@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "larmor"
+version = "0.1.0"
+description = "Open successor to dmfit: solid-state NMR lineshape fitting and simulation workbench"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "sams808", email = "sam.souda.ss@gmail.com" }]
+dependencies = [
+    "numpy",
+    "scipy",
+    "matplotlib",
+    "mrsimulator>=1.0",
+    "lmfit>=1.3",
+    "csdmpy>=0.7",
+    "nmrglue>=0.11",
+]
+
+[project.scripts]
+larmor = "larmor.cli:main"
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[tool.setuptools.packages.find]
+include = ["larmor*"]
+
+[tool.pytest.ini_options]
+markers = ["slow: long-running tests (full kernel build + fit)"]

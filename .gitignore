@@ -16,3 +16,8 @@ data/**/*.fid
 data/**/*.ser
 data/**/*.csdf
 data/**/*.fxmla
+
+# Build artifacts
+*.egg-info/
+build/
+dist/

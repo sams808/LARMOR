@@ -23,10 +23,32 @@ Full architecture and workflow design: see the published design document (artifa
    importer: `acqus` MASR (4200 Hz) disagrees with the operator-typed title (35.714 kHz) —
    surface both, trust neither silently.
 
-Next: **Phase 1 — core workbench** (Guided/Expert-mode app over 1D MAS/static spectra, Bruker +
-dmfit import, lmfit uncertainty).
+**Phase 1 — core library: WORKING** (`larmor/` package, `pip install -e .`):
 
-The MQMAS twin (`CaAlGlassMQ.fxmla`) is deferred to Phase 2 with the other 2D methods.
+- `larmor.io.fxmla` — full dmfit `.fxmla` parser (both 1D and MQMAS files parse; MQMAS fitting
+  itself is Phase 2) + conversion to LARMOR recipes with the σ = sCZ_CQ/2 factor applied.
+- `larmor.io.bruker` — read-only TopSpin EXPNO reader with an enforced no-write guarantee
+  (mtime+size verification) and metadata-conflict surfacing.
+- `larmor.recipe` — the diffable JSON fit format (data referenced by path+SHA-256, never embedded).
+- `larmor.engine` — fast fitting: the (Cq, η) Czjzek basis is simulated **once** per
+  field/spin-rate/window via mrsimulator, then every fit iteration is a cheap reweighting —
+  a full 3-site fit runs in seconds.
+- `larmor.fit` — lmfit refinement writing values **and standard errors** back into the recipe.
+  On `CaAlGlass.fxmla` the refined fit reaches normalized RMSD 0.0025 (10× better than the
+  fixed-parameter replay) — and the uncertainties immediately show that the middle Al site is
+  barely determined by the 1D spectrum alone (σ(Cq) = 0.9 ± 6.7 MHz), which is exactly why the
+  MQMAS data exists. dmfit never told you that.
+- `larmor` CLI — `larmor info <path>` (dmfit file or Bruker EXPNO), `larmor import`, `larmor fit
+  recipe.json --plot out.png`. See `examples/`.
+- `tests/` — 10 tests pinned against the Phase 0 numbers (`pytest`; `-m "not slow"` to skip the
+  full kernel+fit run).
+
+Sites whose center falls outside the fit window are frozen automatically — dmfit's ad-hoc
+Gauss/Lor sideband lines (which LARMOR's simulation handles physically) stop wandering into
+fake-baseline territory, and the covariance stays well-conditioned.
+
+Next: **Phase 1b — the app** (Guided/Expert-mode UI on top of this library), then Phase 2
+(MQMAS/2D methods — `CaAlGlassMQ.fxmla` already parses, fitting it comes with the 2D engine).
 
 ## Data policy
 

@@ -1,0 +1,196 @@
+{
+  "sample": "Example of 27Al MAS spectrum of disordered glass fitted using Czjzek distributions",
+  "source_kind": "fxmla",
+  "source_path": "C:\\Users\\samso\\Desktop\\CaAlGlass.fxmla",
+  "source_sha256": "4425c69190bfe4bb110ec1af0f2c98152ecfe485459af46eef12d318e1320ff6",
+  "nucleus": "27Al",
+  "larmor_frequency_MHz": 195.483,
+  "spin_rate_Hz": 33296.15741,
+  "engine": "czjzek-kernel+lmfit",
+  "sites": [
+    {
+      "model": "czjzek",
+      "label": "CzSimple-0",
+      "params": {
+        "isotropic_chemical_shift_ppm": {
+          "value": 65.12527247063264,
+          "stderr": 0.3653232210537623,
+          "vary": true,
+          "min": null,
+          "max": null
+        },
+        "sigma_Cq_MHz": {
+          "value": 1.843599991020215,
+          "stderr": 0.13144133688650428,
+          "vary": true,
+          "min": 0.05,
+          "max": null
+        },
+        "shift_fwhm_ppm": {
+          "value": 16.666156533936782,
+          "stderr": 0.20134305975974665,
+          "vary": true,
+          "min": 0.1,
+          "max": null
+        },
+        "amplitude": {
+          "value": 1618.2866944668258,
+          "stderr": 50.44077657504627,
+          "vary": true,
+          "min": 0.0,
+          "max": null
+        }
+      }
+    },
+    {
+      "model": "czjzek",
+      "label": "CzSimple-1",
+      "params": {
+        "isotropic_chemical_shift_ppm": {
+          "value": 34.17957565138564,
+          "stderr": 32.714482946228934,
+          "vary": true,
+          "min": null,
+          "max": null
+        },
+        "sigma_Cq_MHz": {
+          "value": 0.8532178551787504,
+          "stderr": 6.693016788720259,
+          "vary": true,
+          "min": 0.05,
+          "max": null
+        },
+        "shift_fwhm_ppm": {
+          "value": 27.558429107298295,
+          "stderr": 13.669982581657948,
+          "vary": true,
+          "min": 0.1,
+          "max": null
+        },
+        "amplitude": {
+          "value": 465.3438552428409,
+          "stderr": 61.66125171788065,
+          "vary": true,
+          "min": 0.0,
+          "max": null
+        }
+      }
+    },
+    {
+      "model": "gauss_lor",
+      "label": "GausLor-2",
+      "params": {
+        "isotropic_chemical_shift_ppm": {
+          "value": 236.2710287,
+          "stderr": 0.0,
+          "vary": true,
+          "min": null,
+          "max": null
+        },
+        "shift_fwhm_ppm": {
+          "value": 20.25136469,
+          "stderr": 0.0,
+          "vary": true,
+          "min": 0.1,
+          "max": null
+        },
+        "amplitude": {
+          "value": 0.0,
+          "stderr": 0.0,
+          "vary": true,
+          "min": 0.0,
+          "max": null
+        },
+        "gl": {
+          "value": 1.0,
+          "stderr": 0.0,
+          "vary": false,
+          "min": 0.0,
+          "max": 1.0
+        }
+      }
+    },
+    {
+      "model": "gauss_lor",
+      "label": "GausLor-4",
+      "params": {
+        "isotropic_chemical_shift_ppm": {
+          "value": 207.6187391,
+          "stderr": 0.0,
+          "vary": true,
+          "min": null,
+          "max": null
+        },
+        "shift_fwhm_ppm": {
+          "value": 23.71497819,
+          "stderr": 0.0,
+          "vary": true,
+          "min": 0.1,
+          "max": null
+        },
+        "amplitude": {
+          "value": 0.0,
+          "stderr": 0.0,
+          "vary": true,
+          "min": 0.0,
+          "max": null
+        },
+        "gl": {
+          "value": 1.0,
+          "stderr": 0.0,
+          "vary": false,
+          "min": 0.0,
+          "max": 1.0
+        }
+      }
+    },
+    {
+      "model": "czjzek",
+      "label": "CzSimple-8",
+      "params": {
+        "isotropic_chemical_shift_ppm": {
+          "value": 15.270645625610873,
+          "stderr": 1.7758303632452517,
+          "vary": true,
+          "min": null,
+          "max": null
+        },
+        "sigma_Cq_MHz": {
+          "value": 2.2999729274493723,
+          "stderr": 0.0984589997293751,
+          "vary": true,
+          "min": 0.05,
+          "max": null
+        },
+        "shift_fwhm_ppm": {
+          "value": 16.348960155920565,
+          "stderr": 2.021346790507262,
+          "vary": true,
+          "min": 0.1,
+          "max": null
+        },
+        "amplitude": {
+          "value": 108.40091529433673,
+          "stderr": 31.982268192466176,
+          "vary": true,
+          "min": 0.0,
+          "max": null
+        }
+      }
+    }
+  ],
+  "fit_window_ppm": [
+    150.0,
+    -80.0
+  ],
+  "fit_rmsd": 0.0025483341536989747,
+  "notes": [
+    "imported from dmfit 20110208 (Fit 1D); Czjzek sigma = sCZ_CQ x 0.5 (Phase 0 convention)",
+    "line 3 ('ss band' at -104.4 ppm) skipped: explicit sideband lines are handled by the simulation itself in LARMOR",
+    "line 5 ('ss band' at -133.0 ppm) skipped: explicit sideband lines are handled by the simulation itself in LARMOR",
+    "line 6 ('ss band' at 65.9 ppm) skipped: explicit sideband lines are handled by the simulation itself in LARMOR",
+    "line 7 ('ss band' at 37.3 ppm) skipped: explicit sideband lines are handled by the simulation itself in LARMOR",
+    "sites frozen (center outside fit window 150.0..-80.0 ppm): GausLor-2, GausLor-4"
+  ],
+  "larmor_recipe_version": 1
+}
