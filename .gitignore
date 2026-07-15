@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# Environments
+.venv/
+env/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Raw/derived NMR data — never tracked, see data/README.md
+data/**/*.fid
+data/**/*.ser
+data/**/*.csdf
+data/**/*.fxmla
