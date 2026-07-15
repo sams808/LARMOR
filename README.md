@@ -12,12 +12,21 @@ Full architecture and workflow design: see the published design document (artifa
 
 ## Status
 
-**Phase 0 — feasibility.** Confirming the reuse thesis before building any UI:
+**Phase 0 — feasibility: PASSED** (see `notebooks/phase0_feasibility.ipynb`, executed with outputs):
 
-1. Reproduce `CaAlGlass.fxmla` and `CaAlGlassMQ.fxmla` (existing dmfit Czjzek fits of a Ca-Al glass) in mrsimulator + lmfit.
-2. Open one real Bruker TopSpin EXPNO from the `NMRFAM/DATA/2026-07` dataset with nmrglue, end to end, read-only.
+1. `CaAlGlass.fxmla` (dmfit Czjzek fit of a Ca-Al glass, 27Al) reproduced in mrsimulator with
+   normalized RMSD 0.027 against the experimental spectrum embedded in the fxmla itself.
+   **Key finding:** dmfit's `sCZ_CQ` = 2 × mrsimulator's `CzjzekDistribution` sigma — the
+   conversion constant the future `.fxmla` importer must apply to every `CzSimple` line.
+2. Bruker EXPNO 1903 (19F Hahn echo) opened with nmrglue end to end; an mtime+size snapshot
+   of the whole EXPNO folder proves the read is strictly non-destructive. Lesson for the
+   importer: `acqus` MASR (4200 Hz) disagrees with the operator-typed title (35.714 kHz) —
+   surface both, trust neither silently.
 
-See `notebooks/phase0_feasibility.ipynb`.
+Next: **Phase 1 — core workbench** (Guided/Expert-mode app over 1D MAS/static spectra, Bruker +
+dmfit import, lmfit uncertainty).
+
+The MQMAS twin (`CaAlGlassMQ.fxmla`) is deferred to Phase 2 with the other 2D methods.
 
 ## Data policy
 
