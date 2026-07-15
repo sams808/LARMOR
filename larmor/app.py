@@ -127,6 +127,14 @@ def _kernel_for(recipe: Recipe, exp_ppm: np.ndarray):
 def simulate(req: SimulateRequest):
     recipe = Recipe.from_dict(req.recipe)
     ppm, _ = _get_data(req.source_path)
+    # resolve constraint expressions (e.g. "0.5 * s0.amplitude") so linked
+    # parameters draw at their derived values, and bad ones fail here with a
+    # clear message rather than mid-fit
+    try:
+        params = fitmod._make_params(recipe)
+        fitmod._apply_params(recipe, params)
+    except fitmod.ConstraintError as exc:
+        raise HTTPException(422, str(exc))
     kernel = _kernel_for(recipe, ppm)
     per_site = [engine.simulate_site(s, kernel) for s in recipe.sites]
     total = np.sum(per_site, axis=0) if per_site else np.zeros_like(kernel.x_ppm)
@@ -143,12 +151,16 @@ def run_fit(req: FitRequest):
     recipe = Recipe.from_dict(req.recipe)
     ppm, amp = _get_data(req.source_path)
     kernel = _kernel_for(recipe, ppm)
-    result = fitmod.fit(recipe, ppm, amp, window_ppm=req.window, kernel=kernel)
+    try:
+        result = fitmod.fit(recipe, ppm, amp, window_ppm=req.window, kernel=kernel)
+    except fitmod.ConstraintError as exc:
+        raise HTTPException(422, str(exc))
     return {
         "recipe": recipe.to_dict(),
         "rmsd": result.rmsd,
         "report": result.report,
         "frozen": result.frozen_sites or [],
+        "at_bounds": result.at_bounds or [],
         "x": result.x_ppm.tolist(),
         "total": result.y_fit.tolist(),
         "sites": [y.tolist() for y in result.per_site],

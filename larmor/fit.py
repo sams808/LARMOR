@@ -6,6 +6,7 @@ recipe's Param objects -- the uncertainty dmfit never reported.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 import numpy as np
@@ -24,6 +25,33 @@ _PARAM_KEYS = {
 }
 _KEY_TO_PARAM = {v: k for k, v in _PARAM_KEYS.items()}
 
+# user-facing constraint syntax: s<index>.<recipe param name>, e.g.
+# "0.5 * s0.amplitude" -- translated to lmfit's internal "0.5 * s0_amp"
+_EXPR_REF = re.compile(r"\bs(\d+)\.([A-Za-z_][A-Za-z0-9_]*)")
+
+
+class ConstraintError(ValueError):
+    """A constraint expression referenced an unknown site or parameter."""
+
+
+def translate_expr(expr: str, recipe: Recipe) -> str:
+    """Turn 's0.amplitude'-style references into lmfit parameter names."""
+
+    def repl(m: re.Match) -> str:
+        i, pname = int(m.group(1)), m.group(2)
+        if i >= len(recipe.sites):
+            raise ConstraintError(
+                f"constraint {expr!r}: site s{i} does not exist "
+                f"(recipe has {len(recipe.sites)} sites)")
+        if pname not in recipe.sites[i].params:
+            valid = ", ".join(recipe.sites[i].params)
+            raise ConstraintError(
+                f"constraint {expr!r}: s{i} has no parameter {pname!r} "
+                f"(valid: {valid})")
+        return f"s{i}_{_PARAM_KEYS[pname]}"
+
+    return _EXPR_REF.sub(repl, expr)
+
 
 @dataclass
 class FitResult:
@@ -35,6 +63,10 @@ class FitResult:
     per_site: list[np.ndarray]
     rmsd: float
     frozen_sites: list[str] = None
+    #: user-facing names (s0.sigma_Cq_MHz, ...) of parameters that finished
+    #: the fit pinned at a min/max bound -- usually a sign that a constraint
+    #: or starting model is fighting the data
+    at_bounds: list[str] = None
 
     @property
     def report(self) -> str:
@@ -43,6 +75,8 @@ class FitResult:
 
 def _make_params(recipe: Recipe) -> lmfit.Parameters:
     params = lmfit.Parameters()
+    # pass 1: every parameter exists as a plain value, so that pass-2
+    # expressions can reference any of them regardless of site order
     for i, site in enumerate(recipe.sites):
         for pname, p in site.params.items():
             params.add(
@@ -52,6 +86,22 @@ def _make_params(recipe: Recipe) -> lmfit.Parameters:
                 min=p.min if p.min is not None else -np.inf,
                 max=p.max if p.max is not None else np.inf,
             )
+    # pass 2: attach constraint expressions
+    for i, site in enumerate(recipe.sites):
+        for pname, p in site.params.items():
+            if p.expr:
+                name = f"s{i}_{_PARAM_KEYS[pname]}"
+                try:
+                    params[name].expr = translate_expr(p.expr, recipe)
+                    # evaluate now so a broken expression fails loudly here,
+                    # not deep inside the minimizer
+                    params.update_constraints()
+                except ConstraintError:
+                    raise
+                except Exception as exc:
+                    raise ConstraintError(
+                        f"constraint {p.expr!r} on s{i}.{pname} is invalid: {exc}"
+                    ) from exc
     return params
 
 
@@ -101,10 +151,14 @@ def fit(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
     for i, site in enumerate(recipe.sites):
         pos = site.params["isotropic_chemical_shift_ppm"].value
         if not (lo <= pos <= hi):
-            for pname in site.params:
-                params[f"s{i}_{_PARAM_KEYS[pname]}"].vary = False
-            # inert outside the window: zero its amplitude for this fit
-            params[f"s{i}_amp"].value = 0.0
+            # freeze only the FREE parameters; expression-linked ones follow
+            # their master parameter and are already constrained
+            for pname, p in site.params.items():
+                if not p.expr:
+                    params[f"s{i}_{_PARAM_KEYS[pname]}"].vary = False
+            if not site.params["amplitude"].expr:
+                # inert outside the window: zero its amplitude for this fit
+                params[f"s{i}_amp"].value = 0.0
             frozen.append(site.label or f"site-{i}")
 
     # analytic global amplitude pre-scale so the optimizer starts on-scale
@@ -122,13 +176,46 @@ def fit(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
         return np.interp(xw, kernel.x_ppm, y) - yw
 
     result = lmfit.minimize(residual, params, method="least_squares")
+
+    def _at_bounds(res) -> list[str]:
+        names = []
+        for n, p in res.params.items():
+            if not p.vary:
+                continue
+            span = max(1.0, abs(p.value))
+            if (np.isfinite(p.min) and (p.value - p.min) < 1e-3 * span) or \
+               (np.isfinite(p.max) and (p.max - p.value) < 1e-3 * span):
+                names.append(n)
+        return names
+
+    at_bounds_internal = _at_bounds(result)
     if not result.errorbars:
         # covariance didn't come out of least_squares; Levenberg-Marquardt from
         # the solution usually recovers it
-        retry = lmfit.minimize(residual, result.params, method="leastsq")
+        retry_params = result.params.copy()
+        # parameters pinned at a bound have a one-sided derivative that breaks
+        # the covariance -- hold them and report errors conditional on that
+        for n in at_bounds_internal:
+            retry_params[n].vary = False
+        # a site whose amplitude collapsed to ~zero leaves its remaining
+        # parameters without any influence on the residual: pin the whole
+        # site for the covariance pass
+        amp_scale = max((abs(retry_params[f"s{i}_amp"].value)
+                         for i in range(len(recipe.sites))), default=1.0)
+        for i, site in enumerate(recipe.sites):
+            if abs(retry_params[f"s{i}_amp"].value) <= 1e-6 * amp_scale:
+                for pname in site.params:
+                    retry_params[f"s{i}_{_PARAM_KEYS[pname]}"].vary = False
+        retry = lmfit.minimize(residual, retry_params, method="leastsq")
         if retry.errorbars:
             result = retry
     _apply_params(recipe, result.params)
+
+    # user-facing names, e.g. "s0.sigma_Cq_MHz"
+    at_bounds = []
+    for n in at_bounds_internal:
+        i, suffix = n.split("_", 1)
+        at_bounds.append(f"{i}.{_KEY_TO_PARAM[suffix]}")
 
     y_fit, per_site = _model(recipe, result.params, kernel)
     y_fit_w = np.interp(xw, kernel.x_ppm, y_fit)
@@ -140,6 +227,11 @@ def fit(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
         note = f"sites frozen (center outside fit window {hi}..{lo} ppm): " + ", ".join(frozen)
         if note not in recipe.notes:
             recipe.notes.append(note)
+    if at_bounds:
+        note = ("parameters finished at a bound (check constraints/starting "
+                "model; uncertainties are conditional on them): " + ", ".join(at_bounds))
+        if note not in recipe.notes:
+            recipe.notes.append(note)
     return FitResult(recipe=recipe, lmfit_result=result, x_ppm=kernel.x_ppm,
                      y_exp=exp_amp, y_fit=y_fit, per_site=per_site, rmsd=rmsd,
-                     frozen_sites=frozen)
+                     frozen_sites=frozen, at_bounds=at_bounds)

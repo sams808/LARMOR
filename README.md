@@ -60,6 +60,26 @@ fake-baseline territory, and the covariance stays well-conditioned.
 - Saving a recipe **into an instrument data folder is refused** (HTTP 403) — the read-only
   guarantee is enforced server-side, not just promised.
 
+**Phase 1c — constraints (ssNake-inspired, algebraic):**
+
+- Every recipe parameter supports `vary` (fix), `min`/`max` (bounds), and `expr` (links):
+  `"expr": "0.29 * s0.amplitude"` locks an amplitude ratio, `"expr": "s0.shift_fwhm_ppm"`
+  shares a linewidth. Any lmfit-valid algebra works, with **full error propagation** —
+  a linked parameter's stderr is derived, not fitted.
+- Bad expressions fail before the fit with a message naming the valid parameters (and come
+  back as clean HTTP 422s in the app).
+- **At-bounds diagnosis**: parameters that finish a fit pinned at a bound are reported
+  (report, app UI ⚠, and a note written into the recipe) — the usual sign that a constraint
+  or starting model is fighting the data. Uncertainties are then computed conditional on the
+  pinned values instead of silently vanishing.
+- In the app: click *constraints ▸* on any site to edit link/min/max per parameter; linked
+  parameters grey out, show ⚭, and follow their expression live in the plot.
+
+**Tutorials** (ssNake-style, in [docs/tutorials/](docs/tutorials/)):
+
+1. [Your first fit — ²⁷Al MAS of a glass](docs/tutorials/01-first-fit-27Al-czjzek.md)
+2. [Constraining a fit: fix, bound, link](docs/tutorials/02-constraints.md)
+
 Next: Guided-mode layer (plain-language panels, guardrails) on this app, then Phase 2
 (MQMAS/2D methods — `CaAlGlassMQ.fxmla` already parses, fitting it comes with the 2D engine).
 

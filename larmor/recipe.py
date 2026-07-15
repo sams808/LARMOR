@@ -16,13 +16,27 @@ RECIPE_VERSION = 1
 
 @dataclass
 class Param:
-    """One fittable quantity: value, uncertainty, and fit behavior."""
+    """One fittable quantity: value, uncertainty, and fit behavior.
+
+    Constraints (ssNake-inspired, but algebraic):
+      - vary=False           freezes the parameter at `value`
+      - min / max            box bounds enforced during the fit
+      - expr                 links this parameter to others by an algebraic
+                             expression, e.g. "0.5 * s0.amplitude" or
+                             "s0.shift_fwhm_ppm" (shared linewidth) or
+                             "s0.isotropic_chemical_shift_ppm + 30".
+                             Site parameters are addressed as s<index>.<name>.
+                             A linked parameter is not varied independently;
+                             its value and stderr are derived (with full error
+                             propagation via lmfit).
+    """
 
     value: float
     stderr: float | None = None
     vary: bool = True
     min: float | None = None
     max: float | None = None
+    expr: str | None = None
 
 
 @dataclass
