@@ -1,0 +1,179 @@
+"""LARMOR local web app: dmfit-style interactive fitting in the browser.
+
+Run with `larmor app` (or `python -m larmor.app`), then open the printed URL.
+Single-user, local-only by default (binds 127.0.0.1).
+
+The precomputed Czjzek kernel is what makes live parameter adjustment
+possible: after the one-time kernel build, every re-simulation costs
+milliseconds.
+"""
+from __future__ import annotations
+
+from pathlib import Path
+
+import numpy as np
+
+try:
+    from fastapi import FastAPI, HTTPException
+    from fastapi.responses import HTMLResponse
+    from pydantic import BaseModel
+except ImportError as exc:  # pragma: no cover
+    raise ImportError(
+        "the LARMOR app needs the 'app' extra: pip install fastapi uvicorn"
+    ) from exc
+
+from larmor import engine
+from larmor import fit as fitmod
+from larmor.recipe import Recipe
+
+app = FastAPI(title="LARMOR")
+
+_STATIC = Path(__file__).parent / "static"
+
+# per-process spectrum store so /simulate and /fit don't re-read the source
+_DATA: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+
+
+def _norm(path: str | Path) -> str:
+    """One canonical key per file, whatever slashes the client sent."""
+    return str(Path(path).resolve())
+
+
+class LoadRequest(BaseModel):
+    path: str
+
+
+class SimulateRequest(BaseModel):
+    recipe: dict
+    source_path: str
+
+
+class FitRequest(BaseModel):
+    recipe: dict
+    source_path: str
+    window: tuple[float, float] | None = None
+
+
+class SaveRequest(BaseModel):
+    recipe: dict
+    path: str
+
+
+@app.get("/", response_class=HTMLResponse)
+def index() -> str:
+    return (_STATIC / "index.html").read_text(encoding="utf-8")
+
+
+@app.post("/api/load")
+def load(req: LoadRequest):
+    path = Path(req.path)
+    if not path.exists():
+        raise HTTPException(404, f"not found: {path}")
+
+    if path.suffix.lower() == ".fxmla":
+        from larmor.io import fxmla
+
+        dm = fxmla.read(path)
+        if dm.spectrum is None or dm.is_2d:
+            raise HTTPException(422, "no 1D experimental data in this fxmla")
+        recipe, warnings = fxmla.to_recipe(dm)
+        ppm, amp = dm.spectrum.ppm, dm.spectrum.amplitude
+        meta = f"dmfit {dm.version} | {dm.comment}"
+    else:
+        from larmor.io import bruker
+
+        if not bruker.is_expno(path):
+            raise HTTPException(422, f"not a .fxmla file or Bruker EXPNO folder: {path}")
+        exp = bruker.read_expno(path)
+        if exp.processed is None:
+            raise HTTPException(422, "EXPNO has no processed pdata/1 to display")
+        ppm, amp = exp.processed_ppm, exp.processed.astype(float)
+        recipe = Recipe(
+            sample=exp.title.splitlines()[0] if exp.title else "",
+            source_kind="bruker", source_path=str(path),
+            nucleus=exp.nucleus, larmor_frequency_MHz=exp.sfo1_MHz,
+            spin_rate_Hz=exp.masr_Hz or 0.0,
+        )
+        warnings = exp.conflicts
+        meta = exp.summary.splitlines()[1]
+
+    order = np.argsort(ppm)
+    ppm, amp = np.asarray(ppm)[order], np.asarray(amp)[order]
+    _DATA[_norm(path)] = (ppm, amp)
+    return {
+        "recipe": recipe.to_dict(),
+        "warnings": list(warnings),
+        "meta": meta,
+        "ppm": ppm.tolist(),
+        "amp": amp.tolist(),
+    }
+
+
+def _get_data(source_path: str) -> tuple[np.ndarray, np.ndarray]:
+    key = _norm(source_path)
+    if key not in _DATA:
+        load(LoadRequest(path=source_path))
+    return _DATA[key]
+
+
+def _kernel_for(recipe: Recipe, exp_ppm: np.ndarray):
+    if engine.needs_kernel(recipe):
+        return engine.build_kernel(
+            recipe.nucleus, recipe.larmor_frequency_MHz, recipe.spin_rate_Hz)
+    return engine.Axis(x_ppm=exp_ppm)
+
+
+@app.post("/api/simulate")
+def simulate(req: SimulateRequest):
+    recipe = Recipe.from_dict(req.recipe)
+    ppm, _ = _get_data(req.source_path)
+    kernel = _kernel_for(recipe, ppm)
+    per_site = [engine.simulate_site(s, kernel) for s in recipe.sites]
+    total = np.sum(per_site, axis=0) if per_site else np.zeros_like(kernel.x_ppm)
+    return {
+        "x": kernel.x_ppm.tolist(),
+        "total": total.tolist(),
+        "sites": [y.tolist() for y in per_site],
+        "labels": [s.label or s.model for s in recipe.sites],
+    }
+
+
+@app.post("/api/fit")
+def run_fit(req: FitRequest):
+    recipe = Recipe.from_dict(req.recipe)
+    ppm, amp = _get_data(req.source_path)
+    kernel = _kernel_for(recipe, ppm)
+    result = fitmod.fit(recipe, ppm, amp, window_ppm=req.window, kernel=kernel)
+    return {
+        "recipe": recipe.to_dict(),
+        "rmsd": result.rmsd,
+        "report": result.report,
+        "frozen": result.frozen_sites or [],
+        "x": result.x_ppm.tolist(),
+        "total": result.y_fit.tolist(),
+        "sites": [y.tolist() for y in result.per_site],
+        "labels": [s.label or s.model for s in recipe.sites],
+    }
+
+
+@app.post("/api/save")
+def save(req: SaveRequest):
+    target = Path(req.path)
+    # data-protection guard: never write into an instrument data folder
+    for parent in [target.parent, *target.parent.parents]:
+        if (parent / "acqus").exists() or (parent / "fid").exists() or (parent / "ser").exists():
+            raise HTTPException(
+                403, f"refusing to write inside instrument data folder: {parent}")
+    Recipe.from_dict(req.recipe).save(target)
+    return {"saved": str(target)}
+
+
+def serve(host: str = "127.0.0.1", port: int = 8642) -> None:  # pragma: no cover
+    import uvicorn
+
+    print(f"LARMOR app: http://{host}:{port}")
+    uvicorn.run(app, host=host, port=port, log_level="warning")
+
+
+if __name__ == "__main__":  # pragma: no cover
+    serve()

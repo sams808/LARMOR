@@ -11,7 +11,7 @@ from dataclasses import dataclass
 import numpy as np
 import lmfit
 
-from larmor.engine import CzjzekKernel, build_kernel, simulate_site
+from larmor.engine import Axis, CzjzekKernel, build_kernel, needs_kernel, simulate_site
 from larmor.recipe import Recipe
 
 #: recipe param name -> lmfit-safe suffix
@@ -73,11 +73,16 @@ def _model(recipe: Recipe, params: lmfit.Parameters, kernel: CzjzekKernel,
 
 def fit(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
         window_ppm: tuple[float, float] | None = None,
-        kernel: CzjzekKernel | None = None) -> FitResult:
+        kernel: "CzjzekKernel | Axis | None" = None) -> FitResult:
     """Refine `recipe` against (exp_ppm, exp_amp). Modifies recipe in place."""
     if kernel is None:
-        kernel = build_kernel(recipe.nucleus, recipe.larmor_frequency_MHz,
-                              recipe.spin_rate_Hz)
+        if needs_kernel(recipe):
+            kernel = build_kernel(recipe.nucleus, recipe.larmor_frequency_MHz,
+                                  recipe.spin_rate_Hz)
+        else:
+            # analytic-only recipe (e.g. spin-1/2): fit straight on the data axis
+            order = np.argsort(exp_ppm)
+            kernel = Axis(x_ppm=np.asarray(exp_ppm)[order])
     window = window_ppm or recipe.fit_window_ppm
     if window is None:
         window = (float(np.max(exp_ppm)), float(np.min(exp_ppm)))

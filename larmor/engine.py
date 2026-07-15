@@ -23,6 +23,16 @@ FWHM_TO_SIGMA = 1.0 / (2.0 * np.sqrt(2.0 * np.log(2.0)))
 
 
 @dataclass
+class Axis:
+    """Bare ppm axis for recipes with no Czjzek site (e.g. spin-1/2 nuclei).
+
+    Duck-types the part of CzjzekKernel that analytic site models need.
+    """
+
+    x_ppm: np.ndarray
+
+
+@dataclass
 class CzjzekKernel:
     x_ppm: np.ndarray            # ascending ppm axis, shape (npts,)
     K: np.ndarray                # basis subspectra, shape (ngrid, npts)
@@ -120,9 +130,15 @@ def gauss_lor(x_ppm: np.ndarray, pos_ppm: float, fwhm_ppm: float,
     return amplitude * (gl * g + (1.0 - gl) * l)
 
 
-def simulate_site(site: SiteModel, kernel: CzjzekKernel) -> np.ndarray:
+def needs_kernel(recipe: Recipe) -> bool:
+    return any(s.model == "czjzek" for s in recipe.sites)
+
+
+def simulate_site(site: SiteModel, kernel: "CzjzekKernel | Axis") -> np.ndarray:
     p = {k: v.value for k, v in site.params.items()}
     if site.model == "czjzek":
+        if not isinstance(kernel, CzjzekKernel):
+            raise TypeError("czjzek sites need a CzjzekKernel, got a bare Axis")
         return kernel.spectrum(
             sigma_MHz=p["sigma_Cq_MHz"],
             pos_ppm=p["isotropic_chemical_shift_ppm"],

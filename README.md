@@ -47,7 +47,20 @@ Sites whose center falls outside the fit window are frozen automatically — dmf
 Gauss/Lor sideband lines (which LARMOR's simulation handles physically) stop wandering into
 fake-baseline territory, and the covariance stays well-conditioned.
 
-Next: **Phase 1b — the app** (Guided/Expert-mode UI on top of this library), then Phase 2
+**Phase 1b — interactive app: first cut** (`larmor app`, then open http://127.0.0.1:8642):
+
+- Load a dmfit `.fxmla` **or** a Bruker EXPNO folder by path; the spectrum plots immediately
+  (Plotly, loaded from CDN — needs internet on first page load).
+- Live model overlay: edit any site parameter and the simulation redraws in milliseconds
+  (the Czjzek kernel is built once per field/spin-rate, then cached).
+- One-click **Fit** with per-parameter “± error” shown next to each value, plus the full lmfit
+  report (correlations included).
+- Add/remove Czjzek and Gauss/Lor sites interactively — works for quadrupolar (27Al Czjzek) and
+  spin-1/2 (19F pseudo-Voigt, no kernel needed) alike.
+- Saving a recipe **into an instrument data folder is refused** (HTTP 403) — the read-only
+  guarantee is enforced server-side, not just promised.
+
+Next: Guided-mode layer (plain-language panels, guardrails) on this app, then Phase 2
 (MQMAS/2D methods — `CaAlGlassMQ.fxmla` already parses, fitting it comes with the 2D engine).
 
 ## Data policy
