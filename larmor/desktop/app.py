@@ -227,6 +227,10 @@ class MainWindow(QMainWindow):
         self._add(m_dec, "&New fit (clear lines)", self.new_fit)
         m_dec.addSeparator()
         self.actFit = self._add(m_dec, "&Fit", self.run_fit, "F5")
+        self.actAuto = self._add(m_dec, "&Auto Fit (multi-start)…",
+                                 self.run_auto_fit)
+        self.actErrors = self._add(m_dec, "&Errors Analysis (χ² profile)…",
+                                   self.run_errors_analysis)
         self._add(m_dec, "&Compute", self.request_simulation, "F9")
         m_dec.addSeparator()
         self._add(m_dec, "Add fit &zone", self.add_zone)
@@ -258,7 +262,12 @@ class MainWindow(QMainWindow):
             self._model_actions[m["name"]] = a
 
         m_tools = mb.addMenu("&Tools")
-        self._add(m_tools, "Saturation recovery (T1)…", self.open_satrec)
+        self._add(m_tools, "Relaxation / series (T1, T2)…", self.open_satrec)
+        self._add(m_tools, "REDOR (dipolar coupling)…", self.open_redor)
+        self._add(m_tools, "Import DFT tensors (.magres)…", self.open_magres)
+        m_tools.addSeparator()
+        self._add(m_tools, "2D MQMAS viewer/fit…", self.open_twod)
+        m_tools.addSeparator()
         self._add(m_tools, "Multi-dataset fit (CLI): larmor multifit a.json b.json",
                   lambda: None).setEnabled(False)
 
@@ -853,8 +862,14 @@ class MainWindow(QMainWindow):
         order = np.argsort(s.x_ppm)
         self.exp_ppm, self.exp_amp = np.asarray(s.x_ppm)[order], s.y.real[order]
         self.view.set_experiment(self.exp_ppm, self.exp_amp)
+        # remember the pipeline in the recipe: saving the fit then saves the
+        # processing that produced the spectrum it was fitted against
+        if self.recipe is not None:
+            self.recipe["processing"] = list(ops)
+            self.recipe["processing_from_raw"] = bool(use_raw)
         self.request_simulation()
-        self.statusBar().showMessage("processing applied")
+        self.statusBar().showMessage(
+            f"processing applied ({len(ops)} step(s), stored in the recipe)")
 
     def reset_processing(self):
         if self.source_path:
@@ -903,6 +918,74 @@ class MainWindow(QMainWindow):
             expno = self.source_path
         SatrecDialog(self, expno).exec()
 
+    def open_redor(self):
+        from larmor.desktop.tool_dialogs import RedorDialog
+
+        expno = self.source_path if (self.source_path and
+                                     Path(self.source_path).is_dir()) else None
+        RedorDialog(self, expno).exec()
+
+    def open_magres(self):
+        from larmor.desktop.tool_dialogs import MagresDialog
+
+        dlg = MagresDialog(self)
+        if dlg.exec() and dlg.result_sites and self.recipe is not None:
+            self.snapshot()
+            for sd in dlg.result_sites:
+                self.recipe["sites"].append(sd)
+            self.on_structure_changed()
+            self.statusBar().showMessage(
+                f"added {len(dlg.result_sites)} site(s) from DFT tensors")
+
+    def open_twod(self):
+        from larmor.desktop.twod_dialog import TwoDDialog
+
+        expno = self.source_path if (self.source_path and
+                                     Path(self.source_path).is_dir()) else None
+        TwoDDialog(self, expno).exec()
+
+    # ------------------------------------------------------------- auto fit
+    def run_auto_fit(self):
+        if not self.recipe or not self.recipe["sites"]:
+            self.statusBar().showMessage("add at least one line first")
+            return
+        from PySide6.QtWidgets import QInputDialog
+
+        n, ok = QInputDialog.getInt(self, "Auto Fit",
+                                    "number of random restarts:", 12, 2, 100)
+        if not ok:
+            return
+        self.snapshot()
+        (x0, x1), _ = self.view.getPlotItem().getViewBox().viewRange()
+        from larmor import autofit
+        from larmor.recipe import Recipe
+
+        self.statusBar().showMessage(f"auto fit: {n} restarts…")
+        QApplication.processEvents()
+        try:
+            r = Recipe.from_dict(self.recipe)
+            res = autofit.auto_fit(r, self.exp_ppm, self.exp_amp,
+                                   window_ppm=(max(x0, x1), min(x0, x1)),
+                                   n_starts=n)
+        except Exception as exc:
+            QMessageBox.warning(self, "Auto Fit failed", str(exc))
+            return
+        self.recipe = r.to_dict()
+        self.lines_table.rebuild(self.recipe, self.hidden)
+        self._update_paddles()
+        self.lines_table.set_chi2(f"RMSD {res.best_rmsd:.4f}")
+        self.request_simulation()
+        self.run_quantify(show=False)
+        self.statusBar().showMessage(res.summary)
+
+    def run_errors_analysis(self):
+        if not self.recipe or not self.recipe["sites"]:
+            return
+        from larmor.desktop.tool_dialogs import ErrorsDialog
+
+        ErrorsDialog(self, self.recipe, self.exp_ppm, self.exp_amp,
+                     self.view.current_xrange()).exec()
+
     # ------------------------------------------------------------- session
     def _persist_session(self):
         if not self.source_path:
@@ -930,47 +1013,10 @@ class MainWindow(QMainWindow):
 
 
 def _load_any(path: str):
-    """Load any supported source. Returns (ppm, amp, recipe_dict, meta, warnings)."""
-    p = Path(path)
-    if p.suffix.lower() == ".json":
-        recipe = Recipe.load(p)
-        if not recipe.source_path or not Path(recipe.source_path).exists():
-            raise ValueError(f"recipe's source data not found: {recipe.source_path}")
-        ppm, amp, _, meta, warnings = _load_any(recipe.source_path)
-        return ppm, amp, recipe.to_dict(), f"recipe {p.name} | {meta}", warnings
+    """Load any supported source (shared with the CLI and figure studio)."""
+    from larmor.loader import load_any
 
-    if p.suffix.lower() in (".fxmla", ".fxml"):
-        from larmor.io import fxmla
-
-        dm = fxmla.read(p)
-        if dm.spectrum is None or dm.is_2d:
-            raise ValueError("no 1D experimental data in this fxmla "
-                             "(2D fitting arrives in Phase 2)")
-        recipe, warnings = fxmla.to_recipe(dm)
-        ppm, amp = dm.spectrum.ppm, dm.spectrum.amplitude
-        order = np.argsort(ppm)
-        return (ppm[order], amp[order], recipe.to_dict(),
-                f"dmfit {dm.version} | {dm.comment}", warnings)
-
-    from larmor.io import bruker
-
-    if bruker.is_expno(p):
-        exp = bruker.read_expno(p)
-        if exp.processed is None:
-            raise ValueError("EXPNO has no processed pdata/1 to display")
-        ppm, amp = exp.processed_ppm, exp.processed.astype(float)
-        order = np.argsort(ppm)
-        recipe = Recipe(
-            sample=exp.title.splitlines()[0] if exp.title else "",
-            source_kind="bruker", source_path=str(p),
-            nucleus=exp.nucleus, larmor_frequency_MHz=exp.sfo1_MHz,
-            spin_rate_Hz=exp.masr_Hz or 0.0,
-        )
-        return (ppm[order], amp[order], recipe.to_dict(),
-                exp.summary.splitlines()[1], exp.conflicts)
-
-    raise ValueError(f"unrecognized source: {p} (expected .fxmla, "
-                     ".recipe.json, or a Bruker EXPNO folder)")
+    return load_any(path)
 
 
 def main() -> int:

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
 RECIPE_VERSION = 1
@@ -66,6 +66,12 @@ class Recipe:
     spin_rate_Hz: float = 0.0
     engine: str = "czjzek-kernel+lmfit"
     sites: list[SiteModel] = field(default_factory=list)
+    #: ordered processing pipeline ({"op": name, ...}) applied to the source
+    #: data before fitting; replayed on load so a recipe carries its
+    #: processing, making the fit reproducible end to end
+    processing: list = field(default_factory=list)
+    #: True when `processing` starts from the raw fid rather than pdata
+    processing_from_raw: bool = False
     fit_window_ppm: tuple[float, float] | None = None
     #: optional list of [hi_ppm, lo_ppm] regions (dmfit's "Zones"); when set,
     #: the fit residual is evaluated only inside their union
@@ -92,8 +98,21 @@ class Recipe:
             params = {k: Param(**p) for k, p in s.pop("params", {}).items()}
             sites.append(SiteModel(params=params, **s))
         window = d.pop("fit_window_ppm", None)
+        # forward compatibility: a recipe written by a NEWER LARMOR may carry
+        # fields this version does not know. Drop them with a note instead of
+        # refusing to open the file.
+        known = {f.name for f in fields(cls)} - {"sites", "fit_window_ppm"}
+        unknown = [k for k in d if k not in known]
+        extra_note = None
+        if unknown:
+            extra_note = ("ignored unknown recipe fields (written by a newer "
+                          "LARMOR?): " + ", ".join(sorted(unknown)))
+            for k in unknown:
+                d.pop(k)
         recipe = cls(sites=sites, **d)
         recipe.fit_window_ppm = tuple(window) if window else None
+        if extra_note:
+            recipe.notes.append(extra_note)
         return recipe
 
     @classmethod

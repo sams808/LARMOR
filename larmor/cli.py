@@ -143,20 +143,66 @@ def cmd_desktop(args: argparse.Namespace) -> int:
 
 
 def cmd_satrec(args: argparse.Namespace) -> int:
-    from larmor import satrec
+    from larmor import series
 
     window = tuple(args.window) if args.window else None
-    result = satrec.analyze(args.expno, window_ppm=window, lb_hz=args.lb,
-                            stretched=args.stretched,
+    result = series.analyze(args.expno, kind=args.kind, window_ppm=window,
+                            lb_hz=args.lb, stretched=args.stretched,
                             mode="magnitude" if args.magnitude else "phase")
     print(result.summary)
     for note in result.notes:
         print("note:", note)
-    print(f"integration window: {result.window_ppm[0]:.1f} … "
-          f"{result.window_ppm[1]:.1f} ppm")
-    print("delay_s\tintegral_norm")
-    for d, i in zip(result.delays_s, result.integrals):
+    print("delay/count\tintegral_norm")
+    for d, i in zip(result.x, result.y):
         print(f"{d:g}\t{i:.5f}")
+    return 0
+
+
+def cmd_redor(args: argparse.Namespace) -> int:
+    from larmor import redor
+
+    pair = tuple(args.pair) if args.pair else None
+    res = redor.analyze_expno(args.expno, pair=pair, regime=args.regime)
+    print(res.summary)
+    print(f"M2 = {res.m2:.4g} rad^2 s^-2")
+    for n in res.notes:
+        print("note:", n)
+    return 0
+
+
+def cmd_magres(args: argparse.Namespace) -> int:
+    from larmor import dft
+    from larmor.recipe import Recipe
+
+    sites = dft.read_magres(args.file)
+    warnings = dft.assign_isotopes(sites)
+    for w in warnings:
+        print("note:", w)
+    chosen = (dft.sites_for_isotope(sites, args.isotope)
+              if args.isotope else sites)
+    print(f"{len(chosen)} site(s)" +
+          (f" for {args.isotope}" if args.isotope else ""))
+    for s in chosen:
+        q = s.quadrupolar()
+        sh = s.shielding()
+        bits = [s.label, s.isotope or "?"]
+        if q:
+            bits.append(f"Cq={q['Cq_MHz']:.3f} MHz eta={q['eta']:.2f}")
+        if sh:
+            bits.append(f"sigma_iso={sh['iso_ppm']:.1f} ppm")
+        print("  " + "  ".join(bits))
+    if args.output and args.isotope:
+        recipe = Recipe(nucleus=args.isotope,
+                        larmor_frequency_MHz=args.larmor or 100.0)
+        for s in chosen:
+            sd = s.to_site_dict(model=args.model, reference_ppm=args.reference)
+            from larmor.recipe import Param, SiteModel
+
+            recipe.sites.append(SiteModel(
+                model=sd["model"], label=sd["label"],
+                params={k: Param(**v) for k, v in sd["params"].items()}))
+        recipe.save(args.output)
+        print(f"recipe written: {args.output} ({len(recipe.sites)} sites)")
     return 0
 
 
@@ -214,14 +260,38 @@ def main(argv: list[str] | None = None) -> int:
     p_desk = sub.add_parser("desktop", help="launch the desktop application")
     p_desk.set_defaults(func=cmd_desktop)
 
-    p_sr = sub.add_parser("satrec", help="automatic T1 from a pseudo-2D "
-                                         "saturation-recovery EXPNO")
+    p_sr = sub.add_parser("satrec", help="relaxation T1/T2 from an arrayed "
+                                         "EXPNO (satrec/invrec/cpmg/t1rho)")
     p_sr.add_argument("expno")
+    p_sr.add_argument("--kind", choices=["satrec", "invrec", "cpmg", "t1rho",
+                                         "decay"],
+                      help="series kind (default: auto-detect from PULPROG)")
     p_sr.add_argument("--window", nargs=2, type=float, metavar=("HI", "LO"))
     p_sr.add_argument("--lb", type=float, default=100.0)
     p_sr.add_argument("--stretched", action="store_true")
     p_sr.add_argument("--magnitude", action="store_true")
     p_sr.set_defaults(func=cmd_satrec)
+
+    p_rd = sub.add_parser("redor", help="dipolar coupling / distance from a "
+                                        "REDOR EXPNO (redor.txt)")
+    p_rd.add_argument("expno")
+    p_rd.add_argument("--pair", nargs=2, metavar=("ISO1", "ISO2"),
+                      help="e.g. 13C 15N, to also report a distance")
+    p_rd.add_argument("--regime", choices=["auto", "short", "pair"],
+                      default="auto")
+    p_rd.set_defaults(func=cmd_redor)
+
+    p_mg = sub.add_parser("magres", help="import DFT tensors (CASTEP/QE "
+                                         ".magres) as fittable sites")
+    p_mg.add_argument("file")
+    p_mg.add_argument("--isotope", help="filter to one isotope, e.g. 27Al")
+    p_mg.add_argument("--model", default="quad_ct",
+                      help="registry model to seed (default quad_ct)")
+    p_mg.add_argument("--reference", type=float,
+                      help="sigma_ref (ppm) to convert shielding -> shift")
+    p_mg.add_argument("--larmor", type=float, help="Larmor MHz for the recipe")
+    p_mg.add_argument("-o", "--output", help="write a .recipe.json")
+    p_mg.set_defaults(func=cmd_magres)
 
     p_mf = sub.add_parser("multifit", help="simultaneous multi-dataset fit "
                                            "(e.g. multi-field 1D)")
