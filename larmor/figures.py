@@ -100,11 +100,10 @@ def load_trace(t: dict) -> tuple[np.ndarray, np.ndarray, dict]:
 
         recipe = Recipe.load(t["recipe"])
         meta["nucleus"] = recipe.nucleus
-        kernel = None
+        exp_ppm = None
         if not engine.needs_kernel(recipe):
-            ex, ey, _ = load_trace({"path": recipe.source_path})
-            kernel = engine.Axis(x_ppm=ex)
-        x, total, per_site = engine.simulate(recipe, kernel=kernel)
+            exp_ppm, _, _ = load_trace({"path": recipe.source_path})
+        x, total, per_site = engine.simulate(recipe, exp_ppm=exp_ppm)
         part = t.get("part", "total")
         if part == "total":
             return x, total, meta

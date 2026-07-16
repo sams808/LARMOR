@@ -4,370 +4,163 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>LARMOR</title>
+<link rel="stylesheet" href="/static/app.css">
 <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
-<style>
-  :root {
-    --bg: #f4f5f3; --panel: #ffffff; --ink: #16202a; --muted: #5a6871;
-    --accent: #0e7c86; --accent-soft: #e2f0f0; --line: #d7dcd9; --bad: #b0442e;
-  }
-  * { box-sizing: border-box; }
-  body { margin: 0; font: 14px/1.5 system-ui, sans-serif; background: var(--bg); color: var(--ink); }
-  header { display: flex; align-items: baseline; gap: 1rem; padding: 0.7rem 1.2rem; background: var(--panel); border-bottom: 1px solid var(--line); }
-  header h1 { font-size: 1.1rem; margin: 0; letter-spacing: 0.06em; }
-  header h1 span { color: var(--accent); }
-  #meta { color: var(--muted); font-size: 0.85rem; }
-  main { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 12px; padding: 12px; }
-  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
-  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
-  #plot { width: 100%; height: 520px; }
-  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
-  input[type=text], input[type=number] { border: 1px solid var(--line); border-radius: 5px; padding: 5px 8px; font: inherit; }
-  input[type=text] { flex: 1; min-width: 200px; }
-  input[type=number] { width: 90px; }
-  button { border: 1px solid var(--accent); background: var(--accent); color: #fff; border-radius: 5px; padding: 6px 14px; font: inherit; cursor: pointer; }
-  button.secondary { background: var(--panel); color: var(--accent); }
-  button:disabled { opacity: 0.5; cursor: default; }
-  .site { border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; }
-  .site h3 { margin: 0 0 6px; font-size: 0.9rem; display: flex; justify-content: space-between; align-items: center; }
-  .site h3 .del { color: var(--bad); background: none; border: none; cursor: pointer; font-size: 0.8rem; padding: 0; }
-  .param { display: grid; grid-template-columns: 1fr 88px 20px; gap: 6px; align-items: center; margin-bottom: 4px; font-size: 0.82rem; }
-  .param label { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .param label .linked { color: var(--accent); font-weight: 600; }
-  .param .err { grid-column: 1 / -1; color: var(--accent); font-size: 0.75rem; text-align: right; }
-  .constraints { display: grid; grid-template-columns: 1fr 62px 62px; gap: 4px; margin: -2px 0 6px; }
-  .constraints input { font-size: 0.75rem; padding: 3px 6px; width: 100%; }
-  .constraints input.expr::placeholder { color: #9fb0b6; }
-  .advBtn { background: none; border: none; color: var(--accent); cursor: pointer; font-size: 0.75rem; padding: 0 4px; }
-  #figstudio { grid-column: 1 / -1; }
-  #figstudio h2 { font-size: 1rem; margin: 0 0 8px; letter-spacing: 0.04em; }
-  .fig-grid { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 12px; }
-  @media (max-width: 900px) { .fig-grid { grid-template-columns: 1fr; } }
-  #figSpec { width: 100%; min-height: 340px; font: 11px/1.5 ui-monospace, monospace; border: 1px solid var(--line); border-radius: 6px; padding: 8px; resize: vertical; }
-  #figImg { max-width: 100%; border: 1px solid var(--line); border-radius: 6px; display: none; }
-  .tplBtn { margin-right: 6px; }
-  #status { font-size: 0.85rem; color: var(--muted); min-height: 1.4em; }
-  #status.error { color: var(--bad); }
-  #warnings { font-size: 0.8rem; color: var(--bad); }
-  #report { white-space: pre-wrap; font: 11px/1.4 ui-monospace, monospace; max-height: 260px; overflow: auto; background: var(--accent-soft); border-radius: 6px; padding: 8px; display: none; }
-  .rmsd { font-weight: 600; color: var(--accent); }
-</style>
 </head>
 <body>
-<header>
-  <h1>LARM<span>O</span>R</h1>
-  <div id="meta">load a dmfit .fxmla file or a Bruker EXPNO folder to begin</div>
-</header>
-<main>
-  <div class="panel">
-    <div class="row">
-      <input type="text" id="path" placeholder="C:\path\to\CaAlGlass.fxmla  or  C:\...\EXPNO folder">
-      <button id="loadBtn">Load</button>
-    </div>
+
+<div id="topbar">
+  <span class="logo">LARM<span>O</span>R</span>
+  <button id="btnOpen" class="primary">Open…</button>
+  <button id="btnSave" disabled>Save recipe</button>
+  <span class="sep"></span>
+  <button id="btnFit" disabled title="Fit (F)">Fit</button>
+  <button id="btnQuant" disabled title="Integrals table (Q)">Quantify</button>
+  <span class="sep"></span>
+  <button id="btnUndo" class="icon" disabled title="Undo (Ctrl+Z)">↩</button>
+  <button id="btnRedo" class="icon" disabled title="Redo (Ctrl+Y)">↪</button>
+  <span class="spacer"></span>
+  <span id="srcline">no data loaded</span>
+</div>
+
+<div id="main">
+  <div id="plotwrap">
     <div id="plot"></div>
-    <div id="status"></div>
-    <div id="warnings"></div>
+    <div id="plotbar">
+      <span id="addbar">
+        <span>Add site:</span>
+        <!-- model buttons injected from /api/models -->
+      </span>
+      <span class="sep"></span>
+      <label>window</label>
+      <input type="number" id="winHi" step="any" placeholder="hi ppm" style="width:70px">
+      <input type="number" id="winLo" step="any" placeholder="lo ppm" style="width:70px">
+      <button id="btnZoomWin" title="use the current x-zoom as the fit window">from zoom</button>
+      <span class="spacer" style="flex:1"></span>
+      <label><input type="checkbox" id="showResid" checked> residual</label>
+      <label><input type="checkbox" id="showComp" checked> components</label>
+      <span id="status"></span>
+    </div>
   </div>
-  <div class="panel">
-    <div class="row">
-      <label>window / ppm</label>
-      <input type="number" id="winHi" step="any" placeholder="high">
-      <input type="number" id="winLo" step="any" placeholder="low">
+
+  <div id="side">
+    <div id="tabs">
+      <button data-tab="sites" class="on">SITES</button>
+      <button data-tab="proc">PROCESSING</button>
+      <button data-tab="fig">FIGURE</button>
     </div>
-    <div class="row">
-      <button id="fitBtn" disabled>Fit</button>
-      <button id="addCz" class="secondary" disabled>+ Czjzek site</button>
-      <button id="addGl" class="secondary" disabled>+ Gauss/Lor site</button>
+
+    <div class="tabpane on" id="tab-sites">
+      <div id="sites"></div>
+      <p style="color:var(--faint); font-size:12px">
+        Click a model button below the plot, then click on the spectrum to
+        place a site. Drag the vertical marker to move it.
+        Checkbox next to a value = <b>fit this parameter</b> (uncheck to fix).
+        The ⚙ row takes a link expression (e.g. <code>0.5 * s0.amplitude</code>)
+        and min/max bounds. Scroll on a value to nudge it.
+      </p>
     </div>
-    <div id="sites"></div>
-    <div class="row">
-      <input type="text" id="savePath" placeholder="save as ...recipe.json">
-      <button id="saveBtn" class="secondary" disabled>Save</button>
-    </div>
-    <div id="report"></div>
-  </div>
-  <div class="panel" id="figstudio">
-    <h2>FIGURE STUDIO <small style="color:var(--muted); font-weight:normal;">publication figures from a saved, re-renderable JSON spec</small></h2>
-    <div class="row">
-      <button id="figTplLoad" class="secondary" disabled>Templates for loaded data</button>
-      <span id="figTplBtns"></span>
-    </div>
-    <div class="fig-grid">
-      <textarea id="figSpec" spellcheck="false" placeholder='{"kind": "1d", "style": "article-wide", "traces": [...]}  — load a template or write a spec; see docs/tutorials/03-figures.md'></textarea>
-      <div>
-        <div class="row">
-          <button id="figPreview">Preview</button>
-          <span id="figStatus" style="font-size:0.85rem;color:var(--muted)"></span>
+
+    <div class="tabpane" id="tab-proc">
+      <div class="proc-group">
+        <h4>Source</h4>
+        <div class="proc-row">
+          <label><input type="radio" name="procsrc" value="pdata" checked>
+            TopSpin-processed (pdata)</label>
+          <label><input type="radio" name="procsrc" value="raw">
+            raw fid (EM → ZF → FT)</label>
         </div>
-        <img id="figImg" alt="figure preview">
+        <div class="proc-row" id="rawopts" style="display:none">
+          <label>EM lb (Hz)</label><input type="number" id="procLb" value="50" step="10">
+          <label>ZF ×</label><input type="number" id="procZf" value="2" min="1" max="8" style="width:52px">
+          <label>offset (ppm)</label><input type="number" id="procOff" value="0" step="any">
+        </div>
+      </div>
+      <div class="proc-group">
+        <h4>Phase</h4>
+        <div class="proc-row">
+          <button id="btnAutophase">Autophase (ACME)</button>
+        </div>
+        <div class="proc-row"><label style="width:22px">p0</label>
+          <input type="range" id="p0" min="-180" max="180" value="0" step="0.5">
+          <input type="number" id="p0v" value="0" step="0.5"></div>
+        <div class="proc-row"><label style="width:22px">p1</label>
+          <input type="range" id="p1" min="-720" max="720" value="0" step="1">
+          <input type="number" id="p1v" value="0" step="1"></div>
+      </div>
+      <div class="proc-group">
+        <h4>Baseline</h4>
+        <div class="proc-row">
+          <label>polynomial order</label>
+          <input type="number" id="blOrder" value="3" min="0" max="9" style="width:52px">
+          <button id="btnBaseline">Correct baseline</button>
+        </div>
+      </div>
+      <div class="proc-row">
+        <button id="btnApplyProc" class="primary">Apply processing</button>
+        <button id="btnResetProc">Reset to original</button>
+      </div>
+      <p style="color:var(--faint); font-size:12px">
+        Processing never touches the instrument files — it re-reads them and
+        applies the pipeline in memory. The fit uses the processed spectrum.
+      </p>
+    </div>
+
+    <div class="tabpane" id="tab-fig">
+      <div class="proc-row">
+        <button id="figTplLoad" disabled>Templates for loaded data</button>
+        <span id="figTplBtns"></span>
+      </div>
+      <textarea id="figSpec" spellcheck="false"
+        placeholder='{"kind": "1d", ...} — load a template or see docs/tutorials/03-figures.md'></textarea>
+      <div class="proc-row" style="margin-top:6px">
+        <button id="figPreview" class="primary">Preview</button>
+        <span id="figStatus" style="font-size:12px;color:var(--muted)"></span>
+      </div>
+      <img id="figImg" alt="figure preview">
+      <div class="proc-row" style="margin-top:6px">
+        <input type="text" id="figPath" placeholder="export base path (no extension)" style="flex:1">
+      </div>
+      <div class="proc-row">
+        <label><input type="checkbox" class="figfmt" value="png" checked> png</label>
+        <label><input type="checkbox" class="figfmt" value="svg" checked> svg</label>
+        <label><input type="checkbox" class="figfmt" value="pdf" checked> pdf</label>
+        <button id="figExport">Export</button>
       </div>
     </div>
-    <div class="row" style="margin-top:8px">
-      <input type="text" id="figPath" placeholder="export base path, no extension (e.g. C:\...\fig\myfigure)">
-      <label><input type="checkbox" class="figfmt" value="png" checked> png</label>
-      <label><input type="checkbox" class="figfmt" value="svg" checked> svg</label>
-      <label><input type="checkbox" class="figfmt" value="pdf" checked> pdf</label>
-      <button id="figExport" class="secondary">Export</button>
-    </div>
   </div>
-</main>
-<script>
-"use strict";
-let state = { recipe: null, sourcePath: null, exp: null };
-const $ = id => document.getElementById(id);
-const status = (msg, isErr) => { const el = $("status"); el.textContent = msg; el.className = isErr ? "error" : ""; };
+</div>
 
-async function api(endpoint, body) {
-  const r = await fetch("/api/" + endpoint, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!r.ok) {
-    let detail = r.statusText;
-    try { detail = (await r.json()).detail; } catch (e) {}
-    throw new Error(detail);
-  }
-  return r.json();
-}
+<div id="dock">
+  <div id="dock-head">
+    <span class="title">RESULTS</span>
+    <button id="dockToggle" class="icon">▴</button>
+    <span id="dock-summary" style="font-size:12px;color:var(--muted)"></span>
+    <span class="spacer" style="flex:1"></span>
+    <button id="btnCsv" disabled>Copy CSV</button>
+  </div>
+  <div id="dock-body">
+    <div id="qwrap"></div>
+    <div id="report" style="display:none"></div>
+  </div>
+</div>
 
-function defaultParams(model, pos) {
-  if (model === "czjzek") return {
-    isotropic_chemical_shift_ppm: { value: pos, stderr: null, vary: true, min: null, max: null },
-    sigma_Cq_MHz: { value: 2.0, stderr: null, vary: true, min: 0.05, max: null },
-    shift_fwhm_ppm: { value: 10.0, stderr: null, vary: true, min: 0.1, max: null },
-    amplitude: { value: 1.0, stderr: null, vary: true, min: 0.0, max: null },
-  };
-  return {
-    isotropic_chemical_shift_ppm: { value: pos, stderr: null, vary: true, min: null, max: null },
-    shift_fwhm_ppm: { value: 5.0, stderr: null, vary: true, min: 0.1, max: null },
-    amplitude: { value: 1.0, stderr: null, vary: true, min: 0.0, max: null },
-    gl: { value: 1.0, stderr: null, vary: false, min: 0.0, max: 1.0 },
-  };
-}
+<div id="modal-overlay">
+  <div id="browser">
+    <header>
+      <button id="bwUp" class="icon" title="parent folder">↑</button>
+      <input type="text" id="bwPath" placeholder="path…">
+      <button id="bwGo">Go</button>
+    </header>
+    <ul id="bwList"></ul>
+    <footer>
+      <span style="flex:1;font-size:11px;color:var(--faint)">
+        Bruker EXPNOs are opened read-only. dmfit .fxmla and LARMOR .json recipes open directly.</span>
+      <button id="bwCancel">Cancel</button>
+    </footer>
+  </div>
+</div>
 
-const PARAM_LABELS = {
-  isotropic_chemical_shift_ppm: "δiso / ppm",
-  sigma_Cq_MHz: "σ(Cq) / MHz",
-  shift_fwhm_ppm: "FWHM / ppm",
-  amplitude: "amplitude",
-  gl: "g/l fraction",
-};
-
-const advOpen = new Set();  // site indices with the constraints panel open
-
-function renderSites() {
-  const box = $("sites");
-  box.innerHTML = "";
-  if (!state.recipe) return;
-  state.recipe.sites.forEach((site, i) => {
-    const div = document.createElement("div");
-    div.className = "site";
-    const h = document.createElement("h3");
-    h.innerHTML = `<span>s${i}: ${site.label || site.model} <small style="color:var(--muted)">(${site.model})</small></span>`;
-    const btns = document.createElement("span");
-    const adv = document.createElement("button");
-    adv.className = "advBtn";
-    adv.textContent = advOpen.has(i) ? "constraints ▾" : "constraints ▸";
-    adv.title = "fix, bound, or link parameters (e.g. 0.5 * s0.amplitude)";
-    adv.onclick = () => { advOpen.has(i) ? advOpen.delete(i) : advOpen.add(i); renderSites(); };
-    const del = document.createElement("button");
-    del.className = "del"; del.textContent = "remove";
-    del.onclick = () => { state.recipe.sites.splice(i, 1); advOpen.delete(i); renderSites(); simulate(); };
-    btns.appendChild(adv); btns.appendChild(del);
-    h.appendChild(btns);
-    div.appendChild(h);
-    for (const [pname, p] of Object.entries(site.params)) {
-      const row = document.createElement("div");
-      row.className = "param";
-      const lab = document.createElement("label");
-      lab.innerHTML = (PARAM_LABELS[pname] || pname) +
-        (p.expr ? ' <span class="linked" title="' + p.expr + '">⚭</span>' : "");
-      const inp = document.createElement("input");
-      inp.type = "number"; inp.step = "any"; inp.value = Number(p.value.toPrecision(6));
-      inp.disabled = !!p.expr;
-      inp.title = p.expr ? "derived from: " + p.expr : "";
-      inp.onchange = () => { p.value = parseFloat(inp.value); simulate(); };
-      const vary = document.createElement("input");
-      vary.type = "checkbox"; vary.checked = p.vary && !p.expr; vary.disabled = !!p.expr;
-      vary.title = p.expr ? "linked — follows its expression" : "vary in fit";
-      vary.onchange = () => { p.vary = vary.checked; };
-      row.appendChild(lab); row.appendChild(inp); row.appendChild(vary);
-      if (p.stderr != null) {
-        const err = document.createElement("div");
-        err.className = "err"; err.textContent = "± " + Number(p.stderr.toPrecision(3));
-        row.appendChild(err);
-      }
-      div.appendChild(row);
-      if (advOpen.has(i)) {
-        const c = document.createElement("div");
-        c.className = "constraints";
-        const expr = document.createElement("input");
-        expr.type = "text"; expr.className = "expr";
-        expr.placeholder = "link: e.g. 0.5 * s0." + pname;
-        expr.value = p.expr || "";
-        expr.onchange = () => { p.expr = expr.value.trim() || null; renderSites(); simulate(); };
-        const lo = document.createElement("input");
-        lo.type = "number"; lo.step = "any"; lo.placeholder = "min";
-        if (p.min != null) lo.value = p.min;
-        lo.onchange = () => { p.min = lo.value === "" ? null : parseFloat(lo.value); };
-        const hi = document.createElement("input");
-        hi.type = "number"; hi.step = "any"; hi.placeholder = "max";
-        if (p.max != null) hi.value = p.max;
-        hi.onchange = () => { p.max = hi.value === "" ? null : parseFloat(hi.value); };
-        c.appendChild(expr); c.appendChild(lo); c.appendChild(hi);
-        div.appendChild(c);
-      }
-    }
-    box.appendChild(div);
-  });
-}
-
-function plot(model) {
-  const traces = [{
-    x: state.exp.ppm, y: state.exp.amp, name: "experiment",
-    line: { color: "#16202a", width: 1 },
-  }];
-  if (model) {
-    traces.push({ x: model.x, y: model.total, name: "model", line: { color: "#b0442e", width: 1.6 } });
-    model.sites.forEach((ys, i) => traces.push({
-      x: model.x, y: ys, name: model.labels[i],
-      line: { width: 1, dash: "dash" }, opacity: 0.65,
-    }));
-  }
-  Plotly.react("plot", traces, {
-    margin: { t: 24, r: 12, l: 48, b: 42 },
-    xaxis: { title: "shift / ppm", autorange: "reversed" },
-    yaxis: { title: "intensity" },
-    legend: { orientation: "h", y: 1.12 },
-  }, { responsive: true, displaylogo: false });
-}
-
-let simTimer = null;
-function simulate() {
-  if (!state.recipe) return;
-  clearTimeout(simTimer);
-  simTimer = setTimeout(async () => {
-    try {
-      const hasCz = state.recipe.sites.some(s => s.model === "czjzek");
-      if (hasCz) status("simulating… (first Czjzek call builds the kernel, ~15 s once)");
-      const model = await api("simulate", { recipe: state.recipe, source_path: state.sourcePath });
-      plot(model);
-      status("");
-    } catch (e) { status("simulate failed: " + e.message, true); }
-  }, 250);
-}
-
-$("loadBtn").onclick = async () => {
-  try {
-    status("loading…");
-    const data = await api("load", { path: $("path").value.trim() });
-    state.recipe = data.recipe;
-    state.sourcePath = $("path").value.trim();
-    state.exp = { ppm: data.ppm, amp: data.amp };
-    $("meta").textContent = data.meta;
-    $("warnings").textContent = data.warnings.join(" • ");
-    $("winHi").value = Math.max(...data.ppm).toFixed(0);
-    $("winLo").value = Math.min(...data.ppm).toFixed(0);
-    ["fitBtn", "addCz", "addGl", "saveBtn", "figTplLoad"].forEach(id => $(id).disabled = false);
-    renderSites();
-    plot(null);
-    if (state.recipe.sites.length) simulate(); else status("no sites yet — add one, or click Fit after adding");
-  } catch (e) { status("load failed: " + e.message, true); }
-};
-
-$("fitBtn").onclick = async () => {
-  try {
-    status("fitting…");
-    $("fitBtn").disabled = true;
-    const win = [parseFloat($("winHi").value), parseFloat($("winLo").value)];
-    const res = await api("fit", {
-      recipe: state.recipe, source_path: state.sourcePath,
-      window: isFinite(win[0]) && isFinite(win[1]) ? win : null,
-    });
-    state.recipe = res.recipe;
-    renderSites();
-    plot(res);
-    const frozen = res.frozen.length ? `\nfrozen (outside window): ${res.frozen.join(", ")}` : "";
-    const bounds = res.at_bounds && res.at_bounds.length
-      ? `\n⚠ at bounds (constraint or start value fighting the data?): ${res.at_bounds.join(", ")}` : "";
-    status("");
-    $("report").style.display = "block";
-    $("report").textContent = `RMSD ${res.rmsd.toFixed(4)}${frozen}${bounds}\n\n${res.report}`;
-  } catch (e) { status("fit failed: " + e.message, true); }
-  finally { $("fitBtn").disabled = false; }
-};
-
-function addSite(model) {
-  if (!state.recipe) return;
-  const mid = state.exp ? state.exp.ppm[state.exp.amp.indexOf(Math.max(...state.exp.amp))] : 0;
-  const n = state.recipe.sites.length;
-  state.recipe.sites.push({ model, label: `${model}-${n}`, params: defaultParams(model, mid) });
-  renderSites();
-  simulate();
-}
-$("addCz").onclick = () => addSite("czjzek");
-$("addGl").onclick = () => addSite("gauss_lor");
-
-$("saveBtn").onclick = async () => {
-  try {
-    const res = await api("save", { recipe: state.recipe, path: $("savePath").value.trim() });
-    status("saved: " + res.saved);
-  } catch (e) { status("save failed: " + e.message, true); }
-};
-
-$("path").addEventListener("keydown", e => { if (e.key === "Enter") $("loadBtn").click(); });
-
-// ---------- figure studio ----------
-const figStatus = (msg, isErr) => {
-  const el = $("figStatus");
-  el.textContent = msg;
-  el.style.color = isErr ? "var(--bad)" : "var(--muted)";
-};
-
-$("figTplLoad").onclick = async () => {
-  try {
-    const res = await api("figure/template", { source_path: state.sourcePath, recipe: state.recipe });
-    const box = $("figTplBtns");
-    box.innerHTML = "";
-    for (const [name, spec] of Object.entries(res.templates)) {
-      const b = document.createElement("button");
-      b.className = "secondary tplBtn";
-      b.textContent = name;
-      b.onclick = () => { $("figSpec").value = JSON.stringify(spec, null, 2); figStatus("template loaded — edit, then Preview"); };
-      box.appendChild(b);
-    }
-    if (!Object.keys(res.templates).length) figStatus("no templates for this source", true);
-  } catch (e) { figStatus("templates failed: " + e.message, true); }
-};
-
-function parseSpec() {
-  try { return JSON.parse($("figSpec").value); }
-  catch (e) { figStatus("spec is not valid JSON: " + e.message, true); return null; }
-}
-
-$("figPreview").onclick = async () => {
-  const spec = parseSpec();
-  if (!spec) return;
-  try {
-    figStatus("rendering…");
-    const res = await api("figure/preview", { spec });
-    const img = $("figImg");
-    img.src = "data:image/png;base64," + res.png_base64;
-    img.style.display = "block";
-    figStatus("");
-  } catch (e) { figStatus("preview failed: " + e.message, true); }
-};
-
-$("figExport").onclick = async () => {
-  const spec = parseSpec();
-  if (!spec) return;
-  const formats = Array.from(document.querySelectorAll(".figfmt:checked")).map(c => c.value);
-  if (!$("figPath").value.trim()) { figStatus("give an export base path", true); return; }
-  try {
-    figStatus("exporting…");
-    const res = await api("figure/export", { spec, path: $("figPath").value.trim(), formats });
-    figStatus("saved: " + res.saved.join("  "));
-  } catch (e) { figStatus("export failed: " + e.message, true); }
-};
-</script>
+<script src="/static/app.js"></script>
 </body>
 </html>

@@ -1,8 +1,10 @@
 """lmfit-based refinement of a LARMOR recipe against an experimental spectrum.
 
-The residual reuses the precomputed Czjzek kernel, so a full fit runs in
-seconds. Fitted values AND their standard errors are written back into the
-recipe's Param objects -- the uncertainty dmfit never reported.
+Parameter names, bounds and defaults come from the model registry
+(larmor.models); the residual reuses cached kernels/lineshapes so a fit runs
+in seconds. Fitted values AND their standard errors are written back into the
+recipe's Param objects, and constraint expressions (Param.expr) are honored
+with full error propagation.
 """
 from __future__ import annotations
 
@@ -12,18 +14,9 @@ from dataclasses import dataclass
 import numpy as np
 import lmfit
 
-from larmor.engine import Axis, CzjzekKernel, build_kernel, needs_kernel, simulate_site
+from larmor import models as model_registry
+from larmor.engine import make_context, simulate_site
 from larmor.recipe import Recipe
-
-#: recipe param name -> lmfit-safe suffix
-_PARAM_KEYS = {
-    "isotropic_chemical_shift_ppm": "pos",
-    "sigma_Cq_MHz": "sigma",
-    "shift_fwhm_ppm": "fwhm",
-    "amplitude": "amp",
-    "gl": "gl",
-}
-_KEY_TO_PARAM = {v: k for k, v in _PARAM_KEYS.items()}
 
 # user-facing constraint syntax: s<index>.<recipe param name>, e.g.
 # "0.5 * s0.amplitude" -- translated to lmfit's internal "0.5 * s0_amp"
@@ -32,6 +25,14 @@ _EXPR_REF = re.compile(r"\bs(\d+)\.([A-Za-z_][A-Za-z0-9_]*)")
 
 class ConstraintError(ValueError):
     """A constraint expression referenced an unknown site or parameter."""
+
+
+def _key(site, pname: str) -> str:
+    return model_registry.get(site.model).key_of(pname)
+
+
+def _lmfit_name(i: int, site, pname: str) -> str:
+    return f"s{i}_{_key(site, pname)}"
 
 
 def translate_expr(expr: str, recipe: Recipe) -> str:
@@ -48,7 +49,7 @@ def translate_expr(expr: str, recipe: Recipe) -> str:
             raise ConstraintError(
                 f"constraint {expr!r}: s{i} has no parameter {pname!r} "
                 f"(valid: {valid})")
-        return f"s{i}_{_PARAM_KEYS[pname]}"
+        return _lmfit_name(i, recipe.sites[i], pname)
 
     return _EXPR_REF.sub(repl, expr)
 
@@ -80,7 +81,7 @@ def _make_params(recipe: Recipe) -> lmfit.Parameters:
     for i, site in enumerate(recipe.sites):
         for pname, p in site.params.items():
             params.add(
-                f"s{i}_{_PARAM_KEYS[pname]}",
+                _lmfit_name(i, site, pname),
                 value=p.value,
                 vary=p.vary,
                 min=p.min if p.min is not None else -np.inf,
@@ -90,7 +91,7 @@ def _make_params(recipe: Recipe) -> lmfit.Parameters:
     for i, site in enumerate(recipe.sites):
         for pname, p in site.params.items():
             if p.expr:
-                name = f"s{i}_{_PARAM_KEYS[pname]}"
+                name = _lmfit_name(i, site, pname)
                 try:
                     params[name].expr = translate_expr(p.expr, recipe)
                     # evaluate now so a broken expression fails loudly here,
@@ -108,31 +109,28 @@ def _make_params(recipe: Recipe) -> lmfit.Parameters:
 def _apply_params(recipe: Recipe, params: lmfit.Parameters) -> None:
     for i, site in enumerate(recipe.sites):
         for pname in site.params:
-            lp = params[f"s{i}_{_PARAM_KEYS[pname]}"]
+            lp = params[_lmfit_name(i, site, pname)]
             site.params[pname].value = float(lp.value)
             site.params[pname].stderr = (
                 float(lp.stderr) if lp.stderr is not None else None)
 
 
-def _model(recipe: Recipe, params: lmfit.Parameters, kernel: CzjzekKernel,
+def _model(recipe: Recipe, params: lmfit.Parameters, ctx,
            ) -> tuple[np.ndarray, list[np.ndarray]]:
     _apply_params(recipe, params)
-    per_site = [simulate_site(s, kernel) for s in recipe.sites]
+    per_site = [simulate_site(s, ctx) for s in recipe.sites]
     return np.sum(per_site, axis=0), per_site
 
 
 def fit(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
         window_ppm: tuple[float, float] | None = None,
-        kernel: "CzjzekKernel | Axis | None" = None) -> FitResult:
-    """Refine `recipe` against (exp_ppm, exp_amp). Modifies recipe in place."""
-    if kernel is None:
-        if needs_kernel(recipe):
-            kernel = build_kernel(recipe.nucleus, recipe.larmor_frequency_MHz,
-                                  recipe.spin_rate_Hz)
-        else:
-            # analytic-only recipe (e.g. spin-1/2): fit straight on the data axis
-            order = np.argsort(exp_ppm)
-            kernel = Axis(x_ppm=np.asarray(exp_ppm)[order])
+        kernel=None) -> FitResult:
+    """Refine `recipe` against (exp_ppm, exp_amp). Modifies recipe in place.
+
+    `kernel` is accepted for backward compatibility and ignored; kernels are
+    cached process-wide and resolved automatically.
+    """
+    ctx = make_context(recipe, exp_ppm=exp_ppm)
     window = window_ppm or recipe.fit_window_ppm
     if window is None:
         window = (float(np.max(exp_ppm)), float(np.min(exp_ppm)))
@@ -144,36 +142,32 @@ def fit(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
 
     # A site whose center lies outside the fit window is unconstrained by the
     # data (its parameters would wander and make the covariance singular), so
-    # freeze it. Typical case: dmfit's ad-hoc Gauss/Lor sideband lines --
-    # LARMOR's kernel simulates sidebands physically, so fitting those lines
-    # again would double-count them anyway.
+    # freeze it. Expression-linked parameters follow their master and stay.
     frozen: list[str] = []
     for i, site in enumerate(recipe.sites):
         pos = site.params["isotropic_chemical_shift_ppm"].value
         if not (lo <= pos <= hi):
-            # freeze only the FREE parameters; expression-linked ones follow
-            # their master parameter and are already constrained
             for pname, p in site.params.items():
                 if not p.expr:
-                    params[f"s{i}_{_PARAM_KEYS[pname]}"].vary = False
+                    params[_lmfit_name(i, site, pname)].vary = False
             if not site.params["amplitude"].expr:
-                # inert outside the window: zero its amplitude for this fit
-                params[f"s{i}_amp"].value = 0.0
+                params[_lmfit_name(i, site, "amplitude")].value = 0.0
             frozen.append(site.label or f"site-{i}")
 
     # analytic global amplitude pre-scale so the optimizer starts on-scale
-    y0, _ = _model(recipe, params, kernel)
-    y0w = np.interp(xw, kernel.x_ppm, y0)
+    y0, _ = _model(recipe, params, ctx)
+    y0w = np.interp(xw, ctx.x_ppm, y0)
     denom = float(y0w @ y0w)
     if denom > 0:
         scale = float(yw @ y0w) / denom
-        for i in range(len(recipe.sites)):
-            if params[f"s{i}_amp"].vary:
-                params[f"s{i}_amp"].value *= scale
+        for i, site in enumerate(recipe.sites):
+            amp = params[_lmfit_name(i, site, "amplitude")]
+            if amp.vary:
+                amp.value *= scale
 
     def residual(p):
-        y, _ = _model(recipe, p, kernel)
-        return np.interp(xw, kernel.x_ppm, y) - yw
+        y, _ = _model(recipe, p, ctx)
+        return np.interp(xw, ctx.x_ppm, y) - yw
 
     result = lmfit.minimize(residual, params, method="least_squares")
 
@@ -200,25 +194,28 @@ def fit(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
         # a site whose amplitude collapsed to ~zero leaves its remaining
         # parameters without any influence on the residual: pin the whole
         # site for the covariance pass
-        amp_scale = max((abs(retry_params[f"s{i}_amp"].value)
-                         for i in range(len(recipe.sites))), default=1.0)
+        amp_names = [_lmfit_name(i, s, "amplitude")
+                     for i, s in enumerate(recipe.sites)]
+        amp_scale = max((abs(retry_params[n].value) for n in amp_names),
+                        default=1.0)
         for i, site in enumerate(recipe.sites):
-            if abs(retry_params[f"s{i}_amp"].value) <= 1e-6 * amp_scale:
+            if abs(retry_params[amp_names[i]].value) <= 1e-6 * amp_scale:
                 for pname in site.params:
-                    retry_params[f"s{i}_{_PARAM_KEYS[pname]}"].vary = False
+                    retry_params[_lmfit_name(i, site, pname)].vary = False
         retry = lmfit.minimize(residual, retry_params, method="leastsq")
         if retry.errorbars:
             result = retry
     _apply_params(recipe, result.params)
 
     # user-facing names, e.g. "s0.sigma_Cq_MHz"
-    at_bounds = []
-    for n in at_bounds_internal:
-        i, suffix = n.split("_", 1)
-        at_bounds.append(f"{i}.{_KEY_TO_PARAM[suffix]}")
+    key_to_name = {}
+    for i, site in enumerate(recipe.sites):
+        for pname in site.params:
+            key_to_name[_lmfit_name(i, site, pname)] = f"s{i}.{pname}"
+    at_bounds = [key_to_name.get(n, n) for n in at_bounds_internal]
 
-    y_fit, per_site = _model(recipe, result.params, kernel)
-    y_fit_w = np.interp(xw, kernel.x_ppm, y_fit)
+    y_fit, per_site = _model(recipe, result.params, ctx)
+    y_fit_w = np.interp(xw, ctx.x_ppm, y_fit)
     rmsd = float(np.sqrt(np.mean((y_fit_w - yw) ** 2)) / (yw.max() or 1.0))
 
     recipe.fit_window_ppm = (hi, lo)
@@ -232,6 +229,6 @@ def fit(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
                 "model; uncertainties are conditional on them): " + ", ".join(at_bounds))
         if note not in recipe.notes:
             recipe.notes.append(note)
-    return FitResult(recipe=recipe, lmfit_result=result, x_ppm=kernel.x_ppm,
+    return FitResult(recipe=recipe, lmfit_result=result, x_ppm=ctx.x_ppm,
                      y_exp=exp_amp, y_fit=y_fit, per_site=per_site, rmsd=rmsd,
                      frozen_sites=frozen, at_bounds=at_bounds)

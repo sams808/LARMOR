@@ -1,33 +1,31 @@
-"""Fast lineshape engine: precomputed Czjzek kernel + cheap reweighting.
+"""Simulation engine: shared kernels + registry-dispatched site rendering.
 
 The expensive part of a Czjzek fit is simulating the quadrupolar lineshape for
-every (Cq, eta) grid point. That basis does not depend on the fit parameters:
-sigma only reweights the grid, the isotropic shift only translates the
-spectrum, and the shift-distribution width is a convolution. So the kernel is
-simulated ONCE per (nucleus, field, spin rate, spectral window) via
-mrsimulator, and every fit iteration afterwards costs milliseconds -- the same
-factorization mrinversion uses.
+every (Cq, eta) grid point. That basis does not depend on the fit parameters,
+so it is simulated ONCE per (nucleus, field, spin rate, window) and cached;
+every fit iteration afterwards is a cheap reweighting. Discrete models
+(quad_ct, csa_mas) simulate on demand with parameter-level LRU caches instead.
+
+Site rendering itself is dispatched through larmor.models.REGISTRY, so new
+models plug in without touching this module or the fit engine.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 
 import numpy as np
-from scipy.ndimage import gaussian_filter1d
 
+from larmor import models as model_registry
+from larmor.models.base import SimContext
+from larmor.models.analytic import gauss_lor  # noqa: F401  (back-compat export)
 from larmor.recipe import Recipe, SiteModel
 
 _KERNEL_CACHE: dict[tuple, "CzjzekKernel"] = {}
 
-FWHM_TO_SIGMA = 1.0 / (2.0 * np.sqrt(2.0 * np.log(2.0)))
-
 
 @dataclass
 class Axis:
-    """Bare ppm axis for recipes with no Czjzek site (e.g. spin-1/2 nuclei).
-
-    Duck-types the part of CzjzekKernel that analytic site models need.
-    """
+    """Bare ppm axis for recipes with no kernel-based site."""
 
     x_ppm: np.ndarray
 
@@ -47,19 +45,6 @@ class CzjzekKernel:
         amp = np.asarray(res[-1] if isinstance(res, (tuple, list)) else res)
         w = amp.ravel()
         return w / w.sum()
-
-    def spectrum(self, sigma_MHz: float, pos_ppm: float,
-                 shift_fwhm_ppm: float, amplitude: float) -> np.ndarray:
-        """One Czjzek site's lineshape on self.x_ppm, peak-normalized basis."""
-        y = self.weights(sigma_MHz) @ self.K
-        # kernel is simulated at delta_iso = 0: translate by pos_ppm
-        y = np.interp(self.x_ppm - pos_ppm, self.x_ppm, y, left=0.0, right=0.0)
-        dppm = abs(self.x_ppm[1] - self.x_ppm[0])
-        sigma_pts = shift_fwhm_ppm * FWHM_TO_SIGMA / dppm
-        if sigma_pts > 0.05:
-            y = gaussian_filter1d(y, sigma_pts, mode="constant")
-        peak = y.max()
-        return amplitude * (y / peak) if peak > 0 else y
 
 
 def build_kernel(nucleus: str, larmor_MHz: float, spin_rate_Hz: float,
@@ -116,49 +101,52 @@ def build_kernel(nucleus: str, larmor_MHz: float, spin_rate_Hz: float,
 
 
 # --------------------------------------------------------------------------
-def gauss_lor(x_ppm: np.ndarray, pos_ppm: float, fwhm_ppm: float,
-              amplitude: float, gl: float) -> np.ndarray:
-    """Analytic pseudo-Voigt, dmfit-style: y = gl*Gaussian + (1-gl)*Lorentzian.
-
-    Both components are peak-normalized so `amplitude` is the peak height.
-    """
-    dx = x_ppm - pos_ppm
-    sig = max(fwhm_ppm, 1e-6) * FWHM_TO_SIGMA
-    g = np.exp(-0.5 * (dx / sig) ** 2)
-    hwhm = max(fwhm_ppm, 1e-6) / 2.0
-    l = 1.0 / (1.0 + (dx / hwhm) ** 2)
-    return amplitude * (gl * g + (1.0 - gl) * l)
-
 
 def needs_kernel(recipe: Recipe) -> bool:
     return any(s.model == "czjzek" for s in recipe.sites)
 
 
-def simulate_site(site: SiteModel, kernel: "CzjzekKernel | Axis") -> np.ndarray:
-    p = {k: v.value for k, v in site.params.items()}
-    if site.model == "czjzek":
-        if not isinstance(kernel, CzjzekKernel):
-            raise TypeError("czjzek sites need a CzjzekKernel, got a bare Axis")
-        return kernel.spectrum(
-            sigma_MHz=p["sigma_Cq_MHz"],
-            pos_ppm=p["isotropic_chemical_shift_ppm"],
-            shift_fwhm_ppm=p["shift_fwhm_ppm"],
-            amplitude=p["amplitude"],
-        )
-    if site.model == "gauss_lor":
-        return gauss_lor(
-            kernel.x_ppm, p["isotropic_chemical_shift_ppm"],
-            p["shift_fwhm_ppm"], p["amplitude"], p.get("gl", 1.0),
-        )
-    raise ValueError(f"unknown site model {site.model!r}")
-
-
-def simulate(recipe: Recipe, kernel: CzjzekKernel | None = None,
-             ) -> tuple[np.ndarray, np.ndarray, list[np.ndarray]]:
-    """Simulate a recipe. Returns (x_ppm, total, per_site)."""
-    if kernel is None:
+def make_context(recipe: Recipe, exp_ppm: np.ndarray | None = None) -> SimContext:
+    """Build the simulation context; picks the axis a recipe should render on."""
+    if needs_kernel(recipe):
         kernel = build_kernel(recipe.nucleus, recipe.larmor_frequency_MHz,
                               recipe.spin_rate_Hz)
-    per_site = [simulate_site(s, kernel) for s in recipe.sites]
-    total = np.sum(per_site, axis=0) if per_site else np.zeros_like(kernel.x_ppm)
-    return kernel.x_ppm, total, per_site
+        x = kernel.x_ppm
+    elif exp_ppm is not None:
+        x = np.asarray(exp_ppm)[np.argsort(exp_ppm)]
+    else:
+        x = np.linspace(-300, 300, 2048)
+    return SimContext(nucleus=recipe.nucleus,
+                      larmor_MHz=recipe.larmor_frequency_MHz,
+                      spin_rate_Hz=recipe.spin_rate_Hz, x_ppm=x)
+
+
+def simulate_site(site: SiteModel, ctx) -> np.ndarray:
+    """Render one site on the context axis. Accepts a SimContext (preferred)
+    or, for backward compatibility, a CzjzekKernel/Axis."""
+    if isinstance(ctx, (CzjzekKernel, Axis)):
+        ctx = SimContext(nucleus="27Al", larmor_MHz=0.0, spin_rate_Hz=0.0,
+                         x_ppm=ctx.x_ppm) if isinstance(ctx, Axis) else _ctx_from_kernel(ctx)
+    values = {k: v.value for k, v in site.params.items()}
+    return model_registry.get(site.model).render(values, ctx)
+
+
+def _ctx_from_kernel(kernel: CzjzekKernel) -> SimContext:
+    # legacy path: infer nothing, just carry the axis; czjzek render rebuilds
+    # its kernel from the cache so this only needs the axis to be right
+    return SimContext(nucleus="27Al", larmor_MHz=0.0, spin_rate_Hz=0.0,
+                      x_ppm=kernel.x_ppm)
+
+
+def simulate(recipe: Recipe, kernel=None, exp_ppm: np.ndarray | None = None,
+             ) -> tuple[np.ndarray, np.ndarray, list[np.ndarray]]:
+    """Simulate a recipe. Returns (x_ppm, total, per_site)."""
+    if kernel is not None and isinstance(kernel, (CzjzekKernel, Axis)):
+        ctx = SimContext(nucleus=recipe.nucleus,
+                         larmor_MHz=recipe.larmor_frequency_MHz,
+                         spin_rate_Hz=recipe.spin_rate_Hz, x_ppm=kernel.x_ppm)
+    else:
+        ctx = make_context(recipe, exp_ppm=exp_ppm)
+    per_site = [simulate_site(s, ctx) for s in recipe.sites]
+    total = np.sum(per_site, axis=0) if per_site else np.zeros_like(ctx.x_ppm)
+    return ctx.x_ppm, total, per_site

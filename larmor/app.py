@@ -16,6 +16,7 @@ import numpy as np
 try:
     from fastapi import FastAPI, HTTPException
     from fastapi.responses import HTMLResponse
+    from fastapi.staticfiles import StaticFiles
     from pydantic import BaseModel
 except ImportError as exc:  # pragma: no cover
     raise ImportError(
@@ -29,6 +30,7 @@ from larmor.recipe import Recipe
 app = FastAPI(title="LARMOR")
 
 _STATIC = Path(__file__).parent / "static"
+app.mount("/static", StaticFiles(directory=str(_STATIC)), name="static")
 
 # per-process spectrum store so /simulate and /fit don't re-read the source
 _DATA: dict[str, tuple[np.ndarray, np.ndarray]] = {}
@@ -86,6 +88,19 @@ def load(req: LoadRequest):
     if not path.exists():
         raise HTTPException(404, f"not found: {path}")
 
+    if path.suffix.lower() == ".json":
+        # a saved LARMOR recipe: load it AND its referenced source data
+        recipe = Recipe.load(path)
+        if not recipe.source_path or not Path(recipe.source_path).exists():
+            raise HTTPException(
+                422, f"recipe's source data not found: {recipe.source_path}")
+        inner = load(LoadRequest(path=recipe.source_path))
+        inner["recipe"] = recipe.to_dict()
+        inner["meta"] = f"recipe {path.name} | " + inner["meta"]
+        # the client will reference the .json path in later calls
+        _DATA[_norm(path)] = _DATA[_norm(recipe.source_path)]
+        return inner
+
     if path.suffix.lower() == ".fxmla":
         from larmor.io import fxmla
 
@@ -132,13 +147,6 @@ def _get_data(source_path: str) -> tuple[np.ndarray, np.ndarray]:
     return _DATA[key]
 
 
-def _kernel_for(recipe: Recipe, exp_ppm: np.ndarray):
-    if engine.needs_kernel(recipe):
-        return engine.build_kernel(
-            recipe.nucleus, recipe.larmor_frequency_MHz, recipe.spin_rate_Hz)
-    return engine.Axis(x_ppm=exp_ppm)
-
-
 @app.post("/api/simulate")
 def simulate(req: SimulateRequest):
     recipe = Recipe.from_dict(req.recipe)
@@ -149,13 +157,11 @@ def simulate(req: SimulateRequest):
     try:
         params = fitmod._make_params(recipe)
         fitmod._apply_params(recipe, params)
-    except fitmod.ConstraintError as exc:
+        x, total, per_site = engine.simulate(recipe, exp_ppm=ppm)
+    except (fitmod.ConstraintError, ValueError) as exc:
         raise HTTPException(422, str(exc))
-    kernel = _kernel_for(recipe, ppm)
-    per_site = [engine.simulate_site(s, kernel) for s in recipe.sites]
-    total = np.sum(per_site, axis=0) if per_site else np.zeros_like(kernel.x_ppm)
     return {
-        "x": kernel.x_ppm.tolist(),
+        "x": x.tolist(),
         "total": total.tolist(),
         "sites": [y.tolist() for y in per_site],
         "labels": [s.label or s.model for s in recipe.sites],
@@ -166,9 +172,8 @@ def simulate(req: SimulateRequest):
 def run_fit(req: FitRequest):
     recipe = Recipe.from_dict(req.recipe)
     ppm, amp = _get_data(req.source_path)
-    kernel = _kernel_for(recipe, ppm)
     try:
-        result = fitmod.fit(recipe, ppm, amp, window_ppm=req.window, kernel=kernel)
+        result = fitmod.fit(recipe, ppm, amp, window_ppm=req.window)
     except fitmod.ConstraintError as exc:
         raise HTTPException(422, str(exc))
     return {
@@ -191,6 +196,104 @@ def save(req: SaveRequest):
     _guard_instrument_dir(target)
     Recipe.from_dict(req.recipe).save(target)
     return {"saved": str(target)}
+
+
+class BrowseRequest(BaseModel):
+    path: str = ""
+
+
+class QuantifyRequest(BaseModel):
+    recipe: dict
+    window: tuple[float, float] | None = None
+
+
+class ProcessRequest(BaseModel):
+    source_path: str
+    ops: list[dict]
+    use_raw: bool = False        # start from the raw fid instead of pdata
+
+
+@app.get("/api/models")
+def list_models():
+    from larmor import models as model_registry
+
+    return {"models": model_registry.describe_all()}
+
+
+@app.post("/api/browse")
+def browse(req: BrowseRequest):
+    """Minimal file browser: folders, EXPNOs, and openable files."""
+    import string
+
+    if not req.path:
+        drives = [f"{d}:\\" for d in string.ascii_uppercase
+                  if Path(f"{d}:\\").exists()]
+        return {"path": "", "parent": None, "dirs": drives, "expnos": [],
+                "files": []}
+    p = Path(req.path)
+    if not p.is_dir():
+        raise HTTPException(404, f"not a folder: {p}")
+    dirs, expnos, files = [], [], []
+    try:
+        for child in sorted(p.iterdir(), key=lambda c: c.name.lower()):
+            try:
+                if child.is_dir():
+                    if (child / "acqus").exists():
+                        expnos.append(child.name)
+                    else:
+                        dirs.append(child.name)
+                elif child.suffix.lower() in (".fxmla", ".fxml", ".json"):
+                    files.append(child.name)
+            except OSError:
+                continue
+    except PermissionError:
+        raise HTTPException(403, f"no permission to read {p}")
+    return {"path": str(p), "parent": str(p.parent) if p.parent != p else None,
+            "dirs": dirs, "expnos": expnos, "files": files}
+
+
+@app.post("/api/quantify")
+def run_quantify(req: QuantifyRequest):
+    from larmor.quantify import quantify
+
+    recipe = Recipe.from_dict(req.recipe)
+    if not recipe.sites:
+        raise HTTPException(422, "no sites to quantify")
+    try:
+        return quantify(recipe, window_ppm=req.window)
+    except Exception as exc:
+        raise HTTPException(422, f"quantification failed: {exc}")
+
+
+@app.post("/api/process")
+def process(req: ProcessRequest):
+    """Apply a processing pipeline; result replaces the working spectrum."""
+    from larmor import processing as proc
+
+    key = _norm(req.source_path)
+    try:
+        if req.use_raw:
+            s = proc.from_bruker_fid(req.source_path)
+        else:
+            ppm, amp = _get_data(req.source_path)
+            # recover SFO1 for phase pivoting when available
+            sfo1 = 0.0
+            from larmor.io import bruker
+
+            if bruker.is_expno(Path(req.source_path)):
+                sfo1 = bruker.read_expno(req.source_path).sfo1_MHz
+            s = proc.from_processed(ppm, amp, sfo1)
+        s = proc.apply(s, req.ops)
+    except Exception as exc:
+        raise HTTPException(422, f"processing failed: {exc}")
+    if s.domain != "freq":
+        raise HTTPException(422, "pipeline must end in the frequency domain "
+                                 "(add an 'ft' step)")
+    x, y = np.asarray(s.x_ppm), s.y.real
+    order = np.argsort(x)
+    x, y = x[order], y[order]
+    _DATA[key] = (x, y)
+    return {"ppm": x.tolist(), "amp": y.tolist()}
 
 
 def _guard_instrument_dir(target: Path) -> None:

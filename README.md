@@ -75,6 +75,21 @@ fake-baseline territory, and the covariance stays well-conditioned.
 - In the app: click *constraints ▸* on any site to edit link/min/max per parameter; linked
   parameters grey out, show ⚭, and follow their expression live in the plot.
 
+**Phase 1e — professional workbench rework** (dmfit-parity core):
+
+- **Model registry** (`larmor/models/`): every lineshape is a self-describing plug-in —
+  Gauss/Lorentz, Czjzek distribution, discrete 2nd-order quadrupolar CT, CSA powder with
+  physical sidebands. New models appear automatically in the app and the fit engine.
+- **dmfit-style workflow in the app**: pick a model, *click on the spectrum* to place a site,
+  drag its marker to move it; compact per-site parameter cards with fix checkboxes,
+  duplicate/hide/remove, scroll-to-nudge values; undo/redo; session restore; file browser
+  (no more typing paths); fit window from the current zoom.
+- **Quantification table** (`larmor/quantify.py`): per-site integrals and relative fractions
+  in % with first-order uncertainties — the dmfit results table, now with error bars. CSV copy.
+- **Processing** (`larmor/processing.py`): EM/zero-fill/FT from the raw fid, manual and
+  ACME autophase, iterative-clipping polynomial baseline — as a replayable JSON pipeline,
+  always read-only against instrument files.
+
 **Phase 1d — figure studio** (NMRVEW-inspired; `larmor.figures` + app panel):
 
 - A figure is a **declarative JSON spec** — savable next to the data,

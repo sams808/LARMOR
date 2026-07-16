@@ -34,14 +34,13 @@ def test_kernel_and_fit_caalglass():
     assert np.all(np.diff(kernel.x_ppm) > 0)
 
     # sigma reweighting sanity: larger sigma -> broader lineshape
-    y_narrow = kernel.spectrum(1.0, 0.0, 1.0, 1.0)
-    y_broad = kernel.spectrum(4.0, 0.0, 1.0, 1.0)
+    y_narrow = kernel.weights(1.0) @ kernel.K
+    y_broad = kernel.weights(4.0) @ kernel.K
     width = lambda y: np.sum(y > y.max() / 2)
     assert width(y_broad) > width(y_narrow)
 
     exp_ppm, exp_amp = dm.spectrum.ppm, dm.spectrum.amplitude
-    result = fitmod.fit(recipe, exp_ppm, exp_amp,
-                        window_ppm=(150.0, -80.0), kernel=kernel)
+    result = fitmod.fit(recipe, exp_ppm, exp_amp, window_ppm=(150.0, -80.0))
 
     # refined fit should beat the fixed-parameter Phase 0 replay (RMSD 0.027)
     assert result.rmsd < 0.01
