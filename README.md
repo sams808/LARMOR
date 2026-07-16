@@ -130,11 +130,12 @@ conda env create -f environment.yml
 
 This installs everything **including LARMOR itself** (editable). Then:
 
-- **Easiest — double-click `LARMOR.bat`.** It finds the `larmor` environment,
-  starts the app, and opens your browser at http://127.0.0.1:8642. Keep the
-  console window open while you work; close it (or Ctrl+C) to stop.
-- Or from a terminal: `conda activate larmor` then `larmor app --open`.
-- CLI without the GUI: `larmor info <path>`, `larmor import <fxmla>`, `larmor fit <recipe>`.
+- **Easiest — double-click `LARMOR.bat`.** It launches the **native desktop
+  application** (PySide6 + pyqtgraph: instant zoom/pan/drag, no browser, no
+  server). Or from a terminal: `larmor desktop`.
+- The browser variant still exists (`larmor app --open`, for a shared lab
+  server later), but the desktop app is the primary interface.
+- CLI without any GUI: `larmor info <path>`, `larmor import <fxmla>`, `larmor fit <recipe>`.
 
 If the env was created before the app existed, refresh it with
 `conda env update -f environment.yml` (adds fastapi/uvicorn and the editable

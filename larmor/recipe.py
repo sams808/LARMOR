@@ -85,6 +85,7 @@ class Recipe:
         d.pop("larmor_recipe_version", None)
         sites = []
         for s in d.pop("sites", []):
+            s = dict(s)   # never mutate the caller's dicts
             params = {k: Param(**p) for k, p in s.pop("params", {}).items()}
             sites.append(SiteModel(params=params, **s))
         window = d.pop("fit_window_ppm", None)

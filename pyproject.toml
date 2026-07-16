@@ -26,6 +26,7 @@ larmor = "larmor.cli:main"
 [project.optional-dependencies]
 dev = ["pytest"]
 app = ["fastapi", "uvicorn[standard]"]
+desktop = ["PySide6", "pyqtgraph"]
 
 [tool.setuptools.packages.find]
 include = ["larmor*"]

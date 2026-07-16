@@ -16,5 +16,7 @@ dependencies:
       - nmrglue
       - fastapi
       - uvicorn[standard]
+      - PySide6
+      - pyqtgraph
       # install LARMOR itself (editable, from this repo)
       - -e .

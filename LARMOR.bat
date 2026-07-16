@@ -31,7 +31,7 @@ REM 3) fall back to conda on PATH
 where conda >nul 2>nul
 if %errorlevel%==0 (
   echo Starting LARMOR via conda...
-  conda run -n larmor python -m larmor.cli app --port %PORT% --open
+  conda run -n larmor python -m larmor.cli desktop
   goto :end
 )
 
@@ -47,8 +47,7 @@ exit /b 1
 
 :run
 echo Starting LARMOR (%LARMOR_PYTHON%)...
-echo The app opens in your browser; keep this window open while working.
-"%LARMOR_PYTHON%" -m larmor.cli app --port %PORT% --open
+"%LARMOR_PYTHON%" -m larmor.cli desktop
 
 :end
 echo.

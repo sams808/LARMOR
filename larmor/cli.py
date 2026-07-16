@@ -136,6 +136,12 @@ def cmd_app(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_desktop(args: argparse.Namespace) -> int:
+    from larmor.desktop.app import main as desktop_main
+
+    return desktop_main()
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="larmor", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -155,6 +161,9 @@ def main(argv: list[str] | None = None) -> int:
     p_fit.add_argument("--window", nargs=2, type=float, metavar=("HI_PPM", "LO_PPM"))
     p_fit.add_argument("--plot", help="write an overlay PNG")
     p_fit.set_defaults(func=cmd_fit)
+
+    p_desk = sub.add_parser("desktop", help="launch the desktop application")
+    p_desk.set_defaults(func=cmd_desktop)
 
     p_app = sub.add_parser("app", help="launch the interactive web app")
     p_app.add_argument("--host", default="127.0.0.1")
