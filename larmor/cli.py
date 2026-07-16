@@ -132,7 +132,7 @@ def cmd_fit(args: argparse.Namespace) -> int:
 def cmd_app(args: argparse.Namespace) -> int:
     from larmor.app import serve
 
-    serve(host=args.host, port=args.port)
+    serve(host=args.host, port=args.port, open_browser=args.open)
     return 0
 
 
@@ -159,6 +159,8 @@ def main(argv: list[str] | None = None) -> int:
     p_app = sub.add_parser("app", help="launch the interactive web app")
     p_app.add_argument("--host", default="127.0.0.1")
     p_app.add_argument("--port", type=int, default=8642)
+    p_app.add_argument("--open", action="store_true",
+                       help="open the browser automatically")
     p_app.set_defaults(func=cmd_app)
 
     args = parser.parse_args(argv)

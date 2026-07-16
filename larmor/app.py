@@ -267,10 +267,17 @@ def figure_export(req: FigureExportRequest):
     return {"saved": saved}
 
 
-def serve(host: str = "127.0.0.1", port: int = 8642) -> None:  # pragma: no cover
+def serve(host: str = "127.0.0.1", port: int = 8642,
+          open_browser: bool = False) -> None:  # pragma: no cover
     import uvicorn
 
-    print(f"LARMOR app: http://{host}:{port}")
+    url = f"http://{host}:{port}"
+    print(f"LARMOR app: {url}")
+    if open_browser:
+        import threading
+        import webbrowser
+
+        threading.Timer(1.2, lambda: webbrowser.open(url)).start()
     uvicorn.run(app, host=host, port=port, log_level="warning")
 
 

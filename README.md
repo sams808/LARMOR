@@ -105,9 +105,24 @@ Next: Guided-mode layer (plain-language panels, guardrails) on this app, then Ph
 
 Raw instrument data (TopSpin EXPNO folders) and legacy `.fxmla` files are **never copied into this repo** and **never written to**. `data/` holds only small reference notes (paths, hashes) — see `data/README.md`.
 
-## Environment
+## Installation & launching
+
+One-time setup (Anaconda/Miniconda prompt, from this folder):
 
 ```
 conda env create -f environment.yml
-conda activate larmor
 ```
+
+This installs everything **including LARMOR itself** (editable). Then:
+
+- **Easiest — double-click `LARMOR.bat`.** It finds the `larmor` environment,
+  starts the app, and opens your browser at http://127.0.0.1:8642. Keep the
+  console window open while you work; close it (or Ctrl+C) to stop.
+- Or from a terminal: `conda activate larmor` then `larmor app --open`.
+- CLI without the GUI: `larmor info <path>`, `larmor import <fxmla>`, `larmor fit <recipe>`.
+
+If the env was created before the app existed, refresh it with
+`conda env update -f environment.yml` (adds fastapi/uvicorn and the editable
+install).
+
+A true standalone installer (no conda needed at all) is on the roadmap (Phase 4).
