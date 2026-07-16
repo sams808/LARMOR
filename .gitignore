@@ -21,3 +21,6 @@ data/**/*.fxmla
 *.egg-info/
 build/
 dist/
+
+# local test clones
+git-test/
