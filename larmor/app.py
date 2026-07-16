@@ -59,6 +59,22 @@ class SaveRequest(BaseModel):
     path: str
 
 
+class FigureTemplateRequest(BaseModel):
+    source_path: str
+    recipe: dict | None = None
+
+
+class FigurePreviewRequest(BaseModel):
+    spec: dict
+
+
+class FigureExportRequest(BaseModel):
+    spec: dict
+    path: str                     # base path, extension added per format
+    formats: list[str] = ["png", "svg", "pdf"]
+    dpi: int = 600
+
+
 @app.get("/", response_class=HTMLResponse)
 def index() -> str:
     return (_STATIC / "index.html").read_text(encoding="utf-8")
@@ -172,12 +188,83 @@ def run_fit(req: FitRequest):
 def save(req: SaveRequest):
     target = Path(req.path)
     # data-protection guard: never write into an instrument data folder
+    _guard_instrument_dir(target)
+    Recipe.from_dict(req.recipe).save(target)
+    return {"saved": str(target)}
+
+
+def _guard_instrument_dir(target: Path) -> None:
     for parent in [target.parent, *target.parent.parents]:
         if (parent / "acqus").exists() or (parent / "fid").exists() or (parent / "ser").exists():
             raise HTTPException(
                 403, f"refusing to write inside instrument data folder: {parent}")
-    Recipe.from_dict(req.recipe).save(target)
-    return {"saved": str(target)}
+
+
+@app.post("/api/figure/template")
+def figure_template(req: FigureTemplateRequest):
+    """Build a sensible starter spec for whatever the source offers."""
+    path = Path(req.source_path)
+    templates: dict[str, dict] = {}
+
+    is_2d = (path / "acqu2s").exists()
+    pdata1 = path / "pdata" / "1"
+    if path.suffix.lower() == ".fxmla" or (path.is_dir() and not is_2d):
+        traces = [{"path": str(path), "label": "experiment",
+                   "color": "black", "linewidth": 0.9}]
+        templates["1d"] = {"kind": "1d", "style": "article-wide",
+                           "traces": traces}
+    if req.recipe and req.recipe.get("sites"):
+        # note: the recipe must be SAVED for figure traces to reference it
+        templates["1d-fit"] = {
+            "kind": "1d", "style": "article-wide",
+            "traces": [
+                {"path": str(path), "label": "experiment", "color": "black",
+                 "linewidth": 0.9},
+                {"recipe": "<save recipe first, then put its path here>",
+                 "part": "total", "label": "fit", "color": "crimson"},
+            ],
+        }
+    if is_2d:
+        templates["2d"] = {
+            "kind": "2d", "style": "thesis", "path": str(path),
+            "xlabel": "F2 shift (ppm)", "ylabel": "F1 (ppm)",
+            "levels": {"mode": "log", "n": 12},
+        }
+    if (pdata1 / "t1ints.txt").exists():
+        templates["satrec"] = {"kind": "series", "mode": "satrec",
+                               "style": "article", "path": str(path),
+                               "stretched": True}
+    if (pdata1 / "redor.txt").exists():
+        templates["redor"] = {"kind": "series", "mode": "redor",
+                              "style": "article", "path": str(path)}
+    return {"templates": templates}
+
+
+@app.post("/api/figure/preview")
+def figure_preview(req: FigurePreviewRequest):
+    import base64
+
+    from larmor import figures
+
+    try:
+        png = figures.render_png_bytes(req.spec, dpi=110)
+    except Exception as exc:
+        raise HTTPException(422, f"figure failed: {exc}")
+    return {"png_base64": base64.b64encode(png).decode("ascii")}
+
+
+@app.post("/api/figure/export")
+def figure_export(req: FigureExportRequest):
+    from larmor import figures
+
+    target = Path(req.path)
+    _guard_instrument_dir(target)
+    try:
+        saved = figures.export(req.spec, target,
+                               formats=tuple(req.formats), dpi=req.dpi)
+    except Exception as exc:
+        raise HTTPException(422, f"figure failed: {exc}")
+    return {"saved": saved}
 
 
 def serve(host: str = "127.0.0.1", port: int = 8642) -> None:  # pragma: no cover

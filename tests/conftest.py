@@ -9,6 +9,11 @@ CAALGLASS_MQ = Path("C:/Users/samso/Desktop/CaAlGlassMQ.fxmla")
 EXPNO_1903 = Path(
     "C:/Users/samso/Desktop/WSU_work/NMR/NMRFAM/DATA/2026-07"
     "/07062026_SR31648_0Ca-9F-Al_SS_ALP/1903")
+EXPNO_1901 = Path(
+    "C:/Users/samso/Desktop/WSU_work/NMR/NMRFAM/DATA/2026-07"
+    "/07062026_SR31648_0Ca-9F-Al_SS_ALP/1901")
+NMRVEW_2D = Path(
+    "C:/Users/samso/Desktop/SAVE_PC_PRO/THESE/NMRVEW/data/B15Na20-17O/1181")
 
 
 def require(path: Path):

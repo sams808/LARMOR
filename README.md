@@ -75,10 +75,28 @@ fake-baseline territory, and the covariance stays well-conditioned.
 - In the app: click *constraints ▸* on any site to edit link/min/max per parameter; linked
   parameters grey out, show ⚭, and follow their expression live in the plot.
 
+**Phase 1d — figure studio** (NMRVEW-inspired; `larmor.figures` + app panel):
+
+- A figure is a **declarative JSON spec** — savable next to the data,
+  re-renderable identically months later. Templates are auto-offered for whatever
+  the loaded source supports.
+- **1D**: overlay/stack spectra, fit totals, per-site components, offset residuals;
+  per-trace scale/offset/window-normalization; LaTeX labels; auto isotope axis labels.
+- **2D** (MQMAS, HMQC, SQ-DQ…): log-spaced contours with a **noise-measured default
+  floor** (~8σ from the matrix edges), top/right projections, external-1D overlay on
+  the top projection, F1-band sub-projections, slope/diagonal lines, negative contours.
+- **Series**: saturation recovery from TopSpin `t1ints.txt` (log-time plot +
+  (stretched-)exponential T₁ fit with uncertainty) and REDOR from `redor.txt`
+  (ΔS/S₀ vs recoupling time); inline arrays for externally computed curves.
+- Style presets (`article`, `article-wide`, `presentation`, `thesis`) regenerate the
+  same figure for different media; export = png + svg + pdf at 600 dpi, with
+  instrument-folder writes refused.
+
 **Tutorials** (ssNake-style, in [docs/tutorials/](docs/tutorials/)):
 
 1. [Your first fit — ²⁷Al MAS of a glass](docs/tutorials/01-first-fit-27Al-czjzek.md)
 2. [Constraining a fit: fix, bound, link](docs/tutorials/02-constraints.md)
+3. [The figure studio: publication figures from any experiment](docs/tutorials/03-figures.md)
 
 Next: Guided-mode layer (plain-language panels, guardrails) on this app, then Phase 2
 (MQMAS/2D methods — `CaAlGlassMQ.fxmla` already parses, fitting it comes with the 2D engine).

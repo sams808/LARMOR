@@ -38,6 +38,13 @@
   .constraints input { font-size: 0.75rem; padding: 3px 6px; width: 100%; }
   .constraints input.expr::placeholder { color: #9fb0b6; }
   .advBtn { background: none; border: none; color: var(--accent); cursor: pointer; font-size: 0.75rem; padding: 0 4px; }
+  #figstudio { grid-column: 1 / -1; }
+  #figstudio h2 { font-size: 1rem; margin: 0 0 8px; letter-spacing: 0.04em; }
+  .fig-grid { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 12px; }
+  @media (max-width: 900px) { .fig-grid { grid-template-columns: 1fr; } }
+  #figSpec { width: 100%; min-height: 340px; font: 11px/1.5 ui-monospace, monospace; border: 1px solid var(--line); border-radius: 6px; padding: 8px; resize: vertical; }
+  #figImg { max-width: 100%; border: 1px solid var(--line); border-radius: 6px; display: none; }
+  .tplBtn { margin-right: 6px; }
   #status { font-size: 0.85rem; color: var(--muted); min-height: 1.4em; }
   #status.error { color: var(--bad); }
   #warnings { font-size: 0.8rem; color: var(--bad); }
@@ -77,6 +84,30 @@
       <button id="saveBtn" class="secondary" disabled>Save</button>
     </div>
     <div id="report"></div>
+  </div>
+  <div class="panel" id="figstudio">
+    <h2>FIGURE STUDIO <small style="color:var(--muted); font-weight:normal;">publication figures from a saved, re-renderable JSON spec</small></h2>
+    <div class="row">
+      <button id="figTplLoad" class="secondary" disabled>Templates for loaded data</button>
+      <span id="figTplBtns"></span>
+    </div>
+    <div class="fig-grid">
+      <textarea id="figSpec" spellcheck="false" placeholder='{"kind": "1d", "style": "article-wide", "traces": [...]}  — load a template or write a spec; see docs/tutorials/03-figures.md'></textarea>
+      <div>
+        <div class="row">
+          <button id="figPreview">Preview</button>
+          <span id="figStatus" style="font-size:0.85rem;color:var(--muted)"></span>
+        </div>
+        <img id="figImg" alt="figure preview">
+      </div>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <input type="text" id="figPath" placeholder="export base path, no extension (e.g. C:\...\fig\myfigure)">
+      <label><input type="checkbox" class="figfmt" value="png" checked> png</label>
+      <label><input type="checkbox" class="figfmt" value="svg" checked> svg</label>
+      <label><input type="checkbox" class="figfmt" value="pdf" checked> pdf</label>
+      <button id="figExport" class="secondary">Export</button>
+    </div>
   </div>
 </main>
 <script>
@@ -236,7 +267,7 @@ $("loadBtn").onclick = async () => {
     $("warnings").textContent = data.warnings.join(" • ");
     $("winHi").value = Math.max(...data.ppm).toFixed(0);
     $("winLo").value = Math.min(...data.ppm).toFixed(0);
-    ["fitBtn", "addCz", "addGl", "saveBtn"].forEach(id => $(id).disabled = false);
+    ["fitBtn", "addCz", "addGl", "saveBtn", "figTplLoad"].forEach(id => $(id).disabled = false);
     renderSites();
     plot(null);
     if (state.recipe.sites.length) simulate(); else status("no sites yet — add one, or click Fit after adding");
@@ -284,6 +315,59 @@ $("saveBtn").onclick = async () => {
 };
 
 $("path").addEventListener("keydown", e => { if (e.key === "Enter") $("loadBtn").click(); });
+
+// ---------- figure studio ----------
+const figStatus = (msg, isErr) => {
+  const el = $("figStatus");
+  el.textContent = msg;
+  el.style.color = isErr ? "var(--bad)" : "var(--muted)";
+};
+
+$("figTplLoad").onclick = async () => {
+  try {
+    const res = await api("figure/template", { source_path: state.sourcePath, recipe: state.recipe });
+    const box = $("figTplBtns");
+    box.innerHTML = "";
+    for (const [name, spec] of Object.entries(res.templates)) {
+      const b = document.createElement("button");
+      b.className = "secondary tplBtn";
+      b.textContent = name;
+      b.onclick = () => { $("figSpec").value = JSON.stringify(spec, null, 2); figStatus("template loaded — edit, then Preview"); };
+      box.appendChild(b);
+    }
+    if (!Object.keys(res.templates).length) figStatus("no templates for this source", true);
+  } catch (e) { figStatus("templates failed: " + e.message, true); }
+};
+
+function parseSpec() {
+  try { return JSON.parse($("figSpec").value); }
+  catch (e) { figStatus("spec is not valid JSON: " + e.message, true); return null; }
+}
+
+$("figPreview").onclick = async () => {
+  const spec = parseSpec();
+  if (!spec) return;
+  try {
+    figStatus("rendering…");
+    const res = await api("figure/preview", { spec });
+    const img = $("figImg");
+    img.src = "data:image/png;base64," + res.png_base64;
+    img.style.display = "block";
+    figStatus("");
+  } catch (e) { figStatus("preview failed: " + e.message, true); }
+};
+
+$("figExport").onclick = async () => {
+  const spec = parseSpec();
+  if (!spec) return;
+  const formats = Array.from(document.querySelectorAll(".figfmt:checked")).map(c => c.value);
+  if (!$("figPath").value.trim()) { figStatus("give an export base path", true); return; }
+  try {
+    figStatus("exporting…");
+    const res = await api("figure/export", { spec, path: $("figPath").value.trim(), formats });
+    figStatus("saved: " + res.saved.join("  "));
+  } catch (e) { figStatus("export failed: " + e.message, true); }
+};
 </script>
 </body>
 </html>
