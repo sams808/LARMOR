@@ -196,6 +196,11 @@ class MainWindow(QMainWindow):
         self._sim_timer.setInterval(120)
         self._sim_timer.timeout.connect(self._simulate_now)
 
+        # give the spectrum the majority of the height; keep the parameter
+        # dock compact so it does not swallow half the window when nearly empty
+        self.resizeDocks([self.lines_dock], [260], Qt.Vertical)
+        self.lines_dock.setMinimumHeight(150)
+
         self._restore_session()
 
     # ------------------------------------------------------------- menus
@@ -295,19 +300,22 @@ class MainWindow(QMainWindow):
     def _build_toolbar(self):
         tb = QToolBar("main")
         tb.setMovable(False)
+        tb.setIconSize(tb.iconSize())
         self.addToolBar(tb)
-        self.actUndo = QAction("↩", self)
+        self.actUndo = QAction("↩  Undo", self)
         self.actUndo.setShortcut(QKeySequence("Ctrl+Z"))
-        self.actUndo.setToolTip("undo")
+        self.actUndo.setToolTip("undo (Ctrl+Z)")
         self.actUndo.triggered.connect(self.undo)
-        self.actRedo = QAction("↪", self)
+        self.actRedo = QAction("↪  Redo", self)
         self.actRedo.setShortcut(QKeySequence("Ctrl+Y"))
-        self.actRedo.setToolTip("redo")
+        self.actRedo.setToolTip("redo (Ctrl+Y)")
         self.actRedo.triggered.connect(self.redo)
         tb.addAction(self.actUndo)
         tb.addAction(self.actRedo)
         tb.addSeparator()
-        tb.addWidget(QLabel(" add line: "))
+        lab = QLabel("  Add line ")
+        lab.setStyleSheet("color:#5a6871; font-weight:600;")
+        tb.addWidget(lab)
         for name, act in self._model_actions.items():
             tb.addAction(act)
         self._update_enabled()
@@ -317,13 +325,15 @@ class MainWindow(QMainWindow):
         sb.setObjectName("sidebar")
         sb.setMovable(False)
         sb.setOrientation(Qt.Vertical)
+        sb.setToolButtonStyle(Qt.ToolButtonTextOnly)
         self.addToolBar(Qt.LeftToolBarArea, sb)
         for text, tip, slot in [
-            ("Full", "full spectrum", self.zoom_full),
+            ("Full", "show the full spectrum", self.zoom_full),
             ("Sites", "zoom to the fitted region", self.zoom_sites),
-            ("Y a", "autoscale Y in the current X window", self.autoscale_y),
-            ("pad", "toggle paddles", lambda: self.actPaddles.trigger()),
-            ("parts", "toggle components", lambda: self.actComp.trigger()),
+            ("Y-fit", "autoscale Y in the current X window", self.autoscale_y),
+            ("Paddles", "toggle the on-spectrum paddles", lambda: self.actPaddles.trigger()),
+            ("Parts", "toggle the component curves", lambda: self.actComp.trigger()),
+            ("Resid.", "toggle the residual", lambda: self.actResid.trigger()),
         ]:
             a = QAction(text, self)
             a.setToolTip(tip)
@@ -556,6 +566,8 @@ class MainWindow(QMainWindow):
         QSettings("LARMOR", "app").setValue("lastDir", str(Path(path).parent))
         self.setWindowTitle(f"LARMOR — {Path(path).name}")
         self.view.set_experiment(ppm, amp)
+        sample = recipe.get("sample") or Path(path).name
+        self.view.set_title(sample)
         self._last_model = None
         self._first_sim = True
         self.zoom_full()
@@ -1021,12 +1033,19 @@ def _load_any(path: str):
 
 def main() -> int:
     import pyqtgraph as pg
+    from PySide6.QtGui import QFont
 
-    pg.setConfigOptions(antialias=True)
+    pg.setConfigOptions(antialias=True, background="#fcfdfc", foreground="#37424a")
     app = QApplication(sys.argv)
     app.setApplicationName("LARMOR")
     app.setStyle("Fusion")            # deterministic rendering on any OS theme
     app.setPalette(_light_palette())
+    # a clean, consistent UI font across all platforms
+    for family in ("Segoe UI", "Inter", "Roboto", "Helvetica Neue", "Arial"):
+        f = QFont(family, 9)
+        if f.exactMatch() or family == "Arial":
+            app.setFont(f)
+            break
     app.setStyleSheet(APP_STYLE)
     win = MainWindow()
     win.show()

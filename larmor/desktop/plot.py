@@ -6,6 +6,7 @@ from __future__ import annotations
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QFont
 
 SITE_COLORS = ["#1f77b4", "#2ca02c", "#d62728", "#9467bd", "#8c564b",
                "#e377c2", "#17becf", "#bcbd22", "#7f7f7f", "#ff7f0e"]
@@ -25,20 +26,46 @@ class SpectrumView(pg.PlotWidget):
     cursor_moved = Signal(float, float)       # live x/y for the status bar
 
     def __init__(self, parent=None):
-        super().__init__(parent, background="w")
-        self.getPlotItem().invertX(True)              # ppm convention
-        self.setLabel("bottom", "shift / ppm")
-        self.setLabel("left", "intensity")
-        self.showGrid(x=True, y=True, alpha=0.15)
-        self.getPlotItem().getViewBox().setMouseMode(pg.ViewBox.PanMode)
-        leg = self.addLegend(offset=(8, 8), labelTextSize="8pt")
-        leg.setBrush(pg.mkBrush(255, 255, 255, 200))
+        super().__init__(parent, background="#fcfdfc")
+        pi = self.getPlotItem()
+        pi.invertX(True)                              # ppm convention
+        # professional axis styling: dark ink axes, tick labels, light grid
+        axis_pen = pg.mkPen("#37424a", width=1.2)
+        tick_font = QFont()
+        tick_font.setPointSize(9)
+        for name in ("bottom", "left"):
+            ax = pi.getAxis(name)
+            ax.setPen(axis_pen)
+            ax.setTextPen(pg.mkPen("#37424a"))
+            ax.setStyle(tickFont=tick_font, tickLength=-5)
+        pi.getAxis("top").setPen(pg.mkPen("#c5ccc6"))
+        pi.getAxis("right").setPen(pg.mkPen("#c5ccc6"))
+        pi.showAxis("top"); pi.getAxis("top").setStyle(showValues=False)
+        pi.showAxis("right"); pi.getAxis("right").setStyle(showValues=False)
+        label_style = {"color": "#37424a", "font-size": "10pt"}
+        self.setLabel("bottom", "chemical shift", units="ppm", **label_style)
+        self.setLabel("left", "intensity", **label_style)
+        self.showGrid(x=True, y=True, alpha=0.08)
+        pi.getViewBox().setMouseMode(pg.ViewBox.PanMode)
+        pi.setContentsMargins(6, 10, 6, 6)
 
-        self._exp = self.plot([], [], pen=pg.mkPen("#16202a", width=1.2),
-                              name="experiment")
-        self._model = self.plot([], [], pen=pg.mkPen("#d62728", width=1.6),
-                                name="model")
-        self._resid = self.plot([], [], pen=pg.mkPen("#8a969e", width=0.9))
+        leg = self.addLegend(offset=(12, 10), labelTextSize="9pt",
+                             brush=pg.mkBrush(255, 255, 255, 235),
+                             pen=pg.mkPen("#d7dcd9"), labelTextColor="#16202a")
+        self._legend = leg
+
+        self._exp = self.plot([], [], pen=pg.mkPen("#1a2831", width=1.4),
+                              name="experiment", antialias=True)
+        self._model = self.plot([], [], pen=pg.mkPen("#c0392b", width=1.8),
+                                name="model", antialias=True)
+        self._resid = self.plot([], [], pen=pg.mkPen("#9aa5ab", width=1.0),
+                                name="residual", antialias=True)
+        # faint zero line for the offset residual strip
+        self._resid_zero = pg.InfiniteLine(
+            angle=0, pen=pg.mkPen("#d0d6d1", width=1, style=Qt.DotLine))
+        self._resid_zero.setVisible(False)
+        self.addItem(self._resid_zero)
+        pi.getAxis("left").setStyle(tickTextWidth=48, autoExpandTextSpace=False)
         self._components: list[pg.PlotDataItem] = []
         self._markers: list[pg.InfiniteLine] = []
         self._add_mode: str | None = None
@@ -161,6 +188,11 @@ class SpectrumView(pg.PlotWidget):
     def set_experiment(self, x: np.ndarray, y: np.ndarray):
         self._exp.setData(x, y)
 
+    def set_title(self, text: str):
+        self.getPlotItem().setTitle(
+            f"<span style='color:#37424a; font-size:11pt'>{text}</span>"
+            if text else None)
+
     def set_model(self, x, total, per_site, labels, hidden: set[int],
                   exp_x=None, exp_y=None):
         if x is None:
@@ -172,12 +204,15 @@ class SpectrumView(pg.PlotWidget):
             return
         self._model.setData(x, total)
 
-        # residual, offset below zero
+        # residual, offset below zero as a dedicated strip
         if self.show_residual and exp_x is not None and len(exp_x):
             yi = np.interp(exp_x, x, total)
-            offset = -0.08 * float(np.max(exp_y)) if len(exp_y) else 0.0
+            offset = -0.10 * float(np.max(exp_y)) if len(exp_y) else 0.0
             self._resid.setData(exp_x, (exp_y - yi) + offset)
+            self._resid_zero.setPos(offset)
+            self._resid_zero.setVisible(True)
         else:
+            self._resid_zero.setVisible(False)
             self._resid.setData([], [])
 
         # components: reuse items, add/remove as needed
@@ -189,9 +224,10 @@ class SpectrumView(pg.PlotWidget):
         for i, ys in enumerate(per_site):
             item = self._components[i]
             if self.show_components and i not in hidden:
-                item.setPen(pg.mkPen(site_color(i), width=1.0,
-                                     style=Qt.DashLine))
-                item.setData(x, ys)
+                col = pg.mkColor(site_color(i))
+                item.setPen(pg.mkPen(col, width=1.3, style=Qt.DashLine))
+                fill = pg.mkColor(col); fill.setAlpha(28)
+                item.setData(x, ys, fillLevel=0.0, fillBrush=pg.mkBrush(fill))
             else:
                 item.setData([], [])
 

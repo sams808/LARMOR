@@ -1,14 +1,51 @@
 # LARMOR
 
-A modern, open successor to [dmfit](https://nmr.cemhti.cnrs-orleans.fr/Dmfit/) for solid-state NMR lineshape fitting and spin-dynamics simulation — built to be usable by students with no NMR background and powerful enough for advanced research work.
+A modern, open successor to [dmfit](https://nmr.cemhti.cnrs-orleans.fr/Dmfit/) for solid-state
+NMR lineshape fitting and analysis — a native desktop application (PySide6 + pyqtgraph) built on
+the [mrsimulator](https://mrsimulator.readthedocs.io) / [lmfit](https://lmfit.github.io/lmfit-py/)
+/ [csdmpy](https://csdmpy.readthedocs.io) / [nmrglue](https://nmrglue.readthedocs.io) stack, with
+one thing none of those tools give you: **an uncertainty on every fitted number**, and fully
+reproducible fits.
 
-Full architecture and workflow design: see the published design document (artifact link shared in the project conversation history). Summary of the plan:
+**Launch:** double-click `LARMOR.bat` (or `larmor desktop`). See "Installation & launching" below.
 
-- **Reuse, don't rebuild the physics.** The numerical core comes from [mrsimulator](https://mrsimulator.readthedocs.io), [lmfit](https://lmfit.github.io/lmfit-py/), [mrinversion](https://mrinversion.readthedocs.io), and [csdmpy](https://csdmpy.readthedocs.io) (P. Grandinetti's group, Ohio State). New work here is ingestion, UX, and orchestration.
-- **Two-tier UX.** Guided mode for students, Expert mode (with an embedded Python console) for research use — same underlying project file.
-- **Bruker/TopSpin import via [nmrglue](https://nmrglue.readthedocs.io)**, strictly read-only against instrument data.
-- **Legacy dmfit `.fxmla` import** for migrating existing fits.
-- **Advanced simulation as opt-in plug-ins**: SIMPSON (exact density-matrix, e.g. REDOR) and DFT/MD tensor import — not part of the default path.
+## Capabilities
+
+**Fitting** — dmfit-style paddles (drag position+amplitude, side handles for width), a
+spreadsheet parameter table with pin-to-fix, live re-simulation, and:
+- 7 lineshape models: Gauss/Lorentz, Czjzek, extended Czjzek, discrete 2nd-order quadrupolar CT,
+  1st-order quadrupolar (satellites + sidebands), quad+CSA, CSA powder — all with a fast cached
+  (Cq, η) kernel where applicable.
+- Constraints: fix, bounds, algebraic links; **dependent positions in ppm _or_ Hz** and
+  amplitude/width ratios via dialogs (no expression writing); full error propagation.
+- Fit **zones** (dmfit-style union of regions), editable νrot / Larmor / nucleus, quantification
+  table (% ± error), CSV export.
+- **Auto Fit** (multi-start, escapes local minima) and **Errors Analysis** (χ² profile with
+  1σ/2σ intervals) — honest errors when the covariance is unreliable.
+- **2D MQMAS** fitting (`larmor.twod`): the same Czjzek kernel trick one dimension up, with a
+  contour viewer and manual shear.
+- **Multi-field / multi-dataset** simultaneous fits (`larmor multifit`) — lifts the Cq/δiso
+  degeneracy a single field can't resolve.
+
+**Processing** (TopSpin/ssNake parity) — EM/GM/SINE/QSINE/TRAF windows, TDeff, ZF (factor or SI),
+FCOR, FT, manual/ACME phase, SR, magnitude, Hilbert reconstruction, linear prediction
+(forward/backward), whole-echo, polynomial and interactive anchor baselines, region extract,
+spectra algebra, align, peak picking. Pipelines are stored in the recipe and **replayed on load**.
+
+**Relaxation & recoupling** — automatic **T1/T2** from arrayed EXPNOs (satrec/invrec/CPMG/T1ρ,
+window- or **per-site** via NNLS decomposition), **REDOR** dipolar couplings and distances
+(model-free short-time or full pair curve).
+
+**Import / advanced** — read-only Bruker TopSpin (1D & 2D), legacy dmfit `.fxmla`; **DFT tensor
+import** (CASTEP/QE `.magres` → fittable sites); **SIMPSON** bridge for exact density-matrix
+recoupling simulations.
+
+**Figures** — publication figure studio (1D / 2D contour / relaxation series), style presets,
+png + svg + pdf export.
+
+Reuse-first design: the physics comes from mrsimulator + lmfit; LARMOR adds ingestion, the
+dmfit-faithful UX, orchestration, uncertainties, and reproducibility. Instrument folders are
+always read-only. See `ROADMAP.md` for what's next (v0.3 → v1.0).
 
 ## Status
 
