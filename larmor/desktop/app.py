@@ -34,19 +34,74 @@ from larmor.desktop.table import LinesTable
 from larmor.recipe import Recipe
 
 APP_STYLE = """
-QMainWindow { background: #eef0ee; }
-QMenuBar { background: #ffffff; border-bottom: 1px solid #d7dcd9; }
-QToolBar { background: #ffffff; border-bottom: 1px solid #d7dcd9; spacing: 3px; padding: 2px; }
-QToolBar#sidebar { border-right: 1px solid #d7dcd9; border-bottom: none; padding: 2px 1px; }
-QToolButton { padding: 3px 7px; border-radius: 4px; }
-QToolButton:hover { background: #e2f0f0; }
-QToolButton:checked { background: #0e7c86; color: white; }
-QDockWidget::title { background: #f6f8f6; padding: 3px 8px; border-bottom: 1px solid #d7dcd9; }
-QTableWidget { background: white; gridline-color: #e4e8e5; }
-QHeaderView::section { background: #f6f8f6; border: none; border-right: 1px solid #d7dcd9;
-                       border-bottom: 1px solid #d7dcd9; padding: 2px 6px; }
-QStatusBar { background: #ffffff; border-top: 1px solid #d7dcd9; }
+QMainWindow { background: #f0f2f0; }
+QMenuBar { background: #fbfcfb; color: #16202a; border-bottom: 1px solid #cfd6d1; }
+QMenuBar::item { padding: 4px 10px; background: transparent; }
+QMenuBar::item:selected { background: #dcebe9; border-radius: 4px; }
+QMenu { background: #ffffff; color: #16202a; border: 1px solid #b9c1bc; }
+QMenu::item { padding: 4px 26px 4px 18px; }
+QMenu::item:selected { background: #dcebe9; }
+QMenu::separator { height: 1px; background: #e0e5e1; margin: 4px 8px; }
+QToolBar { background: #fbfcfb; border-bottom: 1px solid #cfd6d1; spacing: 3px; padding: 3px; }
+QToolBar#sidebar { border-right: 1px solid #cfd6d1; border-bottom: none; padding: 3px 2px; }
+QToolButton { padding: 4px 9px; border-radius: 4px; color: #16202a; border: 1px solid transparent; }
+QToolButton:hover { background: #dcebe9; border-color: #b7cfcb; }
+QToolButton:checked { background: #0e7c86; color: #ffffff; }
+QDockWidget { color: #16202a; }
+QDockWidget::title { background: #e7ebe8; padding: 4px 8px; border-top: 1px solid #cfd6d1; }
+QTableWidget { background: #ffffff; color: #16202a; gridline-color: #e0e5e1;
+               alternate-background-color: #f6f8f6; selection-background-color: #dcebe9;
+               selection-color: #16202a; }
+QHeaderView::section { background: #eef1ee; color: #37424a; font-weight: 600;
+                       border: none; border-right: 1px solid #d3d9d4;
+                       border-bottom: 1px solid #c5ccc6; padding: 3px 6px; }
+QTableCornerButton::section { background: #eef1ee; border: none; }
+QDoubleSpinBox, QSpinBox, QLineEdit { color: #16202a; background: transparent;
+                                      selection-background-color: #bcdcd9; }
+QPushButton { color: #16202a; background: #ffffff; border: 1px solid #aab4ad;
+              border-radius: 4px; padding: 4px 14px; }
+QPushButton:hover { background: #dcebe9; }
+QPushButton:default { background: #0e7c86; color: #ffffff; border-color: #0e7c86; }
+QCheckBox { color: #16202a; }
+QLabel { color: #16202a; }
+QTabBar::tab { background: #e7ebe8; color: #37424a; padding: 4px 14px;
+               border: 1px solid #cfd6d1; border-bottom: none;
+               border-top-left-radius: 4px; border-top-right-radius: 4px; }
+QTabBar::tab:selected { background: #ffffff; color: #0a5a62; font-weight: 600; }
+QStatusBar { background: #fbfcfb; color: #37424a; border-top: 1px solid #cfd6d1; }
+QPlainTextEdit { background: #ffffff; color: #16202a; }
+QScrollBar:vertical { background: #eef1ee; width: 12px; }
+QScrollBar::handle:vertical { background: #c5ccc6; border-radius: 5px; min-height: 30px; }
+QScrollBar:horizontal { background: #eef1ee; height: 12px; }
+QScrollBar::handle:horizontal { background: #c5ccc6; border-radius: 5px; min-width: 30px; }
 """
+
+
+def _light_palette():
+    """A complete light palette so the app renders identically whatever the
+    OS theme (Windows dark mode was bleeding white-on-white text through)."""
+    from PySide6.QtGui import QColor, QPalette
+
+    p = QPalette()
+    c = QColor
+    p.setColor(QPalette.Window, c("#f0f2f0"))
+    p.setColor(QPalette.WindowText, c("#16202a"))
+    p.setColor(QPalette.Base, c("#ffffff"))
+    p.setColor(QPalette.AlternateBase, c("#f6f8f6"))
+    p.setColor(QPalette.Text, c("#16202a"))
+    p.setColor(QPalette.PlaceholderText, c("#93a0a8"))
+    p.setColor(QPalette.Button, c("#fbfcfb"))
+    p.setColor(QPalette.ButtonText, c("#16202a"))
+    p.setColor(QPalette.ToolTipBase, c("#ffffff"))
+    p.setColor(QPalette.ToolTipText, c("#16202a"))
+    p.setColor(QPalette.Highlight, c("#0e7c86"))
+    p.setColor(QPalette.HighlightedText, c("#ffffff"))
+    p.setColor(QPalette.Link, c("#0a5a62"))
+    for group in (QPalette.Disabled,):
+        p.setColor(group, QPalette.WindowText, c("#9aa5ab"))
+        p.setColor(group, QPalette.Text, c("#9aa5ab"))
+        p.setColor(group, QPalette.ButtonText, c("#9aa5ab"))
+    return p
 
 
 class FitWorker(QThread):
@@ -110,6 +165,8 @@ class MainWindow(QMainWindow):
         self._fit_worker: FitWorker | None = None
         self._last_quant = None
         self._paddle_live = False   # true while a paddle is being dragged
+        self._last_model = None     # (x, total) of the latest simulation
+        self._first_sim = False     # autoscale Y once the first model arrives
 
         self.view = SpectrumView()
         self.setCentralWidget(self.view)
@@ -324,15 +381,26 @@ class MainWindow(QMainWindow):
             self.autoscale_y()
 
     def autoscale_y(self):
+        """Fit Y to everything visible in the current X window: experiment,
+        model, and the residual offset below zero."""
         if not self.exp_ppm.size:
             return
         (x0, x1), _ = self.view.getPlotItem().getViewBox().viewRange()
-        sel = (self.exp_ppm >= min(x0, x1)) & (self.exp_ppm <= max(x0, x1))
-        if sel.any():
-            lo = float(self.exp_amp[sel].min())
-            hi = float(self.exp_amp[sel].max())
-            pad = 0.15 * (hi - lo or 1.0)
-            self.view.setYRange(lo - pad, hi + pad, padding=0)
+        lo_x, hi_x = min(x0, x1), max(x0, x1)
+        sel = (self.exp_ppm >= lo_x) & (self.exp_ppm <= hi_x)
+        if not sel.any():
+            return
+        lo = float(self.exp_amp[sel].min())
+        hi = float(self.exp_amp[sel].max())
+        if self._last_model is not None:
+            mx, my = self._last_model
+            msel = (mx >= lo_x) & (mx <= hi_x)
+            if msel.any():
+                hi = max(hi, float(np.max(my[msel])))
+                lo = min(lo, float(np.min(my[msel])))
+        lo = min(lo, -0.12 * hi)          # room for the offset residual
+        pad = 0.08 * (hi - lo or 1.0)
+        self.view.setYRange(lo - pad, hi + pad, padding=0)
 
     def _toggle_resid(self, on):
         self.view.show_residual = on
@@ -380,6 +448,8 @@ class MainWindow(QMainWindow):
         QSettings("LARMOR", "app").setValue("lastDir", str(Path(path).parent))
         self.setWindowTitle(f"LARMOR — {Path(path).name}")
         self.view.set_experiment(ppm, amp)
+        self._last_model = None
+        self._first_sim = True
         self.zoom_full()
         if recipe["sites"]:
             self.zoom_sites()
@@ -548,8 +618,12 @@ class MainWindow(QMainWindow):
 
     def _sim_done(self, x, total, per_site):
         labels = [s.get("label") or s["model"] for s in self.recipe["sites"]]
+        self._last_model = (np.asarray(x), np.asarray(total))
         self.view.set_model(x, total, per_site, labels, self.hidden,
                             self.exp_ppm, self.exp_amp)
+        if self._first_sim:
+            self._first_sim = False
+            self.autoscale_y()
         if self._sim_pending:
             self._sim_pending = False
             self._sim_timer.start()
@@ -583,6 +657,7 @@ class MainWindow(QMainWindow):
         self.lines_table.rebuild(self.recipe, self.hidden)
         self._update_paddles()
         labels = [s.get("label") or s["model"] for s in self.recipe["sites"]]
+        self._last_model = (np.asarray(result.x_ppm), np.asarray(result.y_fit))
         self.view.set_model(result.x_ppm, result.y_fit, result.per_site,
                             labels, self.hidden, self.exp_ppm, self.exp_amp)
         self.lines_table.set_chi2(f"RMSD {result.rmsd:.4f}")
@@ -791,6 +866,8 @@ def main() -> int:
     pg.setConfigOptions(antialias=True)
     app = QApplication(sys.argv)
     app.setApplicationName("LARMOR")
+    app.setStyle("Fusion")            # deterministic rendering on any OS theme
+    app.setPalette(_light_palette())
     app.setStyleSheet(APP_STYLE)
     win = MainWindow()
     win.show()
