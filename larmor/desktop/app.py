@@ -1,4 +1,17 @@
-"""LARMOR desktop: main window wiring the backend modules to Qt."""
+"""LARMOR desktop: main window, laid out after dmfit.
+
+Structure (mirroring dmfit's decomposition interface):
+  - menu bar: File / Process / Decomposition / View / Models / ?
+  - thin top toolbar: zoom shortcuts, undo/redo, add-line model buttons
+  - narrow LEFT sidebar: quick view buttons (Full, Sites, Y auto, parts, pad)
+  - central spectrum canvas with dmfit-style paddles (drag the square top
+    handle = position+amplitude, drag the side circles = width)
+  - BOTTOM dock: the fit-parameters spreadsheet (one row per line, pin
+    checkbox beside every value) with Compute / Fit / chi2 footer,
+    tabbed with the Report (quantification + fit report)
+  - RIGHT dock: processing panel
+  - status bar: live cursor x/y like dmfit
+"""
 from __future__ import annotations
 
 import json
@@ -9,24 +22,29 @@ import numpy as np
 from PySide6.QtCore import QSettings, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
-    QApplication, QDockWidget, QFileDialog, QInputDialog, QLabel, QMainWindow,
-    QMessageBox, QPushButton, QTableWidget, QTableWidgetItem, QTabWidget,
-    QToolBar, QVBoxLayout, QWidget, QHBoxLayout, QPlainTextEdit,
+    QApplication, QDockWidget, QFileDialog, QLabel, QMainWindow, QMessageBox,
+    QPlainTextEdit, QPushButton, QTableWidget, QTableWidgetItem, QToolBar,
+    QVBoxLayout, QWidget, QHBoxLayout,
 )
 
 from larmor import models as model_registry
-from larmor.desktop.panels import ProcessingPanel, SitesPanel
+from larmor.desktop.panels import ProcessingPanel
 from larmor.desktop.plot import SpectrumView
+from larmor.desktop.table import LinesTable
 from larmor.recipe import Recipe
 
 APP_STYLE = """
-QMainWindow, QDockWidget { background: #eef0ee; }
-QToolBar { background: #ffffff; border-bottom: 1px solid #d7dcd9; spacing: 4px; padding: 3px; }
-QToolButton { padding: 4px 8px; border-radius: 5px; }
+QMainWindow { background: #eef0ee; }
+QMenuBar { background: #ffffff; border-bottom: 1px solid #d7dcd9; }
+QToolBar { background: #ffffff; border-bottom: 1px solid #d7dcd9; spacing: 3px; padding: 2px; }
+QToolBar#sidebar { border-right: 1px solid #d7dcd9; border-bottom: none; padding: 2px 1px; }
+QToolButton { padding: 3px 7px; border-radius: 4px; }
 QToolButton:hover { background: #e2f0f0; }
 QToolButton:checked { background: #0e7c86; color: white; }
-QFrame#siteCard { background: white; border: 1px solid #d7dcd9; border-radius: 6px; }
-QTableWidget { background: white; }
+QDockWidget::title { background: #f6f8f6; padding: 3px 8px; border-bottom: 1px solid #d7dcd9; }
+QTableWidget { background: white; gridline-color: #e4e8e5; }
+QHeaderView::section { background: #f6f8f6; border: none; border-right: 1px solid #d7dcd9;
+                       border-bottom: 1px solid #d7dcd9; padding: 2px 6px; }
 QStatusBar { background: #ffffff; border-top: 1px solid #d7dcd9; }
 """
 
@@ -53,9 +71,7 @@ class FitWorker(QThread):
 
 
 class SimWorker(QThread):
-    """Latest-wins simulation thread: UI stays fluid during kernel builds."""
-
-    done = Signal(object, object, object)   # x, total, per_site
+    done = Signal(object, object, object)
     failed = Signal(str)
 
     def __init__(self, recipe_dict, exp_ppm):
@@ -68,7 +84,7 @@ class SimWorker(QThread):
             from larmor import fit as fitmod
 
             recipe = Recipe.from_dict(self.recipe_dict)
-            params = fitmod._make_params(recipe)      # resolves links
+            params = fitmod._make_params(recipe)
             fitmod._apply_params(recipe, params)
             x, total, per_site = engine.simulate(recipe, exp_ppm=self.exp_ppm)
             self.done.emit(x, total, per_site)
@@ -80,7 +96,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("LARMOR")
-        self.resize(1360, 840)
+        self.resize(1440, 900)
 
         self.source_path: str | None = None
         self.recipe: dict | None = None
@@ -93,106 +109,160 @@ class MainWindow(QMainWindow):
         self._sim_pending = False
         self._fit_worker: FitWorker | None = None
         self._last_quant = None
+        self._paddle_live = False   # true while a paddle is being dragged
 
         self.view = SpectrumView()
         self.setCentralWidget(self.view)
         self.view.add_requested.connect(self.add_site_at)
-        self.view.marker_moved.connect(self.marker_moved)
+        self.view.paddle_moved.connect(self.on_paddle_moved)
+        self.view.paddle_released.connect(self.on_paddle_released)
+        self.view.cursor_moved.connect(
+            lambda x, y: self.pos_label.setText(f"x: {x:.2f} ppm   y: {y:.4g}"))
 
+        self._build_menus()
         self._build_toolbar()
-        self._build_side_dock()
-        self._build_results_dock()
-        self.statusBar().showMessage("Open a dmfit .fxmla, a LARMOR recipe, "
-                                     "or a Bruker EXPNO folder to begin")
+        self._build_sidebar()
+        self._build_bottom_docks()
+        self._build_right_dock()
+
+        self.pos_label = QLabel("")
+        self.statusBar().addPermanentWidget(self.pos_label)
+        self.statusBar().showMessage(
+            "File > Open… (dmfit .fxmla / LARMOR recipe) or Open EXPNO…")
 
         self._sim_timer = QTimer(self)
         self._sim_timer.setSingleShot(True)
-        self._sim_timer.setInterval(150)
+        self._sim_timer.setInterval(120)
         self._sim_timer.timeout.connect(self._simulate_now)
 
         self._restore_session()
+
+    # ------------------------------------------------------------- menus
+    def _build_menus(self):
+        mb = self.menuBar()
+
+        m_file = mb.addMenu("&File")
+        self._add(m_file, "&Open…", self.open_file, "Ctrl+O")
+        self._add(m_file, "Open &EXPNO…", self.open_expno, "Ctrl+Shift+O")
+        m_file.addSeparator()
+        self.actSave = self._add(m_file, "&Save recipe", self.save_recipe, "Ctrl+S")
+        self._add(m_file, "Figure…", self.open_figure_dialog)
+        m_file.addSeparator()
+        self._add(m_file, "E&xit", self.close)
+
+        m_proc = mb.addMenu("&Process")
+        self._add(m_proc, "Show processing panel",
+                  lambda: self.proc_dock.show())
+        self._add(m_proc, "Autophase (ACME)",
+                  lambda: self.apply_processing([{"op": "autophase"}], False))
+        self._add(m_proc, "Baseline (order 3)",
+                  lambda: self.apply_processing([{"op": "baseline", "order": 3}], False))
+        self._add(m_proc, "Reset to original", self.reset_processing)
+
+        m_dec = mb.addMenu("&Decomposition")
+        self._add(m_dec, "&New fit (clear lines)", self.new_fit)
+        m_dec.addSeparator()
+        self.actFit = self._add(m_dec, "&Fit", self.run_fit, "F5")
+        self._add(m_dec, "&Compute", self.request_simulation, "F9")
+        m_dec.addSeparator()
+        self.actQuant = self._add(m_dec, "&Report (quantify)", self.run_quantify, "F6")
+
+        m_view = mb.addMenu("&View")
+        self.actResid = self._add(m_view, "Residual", self._toggle_resid,
+                                  checkable=True, checked=True)
+        self.actComp = self._add(m_view, "Components", self._toggle_comp,
+                                 checkable=True, checked=True)
+        self.actPaddles = self._add(m_view, "Show paddles", self._toggle_paddles,
+                                    checkable=True, checked=True)
+        m_view.addSeparator()
+        self._add(m_view, "Zoom to sites", self.zoom_sites)
+        self._add(m_view, "Full spectrum", self.zoom_full)
+
+        m_models = mb.addMenu("&Models")
+        self._model_actions = {}
+        for m in model_registry.describe_all():
+            a = QAction(m["label"], self)
+            a.setCheckable(True)
+            a.setToolTip(m["description"])
+            a.triggered.connect(
+                lambda checked, name=m["name"]: self._set_add_mode(
+                    name if checked else None))
+            m_models.addAction(a)
+            self._model_actions[m["name"]] = a
+
+        m_help = mb.addMenu("&?")
+        self._add(m_help, "About LARMOR", self._about)
+
+    def _add(self, menu, text, slot, shortcut=None, checkable=False, checked=False):
+        a = QAction(text, self)
+        if shortcut:
+            a.setShortcut(QKeySequence(shortcut))
+        a.setCheckable(checkable)
+        a.setChecked(checked)
+        a.triggered.connect(slot)
+        menu.addAction(a)
+        return a
+
+    def _about(self):
+        QMessageBox.information(
+            self, "LARMOR",
+            "LARMOR — open successor to dmfit\n"
+            "mrsimulator + lmfit + pyqtgraph\n"
+            "github.com/sams808/LARMOR")
 
     # ------------------------------------------------------------- toolbar
     def _build_toolbar(self):
         tb = QToolBar("main")
         tb.setMovable(False)
         self.addToolBar(tb)
-
-        def act(text, slot, shortcut=None, tip=None):
-            a = QAction(text, self)
-            if shortcut:
-                a.setShortcut(QKeySequence(shortcut))
-            if tip:
-                a.setToolTip(tip)
-            a.triggered.connect(slot)
-            tb.addAction(a)
-            return a
-
-        act("Open file…", self.open_file, "Ctrl+O",
-            "dmfit .fxmla or LARMOR .recipe.json")
-        act("Open EXPNO…", self.open_expno, "Ctrl+Shift+O",
-            "Bruker experiment folder (read-only)")
-        self.actSave = act("Save recipe", self.save_recipe, "Ctrl+S")
+        self.actUndo = QAction("↩", self)
+        self.actUndo.setShortcut(QKeySequence("Ctrl+Z"))
+        self.actUndo.setToolTip("undo")
+        self.actUndo.triggered.connect(self.undo)
+        self.actRedo = QAction("↪", self)
+        self.actRedo.setShortcut(QKeySequence("Ctrl+Y"))
+        self.actRedo.setToolTip("redo")
+        self.actRedo.triggered.connect(self.redo)
+        tb.addAction(self.actUndo)
+        tb.addAction(self.actRedo)
         tb.addSeparator()
-        self.actFit = act("Fit", self.run_fit, "F5", "run the fit (F5)")
-        self.actQuant = act("Quantify", self.run_quantify, "F6",
-                            "integrals / fractions table (F6)")
-        act("Figure…", self.open_figure_dialog, None,
-            "export a publication figure")
-        tb.addSeparator()
-        self.actUndo = act("↩", self.undo, "Ctrl+Z", "undo")
-        self.actRedo = act("↪", self.redo, "Ctrl+Y", "redo")
-        tb.addSeparator()
-
-        tb.addWidget(QLabel(" Add site: "))
-        self._model_actions = {}
-        for m in model_registry.describe_all():
-            a = QAction(m["label"], self)
-            a.setCheckable(True)
-            a.setToolTip(m["description"] + "  (then click on the spectrum)")
-            a.triggered.connect(
-                lambda checked, name=m["name"]: self._set_add_mode(
-                    name if checked else None))
-            tb.addAction(a)
-            self._model_actions[m["name"]] = a
-
-        tb.addSeparator()
-        act("window ⇐ zoom", self.window_from_zoom, None,
-            "use the current x-zoom as the fit window")
+        tb.addWidget(QLabel(" add line: "))
+        for name, act in self._model_actions.items():
+            tb.addAction(act)
         self._update_enabled()
 
-    def _set_add_mode(self, name):
-        for n, a in self._model_actions.items():
-            a.setChecked(n == name)
-        self.view.set_add_mode(name)
-        if name:
-            self.statusBar().showMessage(
-                f"click on the spectrum to place a {name} site (Esc to cancel)")
-
-    def keyPressEvent(self, ev):
-        if ev.key() == Qt.Key_Escape:
-            self._set_add_mode(None)
-        super().keyPressEvent(ev)
+    def _build_sidebar(self):
+        sb = QToolBar("view")
+        sb.setObjectName("sidebar")
+        sb.setMovable(False)
+        sb.setOrientation(Qt.Vertical)
+        self.addToolBar(Qt.LeftToolBarArea, sb)
+        for text, tip, slot in [
+            ("Full", "full spectrum", self.zoom_full),
+            ("Sites", "zoom to the fitted region", self.zoom_sites),
+            ("Y a", "autoscale Y in the current X window", self.autoscale_y),
+            ("pad", "toggle paddles", lambda: self.actPaddles.trigger()),
+            ("parts", "toggle components", lambda: self.actComp.trigger()),
+        ]:
+            a = QAction(text, self)
+            a.setToolTip(tip)
+            a.triggered.connect(slot)
+            sb.addAction(a)
 
     # ------------------------------------------------------------- docks
-    def _build_side_dock(self):
-        dock = QDockWidget("Model", self)
-        dock.setFeatures(QDockWidget.DockWidgetMovable)
-        tabs = QTabWidget()
-        self.sites_panel = SitesPanel()
-        self.sites_panel.changed.connect(self.on_params_changed)
-        self.sites_panel.structure.connect(self.on_site_structure)
-        tabs.addTab(self.sites_panel, "Sites")
-        self.proc_panel = ProcessingPanel()
-        self.proc_panel.apply_requested.connect(self.apply_processing)
-        self.proc_panel.reset_requested.connect(self.reset_processing)
-        tabs.addTab(self.proc_panel, "Processing")
-        dock.setWidget(tabs)
-        dock.setMinimumWidth(380)
-        self.addDockWidget(Qt.RightDockWidgetArea, dock)
+    def _build_bottom_docks(self):
+        self.lines_dock = QDockWidget("Fit parameters", self)
+        self.lines_dock.setFeatures(QDockWidget.DockWidgetMovable)
+        self.lines_table = LinesTable()
+        self.lines_table.edited.connect(self.on_params_changed)
+        self.lines_table.constraint_edited.connect(self.on_structure_changed)
+        self.lines_table.structure.connect(self.on_site_structure)
+        self.lines_table.compute.connect(self.request_simulation)
+        self.lines_table.fit.connect(self.run_fit)
+        self.lines_dock.setWidget(self.lines_table)
+        self.addDockWidget(Qt.BottomDockWidgetArea, self.lines_dock)
 
-    def _build_results_dock(self):
-        self.results_dock = QDockWidget("Results", self)
+        self.results_dock = QDockWidget("Report", self)
         self.results_dock.setFeatures(QDockWidget.DockWidgetMovable |
                                       QDockWidget.DockWidgetClosable)
         w = QWidget()
@@ -207,18 +277,29 @@ class MainWindow(QMainWindow):
         v.addLayout(head)
         self.qtable = QTableWidget(0, 4)
         self.qtable.setHorizontalHeaderLabels(
-            ["site", "position (ppm)", "integral", "fraction (%)"])
+            ["line", "position (ppm)", "integral", "fraction (%)"])
         self.qtable.horizontalHeader().setStretchLastSection(True)
         self.qtable.verticalHeader().setVisible(False)
         v.addWidget(self.qtable)
         self.report = QPlainTextEdit()
         self.report.setReadOnly(True)
-        self.report.setMaximumHeight(160)
         self.report.setStyleSheet("font-family: Consolas, monospace; font-size: 10px;")
         v.addWidget(self.report)
         self.results_dock.setWidget(w)
         self.addDockWidget(Qt.BottomDockWidgetArea, self.results_dock)
-        self.results_dock.hide()
+        self.tabifyDockWidget(self.lines_dock, self.results_dock)
+        self.lines_dock.raise_()
+
+    def _build_right_dock(self):
+        self.proc_dock = QDockWidget("Processing", self)
+        self.proc_dock.setFeatures(QDockWidget.DockWidgetMovable |
+                                   QDockWidget.DockWidgetClosable)
+        self.proc_panel = ProcessingPanel()
+        self.proc_panel.apply_requested.connect(self.apply_processing)
+        self.proc_panel.reset_requested.connect(self.reset_processing)
+        self.proc_dock.setWidget(self.proc_panel)
+        self.addDockWidget(Qt.RightDockWidgetArea, self.proc_dock)
+        self.proc_dock.hide()
 
     def _update_enabled(self):
         loaded = self.recipe is not None
@@ -227,11 +308,48 @@ class MainWindow(QMainWindow):
         self.actUndo.setEnabled(bool(self.undo_stack))
         self.actRedo.setEnabled(bool(self.redo_stack))
 
+    # ------------------------------------------------------------- view ops
+    def zoom_full(self):
+        self.view.getPlotItem().enableAutoRange()
+
+    def zoom_sites(self):
+        if not self.recipe or not self.recipe["sites"]:
+            return
+        pos = [s["params"]["isotropic_chemical_shift_ppm"]["value"]
+               for s in self.recipe["sites"]
+               if "isotropic_chemical_shift_ppm" in s["params"]]
+        if pos:
+            lo, hi = min(pos) - 120, max(pos) + 120
+            self.view.setXRange(lo, hi, padding=0)
+            self.autoscale_y()
+
+    def autoscale_y(self):
+        if not self.exp_ppm.size:
+            return
+        (x0, x1), _ = self.view.getPlotItem().getViewBox().viewRange()
+        sel = (self.exp_ppm >= min(x0, x1)) & (self.exp_ppm <= max(x0, x1))
+        if sel.any():
+            lo = float(self.exp_amp[sel].min())
+            hi = float(self.exp_amp[sel].max())
+            pad = 0.15 * (hi - lo or 1.0)
+            self.view.setYRange(lo - pad, hi + pad, padding=0)
+
+    def _toggle_resid(self, on):
+        self.view.show_residual = on
+        self.request_simulation()
+
+    def _toggle_comp(self, on):
+        self.view.show_components = on
+        self.request_simulation()
+
+    def _toggle_paddles(self, on):
+        self.view.show_paddles(on)
+
     # ------------------------------------------------------------- loading
     def open_file(self):
         path, _ = QFileDialog.getOpenFileName(
             self, "Open spectrum or recipe", self._last_dir(),
-            "NMR fits (*.fxmla *.json);;All files (*)")
+            "NMR fits (*.fxmla *.fxml *.json);;All files (*)")
         if path:
             self.load_source(path)
 
@@ -262,28 +380,26 @@ class MainWindow(QMainWindow):
         QSettings("LARMOR", "app").setValue("lastDir", str(Path(path).parent))
         self.setWindowTitle(f"LARMOR — {Path(path).name}")
         self.view.set_experiment(ppm, amp)
-        self.view.getPlotItem().enableAutoRange()
-        # open on the region of interest, not the full sideband manifold
-        positions = [s["params"]["isotropic_chemical_shift_ppm"]["value"]
-                     for s in recipe["sites"]
-                     if "isotropic_chemical_shift_ppm" in s["params"]]
-        if positions:
-            lo, hi = min(positions) - 120, max(positions) + 120
-            self.view.setXRange(lo, hi, padding=0)
-            sel = (ppm >= lo) & (ppm <= hi)
-            if sel.any():
-                self.view.setYRange(float(amp[sel].min()) * 1.1,
-                                    float(amp[sel].max()) * 1.15, padding=0)
+        self.zoom_full()
+        if recipe["sites"]:
+            self.zoom_sites()
         msg = meta + ("   ⚠ " + " • ".join(warnings) if warnings else "")
         self.statusBar().showMessage(msg)
-        self.sites_panel.rebuild(self.recipe, self.hidden)
-        self._update_markers()
+        self.lines_table.rebuild(self.recipe, self.hidden)
+        self._update_paddles()
         self._update_enabled()
         if self.recipe["sites"]:
             self.request_simulation()
         self._persist_session()
 
-    # ------------------------------------------------------------- sites
+    def new_fit(self):
+        if self.recipe is None:
+            return
+        self.snapshot()
+        self.recipe["sites"] = []
+        self.on_structure_changed()
+
+    # ------------------------------------------------------------- undo
     def snapshot(self):
         if self.recipe is None:
             return
@@ -299,20 +415,28 @@ class MainWindow(QMainWindow):
             return
         self.redo_stack.append(json.dumps(self.recipe))
         self.recipe = json.loads(self.undo_stack.pop())
-        self._after_structural_change()
+        self.on_structure_changed()
 
     def redo(self):
         if not self.redo_stack:
             return
         self.undo_stack.append(json.dumps(self.recipe))
         self.recipe = json.loads(self.redo_stack.pop())
-        self._after_structural_change()
+        self.on_structure_changed()
 
-    def _after_structural_change(self):
-        self.sites_panel.rebuild(self.recipe, self.hidden)
-        self._update_markers()
-        self._update_enabled()
-        self.request_simulation()
+    # ------------------------------------------------------------- sites
+    def _set_add_mode(self, name):
+        for n, a in self._model_actions.items():
+            a.setChecked(n == name)
+        self.view.set_add_mode(name)
+        if name:
+            self.statusBar().showMessage(
+                f"click on the spectrum to place a {name} line (Esc to cancel)")
+
+    def keyPressEvent(self, ev):
+        if ev.key() == Qt.Key_Escape:
+            self._set_add_mode(None)
+        super().keyPressEvent(ev)
 
     def add_site_at(self, ppm: float, amp: float):
         name = next((n for n, a in self._model_actions.items()
@@ -333,7 +457,7 @@ class MainWindow(QMainWindow):
             {"model": name, "label": f"{m.label.split(' ')[0]}-{n}",
              "params": params})
         self._set_add_mode(None)
-        self._after_structural_change()
+        self.on_structure_changed()
 
     def on_site_structure(self, idx: int, action: str):
         if self.recipe is None:
@@ -345,40 +469,64 @@ class MainWindow(QMainWindow):
         elif action == "duplicate":
             self.snapshot()
             copy = json.loads(json.dumps(self.recipe["sites"][idx]))
-            copy["label"] = (copy.get("label") or "site") + "-copy"
+            copy["label"] = (copy.get("label") or "line") + "-copy"
             for p in copy["params"].values():
                 p["stderr"] = None
             self.recipe["sites"].append(copy)
         elif action == "visibility":
             (self.hidden.discard(idx) if idx in self.hidden
              else self.hidden.add(idx))
-        self._after_structural_change()
+        self.on_structure_changed()
+
+    def on_structure_changed(self):
+        self.lines_table.rebuild(self.recipe, self.hidden)
+        self._update_paddles()
+        self._update_enabled()
+        self.request_simulation()
 
     def on_params_changed(self):
         self._persist_session()
-        self._update_markers()
+        self._update_paddles()
         self.request_simulation()
 
-    def marker_moved(self, idx: int, ppm: float):
-        if self.recipe and idx < len(self.recipe["sites"]):
-            self.snapshot()
-            self.recipe["sites"][idx]["params"][
-                "isotropic_chemical_shift_ppm"]["value"] = ppm
-            self.sites_panel.rebuild(self.recipe, self.hidden)
-            self.request_simulation()
-
-    def _update_markers(self):
+    # ------------------------------------------------------------- paddles
+    def _update_paddles(self):
         if not self.recipe:
-            self.view.set_markers([])
+            self.view.set_paddles([])
             return
-        marks = []
+        states = []
         for i, s in enumerate(self.recipe["sites"]):
             if i in self.hidden:
                 continue
-            p = s["params"].get("isotropic_chemical_shift_ppm")
-            if p:
-                marks.append((i, p["value"], not p.get("expr")))
-        self.view.set_markers(marks)
+            p = s["params"]
+            if "isotropic_chemical_shift_ppm" not in p:
+                continue
+            pos = p["isotropic_chemical_shift_ppm"]
+            amp = p.get("amplitude", {"value": 1.0})
+            fwhm = p.get("shift_fwhm_ppm", {"value": 1.0})
+            movable = not (pos.get("expr") or amp.get("expr"))
+            states.append((i, pos["value"], amp["value"], fwhm["value"], movable))
+        self.view.set_paddles(states)
+        self.view.show_paddles(self.actPaddles.isChecked())
+
+    def on_paddle_moved(self, idx, pos, amp, fwhm):
+        if not self.recipe or idx >= len(self.recipe["sites"]):
+            return
+        if not self._paddle_live:
+            self.snapshot()
+            self._paddle_live = True
+        p = self.recipe["sites"][idx]["params"]
+        p["isotropic_chemical_shift_ppm"]["value"] = pos
+        if not p.get("amplitude", {}).get("expr"):
+            p["amplitude"]["value"] = amp
+        if "shift_fwhm_ppm" in p and not p["shift_fwhm_ppm"].get("expr"):
+            p["shift_fwhm_ppm"]["value"] = fwhm
+        self.request_simulation()
+
+    def on_paddle_released(self, idx):
+        self._paddle_live = False
+        self.lines_table.rebuild(self.recipe, self.hidden)
+        self._persist_session()
 
     # ------------------------------------------------------------- simulate
     def request_simulation(self):
@@ -407,21 +555,17 @@ class MainWindow(QMainWindow):
             self._sim_timer.start()
 
     # ------------------------------------------------------------- fit
-    def window_from_zoom(self):
-        pass  # the window is read from the zoom at fit time; kept as a no-op
-              # action so users discover the behavior from the tooltip
-
     def run_fit(self):
         if not self.recipe or not self.recipe["sites"]:
-            self.statusBar().showMessage("add at least one site first")
+            self.statusBar().showMessage("add at least one line first")
             return
         if self._fit_worker and self._fit_worker.isRunning():
             return
         self.snapshot()
-        hi, lo = self.view.current_xrange()
-        self.statusBar().showMessage(
-            f"fitting in window {hi:.1f} … {lo:.1f} ppm …")
-        self.actFit.setEnabled(False)
+        (x0, x1), _ = self.view.getPlotItem().getViewBox().viewRange()
+        hi, lo = max(x0, x1), min(x0, x1)
+        self.statusBar().showMessage(f"fitting in {hi:.1f} … {lo:.1f} ppm …")
+        self.lines_table.btnFit.setEnabled(False)
         self._fit_worker = FitWorker(json.loads(json.dumps(self.recipe)),
                                      self.exp_ppm, self.exp_amp, (hi, lo))
         self._fit_worker.done.connect(self._fit_done)
@@ -429,18 +573,19 @@ class MainWindow(QMainWindow):
         self._fit_worker.start()
 
     def _fit_failed(self, msg: str):
-        self.actFit.setEnabled(True)
+        self.lines_table.btnFit.setEnabled(True)
         QMessageBox.warning(self, "Fit failed", msg)
         self.statusBar().showMessage("fit failed")
 
     def _fit_done(self, result):
-        self.actFit.setEnabled(True)
+        self.lines_table.btnFit.setEnabled(True)
         self.recipe = result.recipe.to_dict()
-        self.sites_panel.rebuild(self.recipe, self.hidden)
-        self._update_markers()
+        self.lines_table.rebuild(self.recipe, self.hidden)
+        self._update_paddles()
         labels = [s.get("label") or s["model"] for s in self.recipe["sites"]]
         self.view.set_model(result.x_ppm, result.y_fit, result.per_site,
                             labels, self.hidden, self.exp_ppm, self.exp_amp)
+        self.lines_table.set_chi2(f"RMSD {result.rmsd:.4f}")
         bits = [f"RMSD {result.rmsd:.4f}"]
         if result.frozen_sites:
             bits.append("frozen: " + ", ".join(result.frozen_sites))
@@ -448,9 +593,8 @@ class MainWindow(QMainWindow):
             bits.append("⚠ at bounds: " + ", ".join(result.at_bounds))
         self.results_summary.setText("   ·   ".join(bits))
         self.report.setPlainText(result.report)
-        self.results_dock.show()
         self.statusBar().showMessage(
-            "fit done" + ("  ⚠ some parameters at bounds — check constraints"
+            "fit done" + ("  ⚠ parameters at bounds — check constraints"
                           if result.at_bounds else ""))
         self.run_quantify(show=False)
         self._persist_session()
@@ -461,9 +605,10 @@ class MainWindow(QMainWindow):
             return
         from larmor.quantify import quantify
 
-        hi, lo = self.view.current_xrange()
+        (x0, x1), _ = self.view.getPlotItem().getViewBox().viewRange()
         try:
-            q = quantify(Recipe.from_dict(self.recipe), window_ppm=(hi, lo))
+            q = quantify(Recipe.from_dict(self.recipe),
+                         window_ppm=(max(x0, x1), min(x0, x1)))
         except Exception as exc:
             self.statusBar().showMessage("quantify: " + str(exc))
             return
@@ -485,11 +630,12 @@ class MainWindow(QMainWindow):
         self.qtable.resizeColumnsToContents()
         if show:
             self.results_dock.show()
+            self.results_dock.raise_()
 
     def copy_csv(self):
         if not self._last_quant:
             return
-        head = ("site,model,position_ppm,position_err,integral,"
+        head = ("line,model,position_ppm,position_err,integral,"
                 "integral_err,fraction_pct,fraction_err_pct")
         lines = [head]
         for r in self._last_quant["rows"]:
@@ -499,7 +645,7 @@ class MainWindow(QMainWindow):
                                             "integral_err", "fraction_pct",
                                             "fraction_err_pct")))
         QApplication.clipboard().setText("\n".join(lines))
-        self.statusBar().showMessage("quantification table copied as CSV")
+        self.statusBar().showMessage("report table copied as CSV")
 
     # ------------------------------------------------------------- processing
     def apply_processing(self, ops: list, use_raw: bool):
@@ -537,7 +683,7 @@ class MainWindow(QMainWindow):
             self.load_source(self.source_path)
             if keep is not None:
                 self.recipe = keep
-                self._after_structural_change()
+                self.on_structure_changed()
 
     # ------------------------------------------------------------- recipe io
     def save_recipe(self):
@@ -564,7 +710,6 @@ class MainWindow(QMainWindow):
         Recipe.from_dict(self.recipe).save(target)
         self.statusBar().showMessage(f"recipe saved: {target}")
 
-    # ------------------------------------------------------------- figure
     def open_figure_dialog(self):
         from larmor.desktop.figure_dialog import FigureDialog
 
@@ -590,7 +735,7 @@ class MainWindow(QMainWindow):
                 recipe = json.loads(saved)
                 if recipe.get("sites"):
                     self.recipe = recipe
-                    self._after_structural_change()
+                    self.on_structure_changed()
             self.statusBar().showMessage(f"session restored — {src}")
         except Exception:
             pass

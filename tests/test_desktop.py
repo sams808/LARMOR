@@ -57,12 +57,12 @@ def test_load_fit_quantify_undo(qapp, win):
     n = len(win.recipe["sites"])
     win.snapshot()
     win.recipe["sites"].pop()
-    win._after_structural_change()
+    win.on_structure_changed()
     win.undo()
     assert len(win.recipe["sites"]) == n
 
 
-def test_add_site_and_markers(qapp, win):
+def test_add_site_and_paddles(qapp, win):
     require(CAALGLASS)
     win.load_source(str(CAALGLASS))
     qapp.processEvents()
@@ -74,11 +74,16 @@ def test_add_site_and_markers(qapp, win):
     assert new["model"] == "gauss_lor"
     assert new["params"]["isotropic_chemical_shift_ppm"]["value"] == 42.0
     assert new["params"]["amplitude"]["value"] == 123.0
-    # a draggable marker exists for it
-    assert any(getattr(m, "site_index", None) == n
-               for m in win.view._markers)
+    # a dmfit-style paddle exists for it
+    assert any(p.index == n for p in win.view._paddles)
 
-    # marker drag updates the recipe
-    win.marker_moved(n, 55.5)
-    assert win.recipe["sites"][n]["params"][
-        "isotropic_chemical_shift_ppm"]["value"] == 55.5
+    # paddle drag updates position, amplitude AND width in the recipe
+    win.on_paddle_moved(n, 55.5, 200.0, 8.0)
+    prm = win.recipe["sites"][n]["params"]
+    assert prm["isotropic_chemical_shift_ppm"]["value"] == 55.5
+    assert prm["amplitude"]["value"] == 200.0
+    assert prm["shift_fwhm_ppm"]["value"] == 8.0
+    win.on_paddle_released(n)
+
+    # the fit-parameters table shows one row per line
+    assert win.lines_table.table.rowCount() == n + 1
