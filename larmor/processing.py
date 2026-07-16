@@ -28,6 +28,7 @@ class Spectrum1D:
     sfo1_MHz: float
     sw_Hz: float
     domain: str = "freq"          # "time" | "freq"
+    whole_echo: bool = False      # set by swap_echo; magnitude is then usual
 
 
 # --------------------------------------------------------------------------
@@ -229,6 +230,85 @@ def op_baseline(s: Spectrum1D, order: int = 3, k_clip: float = 1.5,
     return s
 
 
+def op_lp(s: Spectrum1D, n_predict: int = 0, n_coeff: int = 16,
+          mode: str = "forward", n_replace: int = 0) -> Spectrum1D:
+    """Linear prediction (Burg-style autoregression on the analytic fid).
+
+    mode "forward": extend the fid by `n_predict` points -- recovers
+        resolution lost to truncation (ssNake lpsvd / TopSpin LPfr).
+    mode "backward": rebuild the FIRST `n_replace` points -- repairs
+        receiver dead-time distortion (the usual cause of a rolling
+        baseline that no polynomial can fix).
+    """
+    _need_time(s, "lp")
+    y = s.y
+    if y.size <= n_coeff * 2:
+        raise ValueError("fid too short for the requested LP order")
+
+    def ar_coeffs(sig: np.ndarray, order: int) -> np.ndarray:
+        # least-squares AR: sig[n] = sum_k a[k] * sig[n-1-k]
+        rows = sig.size - order
+        A = np.empty((rows, order), dtype=complex)
+        for k in range(order):
+            A[:, k] = sig[order - 1 - k: order - 1 - k + rows]
+        b = sig[order:order + rows]
+        a, *_ = np.linalg.lstsq(A, b, rcond=None)
+        return a
+
+    if mode == "forward":
+        if n_predict <= 0:
+            return s
+        a = ar_coeffs(y, n_coeff)
+        out = list(y)
+        for _ in range(n_predict):
+            nxt = np.dot(a, np.array(out[-1:-n_coeff - 1:-1]))
+            out.append(nxt)
+        s.y = np.array(out)
+        return s
+
+    if mode == "backward":
+        if n_replace <= 0:
+            return s
+        # predict forward on the time-reversed GOOD part: that extrapolates
+        # backwards in real time, into the dead-time-corrupted first points
+        good = y[n_replace:]
+        if good.size <= n_coeff * 2:
+            raise ValueError("not enough good points left for backward LP")
+        rev = good[::-1]
+        a = ar_coeffs(rev, n_coeff)
+        out = list(rev)
+        for _ in range(n_replace):
+            out.append(np.dot(a, np.array(out[-1:-n_coeff - 1:-1])))
+        rebuilt_head = np.array(out[-n_replace:])[::-1]
+        s.y = np.concatenate([rebuilt_head, good])
+        return s
+
+    raise ValueError(f"unknown lp mode {mode!r} (forward|backward)")
+
+
+def op_swap_echo(s: Spectrum1D, point: int) -> Spectrum1D:
+    """Rotate the fid so the echo top becomes the first point (ssNake
+    swapEcho) -- the standard whole-echo preparation."""
+    _need_time(s, "swap_echo")
+    p = int(point)
+    if not (0 < p < s.y.size):
+        raise ValueError("echo top must be inside the fid")
+    s.y = np.concatenate([s.y[p:], s.y[:p]])
+    s.whole_echo = True
+    return s
+
+
+def op_echo_apodize(s: Spectrum1D, lb_hz: float = 0.0) -> Spectrum1D:
+    """Symmetric apodization about the echo top for whole-echo data: the
+    window decays away from BOTH ends (ssNake wholeEcho)."""
+    _need_time(s, "echo_apodize")
+    n = s.y.size
+    t = np.arange(n) / s.sw_Hz
+    t_sym = np.minimum(t, t[::-1])
+    s.y = s.y * np.exp(-np.pi * lb_hz * t_sym)
+    return s
+
+
 def op_sr(s: Spectrum1D, sr_hz: float = 0.0) -> Spectrum1D:
     """TopSpin SR (spectral reference): shift the ppm axis by SR/SFO1."""
     if s.domain != "freq":
@@ -263,6 +343,130 @@ def op_hilbert(s: Spectrum1D) -> Spectrum1D:
     return s
 
 
+def op_extract(s: Spectrum1D, hi_ppm: float, lo_ppm: float) -> Spectrum1D:
+    """Keep only a ppm region (ssNake extract)."""
+    if s.domain != "freq":
+        raise ValueError("extract applies to the frequency domain")
+    sel = (s.x_ppm >= min(hi_ppm, lo_ppm)) & (s.x_ppm <= max(hi_ppm, lo_ppm))
+    if sel.sum() < 2:
+        raise ValueError("extract region contains no data")
+    s.x_ppm, s.y = s.x_ppm[sel], s.y[sel]
+    return s
+
+
+def op_scale(s: Spectrum1D, factor: float = 1.0) -> Spectrum1D:
+    s.y = s.y * factor
+    return s
+
+
+def op_offset(s: Spectrum1D, value: float = 0.0) -> Spectrum1D:
+    s.y = s.y + value
+    return s
+
+
+def op_normalize(s: Spectrum1D, hi_ppm: float | None = None,
+                 lo_ppm: float | None = None) -> Spectrum1D:
+    """Peak-normalize to 1, optionally inside a window (NMRVEW norm_0_to_1)."""
+    if s.domain != "freq":
+        raise ValueError("normalize applies to the frequency domain")
+    if hi_ppm is not None and lo_ppm is not None:
+        sel = (s.x_ppm >= min(hi_ppm, lo_ppm)) & (s.x_ppm <= max(hi_ppm, lo_ppm))
+    else:
+        sel = np.ones(s.y.shape, bool)
+    peak = np.abs(s.y[sel].real).max() or 1.0
+    s.y = s.y / peak
+    return s
+
+
+def combine(a: Spectrum1D, b: Spectrum1D, op: str = "subtract",
+            scale: float = 1.0) -> Spectrum1D:
+    """Spectra algebra on a common axis (dmfit Dual / background removal).
+
+    b is interpolated onto a's ppm axis, so the two need not share a grid.
+    """
+    if a.domain != "freq" or b.domain != "freq":
+        raise ValueError("algebra needs two frequency-domain spectra")
+    bi = np.interp(a.x_ppm, b.x_ppm, b.y.real, left=0.0, right=0.0) + \
+        1j * np.interp(a.x_ppm, b.x_ppm, b.y.imag, left=0.0, right=0.0)
+    bi = bi * scale
+    if op == "subtract":
+        y = a.y - bi
+    elif op == "add":
+        y = a.y + bi
+    elif op == "multiply":
+        y = a.y * bi
+    elif op == "divide":
+        y = np.divide(a.y, bi, out=np.zeros_like(a.y), where=np.abs(bi) > 1e-12)
+    else:
+        raise ValueError(f"unknown algebra op {op!r}")
+    return Spectrum1D(x_ppm=a.x_ppm.copy(), y=y, sfo1_MHz=a.sfo1_MHz,
+                      sw_Hz=a.sw_Hz, domain="freq")
+
+
+def align(a: Spectrum1D, b: Spectrum1D, hi_ppm: float | None = None,
+          lo_ppm: float | None = None) -> float:
+    """ppm shift TO APPLY TO b so it lands on a (ssNake align).
+
+    Cross-correlation of the real parts. Apply the result with
+    op_sr(b, shift * b.sfo1_MHz), or add it to b.x_ppm.
+    """
+    x = a.x_ppm
+    ya = a.y.real
+    yb = np.interp(x, b.x_ppm, b.y.real, left=0.0, right=0.0)
+    if hi_ppm is not None and lo_ppm is not None:
+        sel = (x >= min(hi_ppm, lo_ppm)) & (x <= max(hi_ppm, lo_ppm))
+        x, ya, yb = x[sel], ya[sel], yb[sel]
+    ya = ya - ya.mean()
+    yb = yb - yb.mean()
+    corr = np.correlate(ya, yb, mode="full")
+    # lag maximizing sum(ya[n] * yb[n - lag]) is (peak_a - peak_b) in points,
+    # which is exactly the displacement b must undergo to reach a
+    lag = int(np.argmax(corr)) - (len(yb) - 1)
+    dppm = float(np.mean(np.diff(x)))
+    return lag * dppm
+
+
+def pick_peaks(x_ppm: np.ndarray, y: np.ndarray, threshold_frac: float = 0.05,
+               min_sep_ppm: float = 0.0) -> list[dict]:
+    """Peak picking with parabolic sub-point interpolation.
+
+    Returns [{"ppm":…, "height":…, "fwhm_ppm":…}] sorted by descending height
+    -- directly usable to seed one line per peak.
+    """
+    y = np.asarray(y, float)
+    order = np.argsort(x_ppm)
+    x, yy = np.asarray(x_ppm)[order], y[order]
+    thr = threshold_frac * float(np.abs(yy).max() or 1.0)
+    peaks = []
+    for i in range(1, len(yy) - 1):
+        if yy[i] < thr or not (yy[i] >= yy[i - 1] and yy[i] >= yy[i + 1]):
+            continue
+        # parabolic vertex through the three points
+        d = yy[i - 1] - 2 * yy[i] + yy[i + 1]
+        delta = 0.5 * (yy[i - 1] - yy[i + 1]) / d if d else 0.0
+        dx = float(np.mean(np.diff(x)))
+        ppm = float(x[i] + delta * dx)
+        height = float(yy[i] - 0.25 * (yy[i - 1] - yy[i + 1]) * delta)
+        # local FWHM by walking down to half height
+        half = height / 2.0
+        li = i
+        while li > 0 and yy[li] > half:
+            li -= 1
+        ri = i
+        while ri < len(yy) - 1 and yy[ri] > half:
+            ri += 1
+        peaks.append({"ppm": ppm, "height": height,
+                      "fwhm_ppm": float(abs(x[ri] - x[li])) or abs(dx)})
+    peaks.sort(key=lambda p: -p["height"])
+    if min_sep_ppm > 0:
+        kept: list[dict] = []
+        for p in peaks:
+            if all(abs(p["ppm"] - q["ppm"]) >= min_sep_ppm for q in kept):
+                kept.append(p)
+        peaks = kept
+    return peaks
+
+
 OPS = {
     # time domain
     "em": op_em,
@@ -273,6 +477,9 @@ OPS = {
     "shift_fid": op_shift_fid,
     "fcor": op_fcor,
     "zf": op_zf,
+    "lp": op_lp,
+    "swap_echo": op_swap_echo,
+    "echo_apodize": op_echo_apodize,
     "ft": op_ft,
     # frequency domain
     "phase": op_phase,
@@ -281,6 +488,10 @@ OPS = {
     "sr": op_sr,
     "magnitude": op_magnitude,
     "hilbert": op_hilbert,
+    "extract": op_extract,
+    "scale": op_scale,
+    "offset": op_offset,
+    "normalize": op_normalize,
 }
 
 
