@@ -4,9 +4,9 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QDoubleValidator
 from PySide6.QtWidgets import (
-    QCheckBox, QDoubleSpinBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
-    QLineEdit, QPushButton, QRadioButton, QScrollArea, QSizePolicy, QSlider,
-    QSpinBox, QToolButton, QVBoxLayout, QWidget,
+    QCheckBox, QComboBox, QDoubleSpinBox, QFrame, QGridLayout, QHBoxLayout,
+    QLabel, QLineEdit, QPushButton, QRadioButton, QScrollArea, QSizePolicy,
+    QSlider, QSpinBox, QToolButton, QVBoxLayout, QWidget,
 )
 
 from larmor.desktop.plot import site_color
@@ -215,17 +215,57 @@ class ProcessingPanel(QWidget):
         v.addWidget(self.rb_pdata)
         v.addWidget(self.rb_raw)
 
+        # TopSpin-style window function block
+        wdw = QHBoxLayout()
+        wdw.addWidget(QLabel("WDW"))
+        self.wdw = QComboBox()
+        self.wdw.addItems(["none", "EM", "GM", "SINE", "QSINE", "TRAF"])
+        self.wdw.setCurrentText("EM")
+        wdw.addWidget(self.wdw)
+        wdw.addWidget(QLabel("LB"))
+        self.lb = QDoubleSpinBox(); self.lb.setRange(-1e5, 1e5); self.lb.setValue(50)
+        self.lb.setToolTip("Hz; negative for GM (Lorentz-to-Gauss)")
+        wdw.addWidget(self.lb)
+        wdw.addWidget(QLabel("GB"))
+        self.gb = QDoubleSpinBox(); self.gb.setRange(0.001, 1.0); self.gb.setDecimals(3)
+        self.gb.setValue(0.1); self.gb.setToolTip("GM: Gaussian max position (0..1)")
+        wdw.addWidget(self.gb)
+        wdw.addWidget(QLabel("SSB"))
+        self.ssb = QDoubleSpinBox(); self.ssb.setRange(0, 64); self.ssb.setValue(2)
+        self.ssb.setToolTip("SINE/QSINE: 2 = cosine bell, 0 = pure sine")
+        wdw.addWidget(self.ssb)
+        v.addLayout(wdw)
+
         raw = QHBoxLayout()
-        raw.addWidget(QLabel("EM lb (Hz)"))
-        self.lb = QDoubleSpinBox(); self.lb.setRange(0, 1e5); self.lb.setValue(50)
-        raw.addWidget(self.lb)
+        raw.addWidget(QLabel("TDeff"))
+        self.tdeff = QSpinBox(); self.tdeff.setRange(0, 10_000_000)
+        self.tdeff.setToolTip("use only the first TDeff fid points (0 = all)")
+        raw.addWidget(self.tdeff)
         raw.addWidget(QLabel("ZF ×"))
-        self.zf = QSpinBox(); self.zf.setRange(1, 8); self.zf.setValue(2)
+        self.zf = QSpinBox(); self.zf.setRange(1, 16); self.zf.setValue(2)
         raw.addWidget(self.zf)
+        raw.addWidget(QLabel("FCOR"))
+        self.fcor = QDoubleSpinBox(); self.fcor.setRange(0.0, 2.0)
+        self.fcor.setDecimals(2); self.fcor.setValue(0.5)
+        raw.addWidget(self.fcor)
         raw.addWidget(QLabel("offset (ppm)"))
         self.off = QDoubleSpinBox(); self.off.setRange(-1e5, 1e5)
         raw.addWidget(self.off)
         v.addLayout(raw)
+
+        srrow = QHBoxLayout()
+        srrow.addWidget(QLabel("<b>SR</b> (Hz)"))
+        self.sr = QDoubleSpinBox(); self.sr.setRange(-1e6, 1e6); self.sr.setDecimals(2)
+        self.sr.setToolTip("spectral reference: shifts the ppm axis by SR/SFO1")
+        srrow.addWidget(self.sr)
+        self.chkMag = QCheckBox("magnitude")
+        self.chkMag.setToolTip("phase-insensitive |S| display")
+        srrow.addWidget(self.chkMag)
+        self.chkHilbert = QCheckBox("Hilbert first")
+        self.chkHilbert.setToolTip("rebuild the imaginary part of pdata (1r) "
+                                   "so phase correction works on it")
+        srrow.addWidget(self.chkHilbert)
+        v.addLayout(srrow)
 
         v.addWidget(QLabel("<b>Phase</b>"))
         self.btnAuto = QPushButton("Autophase (ACME)")
@@ -294,12 +334,32 @@ class ProcessingPanel(QWidget):
         raw = self.rb_raw.isChecked()
         ops: list[dict] = []
         if raw:
-            if self.lb.value() > 0:
-                ops.append({"op": "em", "lb_hz": self.lb.value()})
+            if self.tdeff.value() > 0:
+                ops.append({"op": "tdeff", "points": self.tdeff.value()})
+            if self.fcor.value() != 1.0:
+                ops.append({"op": "fcor", "factor": self.fcor.value()})
+            w = self.wdw.currentText()
+            if w == "EM" and self.lb.value():
+                ops.append({"op": "em", "lb_hz": abs(self.lb.value())})
+            elif w == "GM":
+                ops.append({"op": "gm", "lb_hz": -abs(self.lb.value()),
+                            "gb": self.gb.value()})
+            elif w == "SINE":
+                ops.append({"op": "sine", "ssb": self.ssb.value(), "power": 1})
+            elif w == "QSINE":
+                ops.append({"op": "sine", "ssb": self.ssb.value(), "power": 2})
+            elif w == "TRAF":
+                ops.append({"op": "traf", "lb_hz": abs(self.lb.value()) or 10.0})
             if self.zf.value() > 1:
                 ops.append({"op": "zf", "factor": self.zf.value()})
             ops.append({"op": "ft", "offset_ppm": self.off.value()})
+        if not raw and self.chkHilbert.isChecked():
+            ops.append({"op": "hilbert"})
         if self.p0v.value() or self.p1v.value():
             ops.append({"op": "phase", "p0": self.p0v.value(), "p1": self.p1v.value()})
+        if self.chkMag.isChecked():
+            ops.append({"op": "magnitude"})
+        if self.sr.value():
+            ops.append({"op": "sr", "sr_hz": self.sr.value()})
         ops.extend(extra)
         self.apply_requested.emit(ops, raw)

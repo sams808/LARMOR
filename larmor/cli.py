@@ -142,6 +142,55 @@ def cmd_desktop(args: argparse.Namespace) -> int:
     return desktop_main()
 
 
+def cmd_satrec(args: argparse.Namespace) -> int:
+    from larmor import satrec
+
+    window = tuple(args.window) if args.window else None
+    result = satrec.analyze(args.expno, window_ppm=window, lb_hz=args.lb,
+                            stretched=args.stretched,
+                            mode="magnitude" if args.magnitude else "phase")
+    print(result.summary)
+    for note in result.notes:
+        print("note:", note)
+    print(f"integration window: {result.window_ppm[0]:.1f} … "
+          f"{result.window_ppm[1]:.1f} ppm")
+    print("delay_s\tintegral_norm")
+    for d, i in zip(result.delays_s, result.integrals):
+        print(f"{d:g}\t{i:.5f}")
+    return 0
+
+
+def cmd_multifit(args: argparse.Namespace) -> int:
+    from larmor.io import fxmla  # noqa: F401  (recipe sources may be fxmla)
+    from larmor.multifit import DEFAULT_SHARE, fit_multi
+    from larmor.recipe import Recipe
+
+    entries = []
+    for rp in args.recipes:
+        recipe = Recipe.load(rp)
+        if recipe.source_kind == "fxmla":
+            dm = fxmla.read(recipe.source_path)
+            ppm, amp = dm.spectrum.ppm, dm.spectrum.amplitude
+        else:
+            from larmor.io import bruker
+
+            exp = bruker.read_expno(recipe.source_path)
+            ppm, amp = exp.processed_ppm, exp.processed.astype(float)
+        order = ppm.argsort()
+        entries.append((recipe, ppm[order], amp[order]))
+
+    share = tuple(args.share.split(",")) if args.share else DEFAULT_SHARE
+    print(f"fitting {len(entries)} datasets, sharing: {', '.join(share)}")
+    result = fit_multi(entries, share=share)
+    print(result.report)
+    for k, (recipe, rp) in enumerate(zip(result.recipes, args.recipes)):
+        print(f"dataset {k}: RMSD {result.rmsd[k]:.4f}  "
+              f"({recipe.nucleus} @ {recipe.larmor_frequency_MHz:.1f} MHz)")
+        recipe.save(rp)
+        print(f"  updated recipe written: {rp}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="larmor", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -164,6 +213,22 @@ def main(argv: list[str] | None = None) -> int:
 
     p_desk = sub.add_parser("desktop", help="launch the desktop application")
     p_desk.set_defaults(func=cmd_desktop)
+
+    p_sr = sub.add_parser("satrec", help="automatic T1 from a pseudo-2D "
+                                         "saturation-recovery EXPNO")
+    p_sr.add_argument("expno")
+    p_sr.add_argument("--window", nargs=2, type=float, metavar=("HI", "LO"))
+    p_sr.add_argument("--lb", type=float, default=100.0)
+    p_sr.add_argument("--stretched", action="store_true")
+    p_sr.add_argument("--magnitude", action="store_true")
+    p_sr.set_defaults(func=cmd_satrec)
+
+    p_mf = sub.add_parser("multifit", help="simultaneous multi-dataset fit "
+                                           "(e.g. multi-field 1D)")
+    p_mf.add_argument("recipes", nargs="+", help="two or more .recipe.json")
+    p_mf.add_argument("--share", help="comma-separated parameter names "
+                                      "(default: physical set)")
+    p_mf.set_defaults(func=cmd_multifit)
 
     p_app = sub.add_parser("app", help="launch the interactive web app")
     p_app.add_argument("--host", default="127.0.0.1")

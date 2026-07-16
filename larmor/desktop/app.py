@@ -257,6 +257,11 @@ class MainWindow(QMainWindow):
             m_models.addAction(a)
             self._model_actions[m["name"]] = a
 
+        m_tools = mb.addMenu("&Tools")
+        self._add(m_tools, "Saturation recovery (T1)…", self.open_satrec)
+        self._add(m_tools, "Multi-dataset fit (CLI): larmor multifit a.json b.json",
+                  lambda: None).setEnabled(False)
+
         m_help = mb.addMenu("&?")
         self._add(m_help, "About LARMOR", self._about)
 
@@ -888,6 +893,15 @@ class MainWindow(QMainWindow):
         from larmor.desktop.figure_dialog import FigureDialog
 
         FigureDialog(self, self.source_path, self.recipe).exec()
+
+    def open_satrec(self):
+        from larmor.desktop.satrec_dialog import SatrecDialog
+
+        expno = None
+        if self.source_path and Path(self.source_path).is_dir() and \
+                (Path(self.source_path) / "ser").exists():
+            expno = self.source_path
+        SatrecDialog(self, expno).exec()
 
     # ------------------------------------------------------------- session
     def _persist_session(self):
