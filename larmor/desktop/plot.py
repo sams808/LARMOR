@@ -49,6 +49,14 @@ class SpectrumView(pg.PlotWidget):
         self.scene().sigMouseMoved.connect(self._on_move)
         self._paddles: list = []
 
+        # manual baseline: draggable anchors + live PCHIP preview
+        self._bl_mode = False
+        self._bl_anchors: list[pg.TargetItem] = []
+        self._bl_curve = self.plot([], [], pen=pg.mkPen("#c88a1e", width=1.4,
+                                                        style=Qt.DashLine))
+        # dmfit-style fit zones
+        self._zones: list[pg.LinearRegionItem] = []
+
     def _on_move(self, scene_pos):
         vb = self.getPlotItem().getViewBox()
         if self.sceneBoundingRect().contains(scene_pos):
@@ -61,14 +69,93 @@ class SpectrumView(pg.PlotWidget):
         self.setCursor(Qt.CrossCursor if model_name else Qt.ArrowCursor)
 
     def _on_click(self, ev):
-        if self._add_mode is None or ev.button() != Qt.LeftButton:
+        if ev.button() != Qt.LeftButton:
             return
         vb = self.getPlotItem().getViewBox()
         if not self.sceneBoundingRect().contains(ev.scenePos()):
             return
         p = vb.mapSceneToView(ev.scenePos())
-        self.add_requested.emit(float(p.x()), abs(float(p.y())))
-        ev.accept()
+        if self._bl_mode:
+            self._add_baseline_anchor(float(p.x()), float(p.y()))
+            ev.accept()
+            return
+        if self._add_mode is not None:
+            self.add_requested.emit(float(p.x()), abs(float(p.y())))
+            ev.accept()
+
+    # ---------- manual baseline ----------
+    def set_baseline_mode(self, on: bool):
+        self._bl_mode = on
+        self.setCursor(Qt.PointingHandCursor if on else Qt.ArrowCursor)
+
+    def _add_baseline_anchor(self, x: float, y: float):
+        t = pg.TargetItem(pos=(x, y), size=11, movable=True,
+                          pen=pg.mkPen("#c88a1e", width=1.5),
+                          brush=pg.mkBrush(255, 255, 255, 220))
+        t.sigPositionChanged.connect(lambda *_: self._update_baseline_curve())
+        self.addItem(t)
+        self._bl_anchors.append(t)
+        self._update_baseline_curve()
+
+    def baseline_anchors(self) -> list[tuple[float, float]]:
+        return sorted(((float(t.pos().x()), float(t.pos().y()))
+                       for t in self._bl_anchors), key=lambda a: a[0])
+
+    def clear_baseline(self):
+        for t in self._bl_anchors:
+            self.removeItem(t)
+        self._bl_anchors.clear()
+        self._bl_curve.setData([], [])
+
+    def baseline_curve(self, x: np.ndarray) -> np.ndarray | None:
+        """Evaluate the anchor spline on x (PCHIP, edge-constant outside)."""
+        pts = self.baseline_anchors()
+        if len(pts) < 2:
+            return None
+        ax = np.array([p[0] for p in pts])
+        ay = np.array([p[1] for p in pts])
+        from scipy.interpolate import PchipInterpolator
+
+        f = PchipInterpolator(ax, ay, extrapolate=False)
+        out = f(x)
+        out = np.where(np.isnan(out) & (x < ax[0]), ay[0], out)
+        out = np.where(np.isnan(out) & (x > ax[-1]), ay[-1], out)
+        return np.nan_to_num(out)
+
+    def _update_baseline_curve(self):
+        x = self._exp.xData
+        if x is None or not len(x):
+            return
+        y = self.baseline_curve(np.asarray(x))
+        if y is None:
+            self._bl_curve.setData([], [])
+        else:
+            self._bl_curve.setData(x, y)
+
+    # ---------- fit zones ----------
+    def set_zones(self, zones: list, on_change=None):
+        """zones: list of [hi_ppm, lo_ppm]; draggable teal regions."""
+        for r in self._zones:
+            self.removeItem(r)
+        self._zones.clear()
+        for z in zones or []:
+            region = pg.LinearRegionItem(values=(min(z), max(z)),
+                                         brush=pg.mkBrush(14, 124, 134, 26),
+                                         hoverBrush=pg.mkBrush(14, 124, 134, 45),
+                                         pen=pg.mkPen("#0e7c86", width=1))
+            region.setZValue(-5)
+            if on_change:
+                region.sigRegionChangeFinished.connect(
+                    lambda *_: on_change(self.zone_values()))
+            self.addItem(region)
+            self._zones.append(region)
+
+    def zone_values(self) -> list:
+        vals = []
+        for r in self._zones:
+            a, b = r.getRegion()
+            vals.append([max(a, b), min(a, b)])
+        return vals
 
     # ---------- data ----------
     def set_experiment(self, x: np.ndarray, y: np.ndarray):

@@ -15,9 +15,12 @@ def test_read_expno_1903_readonly():
     assert exp.sfo1_MHz == pytest.approx(564.27052307)
     assert exp.pulse_program == "hahnecho.nmrfam"
     assert exp.fid is not None and exp.fid.size > 0
-    assert exp.processed is not None
-    assert exp.processed_ppm is not None
-    assert exp.processed_ppm.size == exp.processed.size
+    if (EXPNO_1903 / "pdata" / "1" / "1r").exists():
+        assert exp.processed is not None
+        assert exp.processed_ppm is not None
+        assert exp.processed_ppm.size == exp.processed.size
+    else:  # the user reorganized this dataset; raw-fid path must still work
+        assert exp.processed is None
 
 
 def test_metadata_conflict_detected():

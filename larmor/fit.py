@@ -131,11 +131,20 @@ def fit(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
     cached process-wide and resolved automatically.
     """
     ctx = make_context(recipe, exp_ppm=exp_ppm)
-    window = window_ppm or recipe.fit_window_ppm
-    if window is None:
-        window = (float(np.max(exp_ppm)), float(np.min(exp_ppm)))
-    hi, lo = max(window), min(window)
-    sel = (exp_ppm >= lo) & (exp_ppm <= hi)
+    zones = [z for z in (recipe.fit_zones or []) if z and len(z) == 2]
+    if zones:
+        # dmfit-style Zones: residual evaluated on the union of the regions
+        sel = np.zeros(exp_ppm.shape, dtype=bool)
+        for zhi, zlo in zones:
+            sel |= (exp_ppm >= min(zhi, zlo)) & (exp_ppm <= max(zhi, zlo))
+        hi = max(max(z) for z in zones)
+        lo = min(min(z) for z in zones)
+    else:
+        window = window_ppm or recipe.fit_window_ppm
+        if window is None:
+            window = (float(np.max(exp_ppm)), float(np.min(exp_ppm)))
+        hi, lo = max(window), min(window)
+        sel = (exp_ppm >= lo) & (exp_ppm <= hi)
     xw, yw = exp_ppm[sel], exp_amp[sel]
 
     params = _make_params(recipe)

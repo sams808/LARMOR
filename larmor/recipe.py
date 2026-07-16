@@ -67,6 +67,9 @@ class Recipe:
     engine: str = "czjzek-kernel+lmfit"
     sites: list[SiteModel] = field(default_factory=list)
     fit_window_ppm: tuple[float, float] | None = None
+    #: optional list of [hi_ppm, lo_ppm] regions (dmfit's "Zones"); when set,
+    #: the fit residual is evaluated only inside their union
+    fit_zones: list = field(default_factory=list)
     fit_rmsd: float | None = None
     notes: list[str] = field(default_factory=list)
 

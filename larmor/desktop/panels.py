@@ -200,6 +200,9 @@ class SitesPanel(QScrollArea):
 class ProcessingPanel(QWidget):
     apply_requested = Signal(list, bool)   # (ops, use_raw)
     reset_requested = Signal()
+    baseline_mode = Signal(bool)           # pick-anchors toggle
+    baseline_apply = Signal()
+    baseline_clear = Signal()
 
     def __init__(self):
         super().__init__()
@@ -245,12 +248,25 @@ class ProcessingPanel(QWidget):
         v.addLayout(ph1)
 
         bl = QHBoxLayout()
-        bl.addWidget(QLabel("<b>Baseline</b> order"))
+        bl.addWidget(QLabel("<b>Baseline auto</b> order"))
         self.blOrder = QSpinBox(); self.blOrder.setRange(0, 9); self.blOrder.setValue(3)
         bl.addWidget(self.blOrder)
-        self.btnBaseline = QPushButton("Correct baseline")
+        self.btnBaseline = QPushButton("Correct")
         bl.addWidget(self.btnBaseline)
         v.addLayout(bl)
+
+        v.addWidget(QLabel("<b>Baseline manual</b> (dmfit-style anchors)"))
+        blm = QHBoxLayout()
+        self.btnBlPick = QPushButton("Pick anchors")
+        self.btnBlPick.setCheckable(True)
+        self.btnBlPick.setToolTip("click on the spectrum to place anchor "
+                                  "points; drag them to shape the baseline")
+        self.btnBlApply = QPushButton("Subtract")
+        self.btnBlClear = QPushButton("Clear")
+        blm.addWidget(self.btnBlPick)
+        blm.addWidget(self.btnBlApply)
+        blm.addWidget(self.btnBlClear)
+        v.addLayout(blm)
 
         actions = QHBoxLayout()
         self.btnApply = QPushButton("Apply processing")
@@ -270,6 +286,9 @@ class ProcessingPanel(QWidget):
         self.btnBaseline.clicked.connect(
             lambda: self._emit([{"op": "baseline", "order": self.blOrder.value()}]))
         self.btnReset.clicked.connect(self.reset_requested)
+        self.btnBlPick.toggled.connect(self.baseline_mode)
+        self.btnBlApply.clicked.connect(self.baseline_apply)
+        self.btnBlClear.clicked.connect(self.baseline_clear)
 
     def _emit(self, extra: list[dict]):
         raw = self.rb_raw.isChecked()

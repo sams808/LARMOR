@@ -192,9 +192,29 @@ class LinesTable(QWidget):
             key = self._used_keys[col - 2]
             if key in site["params"]:
                 p = site["params"][key]
-                a_link = QAction(f"Link {key}…  (e.g. 0.5 * s0.{key})", menu)
+                others = len(self._recipe["sites"]) > 1
+                # dmfit-style presets, no expression writing needed
+                if key == "isotropic_chemical_shift_ppm" and others:
+                    a = QAction("Position: offset from another line… (ppm/Hz)", menu)
+                    a.triggered.connect(lambda: self._preset_position(row, p))
+                    menu.addAction(a)
+                if key == "amplitude" and others:
+                    a = QAction("Amplitude: ratio of another line…", menu)
+                    a.triggered.connect(lambda: self._preset_ratio(
+                        row, p, "amplitude", "Amplitude ratio", 0.5))
+                    menu.addAction(a)
+                if key == "shift_fwhm_ppm" and others:
+                    a = QAction("Width: same as another line…", menu)
+                    a.triggered.connect(lambda: self._preset_ratio(
+                        row, p, "shift_fwhm_ppm", "Shared width", 1.0))
+                    menu.addAction(a)
+                a_link = QAction("Custom link expression…", menu)
                 a_link.triggered.connect(lambda: self._edit_link(p))
                 menu.addAction(a_link)
+                if p.get("expr"):
+                    a_un = QAction(f"Unlink  (now: {p['expr']})", menu)
+                    a_un.triggered.connect(lambda: self._unlink(p))
+                    menu.addAction(a_un)
                 a_bounds = QAction("Set min / max…", menu)
                 a_bounds.triggered.connect(lambda: self._edit_bounds(p))
                 menu.addAction(a_bounds)
@@ -208,6 +228,29 @@ class LinesTable(QWidget):
         for a in (a_vis, a_dup, a_del):
             menu.addAction(a)
         menu.exec(self.table.viewport().mapToGlobal(pos))
+
+    def _preset_position(self, row: int, p: dict):
+        from larmor.desktop.dialogs import LinkPositionDialog
+
+        dlg = LinkPositionDialog(self, self._recipe, row)
+        if dlg.exec() and dlg.expr:
+            p["expr"] = dlg.expr
+            p["vary"] = True
+            self.constraint_edited.emit()
+
+    def _preset_ratio(self, row: int, p: dict, param: str, title: str,
+                      default: float):
+        from larmor.desktop.dialogs import RatioDialog
+
+        dlg = RatioDialog(self, self._recipe, row, param, title, default)
+        if dlg.exec() and dlg.expr:
+            p["expr"] = dlg.expr
+            p["vary"] = True
+            self.constraint_edited.emit()
+
+    def _unlink(self, p: dict):
+        p["expr"] = None
+        self.constraint_edited.emit()
 
     def _edit_link(self, p: dict):
         text, ok = QInputDialog.getText(

@@ -182,6 +182,10 @@ class MainWindow(QMainWindow):
         self._build_bottom_docks()
         self._build_right_dock()
 
+        self.exp_label = QLabel("")
+        self.exp_label.setStyleSheet("color: #0a5a62; font-weight: 600;")
+        self.exp_label.setToolTip("Process > Experiment parameters… to edit")
+        self.statusBar().addPermanentWidget(self.exp_label)
         self.pos_label = QLabel("")
         self.statusBar().addPermanentWidget(self.pos_label)
         self.statusBar().showMessage(
@@ -208,11 +212,14 @@ class MainWindow(QMainWindow):
         self._add(m_file, "E&xit", self.close)
 
         m_proc = mb.addMenu("&Process")
+        self.actExp = self._add(m_proc, "&Experiment parameters… (νrot, B0, nucleus)",
+                                self.edit_experiment)
+        m_proc.addSeparator()
         self._add(m_proc, "Show processing panel",
                   lambda: self.proc_dock.show())
         self._add(m_proc, "Autophase (ACME)",
                   lambda: self.apply_processing([{"op": "autophase"}], False))
-        self._add(m_proc, "Baseline (order 3)",
+        self._add(m_proc, "Baseline auto (order 3)",
                   lambda: self.apply_processing([{"op": "baseline", "order": 3}], False))
         self._add(m_proc, "Reset to original", self.reset_processing)
 
@@ -221,6 +228,9 @@ class MainWindow(QMainWindow):
         m_dec.addSeparator()
         self.actFit = self._add(m_dec, "&Fit", self.run_fit, "F5")
         self._add(m_dec, "&Compute", self.request_simulation, "F9")
+        m_dec.addSeparator()
+        self._add(m_dec, "Add fit &zone", self.add_zone)
+        self._add(m_dec, "Clear zones", self.clear_zones)
         m_dec.addSeparator()
         self.actQuant = self._add(m_dec, "&Report (quantify)", self.run_quantify, "F6")
 
@@ -354,6 +364,9 @@ class MainWindow(QMainWindow):
         self.proc_panel = ProcessingPanel()
         self.proc_panel.apply_requested.connect(self.apply_processing)
         self.proc_panel.reset_requested.connect(self.reset_processing)
+        self.proc_panel.baseline_mode.connect(self._baseline_mode)
+        self.proc_panel.baseline_apply.connect(self.apply_manual_baseline)
+        self.proc_panel.baseline_clear.connect(self.view.clear_baseline)
         self.proc_dock.setWidget(self.proc_panel)
         self.addDockWidget(Qt.RightDockWidgetArea, self.proc_dock)
         self.proc_dock.hide()
@@ -364,6 +377,87 @@ class MainWindow(QMainWindow):
             a.setEnabled(loaded)
         self.actUndo.setEnabled(bool(self.undo_stack))
         self.actRedo.setEnabled(bool(self.redo_stack))
+
+    # ------------------------------------------------------------- experiment
+    def _update_exp_label(self):
+        if not self.recipe:
+            self.exp_label.setText("")
+            return
+        nu = self.recipe.get("spin_rate_Hz", 0.0) or 0.0
+        mas = f"νrot {nu:.0f} Hz" if nu else "static"
+        self.exp_label.setText(
+            f"{self.recipe.get('nucleus', '?')} · "
+            f"{self.recipe.get('larmor_frequency_MHz', 0):.3f} MHz · {mas}")
+
+    def edit_experiment(self):
+        if self.recipe is None:
+            return
+        from larmor.desktop.dialogs import ExperimentDialog
+
+        self.snapshot()
+        dlg = ExperimentDialog(self, self.recipe)
+        if dlg.exec():
+            self._update_exp_label()
+            self.statusBar().showMessage(
+                "experiment updated — re-simulating (a new spin rate builds "
+                "a new kernel once)")
+            self.request_simulation()
+            self._persist_session()
+        else:
+            self.undo_stack.pop()   # dialog cancelled: drop the snapshot
+
+    # ------------------------------------------------------------- baseline
+    def _baseline_mode(self, on: bool):
+        self.view.set_baseline_mode(on)
+        self._set_add_mode(None)
+        if on:
+            self.statusBar().showMessage(
+                "manual baseline: click to place anchors, drag to shape; "
+                "then 'Subtract'")
+
+    def apply_manual_baseline(self):
+        base = self.view.baseline_curve(self.exp_ppm)
+        if base is None:
+            self.statusBar().showMessage("place at least 2 baseline anchors first")
+            return
+        self.exp_amp = self.exp_amp - base
+        self.view.clear_baseline()
+        self.proc_panel.btnBlPick.setChecked(False)
+        self.view.set_experiment(self.exp_ppm, self.exp_amp)
+        self.request_simulation()
+        self.statusBar().showMessage(
+            "manual baseline subtracted ('Reset to original' undoes)")
+
+    # ------------------------------------------------------------- zones
+    def add_zone(self):
+        if self.recipe is None:
+            return
+        (x0, x1), _ = self.view.getPlotItem().getViewBox().viewRange()
+        width = abs(x1 - x0) * 0.25
+        center = (x0 + x1) / 2.0
+        zones = self.recipe.get("fit_zones") or []
+        zones.append([center + width / 2.0, center - width / 2.0])
+        self.recipe["fit_zones"] = zones
+        self._sync_zones()
+        self.statusBar().showMessage(
+            "fit zone added — drag its edges; the fit uses the union of all "
+            "zones instead of the zoom")
+
+    def clear_zones(self):
+        if self.recipe is None:
+            return
+        self.recipe["fit_zones"] = []
+        self._sync_zones()
+
+    def _sync_zones(self):
+        zones = (self.recipe or {}).get("fit_zones") or []
+        self.view.set_zones(zones, on_change=self._zones_changed)
+        self._persist_session()
+
+    def _zones_changed(self, values: list):
+        if self.recipe is not None:
+            self.recipe["fit_zones"] = values
+            self._persist_session()
 
     # ------------------------------------------------------------- view ops
     def zoom_full(self):
@@ -457,6 +551,8 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(msg)
         self.lines_table.rebuild(self.recipe, self.hidden)
         self._update_paddles()
+        self._update_exp_label()
+        self._sync_zones()
         self._update_enabled()
         if self.recipe["sites"]:
             self.request_simulation()
@@ -638,7 +734,10 @@ class MainWindow(QMainWindow):
         self.snapshot()
         (x0, x1), _ = self.view.getPlotItem().getViewBox().viewRange()
         hi, lo = max(x0, x1), min(x0, x1)
-        self.statusBar().showMessage(f"fitting in {hi:.1f} … {lo:.1f} ppm …")
+        zones = self.recipe.get("fit_zones") or []
+        self.statusBar().showMessage(
+            f"fitting in {len(zones)} zone(s) …" if zones
+            else f"fitting in {hi:.1f} … {lo:.1f} ppm …")
         self.lines_table.btnFit.setEnabled(False)
         self._fit_worker = FitWorker(json.loads(json.dumps(self.recipe)),
                                      self.exp_ppm, self.exp_amp, (hi, lo))

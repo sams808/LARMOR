@@ -6,8 +6,6 @@ Both share the same physics engine (mrsimulator BlochDecayCTSpectrum):
 """
 from __future__ import annotations
 
-from functools import lru_cache
-
 import numpy as np
 from scipy.ndimage import gaussian_filter1d
 
@@ -64,60 +62,69 @@ register(Model(
 
 
 # --------------------------------------------------------------------------
-# discrete second-order quadrupolar CT lineshape (crystalline sites)
+# extended Czjzek: perturbation of a dominant tensor (same kernel grid)
 
-@lru_cache(maxsize=256)
-def _quad_ct_shape(nucleus: str, larmor_khz: int, mas_hz: int,
-                   cq_khz: int, eta_milli: int,
-                   x0: float, x1: float, npts: int) -> tuple:
-    """Simulate one quadrupolar site at delta_iso=0 (cached on rounded params)."""
-    from mrsimulator import Simulator, Site, SpinSystem
-    from mrsimulator.method.lib import BlochDecayCTSpectrum
-    from mrsimulator.method import SpectralDimension
-    from mrsimulator.spin_system.isotope import Isotope
-    from mrsimulator.spin_system.tensors import SymmetricTensor
+def _render_ext_czjzek(v: dict, ctx: SimContext) -> np.ndarray:
+    from mrsimulator.models import ExtCzjzekDistribution
 
-    larmor_MHz = larmor_khz / 1000.0
-    B0 = larmor_MHz / abs(Isotope(symbol=nucleus).gyromagnetic_ratio)
-    site = Site(isotope=nucleus, isotropic_chemical_shift=0.0,
-                quadrupolar=SymmetricTensor(Cq=cq_khz * 1e3, eta=eta_milli / 1000.0))
-    sw = abs(x1 - x0) * larmor_MHz
-    method = BlochDecayCTSpectrum(
-        channels=[nucleus], magnetic_flux_density=B0, rotor_frequency=mas_hz,
-        spectral_dimensions=[SpectralDimension(
-            count=npts, spectral_width=sw,
-            reference_offset=(x0 + x1) / 2.0 * larmor_MHz)],
-    )
-    sim = Simulator(spin_systems=[SpinSystem(sites=[site])], methods=[method])
-    sim.config.number_of_sidebands = 8
-    sim.run()
-    ds = sim.methods[0].simulation
-    coords = ds.x[0].coordinates
-    x = coords.value if str(coords.unit) == "ppm" else coords.to("Hz").value / larmor_MHz
-    y = np.asarray(ds.y[0].components[0].real, dtype=float)
-    order = np.argsort(x)
-    return tuple(x[order]), tuple(y[order])
+    from larmor import engine
 
-
-def _render_quad_ct(v: dict, ctx: SimContext) -> np.ndarray:
-    x0, x1 = float(ctx.x_ppm[0]), float(ctx.x_ppm[-1])
-    npts = min(len(ctx.x_ppm), 2048)
-    xs, ys = _quad_ct_shape(
-        ctx.nucleus, int(round(ctx.larmor_MHz * 1000)),
-        int(round(ctx.spin_rate_Hz)),
-        int(round(v["Cq_MHz"] * 1000)), int(round(v["eta"] * 1000)),
-        round(x0, 2), round(x1, 2), npts)
-    xs, ys = np.array(xs), np.array(ys)
-    y = _broaden_shift(xs, ys, v["isotropic_chemical_shift_ppm"],
+    kernel = engine.build_kernel(ctx.nucleus, ctx.larmor_MHz, ctx.spin_rate_Hz)
+    # the dominant tensor must share the pdf grid's unit system (MHz here)
+    dominant = {"Cq": v["Cq_MHz"], "eta": v["eta"]}
+    res = ExtCzjzekDistribution(dominant, eps=max(v["eps"], 1e-3)).pdf(
+        pos=[kernel.cq_grid_MHz, kernel.eta_grid])
+    amp = np.asarray(res[-1] if isinstance(res, (tuple, list)) else res)
+    w = amp.ravel()
+    s = w.sum()
+    if s > 0:
+        w = w / s
+    y = w @ kernel.K
+    y = _broaden_shift(kernel.x_ppm, y, v["isotropic_chemical_shift_ppm"],
                        v["shift_fwhm_ppm"])
     peak = y.max()
     y = v["amplitude"] * (y / peak) if peak > 0 else y
-    return np.interp(ctx.x_ppm, xs, y, left=0.0, right=0.0)
+    if kernel.x_ppm.shape == ctx.x_ppm.shape and \
+            np.allclose(kernel.x_ppm, ctx.x_ppm):
+        return y
+    return np.interp(ctx.x_ppm, kernel.x_ppm, y, left=0.0, right=0.0)
+
+
+register(Model(
+    name="ext_czjzek",
+    label="ext. Czjzek",
+    description="Extended Czjzek: random perturbation (eps) around a dominant "
+                "quadrupolar tensor -- partially ordered environments.",
+    needs_quadrupolar=True,
+    params=(
+        ParamDef("isotropic_chemical_shift_ppm", "pos", 0.0, "ppm",
+                 "isotropic chemical shift"),
+        ParamDef("Cq_MHz", "cq", 5.0, "MHz", "dominant quadrupolar coupling",
+                 min=0.05, max=40.0),
+        ParamDef("eta", "eta", 0.2, "", "dominant asymmetry", min=0.0, max=1.0),
+        ParamDef("eps", "eps", 0.3, "", "perturbation fraction",
+                 min=0.01, max=3.0),
+        ParamDef("shift_fwhm_ppm", "fwhm", 5.0, "ppm",
+                 "isotropic shift distribution width", min=0.1),
+        ParamDef("amplitude", "amp", 1.0, "", "peak height", min=0.0),
+    ),
+    render=_render_ext_czjzek,
+))
+
+
+# --------------------------------------------------------------------------
+# discrete second-order quadrupolar CT lineshape (crystalline sites)
+
+def _render_quad_ct(v: dict, ctx: SimContext) -> np.ndarray:
+    from larmor.models._singlesite import render_single_site
+
+    return render_single_site(v, ctx, cq_key="Cq_MHz", eta_q_key="eta",
+                              ct_only=True, n_ssb=8)
 
 
 register(Model(
     name="quad_ct",
-    label="Quadrupolar CT (discrete)",
+    label="Quad CT (2nd order)",
     description="Second-order quadrupolar central-transition lineshape for a "
                 "single crystalline site (MAS or static via spin rate).",
     needs_quadrupolar=True,
@@ -132,4 +139,70 @@ register(Model(
         ParamDef("amplitude", "amp", 1.0, "", "peak height", min=0.0),
     ),
     render=_render_quad_ct,
+))
+
+
+# --------------------------------------------------------------------------
+# first-order quadrupolar: full satellite manifold with spinning sidebands
+
+def _render_quad_first(v: dict, ctx: SimContext) -> np.ndarray:
+    from larmor.models._singlesite import render_single_site
+
+    return render_single_site(v, ctx, cq_key="Cq_MHz", eta_q_key="eta",
+                              ct_only=False, n_ssb=64)
+
+
+register(Model(
+    name="quad_first",
+    label="Quad 1st order (satellites)",
+    description="Full quadrupolar pattern including satellite transitions and "
+                "their spinning-sideband manifold (dmfit's 'quad 1st order').",
+    needs_quadrupolar=True,
+    params=(
+        ParamDef("isotropic_chemical_shift_ppm", "pos", 0.0, "ppm",
+                 "isotropic chemical shift"),
+        ParamDef("Cq_MHz", "cq", 1.0, "MHz", "quadrupolar coupling constant",
+                 min=0.001, max=40.0),
+        ParamDef("eta", "eta", 0.1, "", "quadrupolar asymmetry", min=0.0, max=1.0),
+        ParamDef("shift_fwhm_ppm", "fwhm", 1.0, "ppm", "Gaussian broadening",
+                 min=0.05),
+        ParamDef("amplitude", "amp", 1.0, "", "peak height", min=0.0),
+    ),
+    render=_render_quad_first,
+))
+
+
+# --------------------------------------------------------------------------
+# combined second-order quad CT + CSA on the same site
+
+def _render_quad_csa(v: dict, ctx: SimContext) -> np.ndarray:
+    from larmor.models._singlesite import render_single_site
+
+    return render_single_site(v, ctx, cq_key="Cq_MHz", eta_q_key="eta_q",
+                              zeta_key="zeta_ppm", eta_cs_key="eta_cs",
+                              ct_only=True, n_ssb=16)
+
+
+register(Model(
+    name="quad_csa",
+    label="Quad CT + CSA",
+    description="Central transition with BOTH second-order quadrupolar and "
+                "shielding-anisotropy interactions on the same site.",
+    needs_quadrupolar=True,
+    params=(
+        ParamDef("isotropic_chemical_shift_ppm", "pos", 0.0, "ppm",
+                 "isotropic chemical shift"),
+        ParamDef("Cq_MHz", "cq", 3.0, "MHz", "quadrupolar coupling constant",
+                 min=0.01, max=40.0),
+        ParamDef("eta_q", "etaq", 0.2, "", "quadrupolar asymmetry",
+                 min=0.0, max=1.0),
+        ParamDef("zeta_ppm", "zeta", 50.0, "ppm", "shielding anisotropy",
+                 min=-1000.0, max=1000.0),
+        ParamDef("eta_cs", "etacs", 0.3, "", "shielding asymmetry",
+                 min=0.0, max=1.0),
+        ParamDef("shift_fwhm_ppm", "fwhm", 2.0, "ppm", "Gaussian broadening",
+                 min=0.05),
+        ParamDef("amplitude", "amp", 1.0, "", "peak height", min=0.0),
+    ),
+    render=_render_quad_csa,
 ))
