@@ -208,8 +208,12 @@ class MainWindow(QMainWindow):
         mb = self.menuBar()
 
         m_file = mb.addMenu("&File")
-        self._add(m_file, "&Open…", self.open_file, "Ctrl+O")
-        self._add(m_file, "Open &EXPNO…", self.open_expno, "Ctrl+Shift+O")
+        self._add(m_file, "&Open…  (spectrum / recipe / 1r / 2rr)",
+                  self.open_file, "Ctrl+O")
+        self._add(m_file, "Open &EXPNO / folder…", self.open_expno,
+                  "Ctrl+Shift+O")
+        self._add(m_file, "Open &FID…  (process before FT)", self.open_fid,
+                  "Ctrl+F")
         m_file.addSeparator()
         self.actSave = self._add(m_file, "&Save recipe", self.save_recipe, "Ctrl+S")
         self._add(m_file, "Figure…", self.open_figure_dialog)
@@ -534,16 +538,67 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------- loading
     def open_file(self):
         path, _ = QFileDialog.getOpenFileName(
-            self, "Open spectrum or recipe", self._last_dir(),
-            "NMR fits (*.fxmla *.fxml *.json);;All files (*)")
+            self, "Open spectrum, recipe, or Bruker file", self._last_dir(),
+            "All supported (*.fxmla *.fxml *.json 1r 2rr fid ser);;"
+            "dmfit / recipe (*.fxmla *.fxml *.json);;"
+            "Bruker processed (1r 2rr);;Bruker raw (fid ser);;All files (*)")
         if path:
             self.load_source(path)
 
     def open_expno(self):
         path = QFileDialog.getExistingDirectory(
-            self, "Open Bruker EXPNO folder (read-only)", self._last_dir())
+            self, "Open Bruker EXPNO or pdata folder (read-only)",
+            self._last_dir())
         if path:
             self.load_source(path)
+
+    def open_fid(self):
+        from larmor.desktop.fid_dialog import FidDialog
+
+        path = None
+        if self.source_path and Path(self.source_path).is_dir() and \
+                ((Path(self.source_path) / "fid").exists() or
+                 (Path(self.source_path) / "ser").exists()):
+            path = str(Path(self.source_path) /
+                       ("ser" if (Path(self.source_path) / "ser").exists()
+                        else "fid"))
+        dlg = FidDialog(self, path)
+        dlg.accepted_1d.connect(self._fid_to_workbench)
+        dlg.accepted_2d.connect(self._fid_to_2d)
+        dlg.exec()
+
+    def _fid_to_workbench(self, ppm, amp, meta):
+        """A 1D spectrum processed from a raw fid becomes the working data."""
+        from larmor.recipe import Recipe
+
+        order = np.argsort(ppm)
+        self.exp_ppm, self.exp_amp = np.asarray(ppm)[order], np.asarray(amp)[order]
+        self.source_path = meta.get("expno", "")
+        self.recipe = Recipe(
+            sample=(meta.get("title", "").splitlines() or [""])[0],
+            source_kind="bruker", source_path=meta.get("expno", ""),
+            nucleus=meta.get("nucleus", ""),
+            larmor_frequency_MHz=meta.get("larmor_MHz", 0.0),
+            spin_rate_Hz=meta.get("masr_Hz") or 0.0).to_dict()
+        self.hidden.clear(); self.undo_stack.clear(); self.redo_stack.clear()
+        self.view.set_experiment(self.exp_ppm, self.exp_amp)
+        self.view.set_title(self.recipe.get("sample") or "processed FID")
+        self._last_model = None
+        self._first_sim = True
+        self.zoom_full()
+        self.lines_table.rebuild(self.recipe, self.hidden)
+        self._update_paddles(); self._update_exp_label(); self._update_enabled()
+        self.statusBar().showMessage(
+            "spectrum from processed FID loaded — add lines and fit")
+
+    def _fid_to_2d(self, data2d):
+        from larmor.desktop.twod_dialog import TwoDDialog
+
+        dlg = TwoDDialog(self, None)
+        dlg.data = data2d.normalized()
+        dlg.lbl.setText(data2d.source or "processed 2D FID")
+        dlg._redraw()
+        dlg.exec()
 
     def _last_dir(self) -> str:
         return QSettings("LARMOR", "app").value("lastDir", "")
@@ -1031,24 +1086,60 @@ def _load_any(path: str):
     return load_any(path)
 
 
+def asset_path(name: str) -> str:
+    """Locate a bundled asset, whether running from source or a frozen exe."""
+    here = Path(__file__).resolve()
+    for base in (here.parent.parent.parent / "assets",     # repo/assets
+                 here.parent.parent / "assets",            # larmor/assets
+                 Path(getattr(sys, "_MEIPASS", "")) / "assets"):  # PyInstaller
+        p = base / name
+        if p.is_file():
+            return str(p)
+    return ""
+
+
 def main() -> int:
+    import time
+
     import pyqtgraph as pg
-    from PySide6.QtGui import QFont
+    from PySide6.QtGui import QFont, QIcon, QPixmap
+    from PySide6.QtWidgets import QSplashScreen
 
     pg.setConfigOptions(antialias=True, background="#fcfdfc", foreground="#37424a")
     app = QApplication(sys.argv)
     app.setApplicationName("LARMOR")
     app.setStyle("Fusion")            # deterministic rendering on any OS theme
     app.setPalette(_light_palette())
-    # a clean, consistent UI font across all platforms
     for family in ("Segoe UI", "Inter", "Roboto", "Helvetica Neue", "Arial"):
         f = QFont(family, 9)
         if f.exactMatch() or family == "Arial":
             app.setFont(f)
             break
     app.setStyleSheet(APP_STYLE)
+
+    icon = asset_path("larmor_logo.png")
+    if icon:
+        app.setWindowIcon(QIcon(icon))
+
+    # splash goes up FIRST, heavy imports/build happen behind it (like PRISM)
+    splash = None
+    shown_at = 0.0
+    splash_png = asset_path("larmor_splash.png")
+    if splash_png:
+        splash = QSplashScreen(QPixmap(splash_png))
+        splash.show()
+        shown_at = time.time()
+        app.processEvents()
+
     win = MainWindow()
+    if icon:
+        win.setWindowIcon(QIcon(icon))
     win.show()
+    if splash is not None:
+        while time.time() - shown_at < 2.0:      # keep the logo up briefly
+            app.processEvents()
+            time.sleep(0.02)
+        splash.finish(win)
     return app.exec()
 
 

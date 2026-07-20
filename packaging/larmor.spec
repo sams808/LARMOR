@@ -39,6 +39,8 @@ hiddenimports += [
 
 # --- LARMOR's own resources -------------------------------------------------
 datas += [(str(ROOT / "larmor" / "static"), "larmor/static")]
+if (ROOT / "assets").exists():
+    datas += [(str(ROOT / "assets"), "assets")]
 for doc in ("README.md", "ROADMAP.md"):
     if (ROOT / doc).exists():
         datas.append((str(ROOT / doc), "."))
@@ -80,8 +82,8 @@ exe = EXE(
     upx=False,
     console=False,          # windowed app; errors go to the crash log
     disable_windowed_traceback=False,
-    icon=str(ROOT / "packaging" / "larmor.ico")
-        if (ROOT / "packaging" / "larmor.ico").exists() else None,
+    icon=str(ROOT / "assets" / "larmor.ico")
+        if (ROOT / "assets" / "larmor.ico").exists() else None,
 )
 
 coll = COLLECT(

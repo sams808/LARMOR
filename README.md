@@ -36,9 +36,17 @@ spectra algebra, align, peak picking. Pipelines are stored in the recipe and **r
 window- or **per-site** via NNLS decomposition), **REDOR** dipolar couplings and distances
 (model-free short-time or full pair curve).
 
-**Import / advanced** — read-only Bruker TopSpin (1D & 2D), legacy dmfit `.fxmla`; **DFT tensor
-import** (CASTEP/QE `.magres` → fittable sites); **SIMPSON** bridge for exact density-matrix
-recoupling simulations.
+**Import** (ssNake-style, universal) — point at almost anything: a legacy dmfit `.fxmla`, a LARMOR
+recipe, or **any Bruker path** — a processed `1r`/`2rr` file, a raw `fid`/`ser`, a `pdata/N`
+folder, or an EXPNO folder. The reader figures out 1D vs 2D, raw vs processed, and a real
+spectroscopic 2D vs a pseudo-2D arrayed experiment (relaxation/REDOR keeps a delay axis, not a
+bogus ppm one). **Open FID…** loads the raw fid/ser to process *before* the Fourier transform
+(windowing, zero-fill, phase, and for 2D the indirect quadrature mode: States / States-TPPI /
+Echo-Antiecho / TPPI / QF), with `larmor.fourier` for scripted 1D/2D transforms. Everything is
+strictly read-only against instrument folders.
+
+**Advanced** — **DFT tensor import** (CASTEP/QE `.magres` → fittable sites); **SIMPSON** bridge
+for exact density-matrix recoupling simulations.
 
 **Figures** — publication figure studio (1D / 2D contour / relaxation series), style presets,
 png + svg + pdf export.

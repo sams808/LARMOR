@@ -24,3 +24,6 @@ dist/
 
 # local test clones
 git-test/
+
+# generated brand assets are tracked (needed by the app + exe)
+!assets/
