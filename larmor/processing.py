@@ -147,7 +147,10 @@ def op_ft(s: Spectrum1D, offset_ppm: float = 0.0) -> Spectrum1D:
         raise ValueError("data is already in the frequency domain")
     spec = np.fft.fftshift(np.fft.fft(s.y))
     n = spec.size
-    freq_hz = np.linspace(s.sw_Hz / 2, -s.sw_Hz / 2, n, endpoint=False)
+    # frequency axis matching fftshift(fft): ascending, so a +f Hz component
+    # lands at +f (verified against real Bruker 1r data: a raw-fid FT peaks at
+    # the same ppm as TopSpin's own processed spectrum, up to the SR offset).
+    freq_hz = np.fft.fftshift(np.fft.fftfreq(n, d=1.0 / s.sw_Hz))
     s.x_ppm = freq_hz / s.sfo1_MHz + offset_ppm
     s.y = spec
     s.domain = "freq"

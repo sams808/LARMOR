@@ -65,28 +65,33 @@ class Data2D:
 
 
 def read_bruker_2d(expno: str | Path, procno: int = 1) -> Data2D:
-    """Read a processed Bruker 2D (2rr), strictly read-only."""
-    import nmrglue as ng
+    """Read a processed Bruker 2D (2rr) via the universal reader.
 
-    expno = Path(expno)
-    pdata = expno / "pdata" / str(procno)
-    dic, z = ng.bruker.read_pdata(str(pdata))
-    axes = []
-    for key, npts in (("procs", z.shape[1]), ("proc2s", z.shape[0])):
-        p = dic[key]
-        si, sf = int(p["SI"]), float(p["SF"])
-        offset, sw = float(p["OFFSET"]), float(p["SW_p"])
-        axes.append(offset - np.arange(npts) * (sw / sf / npts))
-    f2, f1 = axes
-    acqus = dic.get("acqus", {})
-    o2 = np.argsort(f2)
-    o1 = np.argsort(f1)
-    return Data2D(f2_ppm=f2[o2], f1_ppm=f1[o1],
-                  z=np.asarray(z, float)[np.ix_(o1, o2)],
-                  nucleus=str(acqus.get("NUC1", "")),
-                  larmor_MHz=float(acqus.get("SFO1", 0.0)),
-                  spin_rate_Hz=float(acqus.get("MASR", 0.0) or 0.0),
-                  source=str(expno))
+    Accepts an EXPNO folder, a pdata folder, or a 2rr file path. Real
+    spectroscopic 2Ds get ppm F1 axes; pseudo-2D (relaxation) datasets keep
+    their arrayed F1 coordinates.
+    """
+    from larmor.io import bruker
+
+    p = Path(expno)
+    # allow the historical (expno, procno) call as well as a direct file path
+    if p.is_dir() and (p / "pdata" / str(procno) / "2rr").exists():
+        p = p / "pdata" / str(procno) / "2rr"
+    data = bruker.read(p)
+    if data.ndim != 2:
+        raise ValueError(f"{expno} is not a 2D dataset")
+    if data.domain != "freq":
+        raise ValueError("this is a raw 2D FID; Fourier-transform it first "
+                         "(larmor.fourier.ft2d)")
+    f1_axis, f2_axis = data.axes
+    d = Data2D(f2_ppm=f2_axis.values, f1_ppm=f1_axis.values, z=data.data,
+               nucleus=data.nucleus, larmor_MHz=data.meta["larmor_MHz"],
+               spin_rate_Hz=data.meta.get("masr_Hz") or 0.0,
+               source=str(expno))
+    d.notes = list(data.warnings)
+    if data.is_pseudo2d:
+        d.notes.append(f"pseudo-2D: F1 is '{f1_axis.label}' in {f1_axis.unit}")
+    return d
 
 
 def shear(data: Data2D, factor: float, ref_ppm: float = 0.0) -> Data2D:

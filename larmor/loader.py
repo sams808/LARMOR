@@ -86,22 +86,33 @@ def load_any(path: str | Path, replay: bool = True):
 
     from larmor.io import bruker
 
-    if bruker.is_expno(p):
-        exp = bruker.read_expno(p)
-        if exp.processed is None:
+    # any Bruker path: a 1r/2rr/fid/ser file, a pdata folder, or an EXPNO
+    try:
+        ref = bruker.resolve(p)
+    except (ValueError, FileNotFoundError):
+        ref = None
+    if ref is not None:
+        data = bruker.read(p)
+        if data.ndim == 2:
+            what = "arrayed/relaxation" if data.is_pseudo2d else "2D"
             raise ValueError(
-                "this EXPNO has no processed pdata; process the raw fid "
-                "first (Processing panel -> raw fid)")
-        ppm, amp = exp.processed_ppm, exp.processed.astype(float)
-        order = np.argsort(ppm)
+                f"this is a {what} dataset — open it with Tools ▸ 2D MQMAS "
+                "viewer (or Tools ▸ Relaxation for a series)")
+        if data.domain == "time":
+            raise ValueError(
+                "this is a raw FID — open it with File ▸ Open FID… to process "
+                "it (apodize, zero-fill, phase) before the Fourier transform")
+        ppm = data.axes[0].values
+        amp = data.data
+        title = data.meta.get("title", "")
         recipe = Recipe(
-            sample=exp.title.splitlines()[0] if exp.title else "",
-            source_kind="bruker", source_path=str(p),
-            nucleus=exp.nucleus, larmor_frequency_MHz=exp.sfo1_MHz,
-            spin_rate_Hz=exp.masr_Hz or 0.0,
+            sample=title.splitlines()[0] if title else "",
+            source_kind="bruker", source_path=str(ref.expno),
+            nucleus=data.nucleus, larmor_frequency_MHz=data.meta["larmor_MHz"],
+            spin_rate_Hz=data.meta.get("masr_Hz") or 0.0,
         )
-        return (ppm[order], amp[order], recipe.to_dict(),
-                exp.summary.splitlines()[1], exp.conflicts)
+        return ppm, amp, recipe.to_dict(), data.summary, list(data.warnings)
 
     raise ValueError(f"unrecognized source: {p} (expected .fxmla, "
-                     ".recipe.json, or a Bruker EXPNO folder)")
+                     ".recipe.json, a Bruker 1r/2rr/fid/ser file, or an "
+                     "EXPNO / pdata folder)")
