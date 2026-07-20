@@ -1,10 +1,68 @@
-"""Dialogs: experiment parameters and dmfit-style parameter links."""
+"""Dialogs: experiment parameters, parameter links, and fit bounds."""
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
-    QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout,
-    QLabel, QLineEdit, QVBoxLayout,
+    QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
+    QFormLayout, QHBoxLayout, QLabel, QLineEdit, QVBoxLayout,
 )
+
+
+class BoundsDialog(QDialog):
+    """Constrain a fitted parameter between a min and a max.
+
+    Either bound is optional (unchecked = unbounded on that side). The fit
+    keeps the parameter inside [min, max] via lmfit box constraints.
+    """
+
+    def __init__(self, parent, label: str, p: dict):
+        super().__init__(parent)
+        self.setWindowTitle("Constrain parameter")
+        self.result_min = p.get("min")
+        self.result_max = p.get("max")
+        v = QVBoxLayout(self)
+        v.addWidget(QLabel(f"<b>{label}</b>  (current value: {p['value']:g})"))
+
+        span = abs(p["value"]) or 1.0
+        row_lo = QHBoxLayout()
+        self.use_min = QCheckBox("minimum")
+        self.use_min.setChecked(p.get("min") is not None)
+        self.min = QDoubleSpinBox()
+        self.min.setDecimals(4); self.min.setRange(-1e12, 1e12)
+        self.min.setValue(p["min"] if p.get("min") is not None
+                          else p["value"] - span)
+        row_lo.addWidget(self.use_min); row_lo.addWidget(self.min, 1)
+        v.addLayout(row_lo)
+
+        row_hi = QHBoxLayout()
+        self.use_max = QCheckBox("maximum")
+        self.use_max.setChecked(p.get("max") is not None)
+        self.max = QDoubleSpinBox()
+        self.max.setDecimals(4); self.max.setRange(-1e12, 1e12)
+        self.max.setValue(p["max"] if p.get("max") is not None
+                          else p["value"] + span)
+        row_hi.addWidget(self.use_max); row_hi.addWidget(self.max, 1)
+        v.addLayout(row_hi)
+
+        note = QLabel("The fit will not let this parameter leave the range. "
+                      "A value that ends the fit exactly on a bound is flagged "
+                      "in the report.")
+        note.setWordWrap(True)
+        note.setStyleSheet("color: #93a0a8;")
+        v.addWidget(note)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self._accept)
+        buttons.rejected.connect(self.reject)
+        v.addWidget(buttons)
+
+    def _accept(self):
+        lo = self.min.value() if self.use_min.isChecked() else None
+        hi = self.max.value() if self.use_max.isChecked() else None
+        if lo is not None and hi is not None and lo >= hi:
+            self.min.setStyleSheet("background: #fbe7e2;")
+            return
+        self.result_min, self.result_max = lo, hi
+        self.accept()
 
 
 class ExperimentDialog(QDialog):

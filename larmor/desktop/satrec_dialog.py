@@ -1,119 +1,310 @@
-"""Saturation-recovery (T1) analysis dialog: pick an EXPNO, LARMOR processes
-every vdlist slice, integrates, fits T1 and shows the build-up curve."""
+"""Guided relaxation (T1/T2) analysis — the TopSpin guided-T1 workflow.
+
+Steps, top to bottom:
+  1. open a pseudo-2D (ser) — the arrayed relaxation experiment;
+  2. LARMOR processes every slice and shows the LAST slice (fully relaxed,
+     most signal) as the reference spectrum;
+  3. the user drags one or more integration ZONES over the peaks of interest;
+  4. each zone becomes a build-up curve — the points are plotted (delay vs
+     integral), one series per zone;
+  5. the user clicks any aberrant point to exclude it;
+  6. Fit gives T1 (or T2) per zone on the surviving points.
+"""
 from __future__ import annotations
 
 from pathlib import Path
 
 import numpy as np
 import pyqtgraph as pg
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QApplication, QCheckBox, QDialog, QDoubleSpinBox, QFileDialog,
-    QHBoxLayout, QLabel, QPushButton, QVBoxLayout,
+    QApplication, QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFileDialog,
+    QHBoxLayout, QLabel, QPushButton, QSplitter, QVBoxLayout, QWidget,
 )
+
+ZONE_COLORS = ["#0e7c86", "#d62728", "#2ca02c", "#9467bd", "#e377c2"]
 
 
 class SatrecDialog(QDialog):
     def __init__(self, parent, expno: str | None):
         super().__init__(parent)
-        self.setWindowTitle("Saturation recovery — automatic T1")
-        self.resize(820, 560)
+        self.setWindowTitle("Guided relaxation — T1 / T2")
+        self.resize(980, 760)
         self.expno = expno
-        self.result = None
+        self.x_ppm = None
+        self.slices = None
+        self.delays = None
+        self.zones: list[pg.LinearRegionItem] = []
+        self.keep: dict[int, np.ndarray] = {}   # per-zone kept-point mask
+        self.results: dict[int, dict] = {}
+        self._scatter: dict[int, pg.ScatterPlotItem] = {}
 
         v = QVBoxLayout(self)
+
+        # ---- source + options bar ----
         top = QHBoxLayout()
-        self.lbl = QLabel(expno or "no EXPNO selected")
+        self.lbl = QLabel(expno or "no relaxation EXPNO selected")
         self.lbl.setStyleSheet("font-weight: 600;")
-        btnPick = QPushButton("Choose EXPNO…")
-        btnPick.clicked.connect(self._pick)
+        btn = QPushButton("Choose EXPNO…")
+        btn.clicked.connect(self._pick)
         top.addWidget(self.lbl, 1)
-        top.addWidget(btnPick)
+        top.addWidget(QLabel("kind"))
+        self.kind = QComboBox()
+        self.kind.addItems(["auto", "satrec", "invrec", "cpmg", "t1rho"])
+        top.addWidget(self.kind)
+        top.addWidget(QLabel("EM lb (Hz)"))
+        self.lb = QDoubleSpinBox(); self.lb.setRange(0, 1e5); self.lb.setValue(100)
+        top.addWidget(self.lb)
+        self.magnitude = QCheckBox("magnitude")
+        top.addWidget(self.magnitude)
+        self.stretched = QCheckBox("stretched β")
+        top.addWidget(self.stretched)
+        self.btnProcess = QPushButton("Process slices")
+        self.btnProcess.clicked.connect(self._process)
+        top.addWidget(self.btnProcess)
         v.addLayout(top)
 
-        opts = QHBoxLayout()
-        opts.addWidget(QLabel("EM lb (Hz)"))
-        self.lb = QDoubleSpinBox()
-        self.lb.setRange(0, 1e5)
-        self.lb.setValue(100)
-        opts.addWidget(self.lb)
-        self.stretched = QCheckBox("stretched exponential (β)")
-        opts.addWidget(self.stretched)
-        self.magnitude = QCheckBox("magnitude mode")
-        self.magnitude.setToolTip("phase-insensitive; use if phasing is unstable")
-        opts.addWidget(self.magnitude)
-        self.btnRun = QPushButton("Analyze")
-        self.btnRun.setDefault(True)
-        self.btnRun.clicked.connect(self._run)
-        opts.addWidget(self.btnRun)
-        opts.addStretch(1)
-        v.addLayout(opts)
+        # ---- two stacked plots ----
+        split = QSplitter(Qt.Vertical)
 
-        self.plot = pg.PlotWidget(background="w")
-        self.plot.setLogMode(x=True, y=False)
-        self.plot.setLabel("bottom", "recovery delay / s")
-        self.plot.setLabel("left", "normalized integral")
-        self.plot.showGrid(x=True, y=True, alpha=0.2)
-        v.addWidget(self.plot, 1)
+        spec_box = QWidget(); sb = QVBoxLayout(spec_box); sb.setContentsMargins(0, 0, 0, 0)
+        zrow = QHBoxLayout()
+        zrow.addWidget(QLabel("Integration zones:"))
+        self.btnAddZone = QPushButton("+ Add zone")
+        self.btnAddZone.clicked.connect(self._add_zone)
+        self.btnClearZones = QPushButton("Clear")
+        self.btnClearZones.clicked.connect(self._clear_zones)
+        zrow.addWidget(self.btnAddZone); zrow.addWidget(self.btnClearZones)
+        zrow.addWidget(QLabel("  (drag the shaded edges; the last, most-relaxed "
+                              "slice is shown)"))
+        zrow.addStretch(1)
+        sb.addLayout(zrow)
+        self.spec_plot = pg.PlotWidget(background="#fcfdfc")
+        self.spec_plot.getPlotItem().invertX(True)
+        self.spec_plot.setLabel("bottom", "shift", units="ppm")
+        self.spec_plot.showGrid(x=True, y=True, alpha=0.1)
+        sb.addWidget(self.spec_plot)
+        split.addWidget(spec_box)
 
-        bottom = QHBoxLayout()
-        self.res_lbl = QLabel("")
-        self.res_lbl.setStyleSheet("font-weight: 700; color: #0a5a62; font-size: 14px;")
-        bottom.addWidget(self.res_lbl, 1)
-        self.btnCsv = QPushButton("Copy CSV")
-        self.btnCsv.setEnabled(False)
+        build_box = QWidget(); bb = QVBoxLayout(build_box); bb.setContentsMargins(0, 0, 0, 0)
+        brow = QHBoxLayout()
+        brow.addWidget(QLabel("Build-up — click a point to exclude an outlier"))
+        brow.addStretch(1)
+        self.btnFit = QPushButton("Fit T1 / T2")
+        self.btnFit.setDefault(True)
+        self.btnFit.clicked.connect(self._fit)
+        self.btnCsv = QPushButton("Copy CSV"); self.btnCsv.setEnabled(False)
         self.btnCsv.clicked.connect(self._csv)
-        bottom.addWidget(self.btnCsv)
-        v.addLayout(bottom)
+        brow.addWidget(self.btnFit); brow.addWidget(self.btnCsv)
+        bb.addLayout(brow)
+        self.build_plot = pg.PlotWidget(background="#fcfdfc")
+        self.build_plot.setLogMode(x=True, y=False)
+        self.build_plot.setLabel("bottom", "delay", units="s")
+        self.build_plot.setLabel("left", "integral (norm.)")
+        self.build_plot.showGrid(x=True, y=True, alpha=0.15)
+        bb.addWidget(self.build_plot)
+        split.addWidget(build_box)
+        split.setSizes([380, 320])
+        v.addWidget(split, 1)
 
+        self.res = QLabel("")
+        self.res.setStyleSheet("font-weight: 700; color: #0a5a62; font-size: 13px;")
+        self.res.setWordWrap(True)
+        v.addWidget(self.res)
+
+        if expno:
+            self._process()
+
+    # ------------------------------------------------------------------
     def _pick(self):
-        path = QFileDialog.getExistingDirectory(
-            self, "Bruker EXPNO with ser + vdlist (read-only)")
-        if path:
-            self.expno = path
-            self.lbl.setText(path)
+        p = QFileDialog.getExistingDirectory(
+            self, "Bruker EXPNO with ser + vdlist/vclist")
+        if p:
+            self.expno = p
+            self.lbl.setText(p)
+            self._process()
 
-    def _run(self):
+    def _kind(self) -> str | None:
+        k = self.kind.currentText()
+        return None if k == "auto" else k
+
+    def _process(self):
         if not self.expno:
             return
+        from larmor import satrec, series
+
         p = Path(self.expno)
-        if not (p / "ser").exists() or not (p / "vdlist").exists():
-            self.res_lbl.setText("this EXPNO has no ser + vdlist "
-                                 "(not a pseudo-2D saturation recovery)")
+        if not (p / "ser").exists():
+            self.res.setText("this EXPNO has no 'ser' — not an arrayed "
+                             "relaxation experiment")
             return
-        self.btnRun.setEnabled(False)
-        self.res_lbl.setText("processing slices…")
+        self.btnProcess.setEnabled(False)
+        self.res.setText("processing slices…")
         QApplication.processEvents()
         try:
-            from larmor import satrec
-
-            self.result = satrec.analyze(
-                p, lb_hz=self.lb.value(),
-                stretched=self.stretched.isChecked(),
-                mode="magnitude" if self.magnitude.isChecked() else "phase")
+            self.delays, src = series.read_delays(p)
+            mode = "magnitude" if self.magnitude.isChecked() else "phase"
+            self.x_ppm, self.slices = satrec.process_slices(
+                p, lb_hz=self.lb.value(), mode=mode)
+            n = min(len(self.delays), self.slices.shape[0])
+            self.delays, self.slices = self.delays[:n], self.slices[:n]
         except Exception as exc:
-            self.res_lbl.setText(f"failed: {exc}")
-            self.btnRun.setEnabled(True)
+            self.res.setText(f"failed: {exc}")
+            self.btnProcess.setEnabled(True)
             return
-        r = self.result
-        self.plot.clear()
-        pos = r.delays_s > 0
-        self.plot.plot(r.delays_s[pos], r.integrals[pos],
-                       pen=None, symbol="o", symbolSize=7,
-                       symbolBrush=None, symbolPen=pg.mkPen("#0e7c86", width=1.5))
-        tt = np.logspace(np.log10(max(r.delays_s[pos].min(), 1e-4)),
-                         np.log10(r.delays_s.max() * 1.3), 300)
-        self.plot.plot(tt, r.curve(tt), pen=pg.mkPen("#d62728", width=1.6))
-        notes = ("   ·   " + " · ".join(r.notes)) if r.notes else ""
-        self.res_lbl.setText(r.summary + notes)
-        self.btnCsv.setEnabled(True)
-        self.btnRun.setEnabled(True)
+        # show the LAST slice (fully relaxed) as the reference spectrum
+        self.spec_plot.clear()
+        ref = self.slices[-1]
+        self.spec_plot.plot(self.x_ppm, ref, pen=pg.mkPen("#1a2831", width=1.2))
+        self._readd_zone_items()
+        # zoom to the real peak region so the default zone lands on the signal
+        pk = self._robust_peak_ppm()
+        span = self.x_ppm.max() - self.x_ppm.min()
+        self.spec_plot.setXRange(pk + 0.18 * span, pk - 0.18 * span, padding=0)
+        if not self.zones:
+            self._add_zone()             # start with one zone on the peak
+        self.res.setText(f"{self.slices.shape[0]} slices · delays from {src} · "
+                         "drag the zone over your peak, then Fit")
+        self.btnProcess.setEnabled(True)
+
+    def _robust_peak_ppm(self) -> float:
+        """Peak of the relaxed slice after removing its rolling baseline and
+        ignoring the noisy outer edges, so neither an edge spike nor a
+        baseline offset steals the default zone."""
+        from scipy.ndimage import uniform_filter1d
+
+        ref = self.slices[-1].astype(float)
+        ref = ref - np.median(ref)               # kill the baseline offset
+        ref = np.maximum(ref, 0.0)               # phased spectrum: signal is +
+        n = ref.size
+        guard = max(3, n // 20)
+        smooth = uniform_filter1d(ref, max(3, n // 500))
+        smooth[:guard] = 0.0
+        smooth[-guard:] = 0.0
+        if smooth.max() <= 0:
+            return float(self.x_ppm[n // 2])
+        return float(self.x_ppm[int(np.argmax(smooth))])
+
+    # ------------------------------------------------------------------
+    def _add_zone(self):
+        if self.x_ppm is None:
+            return
+        i = len(self.zones)
+        col = ZONE_COLORS[i % len(ZONE_COLORS)]
+        # default: a window around the robust peak of the relaxed slice
+        pk = self._robust_peak_ppm()
+        span = 0.06 * (self.x_ppm.max() - self.x_ppm.min())
+        c = pg.mkColor(col); c.setAlpha(40)
+        region = pg.LinearRegionItem(values=(pk - span, pk + span),
+                                     brush=pg.mkBrush(c),
+                                     pen=pg.mkPen(col, width=1.4))
+        self.spec_plot.addItem(region)
+        self.zones.append(region)
+
+    def _clear_zones(self):
+        for z in self.zones:
+            self.spec_plot.removeItem(z)
+        self.zones.clear()
+        self.build_plot.clear()
+        self.results.clear()
+        self._scatter.clear()
+
+    def _readd_zone_items(self):
+        for z in self.zones:
+            self.spec_plot.addItem(z)
+
+    def _zone_ranges(self) -> list[tuple[float, float]]:
+        out = []
+        for z in self.zones:
+            a, b = z.getRegion()
+            out.append((max(a, b), min(a, b)))
+        return out
+
+    # ------------------------------------------------------------------
+    def _fit(self):
+        if self.slices is None or not self.zones:
+            return
+        from larmor import series
+
+        zones = self._zone_ranges()
+        integrals = series.integrate_zones(self.x_ppm, self.slices, zones)
+        self.build_plot.clear()
+        self._scatter.clear()
+        self.results.clear()
+        summaries = []
+        for zi, ig in enumerate(integrals):
+            col = ZONE_COLORS[zi % len(ZONE_COLORS)]
+            if ig[-1] < 0:
+                ig = -ig
+            keep = self.keep.get(zi)
+            if keep is None or len(keep) != len(ig):
+                keep = np.ones(len(ig), bool)
+                self.keep[zi] = keep
+            norm = np.abs(ig).max() or 1.0
+            self._plot_points(zi, ig / norm, col)
+            try:
+                r = series.fit_buildup(self.delays, ig, keep=keep,
+                                       kind=self._kind() or "satrec",
+                                       stretched=self.stretched.isChecked())
+            except Exception as exc:
+                summaries.append(f"zone {zi + 1}: {exc}")
+                continue
+            self.results[zi] = r
+            tt = np.logspace(np.log10(max(self.delays[self.delays > 0].min(), 1e-4)),
+                             np.log10(self.delays.max() * 1.3), 300)
+            self.build_plot.plot(tt, r["curve"](tt) / (r["norm"] / norm),
+                                 pen=pg.mkPen(col, width=1.6))
+            name = {"satrec": "T1", "invrec": "T1", "cpmg": "T2",
+                    "t1rho": "T1ρ"}.get(r["kind"], "τ")
+            err = f" ± {r['tau_err']:.3g}" if r["tau_err"] else ""
+            b = (f", β={r['beta']:.2f}" if r["beta"] != 1.0 else "")
+            summaries.append(f"<span style='color:{col}'>zone {zi + 1}</span>: "
+                             f"{name} = {r['tau']:.4g}{err} s{b}")
+        self.res.setText("   ·   ".join(summaries))
+        self.btnCsv.setEnabled(bool(self.results))
+
+    def _plot_points(self, zi: int, y_norm: np.ndarray, col: str):
+        keep = self.keep[zi]
+        pos = self.delays > 0
+        spots = []
+        for k in range(len(self.delays)):
+            if not pos[k]:
+                continue
+            on = keep[k]
+            spots.append({"pos": (self.delays[k], y_norm[k]), "data": (zi, k),
+                          "brush": pg.mkBrush(col) if on else pg.mkBrush(230, 230, 230),
+                          "pen": pg.mkPen(col, width=1.4),
+                          "size": 9 if on else 7,
+                          "symbol": "o" if on else "x"})
+        sc = pg.ScatterPlotItem(pxMode=True)
+        sc.addPoints(spots)
+        sc.sigClicked.connect(self._point_clicked)
+        self.build_plot.addItem(sc)
+        self._scatter[zi] = sc
+
+    def _point_clicked(self, scatter, points):
+        if not points:
+            return
+        zi, k = points[0].data()
+        self.keep[zi][k] = not self.keep[zi][k]     # toggle exclusion
+        self._fit()                                  # refit on the survivors
 
     def _csv(self):
-        if not self.result:
-            return
-        r = self.result
-        lines = ["delay_s,integral_norm"]
-        lines += [f"{d},{i}" for d, i in zip(r.delays_s, r.integrals)]
-        lines.append(f"# {r.summary}  window {r.window_ppm[0]:.1f}..{r.window_ppm[1]:.1f} ppm")
+        lines = ["zone,delay_s,integral_norm,kept"]
+        zones = self._zone_ranges()
+        from larmor import series
+
+        integrals = series.integrate_zones(self.x_ppm, self.slices, zones)
+        for zi, ig in enumerate(integrals):
+            if ig[-1] < 0:
+                ig = -ig
+            norm = np.abs(ig).max() or 1.0
+            keep = self.keep.get(zi, np.ones(len(ig), bool))
+            for k in range(len(self.delays)):
+                lines.append(f"{zi + 1},{self.delays[k]:g},"
+                             f"{ig[k] / norm:.5f},{int(keep[k])}")
+        for zi, r in self.results.items():
+            lines.append(f"# zone {zi + 1}: tau={r['tau']:g} s "
+                         f"({'stretched ' if r['beta'] != 1 else ''}{r['kind']})")
         QApplication.clipboard().setText("\n".join(lines))
-        self.res_lbl.setText(r.summary + "   ·   copied as CSV")
+        self.res.setText(self.res.text() + "   ·   copied CSV")

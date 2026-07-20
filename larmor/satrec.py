@@ -62,27 +62,36 @@ def process_slices(expno: str | Path, lb_hz: float = 100.0,
                    ) -> tuple[np.ndarray, np.ndarray]:
     """Read ser (read-only), process every row identically.
 
-    mode "phase": remove digital filter, EM, ZF, FT, then apply the p0 that
-    maximizes the real integral of the LAST (fully relaxed) slice to all
-    slices. mode "magnitude": phase-insensitive |S|.
-    Returns (x_ppm, slices_real) with slices shape (nvd, npts).
+    mode "phase": EM, ZF, FT, then apply the p0 that maximizes the real
+    integral of the LAST (fully relaxed) slice to all slices.
+    mode "magnitude": phase-insensitive |S|.
+    Returns (x_ppm ascending, slices_real) with slices shape (nvd, npts).
+
+    The ser is read through the universal reader, so it is correctly reshaped
+    into rows (nmrglue leaves it flat) and the digital filter is removed.
     """
-    import nmrglue as ng
+    from larmor.io import bruker
 
-    dic, ser = ng.bruker.read(str(expno))
-    if ser.ndim == 1:
-        ser = ser[None, :]
-    ser = ng.bruker.remove_digital_filter(dic, ser)
-    acqus = dic["acqus"]
-    sw, sfo1 = float(acqus["SW_h"]), float(acqus["SFO1"])
+    data = bruker.read(expno)          # 2D time-domain NMRData, rows = slices
+    if data.ndim == 1:
+        ser = data.data[None, :]
+    else:
+        ser = data.data
+    sw = data.axes[-1].sw_Hz or data.meta.get("sw_Hz", 0.0)
+    sfo1 = data.meta["larmor_MHz"]
 
+    ser = np.asarray(ser, complex).copy()
+    ser[:, 0] *= 0.5                     # FCOR: kill the DC ridge / edge spike
     n = ser.shape[1]
     t = np.arange(n) / sw
     window = np.exp(-np.pi * lb_hz * t)
     nfft = int(2 ** np.ceil(np.log2(n * max(1, zf_factor))))
     spec = np.fft.fftshift(np.fft.fft(ser * window, n=nfft, axis=1), axes=1)
-    freq = np.linspace(sw / 2, -sw / 2, nfft, endpoint=False)
+    # ascending frequency axis (fftshift(fftfreq), matches the rest of LARMOR)
+    freq = np.fft.fftshift(np.fft.fftfreq(nfft, d=1.0 / sw))
     x_ppm = freq / sfo1
+    order = np.argsort(x_ppm)
+    x_ppm, spec = x_ppm[order], spec[:, order]
 
     if mode == "magnitude":
         out = np.abs(spec)
@@ -92,8 +101,7 @@ def process_slices(expno: str | Path, lb_hz: float = 100.0,
         scores = [(np.real(ref * np.exp(1j * p))).sum() for p in phis]
         p0 = float(phis[int(np.argmax(scores))])
         out = np.real(spec * np.exp(1j * p0))
-    order = np.argsort(x_ppm)
-    return x_ppm[order], out[:, order]
+    return x_ppm, out
 
 
 def fit_t1(delays: np.ndarray, integrals: np.ndarray,

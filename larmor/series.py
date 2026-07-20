@@ -25,6 +25,51 @@ from larmor.satrec import process_slices, read_vdlist
 
 KINDS = ("satrec", "invrec", "cpmg", "t1rho", "decay")
 
+
+def integrate_zones(x_ppm: np.ndarray, slices: np.ndarray,
+                    zones: list[tuple[float, float]]) -> np.ndarray:
+    """Integral of every slice inside every ppm zone.
+
+    Returns an array of shape (n_zones, n_slices). This is the numeric core of
+    the guided-T1 workflow: the user drags integration regions, this turns
+    each region into a build-up curve.
+    """
+    out = np.zeros((len(zones), slices.shape[0]))
+    for zi, (hi, lo) in enumerate(zones):
+        sel = (x_ppm >= min(hi, lo)) & (x_ppm <= max(hi, lo))
+        if sel.any():
+            out[zi] = slices[:, sel].sum(axis=1)
+    return out
+
+
+def fit_buildup(delays: np.ndarray, integrals: np.ndarray,
+                keep: np.ndarray | None = None, kind: str = "satrec",
+                stretched: bool = False):
+    """Fit one build-up curve, optionally excluding points (keep mask).
+
+    This backs the outlier-removal step: the user unchecks aberrant points and
+    the fit is redone on the survivors only. Returns (SeriesResult-like dict).
+    """
+    delays = np.asarray(delays, float)
+    integrals = np.asarray(integrals, float)
+    if keep is None:
+        keep = np.ones(delays.shape, bool)
+    keep = np.asarray(keep, bool)
+    if keep.sum() < (3 if stretched else 2):
+        raise ValueError("need at least 2-3 kept points to fit T1")
+    norm = np.abs(integrals[keep]).max() or 1.0
+    out, curve = fit_series(delays[keep], integrals[keep] / norm,
+                            kind=kind, stretched=stretched)
+    p = out.params
+    return {
+        "tau": float(p["tau"].value),
+        "tau_err": float(p["tau"].stderr) if p["tau"].stderr else None,
+        "beta": float(p["beta"].value) if stretched else 1.0,
+        "beta_err": (float(p["beta"].stderr)
+                     if stretched and p["beta"].stderr else None),
+        "curve": curve, "norm": norm, "kind": kind,
+    }
+
 #: pulse-program name fragments -> series kind
 _PULPROG_HINTS = (
     ("satrec", "satrec"), ("sr_", "satrec"), ("satur", "satrec"),

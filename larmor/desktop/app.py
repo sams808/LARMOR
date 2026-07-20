@@ -979,10 +979,18 @@ class MainWindow(QMainWindow):
     def open_satrec(self):
         from larmor.desktop.satrec_dialog import SatrecDialog
 
+        # resolve whatever is loaded (a 2rr/ser file, a pdata or EXPNO folder)
+        # up to the EXPNO that owns the raw ser
         expno = None
-        if self.source_path and Path(self.source_path).is_dir() and \
-                (Path(self.source_path) / "ser").exists():
-            expno = self.source_path
+        if self.source_path:
+            try:
+                from larmor.io import bruker
+
+                ref = bruker.resolve(self.source_path)
+                if (ref.expno / "ser").exists():
+                    expno = str(ref.expno)
+            except Exception:
+                expno = None
         SatrecDialog(self, expno).exec()
 
     def open_redor(self):

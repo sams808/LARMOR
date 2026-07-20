@@ -47,18 +47,33 @@ class _Cell(QWidget):
         self.spin.setStepType(QDoubleSpinBox.AdaptiveDecimalStepType)
         self.spin.setButtonSymbols(QDoubleSpinBox.NoButtons)
         self.spin.setFrame(False)
+        # keep the editor from letting a value out of its own bounds
+        if p.get("min") is not None:
+            self.spin.setMinimum(float(p["min"]))
+        if p.get("max") is not None:
+            self.spin.setMaximum(float(p["max"]))
         self.spin.setValue(p["value"])
         self.spin.setEnabled(not p.get("expr"))
         self.pin = QCheckBox()
         self.pin.setToolTip("pin: hold this parameter fixed during the fit")
         self.pin.setChecked(not p.get("vary", True) and not p.get("expr"))
         self.pin.setEnabled(not p.get("expr"))
+
+        tips = []
+        bounded = p.get("min") is not None or p.get("max") is not None
+        if bounded:
+            lo = "−∞" if p.get("min") is None else f"{p['min']:g}"
+            hi = "+∞" if p.get("max") is None else f"{p['max']:g}"
+            tips.append(f"constrained to [{lo}, {hi}]")
+            # a teal left border marks a bounded parameter at a glance
+            self.setStyleSheet("_Cell { border-left: 3px solid #0e7c86; }")
         if p.get("expr"):
-            self.spin.setToolTip("linked: " + p["expr"])
+            tips.append("linked: " + p["expr"])
             self.setStyleSheet("background: #e2f0f0;")
-        err = p.get("stderr")
-        if err:
-            self.spin.setToolTip((p.get("expr") or "") + f"  ± {err:.3g}".strip())
+        if p.get("stderr"):
+            tips.append(f"± {p['stderr']:.3g}")
+        if tips:
+            self.spin.setToolTip("  ·  ".join(tips))
         lay.addWidget(self.spin, 1)
         lay.addWidget(self.pin)
         self.spin.valueChanged.connect(self._on_value)
@@ -215,9 +230,19 @@ class LinesTable(QWidget):
                     a_un = QAction(f"Unlink  (now: {p['expr']})", menu)
                     a_un.triggered.connect(lambda: self._unlink(p))
                     menu.addAction(a_un)
-                a_bounds = QAction("Set min / max…", menu)
-                a_bounds.triggered.connect(lambda: self._edit_bounds(p))
+                bounded = (p.get("min") is not None
+                           or p.get("max") is not None)
+                label = ("Constrain min / max…  ✓" if bounded
+                         else "Constrain min / max…")
+                a_bounds = QAction(label, menu)
+                a_bounds.triggered.connect(
+                    lambda _=False, key=key: self._edit_bounds(site, key))
                 menu.addAction(a_bounds)
+                if bounded:
+                    a_free = QAction("Remove constraints", menu)
+                    a_free.triggered.connect(
+                        lambda _=False, pp=p: self._clear_bounds(pp))
+                    menu.addAction(a_free)
                 menu.addSeparator()
         a_vis = QAction("Show / hide on plot", menu)
         a_vis.triggered.connect(lambda: self.structure.emit(row, "visibility"))
@@ -263,15 +288,21 @@ class LinesTable(QWidget):
                 p["vary"] = True
             self.constraint_edited.emit()
 
-    def _edit_bounds(self, p: dict):
-        lo, ok1 = QInputDialog.getText(self, "Bounds", "min (empty = none):",
-                                       text="" if p.get("min") is None else str(p["min"]))
-        if not ok1:
-            return
-        hi, ok2 = QInputDialog.getText(self, "Bounds", "max (empty = none):",
-                                       text="" if p.get("max") is None else str(p["max"]))
-        if not ok2:
-            return
-        p["min"] = float(lo) if lo.strip() else None
-        p["max"] = float(hi) if hi.strip() else None
+    def _edit_bounds(self, site: dict, key: str):
+        from larmor.desktop.dialogs import BoundsDialog
+
+        p = site["params"][key]
+        from larmor.desktop.table import PARAM_LABELS as _PL
+
+        dlg = BoundsDialog(self, _PL.get(key, key), p)
+        if dlg.exec():
+            p["min"], p["max"] = dlg.result_min, dlg.result_max
+            if p["min"] is not None and p["value"] < p["min"]:
+                p["value"] = p["min"]
+            if p["max"] is not None and p["value"] > p["max"]:
+                p["value"] = p["max"]
+            self.constraint_edited.emit()
+
+    def _clear_bounds(self, p: dict):
+        p["min"] = p["max"] = None
         self.constraint_edited.emit()
