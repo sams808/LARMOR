@@ -94,6 +94,33 @@ def test_overlay_cockpit(qapp, win):
     assert len(win._overlays) == 1
 
 
+def test_hmqc_uncorrelated_features(qapp):
+    """Overlaying a 1D on an HMQC projection and subtracting the (scaled)
+    projection isolates the features that do NOT correlate."""
+    from larmor import twod
+    from larmor.desktop.twod_view import Contour2DView
+
+    f2 = np.linspace(-50, 50, 200); f1 = np.linspace(-30, 30, 80)
+    Z = (np.exp(-((f2[None, :] - 10) / 3) ** 2)
+         * np.exp(-((f1[:, None] - 5) / 3) ** 2))          # one cross-peak @ F2=10
+    d = twod.Data2D(f2_ppm=f2, f1_ppm=f1, z=Z, nucleus="1H", larmor_MHz=500.0)
+    v = Contour2DView(); v.set_data(d.normalized(), "HMQC"); qapp.processEvents()
+
+    # a 1D with the correlated peak (@10) AND an uncorrelated one (@-20)
+    oned = np.exp(-((f2 - 10) / 3) ** 2) + 0.7 * np.exp(-((f2 + 20) / 3) ** 2)
+    v.set_projection_1d("f2", f2, oned); qapp.processEvents()
+    assert v.btnHmqc.isChecked()
+
+    got = {}
+    v.slice_to_fit.connect(lambda p, a, lab: got.update(ppm=p, amp=a))
+    v._emit_uncorrelated("f2"); qapp.processEvents()
+    ppm, amp = got["ppm"], got["amp"]
+    at10 = amp[int(np.argmin(np.abs(ppm - 10)))]
+    atm20 = amp[int(np.argmin(np.abs(ppm + 20)))]
+    assert abs(at10) < 0.15            # correlated peak removed
+    assert atm20 > 0.5                 # uncorrelated peak retained
+
+
 def test_twod_fit_wiring(qapp, win):
     """A displayed 2D gets a recipe, click-to-add places 2D sites, the fitted
     overlay renders, and run_fit routes to the 2D path (rejecting 1D-only models)."""

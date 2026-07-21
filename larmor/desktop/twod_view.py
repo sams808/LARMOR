@@ -30,6 +30,8 @@ class Contour2DView(QWidget):
     slice_to_fit = Signal(object, object, str)
     #: (f2_ppm, f1_ppm) where the user clicked to place a 2D site
     add_requested = Signal(float, float)
+    #: ask the app to load a 1D spectrum to overlay on a projection ("f2"/"f1")
+    load_1d_for_projection = Signal(str)
 
     def __init__(self):
         super().__init__()
@@ -38,6 +40,9 @@ class Contour2DView(QWidget):
         self._committed = None      # phases the user has applied so far
         self._add_model = None      # model name while placing a 2D site
         self._model = None          # fitted overlay: (z, f2_ppm, f1_ppm)
+        #: HMQC: an external 1D per projection axis, {"f2":(ppm,amp),"f1":...}
+        self._hmqc = {"f2": None, "f1": None}
+        self._hmqc_scale = {"f2": 1.0, "f1": 1.0}
         self._picks: list[int] = []  # reference row/column indices (1 or 2)
         self._pick_axis = "f2"
         self._pivot = None          # pivot ppm on the phased axis
@@ -88,8 +93,42 @@ class Contour2DView(QWidget):
         self.btnMeasure.setToolTip("two draggable markers: ΔF2 / ΔF1 in ppm and Hz")
         self.btnMeasure.toggled.connect(self._toggle_measure)
         bar.addWidget(self.btnMeasure)
+        self.btnHmqc = QPushButton("HMQC")
+        self.btnHmqc.setCheckable(True)
+        self.btnHmqc.setToolTip("overlay 1D spectra on the projections and "
+                                "extract un-correlated features")
+        self.btnHmqc.toggled.connect(lambda on: self.hmqcbar.setVisible(on))
+        bar.addWidget(self.btnHmqc)
         v.addLayout(bar)
         self._mtargets: list = []
+
+        # ---- HMQC bar (hidden until HMQC) ----
+        self.hmqcbar = QWidget()
+        hb = QHBoxLayout(self.hmqcbar); hb.setContentsMargins(0, 0, 0, 0)
+        hb.addWidget(QLabel("overlay 1D on projection:"))
+        b2 = QPushButton("F2 1D…"); b2.clicked.connect(
+            lambda: self.load_1d_for_projection.emit("f2"))
+        b1 = QPushButton("F1 1D…"); b1.clicked.connect(
+            lambda: self.load_1d_for_projection.emit("f1"))
+        hb.addWidget(b2); hb.addWidget(b1)
+        hb.addWidget(QLabel("scale"))
+        self.hmqcScale = QDoubleSpinBox()
+        self.hmqcScale.setRange(0.0, 1e6); self.hmqcScale.setDecimals(3)
+        self.hmqcScale.setValue(1.0)
+        self.hmqcScale.setToolTip("scale the correlated (projection) part before "
+                                  "subtracting it from the 1D")
+        self.hmqcScale.valueChanged.connect(self._on_hmqc_scale)
+        hb.addWidget(self.hmqcScale)
+        self.btnUncF2 = QPushButton("uncorrelated F2 →")
+        self.btnUncF2.setToolTip("1D − scale·(F2 projection) → features that do "
+                                 "NOT correlate, sent to the fit workbench")
+        self.btnUncF2.clicked.connect(lambda: self._emit_uncorrelated("f2"))
+        self.btnUncF1 = QPushButton("uncorrelated F1 →")
+        self.btnUncF1.clicked.connect(lambda: self._emit_uncorrelated("f1"))
+        hb.addWidget(self.btnUncF2); hb.addWidget(self.btnUncF1)
+        hb.addStretch(1)
+        self.hmqcbar.setVisible(False)
+        v.addWidget(self.hmqcbar)
 
         # ---- phase bar (hidden until Phase 2D) ----
         self.phasebar = QWidget()
@@ -206,6 +245,8 @@ class Contour2DView(QWidget):
         self.btnPhase.blockSignals(True); self.btnPhase.setChecked(False)
         self.btnPhase.blockSignals(False)
         self.phasebar.setVisible(False)
+        self._hmqc = {"f2": None, "f1": None}
+        self._hmqc_scale = {"f2": 1.0, "f1": 1.0}
         self._picks = []; self._pivot = None; self._pref = []
         for s in (self.p0v, self.p1v):
             s.blockSignals(True); s.setValue(0); s.blockSignals(False)
@@ -443,6 +484,52 @@ class Contour2DView(QWidget):
         self._model = None
         self._redraw()
 
+    # ---------- HMQC: overlay 1D on projections + uncorrelated features ----------
+    def set_projection_1d(self, axis: str, ppm, amp):
+        """Store an external 1D for the F2 or F1 projection and peak-match its
+        scale to the HMQC sum-projection."""
+        ppm = np.asarray(ppm, float); amp = np.asarray(amp, float)
+        o = np.argsort(ppm)
+        self._hmqc[axis] = (ppm[o], amp[o])
+        self._hmqc_scale[axis] = self._peak_match(axis)
+        self.hmqcScale.blockSignals(True); self.hmqcScale.setValue(1.0)
+        self.hmqcScale.blockSignals(False)
+        if not self.btnHmqc.isChecked():
+            self.btnHmqc.setChecked(True)
+        self._redraw()
+
+    def _proj(self, axis: str):
+        d = self.data
+        coords = d.f2_ppm if axis == "f2" else d.f1_ppm
+        return coords, d.projection(axis, "sum")
+
+    def _one_d_on(self, axis: str, coords):
+        px, pa = self._hmqc[axis]
+        return np.interp(coords, px, pa, left=0.0, right=0.0)
+
+    def _peak_match(self, axis: str) -> float:
+        if self.data is None or self._hmqc[axis] is None:
+            return 1.0
+        coords, proj = self._proj(axis)
+        yi = self._one_d_on(axis, coords)
+        i = int(np.argmax(proj))
+        return float(yi[i] / (proj[i] or 1.0)) if proj[i] else 1.0
+
+    def _eff_scale(self, axis: str) -> float:
+        return self._hmqc_scale[axis] * (self.hmqcScale.value() or 1.0)
+
+    def _on_hmqc_scale(self, *_):
+        self._redraw()
+
+    def _emit_uncorrelated(self, axis: str):
+        if self.data is None or self._hmqc[axis] is None:
+            return
+        coords, proj = self._proj(axis)
+        yi = self._one_d_on(axis, coords)
+        diff = yi - self._eff_scale(axis) * proj
+        self.slice_to_fit.emit(np.asarray(coords), np.asarray(diff),
+                               f"un-correlated {axis.upper()} of {self.title.text()}")
+
     # ------------------------------------------------------------------
     def _contour_levels(self, z):
         edge = max(1, min(z.shape) // 20)
@@ -516,8 +603,22 @@ class Contour2DView(QWidget):
         lo = max(min(f2), min(f1)); hi = min(max(f2), max(f1))
         self.p_main.plot([lo, hi], [lo, hi],
                          pen=pg.mkPen("#b9c1bc", style=Qt.DashLine))
-        self.p_top.plot(f2, z.max(axis=0), pen=pg.mkPen("#0e7c86"))
-        self.p_left.plot(z.max(axis=1), f1, pen=pg.mkPen("#0e7c86"))
+        # projections — or, in HMQC mode, the scaled sum-projection (correlated)
+        # under the external 1D (total), so the gap is the uncorrelated part
+        if self._hmqc["f2"] is not None:
+            self.p_top.plot(f2, self._eff_scale("f2") * d.projection("f2", "sum"),
+                            pen=pg.mkPen("#0e7c86"))
+            self.p_top.plot(f2, self._one_d_on("f2", f2),
+                            pen=pg.mkPen("#e8832a", width=1.2))
+        else:
+            self.p_top.plot(f2, z.max(axis=0), pen=pg.mkPen("#0e7c86"))
+        if self._hmqc["f1"] is not None:
+            self.p_left.plot(self._eff_scale("f1") * d.projection("f1", "sum"), f1,
+                             pen=pg.mkPen("#0e7c86"))
+            self.p_left.plot(self._one_d_on("f1", f1), f1,
+                             pen=pg.mkPen("#e8832a", width=1.2))
+        else:
+            self.p_left.plot(z.max(axis=1), f1, pen=pg.mkPen("#0e7c86"))
 
         # reference-peak markers while picking for phase
         if self.btnPhase.isChecked() and self._picks:

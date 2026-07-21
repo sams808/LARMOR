@@ -251,6 +251,7 @@ class MainWindow(QMainWindow):
         self._data2d = None            # the 2D dataset currently on the map
         self._fit2d_worker = None
         self.view2d.add_requested.connect(self.add_site_2d)
+        self.view2d.load_1d_for_projection.connect(self.load_projection_1d)
 
         # give the spectrum the majority of the height; keep the parameter
         # dock compact so it does not swallow half the window when nearly empty
@@ -948,6 +949,32 @@ class MainWindow(QMainWindow):
             label = self.recipe.get("sample") or (
                 Path(self.source_path).name if self.source_path else "")
         self.datasets_panel.rebuild(label, self._overlays)
+
+    def load_projection_1d(self, axis: str):
+        """HMQC: load a 1D spectrum and overlay it on the F2/F1 projection."""
+        path, _ = QFileDialog.getOpenFileName(
+            self, f"1D spectrum for the {axis.upper()} projection",
+            self._last_dir(),
+            "Spectra (*.fxmla *.json 1r *.txt *.csv);;All files (*)")
+        if not path:
+            return
+        try:
+            ppm, amp, *_ = _load_any(path)
+        except Exception:
+            try:
+                from larmor.io import bruker
+
+                d = bruker.read(path)
+                if d.ndim != 1 or d.domain != "freq":
+                    raise ValueError("not a 1D spectrum")
+                ppm, amp = np.asarray(d.axes[0].values), np.asarray(d.data, float)
+            except Exception as exc:
+                QMessageBox.warning(self, "Projection 1D", f"cannot read: {exc}")
+                return
+        self.view2d.set_projection_1d(axis, np.asarray(ppm), np.asarray(amp))
+        self.statusBar().showMessage(
+            f"{axis.upper()} 1D overlaid — adjust scale, then 'uncorrelated "
+            f"{axis.upper()} →' for the non-correlated features")
 
     def _show_2d(self, data2d, title: str, kind: str):
         from larmor.recipe import Recipe
