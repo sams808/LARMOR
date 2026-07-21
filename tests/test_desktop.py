@@ -74,6 +74,34 @@ def test_open_any_type_never_rejects(qapp, win):
     assert is_1d() and win.exp_ppm.size > 0
 
 
+def test_twod_fit_wiring(qapp, win):
+    """A displayed 2D gets a recipe, click-to-add places 2D sites, the fitted
+    overlay renders, and run_fit routes to the 2D path (rejecting 1D-only models)."""
+    from larmor import twod
+
+    f2 = np.linspace(-60, 60, 48); f1 = np.linspace(-30, 30, 24)
+    d = twod.Data2D(f2_ppm=f2, f1_ppm=f1,
+                    z=np.abs(np.random.RandomState(3).randn(24, 48)),
+                    nucleus="27Al", larmor_MHz=195.5)
+    win._show_2d(d, "syn", "2D"); qapp.processEvents()
+    assert win.central_stack.currentWidget() is win.view2d
+    assert win.recipe is not None and win.recipe["nucleus"] == "27Al"
+    assert win._data2d_fittable
+
+    win._model_actions["czjzek"].setChecked(True)
+    win.add_site_2d(-10.0, 5.0); qapp.processEvents()
+    assert len(win.recipe["sites"]) == 1 and win.recipe["sites"][0]["model"] == "czjzek"
+
+    win.view2d.set_model(d.z, f2, f1); qapp.processEvents()
+    assert win.view2d._model is not None
+
+    # a pseudo-2D (relaxation) array is not fittable
+    dp = twod.Data2D(f2_ppm=f2, f1_ppm=f1, z=d.z, nucleus="27Al")
+    dp.notes = ["pseudo-2D (arrayed)"]
+    win._show_2d(dp, "relax", "pseudo-2D"); qapp.processEvents()
+    assert not win._data2d_fittable
+
+
 def test_calibrate_and_measure(qapp):
     """Calibrate shifts the axis so a picked peak reads the target; the 2D
     measure readout reports Δ in ppm and Hz."""

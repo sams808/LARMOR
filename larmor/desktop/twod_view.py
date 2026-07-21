@@ -28,12 +28,16 @@ from PySide6.QtWidgets import (
 class Contour2DView(QWidget):
     #: (ppm, amp, label) of a 1D trace the user wants to fit
     slice_to_fit = Signal(object, object, str)
+    #: (f2_ppm, f1_ppm) where the user clicked to place a 2D site
+    add_requested = Signal(float, float)
 
     def __init__(self):
         super().__init__()
         self.data = None            # currently displayed (committed) data
         self._orig = None           # as loaded, never mutated
         self._committed = None      # phases the user has applied so far
+        self._add_model = None      # model name while placing a 2D site
+        self._model = None          # fitted overlay: (z, f2_ppm, f1_ppm)
         self._picks: list[int] = []  # reference row/column indices (1 or 2)
         self._pick_axis = "f2"
         self._pivot = None          # pivot ppm on the phased axis
@@ -245,6 +249,11 @@ class Contour2DView(QWidget):
                 ev.scenePos()))
             ev.accept()
             return
+        if self._add_model is not None:
+            p = self.p_main.getViewBox().mapSceneToView(ev.scenePos())
+            self.add_requested.emit(float(p.x()), float(p.y()))
+            ev.accept()
+            return
         if not self.btnPhase.isChecked():
             return
         if self.stack.currentWidget() is not self.glw:
@@ -413,6 +422,20 @@ class Contour2DView(QWidget):
         i = int(np.argmin(np.abs(d.f1_ppm - p.y())))
         self.cursor.setText(f"F2 {p.x():7.1f}  F1 {p.y():7.1f}  z {d.z[i, j]:+.3f}")
 
+    # ---------- fitted-model overlay ----------
+    def set_add_mode(self, name):
+        self._add_model = name
+        self.setCursor(Qt.CrossCursor if name else Qt.ArrowCursor)
+
+    def set_model(self, z, f2_ppm, f1_ppm):
+        self._model = (np.asarray(z, float), np.asarray(f2_ppm),
+                       np.asarray(f1_ppm)) if z is not None else None
+        self._redraw()
+
+    def clear_model(self):
+        self._model = None
+        self._redraw()
+
     # ------------------------------------------------------------------
     def _contour_levels(self, z):
         edge = max(1, min(z.shape) // 20)
@@ -451,6 +474,22 @@ class Contour2DView(QWidget):
                 iso = pg.IsocurveItem(data=z.T, level=-lvl,
                                       pen=pg.mkPen("#d62728", width=1))
                 iso.setTransform(tr); self.p_main.addItem(iso)
+
+        # fitted-model contours overlaid in orange, dashed
+        if self._model is not None:
+            mz, mf2, mf1 = self._model
+            mtop = float(np.nanmax(mz)) or 1.0
+            mlev = np.logspace(np.log10(max(0.05 * mtop, 1e-6)),
+                               np.log10(mtop), max(4, int(self.nlevels.value()) // 2))
+            mtr = pg.QtGui.QTransform()
+            mtr.translate(mf2[0], mf1[0])
+            mtr.scale((mf2[-1] - mf2[0]) / max(mz.shape[1] - 1, 1),
+                      (mf1[-1] - mf1[0]) / max(mz.shape[0] - 1, 1))
+            for lvl in mlev:
+                iso = pg.IsocurveItem(data=mz.T, level=lvl,
+                                      pen=pg.mkPen("#e8832a", width=1,
+                                                   style=Qt.DashLine))
+                iso.setTransform(mtr); self.p_main.addItem(iso)
 
         lo = max(min(f2), min(f1)); hi = min(max(f2), max(f1))
         self.p_main.plot([lo, hi], [lo, hi],

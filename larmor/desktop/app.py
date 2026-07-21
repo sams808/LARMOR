@@ -125,6 +125,26 @@ class FitWorker(QThread):
             self.failed.emit(str(exc))
 
 
+class Fit2DWorker(QThread):
+    done = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, recipe_dict, data2d, method):
+        super().__init__()
+        self.recipe_dict, self.data2d, self.method = \
+            recipe_dict, data2d, method
+
+    def run(self):
+        try:
+            from larmor import twod
+
+            recipe = Recipe.from_dict(self.recipe_dict)
+            result = twod.fit_2d(recipe, self.data2d, method=self.method)
+            self.done.emit(result)
+        except Exception as exc:
+            self.failed.emit(str(exc))
+
+
 class SimWorker(QThread):
     done = Signal(object, object, object)
     failed = Signal(str)
@@ -215,6 +235,9 @@ class MainWindow(QMainWindow):
         self._sim_timer.setSingleShot(True)
         self._sim_timer.setInterval(120)
         self._sim_timer.timeout.connect(self._simulate_now)
+        self._data2d = None            # the 2D dataset currently on the map
+        self._fit2d_worker = None
+        self.view2d.add_requested.connect(self.add_site_2d)
 
         # give the spectrum the majority of the height; keep the parameter
         # dock compact so it does not swallow half the window when nearly empty
@@ -787,8 +810,24 @@ class MainWindow(QMainWindow):
         return False
 
     def _show_2d(self, data2d, title: str, kind: str):
+        from larmor.recipe import Recipe
+
+        self._data2d = data2d
         self.view2d.set_data(data2d, f"{kind} — {title}")
+        self.view2d.clear_model()
         self.central_stack.setCurrentWidget(self.view2d)
+        # a genuine spectroscopic 2D (not a relaxation array) is fittable, so
+        # give it a recipe if there isn't a fit already in progress
+        pseudo = any("pseudo" in n or "arrayed" in n for n in data2d.notes)
+        self._data2d_fittable = not pseudo
+        if not pseudo and (self.recipe is None or not self.recipe.get("sites")):
+            self.recipe = Recipe(
+                sample=title, source_kind="bruker", source_path=self.source_path,
+                nucleus=data2d.nucleus,
+                larmor_frequency_MHz=data2d.larmor_MHz).to_dict()
+            self.hidden.clear()
+            self.lines_table.rebuild(self.recipe, self.hidden)
+            self._update_exp_label(); self._update_enabled()
 
     def _display_1d(self, ppm, amp, nucleus, larmor, masr, title, expno):
         """Put a bare 1D spectrum on the workbench (no fit), ready to fit."""
@@ -854,6 +893,7 @@ class MainWindow(QMainWindow):
         for n, a in self._model_actions.items():
             a.setChecked(n == name)
         self.view.set_add_mode(name)
+        self.view2d.set_add_mode(name)
         if name:
             self.statusBar().showMessage(
                 f"click on the spectrum to place a {name} line (Esc to cancel)")
@@ -883,6 +923,33 @@ class MainWindow(QMainWindow):
              "params": params})
         self._set_add_mode(None)
         self.on_structure_changed()
+
+    def add_site_2d(self, f2_ppm: float, f1_ppm: float):
+        """Place a 2D site from a click on the contour: the isotropic shift
+        starts at the clicked F1 (isotropic) position."""
+        name = next((n for n, a in self._model_actions.items()
+                     if a.isChecked()), None)
+        if not name or self.recipe is None:
+            return
+        self.snapshot()
+        m = model_registry.get(name)
+        params = {p.name: {"value": p.default, "stderr": None, "vary": p.vary,
+                           "min": p.min, "max": p.max, "expr": None}
+                  for p in m.params}
+        if "isotropic_chemical_shift_ppm" in params:
+            params["isotropic_chemical_shift_ppm"]["value"] = float(f1_ppm)
+        if "amplitude" in params:
+            params["amplitude"]["value"] = 1.0
+        n = len(self.recipe["sites"])
+        self.recipe["sites"].append(
+            {"model": name, "label": f"{m.label.split(' ')[0]}-{n}",
+             "params": params})
+        self._set_add_mode(None)
+        self.lines_table.rebuild(self.recipe, self.hidden)
+        self._update_enabled()
+        self.statusBar().showMessage(
+            f"added {name} at F1≈{f1_ppm:.1f} ppm — Decomposition ▸ Fit to fit "
+            "the 2D")
 
     def on_site_structure(self, idx: int, action: str):
         if self.recipe is None:
@@ -958,6 +1025,9 @@ class MainWindow(QMainWindow):
         self._sim_timer.start()
 
     def _simulate_now(self):
+        # the 2D map has its own (explicit) fit path; skip the live 1D sim there
+        if self.central_stack.currentWidget() is self.view2d:
+            return
         if not self.recipe or not self.recipe["sites"]:
             self.view.set_model(None, None, None, None, self.hidden)
             return
@@ -988,6 +1058,9 @@ class MainWindow(QMainWindow):
         if not self.recipe or not self.recipe["sites"]:
             self.statusBar().showMessage("add at least one line first")
             return
+        if self.central_stack.currentWidget() is self.view2d:
+            self.run_fit_2d()
+            return
         if self._fit_worker and self._fit_worker.isRunning():
             return
         self.snapshot()
@@ -1003,6 +1076,46 @@ class MainWindow(QMainWindow):
         self._fit_worker.done.connect(self._fit_done)
         self._fit_worker.failed.connect(self._fit_failed)
         self._fit_worker.start()
+
+    # ------------------------------------------------------------- 2D fit
+    _MODELS_2D = {"czjzek", "ext_czjzek", "quad_ct", "quad_csa"}
+
+    def run_fit_2d(self, method: str = "3QMAS"):
+        if self._data2d is None or not getattr(self, "_data2d_fittable", False):
+            self.statusBar().showMessage(
+                "this 2D is a relaxation array, not an MQMAS map — not fittable")
+            return
+        bad = [s["model"] for s in self.recipe["sites"]
+               if s["model"] not in self._MODELS_2D]
+        if bad:
+            QMessageBox.warning(
+                self, "2D fit", "these models have no 2D implementation: "
+                + ", ".join(sorted(set(bad)))
+                + "\n2D supports: " + ", ".join(sorted(self._MODELS_2D)))
+            return
+        if self._fit2d_worker and self._fit2d_worker.isRunning():
+            return
+        self.snapshot()
+        self.statusBar().showMessage(
+            "fitting the 2D (building the MQMAS kernel, first time is slow)…")
+        self.lines_table.btnFit.setEnabled(False)
+        self._fit2d_worker = Fit2DWorker(
+            json.loads(json.dumps(self.recipe)), self._data2d, method)
+        self._fit2d_worker.done.connect(self._fit2d_done)
+        self._fit2d_worker.failed.connect(self._fit_failed)
+        self._fit2d_worker.start()
+
+    def _fit2d_done(self, result):
+        self.lines_table.btnFit.setEnabled(True)
+        self.recipe = result.recipe.to_dict()
+        self.lines_table.rebuild(self.recipe, self.hidden)
+        self.view2d.set_model(result.z_fit, result.kernel.f2_ppm,
+                              result.kernel.f1_ppm)
+        self.lines_table.set_chi2(f"RMSD {result.rmsd:.4f}")
+        self.results_summary.setText(f"2D MQMAS fit · RMSD {result.rmsd:.4f}")
+        self.report.setPlainText(result.report)
+        self.statusBar().showMessage(f"2D fit done · RMSD {result.rmsd:.4f}")
+        self._persist_session()
 
     def _fit_failed(self, msg: str):
         self.lines_table.btnFit.setEnabled(True)
