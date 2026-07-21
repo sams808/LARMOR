@@ -173,12 +173,14 @@ class MainWindow(QMainWindow):
         self.view.add_requested.connect(self.add_site_at)
         self.view.paddle_moved.connect(self.on_paddle_moved)
         self.view.paddle_released.connect(self.on_paddle_released)
+        self.view.file_dropped.connect(self.load_source)
         self.view.cursor_moved.connect(
             lambda x, y: self.pos_label.setText(f"x: {x:.2f} ppm   y: {y:.4g}"))
 
         self._build_menus()
         self._build_toolbar()
         self._build_sidebar()
+        self._build_explorer_dock()
         self._build_bottom_docks()
         self._build_right_dock()
 
@@ -210,12 +212,16 @@ class MainWindow(QMainWindow):
         m_file = mb.addMenu("&File")
         self._add(m_file, "&Open…  (spectrum / recipe / 1r / 2rr)",
                   self.open_file, "Ctrl+O")
+        self._add(m_file, "Open &sample…  (list all its spectra)",
+                  self.open_sample, "Ctrl+Shift+S")
         self._add(m_file, "Open &EXPNO / folder…", self.open_expno,
                   "Ctrl+Shift+O")
         self._add(m_file, "Open &FID…  (process before FT)", self.open_fid,
                   "Ctrl+F")
         m_file.addSeparator()
         self.actSave = self._add(m_file, "&Save recipe", self.save_recipe, "Ctrl+S")
+        self._add(m_file, "Save fit &as…  (txt / csv / json / dmfit)",
+                  self.save_fit_as, "Ctrl+Shift+E")
         self._add(m_file, "Figure…", self.open_figure_dialog)
         m_file.addSeparator()
         self._add(m_file, "E&xit", self.close)
@@ -343,6 +349,18 @@ class MainWindow(QMainWindow):
             a.setToolTip(tip)
             a.triggered.connect(slot)
             sb.addAction(a)
+
+    def _build_explorer_dock(self):
+        from larmor.desktop.explorer import ExplorerPanel
+
+        self.explorer_dock = QDockWidget("Explorer", self)
+        self.explorer_dock.setFeatures(QDockWidget.DockWidgetMovable |
+                                       QDockWidget.DockWidgetClosable)
+        self.explorer = ExplorerPanel()
+        self.explorer.open_requested.connect(self.load_source)
+        self.explorer_dock.setWidget(self.explorer)
+        self.explorer_dock.setMinimumWidth(230)
+        self.addDockWidget(Qt.LeftDockWidgetArea, self.explorer_dock)
 
     # ------------------------------------------------------------- docks
     def _build_bottom_docks(self):
@@ -552,6 +570,18 @@ class MainWindow(QMainWindow):
         if path:
             self.load_source(path)
 
+    def open_sample(self):
+        path = QFileDialog.getExistingDirectory(
+            self, "Choose a sample folder (lists all its spectra)",
+            self._last_dir())
+        if path:
+            self.explorer.load_sample(path)
+            self.explorer_dock.show()
+            self.explorer_dock.raise_()
+            self.statusBar().showMessage(
+                "sample scanned — double-click a spectrum in the Explorer "
+                "to open it")
+
     def open_fid(self):
         from larmor.desktop.fid_dialog import FidDialog
 
@@ -603,7 +633,7 @@ class MainWindow(QMainWindow):
     def _last_dir(self) -> str:
         return QSettings("LARMOR", "app").value("lastDir", "")
 
-    def load_source(self, path: str):
+    def load_source(self, path: str, keep_fit: bool | None = None):
         self.statusBar().showMessage("loading…")
         QApplication.processEvents()
         try:
@@ -612,6 +642,25 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Load failed", str(exc))
             self.statusBar().showMessage("load failed")
             return
+
+        # dmfit behaviour: if a fit is already on screen and the new source
+        # brings no fit of its own, offer to keep the current lines
+        existing = self.recipe.get("sites") if self.recipe else None
+        incoming = recipe.get("sites")
+        if keep_fit is None and existing and not incoming:
+            btn = QMessageBox.question(
+                self, "Keep fit parameters?",
+                "A fit is already open. Keep the current lines and fit them "
+                "against the new spectrum?\n\n"
+                "Yes = keep the lines · No = start empty",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+            keep_fit = btn == QMessageBox.Yes
+        if keep_fit and existing and not incoming:
+            recipe["sites"] = existing
+            # carry the experiment parameters the new source knows
+            for k in ("nucleus", "larmor_frequency_MHz", "spin_rate_Hz"):
+                recipe[k] = recipe.get(k) or self.recipe.get(k)
+
         self.source_path = path
         self.exp_ppm, self.exp_amp = ppm, amp
         self.recipe = recipe
@@ -970,6 +1019,59 @@ class MainWindow(QMainWindow):
                 return
         Recipe.from_dict(self.recipe).save(target)
         self.statusBar().showMessage(f"recipe saved: {target}")
+
+    def _guard_write(self, target: Path) -> bool:
+        for parent in [target.parent, *target.parent.parents]:
+            if (parent / "acqus").exists() or (parent / "fid").exists() \
+                    or (parent / "ser").exists():
+                QMessageBox.warning(
+                    self, "Refused",
+                    f"{parent} is an instrument data folder — pick another "
+                    "location. LARMOR never writes next to raw data.")
+                return False
+        return True
+
+    def save_fit_as(self):
+        if not self.recipe or not self.recipe.get("sites"):
+            self.statusBar().showMessage("nothing to export — add and fit lines first")
+            return
+        from larmor.io import export
+
+        default = (self.recipe.get("sample") or "fit").strip()
+        default = "".join(c if c.isalnum() or c in "-_" else "_"
+                          for c in default)[:40] or "fit"
+        filters = ";;".join(
+            f"{name} (*.{ext})" for name, (ext, _) in export.FORMATS.items())
+        path, chosen = QFileDialog.getSaveFileName(
+            self, "Save fit as", str(Path(self._last_dir()) / default), filters)
+        if not path:
+            return
+        # figure out the format from the chosen filter (or the extension)
+        fmt = None
+        for name, (ext, fn) in export.FORMATS.items():
+            if name == chosen or path.lower().endswith("." + ext):
+                fmt = (ext, fn)
+                break
+        if fmt is None:
+            fmt = ("json", export.export_json)
+        ext, fn = fmt
+        target = Path(path)
+        if target.suffix.lower() != "." + ext:
+            target = target.with_suffix("." + ext)
+        if not self._guard_write(target):
+            return
+        recipe = Recipe.from_dict(self.recipe)
+        try:
+            if ext in ("txt",):
+                fn(recipe, self.exp_ppm, self.exp_amp, target)
+            elif ext == "fxmla":
+                fn(recipe, self.exp_ppm, self.exp_amp, target)
+            else:                        # csv, json take (recipe, path)
+                fn(recipe, target)
+        except Exception as exc:
+            QMessageBox.warning(self, "Export failed", str(exc))
+            return
+        self.statusBar().showMessage(f"fit exported: {target}")
 
     def open_figure_dialog(self):
         from larmor.desktop.figure_dialog import FigureDialog

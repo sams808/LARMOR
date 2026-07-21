@@ -24,6 +24,7 @@ class SpectrumView(pg.PlotWidget):
     paddle_moved = Signal(int, float, float, float)   # index, pos, amp, fwhm
     paddle_released = Signal(int)
     cursor_moved = Signal(float, float)       # live x/y for the status bar
+    file_dropped = Signal(str)                # a data file dragged onto the plot
 
     def __init__(self, parent=None):
         super().__init__(parent, background="#fcfdfc")
@@ -75,6 +76,7 @@ class SpectrumView(pg.PlotWidget):
         self.scene().sigMouseClicked.connect(self._on_click)
         self.scene().sigMouseMoved.connect(self._on_move)
         self._paddles: list = []
+        self.setAcceptDrops(True)                # drag a spectrum onto the plot
 
         # manual baseline: draggable anchors + live PCHIP preview
         self._bl_mode = False
@@ -83,6 +85,27 @@ class SpectrumView(pg.PlotWidget):
                                                         style=Qt.DashLine))
         # dmfit-style fit zones
         self._zones: list[pg.LinearRegionItem] = []
+
+    # ---------- drag & drop ----------
+    def dragEnterEvent(self, ev):
+        if ev.mimeData().hasUrls():
+            ev.acceptProposedAction()
+        else:
+            super().dragEnterEvent(ev)
+
+    def dragMoveEvent(self, ev):
+        if ev.mimeData().hasUrls():
+            ev.acceptProposedAction()
+        else:
+            super().dragMoveEvent(ev)
+
+    def dropEvent(self, ev):
+        urls = ev.mimeData().urls()
+        if urls:
+            self.file_dropped.emit(urls[0].toLocalFile())
+            ev.acceptProposedAction()
+        else:
+            super().dropEvent(ev)
 
     def _on_move(self, scene_pos):
         vb = self.getPlotItem().getViewBox()
