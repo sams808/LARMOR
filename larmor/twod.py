@@ -63,6 +63,59 @@ class Data2D:
         red = np.max if mode == "skyline" else np.sum
         return red(self.z, axis=0 if axis == "f2" else 1)
 
+    def phased(self, axis: str, p0_deg: float, p1_deg: float,
+               pivot_ppm: float | None = None) -> "Data2D":
+        """Zero/first-order phase along one axis, TopSpin-style.
+
+        axis 'f2' phases the direct dimension (rows), 'f1' the indirect one
+        (columns). A processed 2rr keeps only the real part, so the dispersive
+        companion is reconstructed by a Hilbert transform along the axis
+        (Kramers-Kronig) -- the same trick ssNake uses to re-phase an
+        already-transformed spectrum. p1 pivots about ``pivot_ppm`` (default:
+        the axis centre).
+        """
+        if p0_deg == 0.0 and p1_deg == 0.0:
+            return self
+        from scipy.signal import hilbert
+
+        ax = 1 if axis == "f2" else 0
+        coords = self.f2_ppm if axis == "f2" else self.f1_ppm
+        n = self.z.shape[ax]
+        if n < 2:
+            return self
+        analytic = hilbert(np.asarray(self.z, float), axis=ax)
+        piv = _pivot_index(coords, pivot_ppm)
+        ramp = (np.arange(n) - piv) / max(n - 1, 1)
+        phase = np.deg2rad(p0_deg + p1_deg * ramp)
+        shape = [1, 1]; shape[ax] = n
+        out = np.real(analytic * np.exp(-1j * phase).reshape(tuple(shape)))
+        d = Data2D(self.f2_ppm, self.f1_ppm, out, self.nucleus,
+                   self.larmor_MHz, self.spin_rate_Hz, self.source,
+                   list(self.notes))
+        return d
+
+
+def _pivot_index(coords: np.ndarray, pivot_ppm: float | None) -> int:
+    n = len(coords)
+    if pivot_ppm is None:
+        return n // 2
+    return int(np.argmin(np.abs(np.asarray(coords) - pivot_ppm)))
+
+
+def phase_1d(y: np.ndarray, coords: np.ndarray, p0_deg: float, p1_deg: float,
+             pivot_ppm: float | None = None) -> np.ndarray:
+    """Phase one real trace exactly as :meth:`Data2D.phased` phases each line,
+    so a live single-row/column preview matches the applied 2D result."""
+    if p0_deg == 0.0 and p1_deg == 0.0:
+        return np.asarray(y, float)
+    from scipy.signal import hilbert
+
+    y = np.asarray(y, float)
+    n = y.size
+    piv = _pivot_index(coords, pivot_ppm)
+    ramp = (np.arange(n) - piv) / max(n - 1, 1)
+    return np.real(hilbert(y) * np.exp(-1j * np.deg2rad(p0_deg + p1_deg * ramp)))
+
 
 def read_bruker_2d(expno: str | Path, procno: int = 1) -> Data2D:
     """Read a processed Bruker 2D (2rr) via the universal reader.

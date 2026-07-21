@@ -74,6 +74,39 @@ def test_open_any_type_never_rejects(qapp, win):
     assert is_1d() and win.exp_ppm.size > 0
 
 
+def test_twod_phasing_and_contours(qapp):
+    """The 2D contour view: phase_1d matches Data2D.phased, and the pick →
+    phase-traces → apply flow mutates the committed data and returns to the map."""
+    from larmor import twod
+    from larmor.desktop.twod_view import Contour2DView
+
+    # phase_1d must equal the row-by-row result of Data2D.phased (so the live
+    # single-row preview is faithful to what Apply will do)
+    f2 = np.linspace(-100, 100, 256)
+    f1 = np.linspace(-50, 50, 32)
+    z = np.random.RandomState(1).randn(32, 256)
+    d = twod.Data2D(f2_ppm=f2, f1_ppm=f1, z=z)
+    dp = d.phased("f2", 33.0, 110.0, pivot_ppm=10.0)
+    row = twod.phase_1d(z[7], f2, 33.0, 110.0, 10.0)
+    assert np.allclose(row, dp.z[7], atol=1e-9)
+    assert d.phased("f2", 0.0, 0.0) is d          # no-op returns self
+
+    v = Contour2DView()
+    v.set_data(d.normalized(), "synthetic")
+    qapp.processEvents()
+    for s in ("both", "negative", "positive"):
+        v.sign.setCurrentText(s); qapp.processEvents()
+    v.btnPhase.setChecked(True)
+    v._pick_axis = "f2"; v._pivot = 10.0; v._picks = [7]
+    v._enter_phasing(); qapp.processEvents()
+    assert v.stack.currentWidget() is v.phase_glw and len(v._pref) == 1
+    v._nudge_p0(90.0); v.p1v.setValue(30.0); qapp.processEvents()
+    before = v._committed.z.copy()
+    v._apply_phase(); qapp.processEvents()
+    assert not np.allclose(before, v._committed.z)
+    assert v.stack.currentWidget() is v.glw       # returned to the contour map
+
+
 @pytest.mark.slow
 def test_load_fit_quantify_undo(qapp, win):
     require(CAALGLASS)
