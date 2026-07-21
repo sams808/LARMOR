@@ -158,6 +158,38 @@ def test_multifield_lifts_degeneracy():
     assert max(result.rmsd) < 0.05
 
 
+@pytest.mark.slow
+def test_cofit_mixed_1d_and_2d_mqmas():
+    """Co-fit a 1D spectrum and a 2D MQMAS map of the SAME czjzek site with a
+    shared sigma_Cq; recover it from a wrong start."""
+    from larmor import engine, twod
+    from larmor.multifit import fit_cofit
+
+    def czjzek(sigma):
+        return Recipe(nucleus="27Al", larmor_frequency_MHz=195.5,
+                      sites=[SiteModel(model="czjzek", label="A", params={
+                          "isotropic_chemical_shift_ppm": Param(0.0),
+                          "sigma_Cq_MHz": Param(sigma, min=0.1, max=8.0),
+                          "shift_fwhm_ppm": Param(2.0, min=0.1),
+                          "amplitude": Param(1.0, min=0.0)})])
+
+    x = np.linspace(-80, 120, 500)
+    xc, tot, _ = engine.simulate(czjzek(3.0), exp_ppm=x)
+    y1 = np.interp(x, xc, tot)
+    k = twod.build_mqmas_kernel("27Al", 195.5, (120, -80), (60, -40))
+    zt, _ = twod.simulate_2d(czjzek(3.0), k)
+    d2 = twod.Data2D(f2_ppm=k.f2_ppm, f1_ppm=k.f1_ppm, z=zt, nucleus="27Al",
+                     larmor_MHz=195.5)
+
+    res = fit_cofit([(czjzek(1.5), (x, y1)), (czjzek(1.5), d2)])
+    assert [pd["kind"] for pd in res.per_dataset] == ["1d", "2d"]
+    s0 = res.recipes[0].sites[0].params["sigma_Cq_MHz"].value
+    assert s0 == pytest.approx(3.0, abs=0.1)
+    assert res.recipes[1].sites[0].params["sigma_Cq_MHz"].value == pytest.approx(
+        s0, rel=1e-9)                       # tied across the 1D and 2D
+    assert max(res.rmsd) < 0.02
+
+
 def test_multifit_validates_alignment():
     from larmor.multifit import fit_multi
 
