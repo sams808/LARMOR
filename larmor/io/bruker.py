@@ -340,6 +340,8 @@ def _meta_1d(acqus: dict, title: str, expno: Path) -> dict:
         "pulse_program": str(acqus.get("PULPROG", "")).strip(),
         "masr_Hz": (float(acqus["MASR"]) if acqus.get("MASR") is not None
                     else None),
+        "o1_Hz": float(acqus.get("O1", 0.0)),
+        "bf1_MHz": float(acqus.get("BF1", 0.0)),
         "title": title,
         "grpdly": acqus.get("GRPDLY"),
         "expno": str(expno),

@@ -341,6 +341,7 @@ class MainWindow(QMainWindow):
 
         m_tools = mb.addMenu("&Tools")
         self._add(m_tools, "Relaxation / series (T1, T2)…", self.open_satrec)
+        self._add(m_tools, "QCPMG (echo train → spectrum)…", self.open_qcpmg)
         self._add(m_tools, "REDOR (dipolar coupling)…", self.open_redor)
         self._add(m_tools, "Import DFT tensors (.magres)…", self.open_magres)
         m_tools.addSeparator()
@@ -1571,6 +1572,24 @@ class MainWindow(QMainWindow):
         from larmor.desktop.figure_dialog import FigureDialog
 
         FigureDialog(self, self.source_path, self.recipe).exec()
+
+    def open_qcpmg(self):
+        from larmor.desktop.qcpmg_dialog import QcpmgDialog
+
+        # prefer the raw fid of whatever EXPNO is loaded
+        source = None
+        if self.source_path:
+            try:
+                from larmor.io import bruker
+
+                ref = bruker.resolve(self.source_path)
+                if (ref.expno / "fid").exists():
+                    source = str(ref.expno / "fid")
+            except Exception:
+                source = None
+        dlg = QcpmgDialog(self, source)
+        dlg.accepted_1d.connect(self._fid_to_workbench)
+        dlg.exec()
 
     def open_satrec(self):
         from larmor.desktop.satrec_dialog import SatrecDialog
