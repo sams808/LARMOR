@@ -180,10 +180,16 @@ class LinesTable(QWidget):
         self.btnFit.clicked.connect(self.fit)
         self.chi2 = QLabel("")
         self.chi2.setStyleSheet("font-weight: 600; color: #0a5a62;")
+        self.sn = QLabel("")
+        self.sn.setStyleSheet("font-weight: 600; color: #6a4fb0;")
+        self.sn.setToolTip("signal-to-noise: peak signal ÷ RMS of a "
+                           "signal-free region")
         foot.addWidget(self.btnCompute)
         foot.addWidget(self.btnFit)
         foot.addSpacing(16)
         foot.addWidget(self.chi2)
+        foot.addSpacing(12)
+        foot.addWidget(self.sn)
         foot.addStretch(1)
         v.addLayout(foot)
         # a full-width, always-visible hint (was previously cut off at the edge)
@@ -268,6 +274,9 @@ class LinesTable(QWidget):
 
     def set_chi2(self, text: str):
         self.chi2.setText(text)
+
+    def set_sn(self, text: str):
+        self.sn.setText(text)
 
     # ------------------------------------------------------------------
     def _context_menu(self, pos):

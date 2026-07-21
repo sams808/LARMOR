@@ -167,6 +167,15 @@ class SimWorker(QThread):
             self.failed.emit(str(exc))
 
 
+class ClickableLabel(QLabel):
+    """A QLabel that emits doubleClicked (used for the experiment strip)."""
+    doubleClicked = Signal()
+
+    def mouseDoubleClickEvent(self, ev):
+        self.doubleClicked.emit()
+        super().mouseDoubleClickEvent(ev)
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -223,9 +232,12 @@ class MainWindow(QMainWindow):
         self._build_bottom_docks()
         self._build_right_dock()
 
-        self.exp_label = QLabel("")
+        self.exp_label = ClickableLabel("")
         self.exp_label.setStyleSheet("color: #0a5a62; font-weight: 600;")
-        self.exp_label.setToolTip("Process > Experiment parameters… to edit")
+        self.exp_label.setToolTip("double-click to edit the experiment "
+                                  "parameters (nucleus, Larmor, νrot)")
+        self.exp_label.setCursor(Qt.PointingHandCursor)
+        self.exp_label.doubleClicked.connect(self.edit_experiment)
         self.statusBar().addPermanentWidget(self.exp_label)
         self.pos_label = QLabel("")
         self.statusBar().addPermanentWidget(self.pos_label)
@@ -756,6 +768,9 @@ class MainWindow(QMainWindow):
         QSettings("LARMOR", "app").setValue("lastDir", str(Path(path).parent))
         self.setWindowTitle(f"LARMOR — {Path(path).name}")
         self.view.set_experiment(ppm, amp)
+        if not self.recipe["sites"]:
+            # drop any model curve left over from the previous spectrum
+            self.view.set_model(None, None, None, None, self.hidden)
         sample = recipe.get("sample") or Path(path).name
         self.view.set_title(sample)
         self._last_model = None
@@ -763,6 +778,7 @@ class MainWindow(QMainWindow):
         self.zoom_full()
         if recipe["sites"]:
             self.zoom_sites()
+        self._update_sn()
         msg = meta + ("   ⚠ " + " • ".join(warnings) if warnings else "")
         self.statusBar().showMessage(msg)
         self.lines_table.rebuild(self.recipe, self.hidden)
@@ -828,6 +844,23 @@ class MainWindow(QMainWindow):
                 "phase and transform properly, then fit")
             return True
         return False
+
+    # ------------------------------------------------------------------- S/N
+    def _update_sn(self):
+        """Signal-to-noise: peak signal over the RMS of a signal-free region.
+        The noise region is taken from the quiet outer edges of the spectrum
+        (robust to where the peak sits), matching TopSpin's sino spirit."""
+        y = self.exp_amp
+        if y is None or y.size < 20:
+            self.lines_table.set_sn("")
+            return
+        y = np.asarray(y, float)
+        edge = max(5, y.size // 10)
+        noise_region = np.concatenate([y[:edge], y[-edge:]])
+        noise = float(np.std(noise_region - np.median(noise_region)))
+        signal = float(np.max(np.abs(y - np.median(noise_region))))
+        sn = signal / noise if noise > 0 else 0.0
+        self.lines_table.set_sn(f"S/N {sn:,.0f}" if sn else "")
 
     # --------------------------------------------------------- overlays
     def add_overlay_dialog(self):
@@ -942,12 +975,13 @@ class MainWindow(QMainWindow):
                              spin_rate_Hz=masr or 0.0).to_dict()
         self.hidden.clear(); self.undo_stack.clear(); self.redo_stack.clear()
         self.view.set_experiment(self.exp_ppm, self.exp_amp)
+        self.view.set_model(None, None, None, None, self.hidden)  # clear old model
         self.view.set_title(title)
         self._last_model = None; self._first_sim = True
         self.zoom_full()
         self.lines_table.rebuild(self.recipe, self.hidden)
         self._update_paddles(); self._update_exp_label(); self._update_enabled()
-        self._refresh_overlays()
+        self._refresh_overlays(); self._update_sn()
 
     def _trace_to_workbench(self, ppm, amp, label):
         """A 1D trace pulled out of the 2D view becomes the working spectrum."""
@@ -997,7 +1031,8 @@ class MainWindow(QMainWindow):
         self.view2d.set_add_mode(name)
         if name:
             self.statusBar().showMessage(
-                f"click on the spectrum to place a {name} line (Esc to cancel)")
+                f"placing {name} lines — click to add as many as you want; "
+                f"click {name} again (or press Esc) to stop")
 
     def keyPressEvent(self, ev):
         if ev.key() == Qt.Key_Escape:
@@ -1022,8 +1057,12 @@ class MainWindow(QMainWindow):
         self.recipe["sites"].append(
             {"model": name, "label": f"{m.label.split(' ')[0]}-{n}",
              "params": params})
-        self._set_add_mode(None)
+        # stay in placement mode: drop as many lines as wanted, click the model
+        # again (or Esc) to leave the mode
         self.on_structure_changed()
+        self.statusBar().showMessage(
+            f"added {name} #{n} — click to add more, or click {name} again "
+            "(Esc) to stop")
 
     def add_site_2d(self, f2_ppm: float, f1_ppm: float):
         """Place a 2D site from a click on the contour: the isotropic shift
@@ -1045,12 +1084,11 @@ class MainWindow(QMainWindow):
         self.recipe["sites"].append(
             {"model": name, "label": f"{m.label.split(' ')[0]}-{n}",
              "params": params})
-        self._set_add_mode(None)
         self.lines_table.rebuild(self.recipe, self.hidden)
         self._update_enabled()
         self.statusBar().showMessage(
-            f"added {name} at F1≈{f1_ppm:.1f} ppm — Decomposition ▸ Fit to fit "
-            "the 2D")
+            f"added {name} at F1≈{f1_ppm:.1f} ppm — click to add more, or click "
+            f"{name} again (Esc) to stop; Decomposition ▸ Fit to fit the 2D")
 
     def on_site_structure(self, idx: int, action: str):
         if self.recipe is None:
@@ -1335,6 +1373,7 @@ class MainWindow(QMainWindow):
         order = np.argsort(s.x_ppm)
         self.exp_ppm, self.exp_amp = np.asarray(s.x_ppm)[order], s.y.real[order]
         self.view.set_experiment(self.exp_ppm, self.exp_amp)
+        self._update_sn()
         # remember the pipeline in the recipe: saving the fit then saves the
         # processing that produced the spectrum it was fitted against
         if self.recipe is not None:
