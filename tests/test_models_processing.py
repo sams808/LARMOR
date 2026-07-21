@@ -10,11 +10,13 @@ from larmor.recipe import Param, Recipe, SiteModel
 def test_registry_contents():
     names = {m["name"] for m in models.describe_all()}
     assert {"gauss_lor", "czjzek", "quad_ct", "csa_mas"} <= names
-    # every model exposes the two params the fit engine relies on
+    # every analytic model exposes the two params the fit engine relies on;
+    # "spectrum" is a data-backed background component (no analytic centre)
     for m in models.REGISTRY.values():
-        assert "isotropic_chemical_shift_ppm" in m.param_names
         assert "amplitude" in m.param_names
         assert m.key_of("amplitude") == "amp"
+        if m.name != "spectrum":
+            assert "isotropic_chemical_shift_ppm" in m.param_names
 
 
 def test_unknown_model_message():

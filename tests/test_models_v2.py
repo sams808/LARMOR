@@ -102,3 +102,29 @@ def test_position_offset_link_hz_equivalent():
         f"s0.isotropic_chemical_shift_ppm + {expected_ppm:.6g}"
     params = fitmod._make_params(r)
     assert params["s1_pos"].value == pytest.approx(15.0 + 10.0, abs=1e-6)
+
+
+def test_spectrum_background_component_fits():
+    """An external measured spectrum can be added as a fit component whose
+    amplitude (and ppm shift) are optimized alongside the analytic lines."""
+    x = np.linspace(-100, 100, 1024)
+    bg = np.exp(-((x + 30) / 25) ** 2)            # unit-peak background
+    peak = 1.0 / (1.0 + ((x - 10) / 2.0) ** 2)
+    data = 3.0 * bg + 5.0 * peak
+
+    rec = Recipe(nucleus="27Al", larmor_frequency_MHz=100.0)
+    rec.sites = [
+        SiteModel(model="spectrum", label="bg",
+                  ref={"ppm": x.tolist(), "amp": bg.tolist()},
+                  params={"amplitude": Param(1.0, min=0.0),
+                          "shift_ppm": Param(0.0, min=-10, max=10)}),
+        SiteModel(model="gauss_lor", label="pk", params={
+            "isotropic_chemical_shift_ppm": Param(10.0),
+            "shift_fwhm_ppm": Param(4.0, min=0.1),
+            "amplitude": Param(1.0, min=0.0),
+            "gl": Param(0.5, min=0.0, max=1.0)}),
+    ]
+    res = fitmod.fit(rec, x, data, window_ppm=(100.0, -100.0))
+    assert res.recipe.sites[0].params["amplitude"].value == pytest.approx(3.0, abs=0.05)
+    assert res.recipe.sites[1].params["amplitude"].value == pytest.approx(5.0, abs=0.05)
+    assert res.rmsd < 1e-3

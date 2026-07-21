@@ -299,6 +299,8 @@ class MainWindow(QMainWindow):
 
         m_dec = mb.addMenu("&Decomposition")
         self._add(m_dec, "&New fit (clear lines)", self.new_fit)
+        self._add(m_dec, "Add background &spectrum…  (fit another spectrum)",
+                  self.add_background_spectrum)
         m_dec.addSeparator()
         self.actFit = self._add(m_dec, "&Fit", self.run_fit, "F5")
         self.actAuto = self._add(m_dec, "&Auto Fit (multi-start)…",
@@ -326,6 +328,8 @@ class MainWindow(QMainWindow):
         m_models = mb.addMenu("&Models")
         self._model_actions = {}
         for m in model_registry.describe_all():
+            if m["name"] == "spectrum":
+                continue          # added via Decomposition ▸ Add background…
             a = QAction(m["label"], self)
             a.setCheckable(True)
             a.setToolTip(m["description"])
@@ -1063,6 +1067,50 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             f"added {name} #{n} — click to add more, or click {name} again "
             "(Esc) to stop")
+
+    def add_background_spectrum(self):
+        """Add another measured spectrum as a fit component (background /
+        impurity / reference), scaled by amplitude and shiftable in ppm."""
+        if self.recipe is None:
+            self.statusBar().showMessage("load a spectrum to fit first")
+            return
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Background spectrum to fit", self._last_dir(),
+            "Spectra (*.fxmla *.json 1r 2rr *.txt *.csv);;All files (*)")
+        if not path:
+            return
+        try:
+            _r, ppm, amp, *_ = _load_any(path)
+        except Exception:
+            try:
+                from larmor.io import bruker
+
+                d = bruker.read(path)
+                if d.ndim != 1 or d.domain != "freq":
+                    raise ValueError("not a 1D spectrum")
+                ppm, amp = np.asarray(d.axes[0].values), np.asarray(d.data, float)
+            except Exception as exc:
+                QMessageBox.warning(self, "Background spectrum", f"cannot read: {exc}")
+                return
+        ppm = np.asarray(ppm, float); amp = np.asarray(amp, float)
+        amp = amp / (np.max(np.abs(amp)) or 1.0)         # unit peak
+        self.snapshot()
+        m = model_registry.get("spectrum")
+        params = {p.name: {"value": p.default, "stderr": None, "vary": p.vary,
+                           "min": p.min, "max": p.max, "expr": None}
+                  for p in m.params}
+        # start the amplitude near the data's peak so it is on-scale
+        params["amplitude"]["value"] = float(np.max(np.abs(self.exp_amp))
+                                              if self.exp_amp.size else 1.0)
+        n = len(self.recipe["sites"])
+        self.recipe["sites"].append({
+            "model": "spectrum", "label": f"bg-{n}",
+            "ref": {"ppm": ppm.tolist(), "amp": amp.tolist()},
+            "params": params})
+        self.on_structure_changed()
+        self.statusBar().showMessage(
+            f"added background spectrum '{Path(path).name}' — Fit scales and "
+            "shifts it")
 
     def add_site_2d(self, f2_ppm: float, f1_ppm: float):
         """Place a 2D site from a click on the contour: the isotropic shift

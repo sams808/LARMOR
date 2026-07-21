@@ -127,8 +127,25 @@ def simulate_site(site: SiteModel, ctx) -> np.ndarray:
     if isinstance(ctx, (CzjzekKernel, Axis)):
         ctx = SimContext(nucleus="27Al", larmor_MHz=0.0, spin_rate_Hz=0.0,
                          x_ppm=ctx.x_ppm) if isinstance(ctx, Axis) else _ctx_from_kernel(ctx)
+    if site.model == "spectrum":
+        return _render_spectrum(site, ctx)
     values = {k: v.value for k, v in site.params.items()}
     return model_registry.get(site.model).render(values, ctx)
+
+
+def _render_spectrum(site, ctx) -> np.ndarray:
+    """Render an external-spectrum component: its reference trace (unit peak),
+    interpolated onto the fit axis, rigidly shifted, and scaled by amplitude."""
+    ref = getattr(site, "ref", None) or {}
+    rp = np.asarray(ref.get("ppm", []), float)
+    ra = np.asarray(ref.get("amp", []), float)
+    if rp.size < 2 or ra.size != rp.size:
+        return np.zeros_like(ctx.x_ppm)
+    amp = site.params["amplitude"].value
+    shift = site.params["shift_ppm"].value if "shift_ppm" in site.params else 0.0
+    order = np.argsort(rp)
+    y = np.interp(ctx.x_ppm, rp[order] + shift, ra[order], left=0.0, right=0.0)
+    return amp * y
 
 
 def _ctx_from_kernel(kernel: CzjzekKernel) -> SimContext:

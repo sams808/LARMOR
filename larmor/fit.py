@@ -154,7 +154,10 @@ def fit(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
     # freeze it. Expression-linked parameters follow their master and stay.
     frozen: list[str] = []
     for i, site in enumerate(recipe.sites):
-        pos = site.params["isotropic_chemical_shift_ppm"].value
+        center = site.params.get("isotropic_chemical_shift_ppm")
+        if center is None:
+            continue          # spans the window (e.g. a background spectrum)
+        pos = center.value
         if not (lo <= pos <= hi):
             for pname, p in site.params.items():
                 if not p.expr:

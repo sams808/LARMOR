@@ -53,6 +53,9 @@ class SiteModel:
     model: str
     label: str = ""
     params: dict[str, Param] = field(default_factory=dict)
+    #: for the "spectrum" (background) model: the reference trace it renders,
+    #: {"ppm": [...], "amp": [...]} (amp pre-normalized to unit peak)
+    ref: dict | None = None
 
 
 @dataclass
