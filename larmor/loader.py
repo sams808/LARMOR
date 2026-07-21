@@ -84,6 +84,17 @@ def load_any(path: str | Path, replay: bool = True):
         return (ppm[order], amp[order], recipe.to_dict(),
                 f"dmfit {dm.version} | {dm.comment}", warnings)
 
+    if p.suffix.lower() in (".csv", ".txt", ".dat"):
+        from larmor.io import spectra
+
+        ppm, amp, meta = spectra.read_csv(p)
+        recipe = Recipe(
+            sample=meta.get("sample") or p.stem, source_kind="csv",
+            source_path=str(p), nucleus=meta.get("nucleus", ""),
+            larmor_frequency_MHz=float(meta.get("larmor_MHz", 0.0) or 0.0),
+            spin_rate_Hz=float(meta.get("spin_rate_Hz", 0.0) or 0.0))
+        return ppm, amp, recipe.to_dict(), f"spectrum {p.name}", []
+
     from larmor.io import bruker
 
     # any Bruker path: a 1r/2rr/fid/ser file, a pdata folder, or an EXPNO

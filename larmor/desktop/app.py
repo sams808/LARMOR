@@ -277,6 +277,8 @@ class MainWindow(QMainWindow):
         self.actSave = self._add(m_file, "&Save recipe", self.save_recipe, "Ctrl+S")
         self._add(m_file, "Save fit &as…  (txt / csv / json / dmfit)",
                   self.save_fit_as, "Ctrl+Shift+E")
+        self._add(m_file, "Save s&pectrum as…  (CSV, reopenable in LARMOR)",
+                  self.save_spectrum)
         self._add(m_file, "Figure…", self.open_figure_dialog)
         m_file.addSeparator()
         self._add(m_file, "E&xit", self.close)
@@ -297,6 +299,9 @@ class MainWindow(QMainWindow):
                   self.start_calibrate)
         self.actMeasure = self._add(m_proc, "&Measure Δ (ppm / Hz)",
                                     self.toggle_measure, checkable=True)
+        m_proc.addSeparator()
+        self._add(m_proc, "Subtract a spectrum (&background)…",
+                  self.open_subtract)
 
         m_dec = mb.addMenu("&Decomposition")
         self._add(m_dec, "&New fit (clear lines)", self.new_fit)
@@ -1601,6 +1606,61 @@ class MainWindow(QMainWindow):
         from larmor.desktop.figure_dialog import FigureDialog
 
         FigureDialog(self, self.source_path, self.recipe).exec()
+
+    def open_subtract(self):
+        from larmor.desktop.subtract_dialog import SubtractDialog
+
+        if not self.exp_ppm.size:
+            self.statusBar().showMessage("load a spectrum first")
+            return
+        meta = {"nucleus": self.recipe.get("nucleus", "") if self.recipe else "",
+                "larmor_MHz": (self.recipe.get("larmor_frequency_MHz", 0.0)
+                               if self.recipe else 0.0)}
+        dlg = SubtractDialog(self, self.exp_ppm, self.exp_amp, meta)
+        dlg.applied.connect(self._subtract_applied)
+        dlg.exec()
+
+    def _subtract_applied(self, ppm, amp):
+        self.snapshot()
+        self.exp_ppm, self.exp_amp = np.asarray(ppm), np.asarray(amp)
+        self._proc_base = None
+        self.view.set_experiment(self.exp_ppm, self.exp_amp)
+        if self.recipe is not None:
+            base = self.recipe.get("sample") or "spectrum"
+            if "− background" not in base and "minus" not in base:
+                self.recipe["sample"] = base + " − background"
+            self.view.set_title(self.recipe["sample"])
+        if not (self.recipe and self.recipe.get("sites")):
+            self.view.set_model(None, None, None, None, self.hidden)
+        else:
+            self.request_simulation()
+        self._update_sn(); self._refresh_overlays()
+        self.statusBar().showMessage(
+            "background subtracted — File ▸ Save spectrum as… to keep the result")
+
+    def save_spectrum(self):
+        from larmor.io import spectra
+
+        if not self.exp_ppm.size:
+            self.statusBar().showMessage("no spectrum to save")
+            return
+        default = (self.recipe.get("sample") if self.recipe else "") or "spectrum"
+        default = "".join(c if c.isalnum() or c in "-_ " else "_"
+                          for c in default).strip()[:60] or "spectrum"
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save spectrum", str(Path(self._last_dir()) / f"{default}.csv"),
+            "LARMOR spectrum (*.csv);;Text (*.txt)")
+        if not path:
+            return
+        meta = {}
+        if self.recipe:
+            meta = {"nucleus": self.recipe.get("nucleus", ""),
+                    "larmor_MHz": self.recipe.get("larmor_frequency_MHz", 0.0),
+                    "spin_rate_Hz": self.recipe.get("spin_rate_Hz", 0.0),
+                    "sample": self.recipe.get("sample", "")}
+        spectra.write_csv(path, self.exp_ppm, self.exp_amp, meta)
+        self.statusBar().showMessage(f"spectrum saved to {Path(path).name} "
+                                     "(reopen it with File ▸ Open…)")
 
     def open_cofit(self):
         from larmor.desktop.cofit_dialog import CofitDialog

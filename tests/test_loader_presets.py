@@ -24,7 +24,7 @@ def test_load_2d_fxmla_is_refused_with_guidance():
 
 
 def test_load_unknown_source(tmp_path):
-    p = tmp_path / "x.dat"
+    p = tmp_path / "x.xyz"
     p.write_text("hello")
     with pytest.raises(ValueError, match="unrecognized source"):
         loader.load_any(p)
