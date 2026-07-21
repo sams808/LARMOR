@@ -45,3 +45,35 @@ def test_coadd_echoes_shape():
     assert echo.shape == (period,)
     # coadding boosts the aligned echo top above a single echo's
     assert np.abs(echo).max() > 5.0
+
+
+def test_split_trims_trailing_zeros():
+    fid, period = _synthetic_train(period=40, n_echoes=15)
+    fid = np.concatenate([fid, np.zeros(40 * 5, complex)])   # 5 blank slots
+    ech = qcpmg.split_echoes(fid, period)
+    assert ech.shape == (15, period)                        # blanks dropped
+
+
+def test_fit_t2_recovers_decay():
+    """The echo-top decay yields the transverse relaxation time."""
+    period, n = 64, 60
+    tau = 5e-4                       # 0.5 ms echo spacing
+    T2_true = 12e-3                  # 12 ms
+    half = period // 2
+    t = np.arange(period) - half
+    base = np.exp(-(t / 5.0) ** 2)
+    echoes = np.array([base * np.exp(-k * tau / T2_true) for k in range(n)],
+                      dtype=complex)
+    top = qcpmg.echo_top_point(echoes)
+    T2, curve = qcpmg.fit_t2(tau, qcpmg.echo_decay(echoes, top))
+    assert T2 == pytest.approx(T2_true, rel=0.05)
+
+
+def test_sum_echo_spectrum_is_phasable_absorption():
+    fid, period = _synthetic_train(period=64, n_echoes=40)
+    ppm, spec = qcpmg.sum_echo_spectrum(fid, period, 100000.0, 100.0, gb_Hz=50)
+    assert np.iscomplexobj(spec)
+    p0 = qcpmg.autophase0(spec)
+    real = np.real(spec * np.exp(-1j * np.deg2rad(p0)))
+    # the autophased real spectrum has a clear positive main peak
+    assert real.max() > 3 * abs(real.min())
