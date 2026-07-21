@@ -201,8 +201,14 @@ class Contour2DView(QWidget):
         f1_kind = "arrayed (relaxation)" if getattr(data, "notes", None) and \
             any("pseudo" in n or "arrayed" in n for n in data.notes) else "F1"
         self.hint.setText(f"F1 = {f1_kind}")
-        self.btnPhase.setChecked(False)
-        self._clear_picks()
+        # reset phase/pick state WITHOUT triggering extra redraws (each contour
+        # pass over a large 2D is expensive; we redraw exactly once below)
+        self.btnPhase.blockSignals(True); self.btnPhase.setChecked(False)
+        self.btnPhase.blockSignals(False)
+        self.phasebar.setVisible(False)
+        self._picks = []; self._pivot = None; self._pref = []
+        for s in (self.p0v, self.p1v):
+            s.blockSignals(True); s.setValue(0); s.blockSignals(False)
         self.stack.setCurrentWidget(self.glw)
         self._redraw()
 
@@ -448,6 +454,24 @@ class Contour2DView(QWidget):
             floor = top * 0.1
         return np.logspace(np.log10(floor), np.log10(top), n)
 
+    @staticmethod
+    def _decimate(z, f2, f1, cap: int = 512):
+        """Stride a large 2D down so marching-squares stays cheap; contours look
+        the same but cost a fraction. Returns (zc, f2c, f1c)."""
+        s2 = max(1, -(-z.shape[1] // cap))       # ceil division -> under cap
+        s1 = max(1, -(-z.shape[0] // cap))
+        if s1 == 1 and s2 == 1:
+            return z, f2, f1
+        return z[::s1, ::s2], f2[::s2], f1[::s1]
+
+    @staticmethod
+    def _iso_transform(zc, f2c, f1c):
+        tr = pg.QtGui.QTransform()
+        tr.translate(f2c[0], f1c[0])
+        tr.scale((f2c[-1] - f2c[0]) / max(zc.shape[1] - 1, 1),
+                 (f1c[-1] - f1c[0]) / max(zc.shape[0] - 1, 1))
+        return tr
+
     def _redraw(self):
         if self.data is None:
             return
@@ -455,38 +479,35 @@ class Contour2DView(QWidget):
         for p in (self.p_main, self.p_top, self.p_left):
             p.clear()
         z = d.z
-        levels = self._contour_levels(z)
         f2, f1 = d.f2_ppm, d.f1_ppm
-        tr = pg.QtGui.QTransform()
-        tr.translate(f2[0], f1[0])
-        tr.scale((f2[-1] - f2[0]) / max(z.shape[1] - 1, 1),
-                 (f1[-1] - f1[0]) / max(z.shape[0] - 1, 1))
+        zc, f2c, f1c = self._decimate(z, f2, f1)
+        levels = self._contour_levels(zc)
+        tr = self._iso_transform(zc, f2c, f1c)
 
         sign = self.sign.currentText()
         pos_cmap = pg.colormap.get("viridis").getLookupTable(0.0, 1.0, len(levels))
+        zt = np.ascontiguousarray(zc.T)
         if sign in ("positive", "both"):
             for lvl, col in zip(levels, pos_cmap):
-                iso = pg.IsocurveItem(data=z.T, level=lvl,
+                iso = pg.IsocurveItem(data=zt, level=lvl,
                                       pen=pg.mkPen(tuple(int(c) for c in col), width=1))
                 iso.setTransform(tr); self.p_main.addItem(iso)
         if sign in ("negative", "both"):
             for lvl in levels:
-                iso = pg.IsocurveItem(data=z.T, level=-lvl,
+                iso = pg.IsocurveItem(data=zt, level=-lvl,
                                       pen=pg.mkPen("#d62728", width=1))
                 iso.setTransform(tr); self.p_main.addItem(iso)
 
         # fitted-model contours overlaid in orange, dashed
         if self._model is not None:
-            mz, mf2, mf1 = self._model
+            mz, mf2, mf1 = self._decimate(*self._model)
             mtop = float(np.nanmax(mz)) or 1.0
             mlev = np.logspace(np.log10(max(0.05 * mtop, 1e-6)),
                                np.log10(mtop), max(4, int(self.nlevels.value()) // 2))
-            mtr = pg.QtGui.QTransform()
-            mtr.translate(mf2[0], mf1[0])
-            mtr.scale((mf2[-1] - mf2[0]) / max(mz.shape[1] - 1, 1),
-                      (mf1[-1] - mf1[0]) / max(mz.shape[0] - 1, 1))
+            mtr = self._iso_transform(mz, mf2, mf1)
+            mzt = np.ascontiguousarray(mz.T)
             for lvl in mlev:
-                iso = pg.IsocurveItem(data=mz.T, level=lvl,
+                iso = pg.IsocurveItem(data=mzt, level=lvl,
                                       pen=pg.mkPen("#e8832a", width=1,
                                                    style=Qt.DashLine))
                 iso.setTransform(mtr); self.p_main.addItem(iso)
