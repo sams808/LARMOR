@@ -25,6 +25,8 @@ class SpectrumView(pg.PlotWidget):
     paddle_released = Signal(int)
     cursor_moved = Signal(float, float)       # live x/y for the status bar
     file_dropped = Signal(str)                # a data file dragged onto the plot
+    calibrate_picked = Signal(float)          # snapped peak ppm to reference
+    measure_changed = Signal(float, float)    # two ppm cursors (ruler)
 
     def __init__(self, parent=None):
         super().__init__(parent, background="#fcfdfc")
@@ -85,6 +87,9 @@ class SpectrumView(pg.PlotWidget):
                                                         style=Qt.DashLine))
         # dmfit-style fit zones
         self._zones: list[pg.LinearRegionItem] = []
+        # calibrate (click a peak) and measure (two-cursor ruler)
+        self._cal_mode = False
+        self._measure_lines: list[pg.InfiniteLine] = []
 
     # ---------- drag & drop ----------
     def dragEnterEvent(self, ev):
@@ -125,6 +130,10 @@ class SpectrumView(pg.PlotWidget):
         if not self.sceneBoundingRect().contains(ev.scenePos()):
             return
         p = vb.mapSceneToView(ev.scenePos())
+        if self._cal_mode:
+            self.calibrate_picked.emit(self._snap_peak(float(p.x())))
+            ev.accept()
+            return
         if self._bl_mode:
             self._add_baseline_anchor(float(p.x()), float(p.y()))
             ev.accept()
@@ -132,6 +141,50 @@ class SpectrumView(pg.PlotWidget):
         if self._add_mode is not None:
             self.add_requested.emit(float(p.x()), abs(float(p.y())))
             ev.accept()
+
+    # ---------- calibrate (reference a peak) ----------
+    def set_calibrate_mode(self, on: bool):
+        self._cal_mode = on
+        self.setCursor(Qt.CrossCursor if on else Qt.ArrowCursor)
+
+    def _snap_peak(self, x_click: float) -> float:
+        """Snap a click to the nearest local maximum of the experiment."""
+        x, y = self._exp.xData, self._exp.yData
+        if x is None or not len(x):
+            return x_click
+        span = 0.01 * (float(np.max(x)) - float(np.min(x)))
+        near = np.abs(x - x_click) <= max(span, 1e-9)
+        if not near.any():
+            return x_click
+        idx = np.where(near)[0]
+        return float(x[idx[int(np.argmax(y[idx]))]])
+
+    # ---------- measure (two-cursor ruler) ----------
+    def set_measure_mode(self, on: bool):
+        for ln in self._measure_lines:
+            self.removeItem(ln)
+        self._measure_lines.clear()
+        if not on:
+            return
+        (x0, x1), _ = self.getPlotItem().getViewBox().viewRange()
+        lo, hi = min(x0, x1), max(x0, x1)
+        for frac in (0.35, 0.65):
+            ln = pg.InfiniteLine(pos=lo + frac * (hi - lo), angle=90,
+                                 movable=True,
+                                 pen=pg.mkPen("#0e7c86", width=1.4),
+                                 hoverPen=pg.mkPen("#0e7c86", width=2.4),
+                                 label="{value:.1f}",
+                                 labelOpts={"color": "#0e7c86",
+                                            "position": 0.92})
+            ln.sigPositionChanged.connect(self._emit_measure)
+            self.addItem(ln)
+            self._measure_lines.append(ln)
+        self._emit_measure()
+
+    def _emit_measure(self, *_):
+        if len(self._measure_lines) == 2:
+            self.measure_changed.emit(float(self._measure_lines[0].value()),
+                                      float(self._measure_lines[1].value()))
 
     # ---------- manual baseline ----------
     def set_baseline_mode(self, on: bool):

@@ -75,7 +75,17 @@ class Contour2DView(QWidget):
         self.btnPhase.setCheckable(True)
         self.btnPhase.toggled.connect(self._toggle_phase)
         bar.addWidget(self.btnPhase)
+        self.btnCal = QPushButton("Calibrate")
+        self.btnCal.setCheckable(True)
+        self.btnCal.setToolTip("click a peak, then set its F2 / F1 ppm")
+        bar.addWidget(self.btnCal)
+        self.btnMeasure = QPushButton("Measure")
+        self.btnMeasure.setCheckable(True)
+        self.btnMeasure.setToolTip("two draggable markers: ΔF2 / ΔF1 in ppm and Hz")
+        self.btnMeasure.toggled.connect(self._toggle_measure)
+        bar.addWidget(self.btnMeasure)
         v.addLayout(bar)
+        self._mtargets: list = []
 
         # ---- phase bar (hidden until Phase 2D) ----
         self.phasebar = QWidget()
@@ -228,11 +238,16 @@ class Contour2DView(QWidget):
         self._redraw()
 
     def _on_click(self, ev):
-        if not self.btnPhase.isChecked() or self.data is None:
+        if self.data is None or ev.button() != Qt.LeftButton:
+            return
+        if self.btnCal.isChecked():
+            self._calibrate_at(self.p_main.getViewBox().mapSceneToView(
+                ev.scenePos()))
+            ev.accept()
+            return
+        if not self.btnPhase.isChecked():
             return
         if self.stack.currentWidget() is not self.glw:
-            return
-        if ev.button() != Qt.LeftButton:
             return
         p = self.p_main.getViewBox().mapSceneToView(ev.scenePos())
         d = self.data
@@ -331,8 +346,65 @@ class Contour2DView(QWidget):
         self.data = self._orig
         self._redraw()
 
+    # ---------- calibrate + measure ----------
+    def _calibrate_at(self, p):
+        from PySide6.QtWidgets import QInputDialog
+
+        f2, ok = QInputDialog.getDouble(
+            self, "Calibrate F2", f"Set F2 {p.x():.2f} ppm to:",
+            float(p.x()), -1e5, 1e5, 3)
+        if not ok:
+            return
+        f1, ok = QInputDialog.getDouble(
+            self, "Calibrate F1", f"Set F1 {p.y():.2f} ppm to:",
+            float(p.y()), -1e5, 1e5, 3)
+        if not ok:
+            return
+        self._shift_axes(float(f2) - float(p.x()), float(f1) - float(p.y()))
+        self.btnCal.setChecked(False)
+
+    def _shift_axes(self, d2: float, d1: float):
+        from larmor.twod import Data2D
+
+        def sh(src):
+            return Data2D(src.f2_ppm + d2, src.f1_ppm + d1, src.z, src.nucleus,
+                          src.larmor_MHz, src.spin_rate_Hz, src.source,
+                          list(src.notes))
+        self._orig = sh(self._orig)
+        self._committed = sh(self._committed)
+        self.data = sh(self.data)
+        self._redraw()
+
+    def _toggle_measure(self, on: bool):
+        for t in self._mtargets:
+            self.p_main.removeItem(t)
+        self._mtargets = []
+        if not on or self.data is None:
+            return
+        d = self.data
+        for fx, fy in ((0.4, 0.55), (0.6, 0.45)):
+            x = float(d.f2_ppm.min() + fx * (d.f2_ppm.max() - d.f2_ppm.min()))
+            y = float(d.f1_ppm.min() + fy * (d.f1_ppm.max() - d.f1_ppm.min()))
+            t = pg.TargetItem(pos=(x, y), size=12, movable=True,
+                              pen=pg.mkPen("#0e7c86", width=1.6))
+            t.sigPositionChanged.connect(self._emit_measure2d)
+            self.p_main.addItem(t)
+            self._mtargets.append(t)
+        self._emit_measure2d()
+
+    def _emit_measure2d(self, *_):
+        if len(self._mtargets) != 2 or self.data is None:
+            return
+        a, b = (t.pos() for t in self._mtargets)
+        d2 = abs(a.x() - b.x()); d1 = abs(a.y() - b.y())
+        lar = self.data.larmor_MHz or 0.0
+        hz2 = f" ({d2 * lar:.0f} Hz)" if lar else ""
+        self.cursor.setText(f"ΔF2 {d2:.2f} ppm{hz2}   ΔF1 {d1:.2f} ppm")
+
     # ------------------------------------------------------------------
     def _on_move(self, pos):
+        if self.btnMeasure.isChecked():
+            return                       # keep the Δ readout stable while measuring
         if self.data is None or not self.p_main.sceneBoundingRect().contains(pos):
             return
         p = self.p_main.getViewBox().mapSceneToView(pos)

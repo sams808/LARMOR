@@ -191,6 +191,8 @@ class MainWindow(QMainWindow):
         self.view.file_dropped.connect(self.load_source)
         self.view.cursor_moved.connect(
             lambda x, y: self.pos_label.setText(f"x: {x:.2f} ppm   y: {y:.4g}"))
+        self.view.calibrate_picked.connect(self.on_calibrate_picked)
+        self.view.measure_changed.connect(self.on_measure_changed)
         self.view2d.slice_to_fit.connect(self._trace_to_workbench)
 
         self._build_menus()
@@ -253,6 +255,11 @@ class MainWindow(QMainWindow):
         self._add(m_proc, "Baseline auto (order 3)",
                   lambda: self.apply_processing([{"op": "baseline", "order": 3}], False))
         self._add(m_proc, "Reset to original", self.reset_processing)
+        m_proc.addSeparator()
+        self._add(m_proc, "&Calibrate axis…  (click a peak, set its ppm)",
+                  self.start_calibrate)
+        self.actMeasure = self._add(m_proc, "&Measure Δ (ppm / Hz)",
+                                    self.toggle_measure, checkable=True)
 
         m_dec = mb.addMenu("&Decomposition")
         self._add(m_dec, "&New fit (clear lines)", self.new_fit)
@@ -1122,6 +1129,56 @@ class MainWindow(QMainWindow):
         self.request_simulation()
         self.statusBar().showMessage(
             f"processing applied ({len(ops)} step(s), stored in the recipe)")
+
+    # ------------------------------------------------------------- calibrate
+    def start_calibrate(self):
+        if not self.exp_ppm.size:
+            self.statusBar().showMessage("load a spectrum first")
+            return
+        self.view.set_calibrate_mode(True)
+        self.statusBar().showMessage(
+            "calibrate: click the peak whose shift you want to set")
+
+    def on_calibrate_picked(self, peak_ppm: float):
+        from PySide6.QtWidgets import QInputDialog
+
+        self.view.set_calibrate_mode(False)
+        target, ok = QInputDialog.getDouble(
+            self, "Calibrate axis", f"Set the peak at {peak_ppm:.2f} ppm to:",
+            peak_ppm, -100000.0, 100000.0, 3)
+        if not ok:
+            return
+        delta = float(target) - float(peak_ppm)
+        if abs(delta) < 1e-12:
+            return
+        self.exp_ppm = self.exp_ppm + delta
+        if self._proc_base is not None:
+            self._proc_base = (self._proc_base[0] + delta, self._proc_base[1])
+        self.view.set_experiment(self.exp_ppm, self.exp_amp)
+        larmor = self.recipe.get("larmor_frequency_MHz", 0.0) if self.recipe else 0.0
+        if self.recipe is not None:
+            self.recipe["calibration_ppm"] = \
+                self.recipe.get("calibration_ppm", 0.0) + delta
+        self.request_simulation()
+        hz = delta * larmor
+        self.statusBar().showMessage(
+            f"axis shifted by {delta:+.3f} ppm"
+            + (f"  (SR {hz:+.1f} Hz)" if larmor else ""))
+
+    # --------------------------------------------------------------- measure
+    def toggle_measure(self, on: bool):
+        self.view.set_measure_mode(on)
+        if not on:
+            self.statusBar().showMessage("")
+
+    def on_measure_changed(self, p1: float, p2: float):
+        larmor = self.recipe.get("larmor_frequency_MHz", 0.0) if self.recipe else 0.0
+        dppm = abs(p1 - p2)
+        msg = f"Δ = {dppm:.3f} ppm"
+        if larmor:
+            msg += f"   {dppm * larmor:.1f} Hz"
+        msg += f"   ({p1:.2f} → {p2:.2f} ppm)"
+        self.statusBar().showMessage(msg)
 
     def reset_processing(self):
         if self.source_path:

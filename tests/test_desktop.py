@@ -74,6 +74,29 @@ def test_open_any_type_never_rejects(qapp, win):
     assert is_1d() and win.exp_ppm.size > 0
 
 
+def test_calibrate_and_measure(qapp):
+    """Calibrate shifts the axis so a picked peak reads the target; the 2D
+    measure readout reports Δ in ppm and Hz."""
+    from larmor import twod
+    from larmor.desktop.twod_view import Contour2DView
+
+    # 2D axis calibration
+    f2 = np.linspace(-100, 100, 64); f1 = np.linspace(-40, 40, 16)
+    d = twod.Data2D(f2_ppm=f2, f1_ppm=f1, z=np.random.RandomState(2).randn(16, 64),
+                    larmor_MHz=100.0)
+    v = Contour2DView(); v.set_data(d.normalized(), "syn"); qapp.processEvents()
+    v._shift_axes(5.0, -3.0); qapp.processEvents()
+    assert v.data.f2_ppm[0] == pytest.approx(f2[0] + 5.0)
+    assert v.data.f1_ppm[0] == pytest.approx(f1[0] - 3.0)
+
+    v.btnMeasure.setChecked(True); qapp.processEvents()
+    assert len(v._mtargets) == 2
+    v._mtargets[0].setPos((-50.0, 10.0))
+    v._mtargets[1].setPos((-80.0, 4.0)); qapp.processEvents()
+    assert "ΔF2 30.00 ppm" in v.cursor.text()
+    assert "3000 Hz" in v.cursor.text()          # 30 ppm × 100 MHz
+
+
 def test_twod_phasing_and_contours(qapp):
     """The 2D contour view: phase_1d matches Data2D.phased, and the pick →
     phase-traces → apply flow mutates the committed data and returns to the map."""
