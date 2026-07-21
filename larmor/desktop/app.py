@@ -168,14 +168,27 @@ class MainWindow(QMainWindow):
         self._last_model = None     # (x, total) of the latest simulation
         self._first_sim = False     # autoscale Y once the first model arrives
 
+        # central area holds a 1D spectrum view AND a 2D contour view; the
+        # loader switches between them so ANY dataset opens with a basic
+        # display and the user then picks what to do with it
+        from PySide6.QtWidgets import QStackedWidget
+
+        from larmor.desktop.twod_view import Contour2DView
+
         self.view = SpectrumView()
-        self.setCentralWidget(self.view)
+        self.view2d = Contour2DView()
+        self.central_stack = QStackedWidget()
+        self.central_stack.addWidget(self.view)      # index 0: 1D
+        self.central_stack.addWidget(self.view2d)    # index 1: 2D
+        self.setCentralWidget(self.central_stack)
+
         self.view.add_requested.connect(self.add_site_at)
         self.view.paddle_moved.connect(self.on_paddle_moved)
         self.view.paddle_released.connect(self.on_paddle_released)
         self.view.file_dropped.connect(self.load_source)
         self.view.cursor_moved.connect(
             lambda x, y: self.pos_label.setText(f"x: {x:.2f} ppm   y: {y:.4g}"))
+        self.view2d.slice_to_fit.connect(self._trace_to_workbench)
 
         self._build_menus()
         self._build_toolbar()
@@ -634,14 +647,33 @@ class MainWindow(QMainWindow):
         return QSettings("LARMOR", "app").value("lastDir", "")
 
     def load_source(self, path: str, keep_fit: bool | None = None):
+        """Open ANY dataset with a basic display, then let the user choose a
+        process. 1D spectra go to the fit workbench; 2D datasets show a contour
+        map; raw fid/ser get a quick preview. Nothing is ever rejected."""
         self.statusBar().showMessage("loading…")
         QApplication.processEvents()
+
+        # First try the 1D-fittable path (dmfit / recipe / 1D processed).
         try:
             ppm, amp, recipe, meta, warnings = _load_any(path)
+        except ValueError:
+            # not a 1D-fittable source: it may be a 2D or a raw fid/ser.
+            handled = self._load_nonfittable(path)
+            if handled:
+                return
+            # fall through to report the original error
+            try:
+                _load_any(path)
+            except Exception as exc:
+                QMessageBox.warning(self, "Load failed", str(exc))
+                self.statusBar().showMessage("load failed")
+            return
         except Exception as exc:
             QMessageBox.warning(self, "Load failed", str(exc))
             self.statusBar().showMessage("load failed")
             return
+
+        self.central_stack.setCurrentWidget(self.view)   # 1D workbench
 
         # dmfit behaviour: if a fit is already on screen and the new source
         # brings no fit of its own, offer to keep the current lines
@@ -687,6 +719,90 @@ class MainWindow(QMainWindow):
         if self.recipe["sites"]:
             self.request_simulation()
         self._persist_session()
+
+    def _load_nonfittable(self, path: str) -> bool:
+        """Display a 2D dataset or a raw fid/ser without rejecting it.
+        Returns True if it handled the path."""
+        from larmor.io import bruker
+
+        try:
+            ref = bruker.resolve(path)
+            data = bruker.read(path)
+        except Exception:
+            return False
+
+        self.source_path = path
+        QSettings("LARMOR", "app").setValue("lastDir", str(Path(path).parent))
+        self.setWindowTitle(f"LARMOR — {Path(path).name}")
+
+        if data.ndim == 2 and data.domain == "freq":
+            self._show_2d(_nmrdata_to_data2d(data), Path(path).name,
+                          "2D spectrum")
+            kind = "arrayed/relaxation" if data.is_pseudo2d else "MQMAS 2D"
+            self.statusBar().showMessage(
+                f"{kind} displayed — Tools ▸ 2D MQMAS to fit · Tools ▸ "
+                "Relaxation for a series · or send a 1D trace to fitting below")
+            return True
+
+        if data.ndim == 2 and data.domain == "time":
+            from larmor import fourier
+
+            d2 = fourier.ft2d_from_nmrdata(data, fourier.FT2DParams(
+                f2_ops=[{"op": "fcor", "factor": 0.5}, {"op": "em", "lb_hz": 100}]))
+            self._show_2d(d2, Path(path).name, "raw 2D (quick preview)")
+            self.statusBar().showMessage(
+                "raw 2D preview — File ▸ Open FID for full processing · "
+                "Tools ▸ Relaxation for a T1/T2 series")
+            return True
+
+        if data.ndim == 1 and data.domain == "time":
+            # quick magnitude-FT preview so the user sees a spectrum at once
+            from larmor import fourier
+
+            ppm, spec = fourier.ft1d(
+                data.data, data.axes[0].sw_Hz, data.meta["larmor_MHz"],
+                ops=[{"op": "fcor", "factor": 0.5}, {"op": "em", "lb_hz": 100}])
+            order = np.argsort(ppm)
+            spec = np.abs(spec)              # magnitude preview (phase-free)
+            self._display_1d(ppm[order], spec[order],
+                             data.meta.get("nucleus", ""),
+                             data.meta["larmor_MHz"], data.meta.get("masr_Hz"),
+                             Path(path).name + " (FID preview)", str(ref.expno))
+            self.statusBar().showMessage(
+                "raw FID preview (magnitude) — Process ▸ Open FID to apodize, "
+                "phase and transform properly, then fit")
+            return True
+        return False
+
+    def _show_2d(self, data2d, title: str, kind: str):
+        self.view2d.set_data(data2d, f"{kind} — {title}")
+        self.central_stack.setCurrentWidget(self.view2d)
+
+    def _display_1d(self, ppm, amp, nucleus, larmor, masr, title, expno):
+        """Put a bare 1D spectrum on the workbench (no fit), ready to fit."""
+        from larmor.recipe import Recipe
+
+        self.central_stack.setCurrentWidget(self.view)
+        self.exp_ppm, self.exp_amp = np.asarray(ppm), np.asarray(amp)
+        self.recipe = Recipe(sample=title, source_kind="bruker",
+                             source_path=expno, nucleus=nucleus,
+                             larmor_frequency_MHz=larmor,
+                             spin_rate_Hz=masr or 0.0).to_dict()
+        self.hidden.clear(); self.undo_stack.clear(); self.redo_stack.clear()
+        self.view.set_experiment(self.exp_ppm, self.exp_amp)
+        self.view.set_title(title)
+        self._last_model = None; self._first_sim = True
+        self.zoom_full()
+        self.lines_table.rebuild(self.recipe, self.hidden)
+        self._update_paddles(); self._update_exp_label(); self._update_enabled()
+
+    def _trace_to_workbench(self, ppm, amp, label):
+        """A 1D trace pulled out of the 2D view becomes the working spectrum."""
+        nuc = self.view2d.data.nucleus if self.view2d.data else ""
+        larmor = self.view2d.data.larmor_MHz if self.view2d.data else 0.0
+        self._display_1d(ppm, amp, nuc, larmor, None, label,
+                         self.source_path or "")
+        self.statusBar().showMessage(f"{label} — add lines and Fit")
 
     def new_fit(self):
         if self.recipe is None:
@@ -1194,6 +1310,21 @@ def _load_any(path: str):
     from larmor.loader import load_any
 
     return load_any(path)
+
+
+def _nmrdata_to_data2d(data):
+    """Convert a frequency-domain 2D NMRData into a twod.Data2D for display."""
+    from larmor.twod import Data2D
+
+    f1, f2 = data.axes
+    d = Data2D(f2_ppm=np.asarray(f2.values), f1_ppm=np.asarray(f1.values),
+               z=np.asarray(data.data, float), nucleus=data.nucleus,
+               larmor_MHz=data.meta.get("larmor_MHz", 0.0),
+               source=data.source)
+    d.notes = list(data.warnings)
+    if data.is_pseudo2d:
+        d.notes.append("pseudo-2D (arrayed)")
+    return d
 
 
 def asset_path(name: str) -> str:

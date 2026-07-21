@@ -5,7 +5,8 @@ import os
 import numpy as np
 import pytest
 
-from conftest import CAALGLASS, require
+from conftest import (BRUKER_1R, BRUKER_2RR_MQMAS, BRUKER_2RR_PSEUDO,
+                      BRUKER_FID, BRUKER_SER, CAALGLASS, require)
 
 pyside = pytest.importorskip("PySide6")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -26,6 +27,44 @@ def win(qapp):
     w = MainWindow()
     yield w
     w.close()
+
+
+def test_open_any_type_never_rejects(qapp, win):
+    """Every data type opens with a basic display: 1D → workbench, 2D → the
+    contour view, raw fid/ser → a preview. None is rejected."""
+    def is_1d():
+        return win.central_stack.currentWidget() is win.view
+
+    # 1D processed spectrum → fit workbench
+    win.load_source(str(require(BRUKER_1R)), keep_fit=False)
+    qapp.processEvents()
+    assert is_1d() and win.exp_ppm.size > 0 and win.recipe["nucleus"] == "27Al"
+
+    # real MQMAS 2rr → the 2D contour view (was previously a rejection)
+    win.load_source(str(require(BRUKER_2RR_MQMAS)), keep_fit=False)
+    qapp.processEvents()
+    assert not is_1d()
+    assert win.view2d.data is not None and win.view2d.data.z.ndim == 2
+
+    # pseudo-2D relaxation 2rr → the 2D view (the exact case the user hit)
+    win.load_source(str(require(BRUKER_2RR_PSEUDO)), keep_fit=False)
+    qapp.processEvents()
+    assert not is_1d()
+
+    # raw fid → 1D magnitude preview on the workbench
+    win.load_source(str(require(BRUKER_FID)), keep_fit=False)
+    qapp.processEvents()
+    assert is_1d() and win.exp_ppm.size > 0
+
+    # raw ser → 2D preview
+    win.load_source(str(require(BRUKER_SER)), keep_fit=False)
+    qapp.processEvents()
+    assert not is_1d()
+
+    # pull a 1D projection out of the 2D → back to the workbench
+    win.view2d._emit_projection("skyline")
+    qapp.processEvents()
+    assert is_1d() and win.exp_ppm.size > 0
 
 
 @pytest.mark.slow
