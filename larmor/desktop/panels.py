@@ -1,7 +1,7 @@
 """Side panels: sites (dmfit-style parameter cards) and processing."""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QDoubleValidator
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDoubleSpinBox, QFrame, QGridLayout, QHBoxLayout,
@@ -287,6 +287,17 @@ class ProcessingPanel(QWidget):
         ph1.addWidget(self.p1); ph1.addWidget(self.p1v)
         v.addLayout(ph1)
 
+        # TopSpin-style quick zero-order phase steps
+        quick = QHBoxLayout()
+        quick.addWidget(QLabel("p0 step"))
+        for lbl, d in (("−90°", -90.0), ("+90°", 90.0), ("180°", 180.0)):
+            b = QPushButton(lbl)
+            b.setToolTip("add to the zero-order phase (wraps to ±180°)")
+            b.clicked.connect(lambda _=False, d=d: self._nudge_p0(d))
+            quick.addWidget(b)
+        quick.addStretch(1)
+        v.addLayout(quick)
+
         bl = QHBoxLayout()
         bl.addWidget(QLabel("<b>Baseline auto</b> order"))
         self.blOrder = QSpinBox(); self.blOrder.setRange(0, 9); self.blOrder.setValue(3)
@@ -309,6 +320,11 @@ class ProcessingPanel(QWidget):
         v.addLayout(blm)
 
         actions = QHBoxLayout()
+        self.chkLive = QCheckBox("live")
+        self.chkLive.setChecked(True)
+        self.chkLive.setToolTip("re-apply the pipeline to the spectrum as you "
+                                "change any control")
+        actions.addWidget(self.chkLive)
         self.btnApply = QPushButton("Apply processing")
         self.btnApply.setDefault(True)
         self.btnReset = QPushButton("Reset to original")
@@ -329,6 +345,32 @@ class ProcessingPanel(QWidget):
         self.btnBlPick.toggled.connect(self.baseline_mode)
         self.btnBlApply.clicked.connect(self.baseline_apply)
         self.btnBlClear.clicked.connect(self.baseline_clear)
+
+        # ---- live preview: coalesce rapid edits into one re-apply ----
+        self._live_timer = QTimer(self)
+        self._live_timer.setSingleShot(True)
+        self._live_timer.setInterval(120)
+        self._live_timer.timeout.connect(lambda: self._emit([]))
+        for w in (self.lb, self.gb, self.ssb, self.fcor, self.off, self.sr,
+                  self.p0v, self.p1v):
+            w.valueChanged.connect(self._schedule_live)
+        for w in (self.tdeff, self.zf):
+            w.valueChanged.connect(self._schedule_live)
+        self.wdw.currentTextChanged.connect(self._schedule_live)
+        for w in (self.chkMag, self.chkHilbert, self.rb_raw, self.rb_pdata):
+            w.toggled.connect(self._schedule_live)
+
+    def _schedule_live(self, *_):
+        if self.chkLive.isChecked():
+            self._live_timer.start()
+
+    def _nudge_p0(self, delta: float):
+        v_ = self.p0v.value() + delta
+        while v_ > 180.0:
+            v_ -= 360.0
+        while v_ < -180.0:
+            v_ += 360.0
+        self.p0v.setValue(v_)          # fires valueChanged -> live re-apply
 
     def _emit(self, extra: list[dict]):
         raw = self.rb_raw.isChecked()

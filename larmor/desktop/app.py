@@ -157,6 +157,9 @@ class MainWindow(QMainWindow):
         self.recipe: dict | None = None
         self.exp_ppm = np.array([])
         self.exp_amp = np.array([])
+        #: unprocessed workbench spectrum the pipeline is (re)applied from, so
+        #: live processing reflects ABSOLUTE settings instead of compounding
+        self._proc_base: tuple[np.ndarray, np.ndarray] | None = None
         self.hidden: set[int] = set()
         self.undo_stack: list[str] = []
         self.redo_stack: list[str] = []
@@ -616,6 +619,7 @@ class MainWindow(QMainWindow):
 
         order = np.argsort(ppm)
         self.exp_ppm, self.exp_amp = np.asarray(ppm)[order], np.asarray(amp)[order]
+        self._proc_base = None
         self.source_path = meta.get("expno", "")
         self.recipe = Recipe(
             sample=(meta.get("title", "").splitlines() or [""])[0],
@@ -695,6 +699,7 @@ class MainWindow(QMainWindow):
 
         self.source_path = path
         self.exp_ppm, self.exp_amp = ppm, amp
+        self._proc_base = None
         self.recipe = recipe
         self.hidden.clear()
         self.undo_stack.clear()
@@ -784,6 +789,7 @@ class MainWindow(QMainWindow):
 
         self.central_stack.setCurrentWidget(self.view)
         self.exp_ppm, self.exp_amp = np.asarray(ppm), np.asarray(amp)
+        self._proc_base = None
         self.recipe = Recipe(sample=title, source_kind="bruker",
                              source_path=expno, nucleus=nucleus,
                              larmor_frequency_MHz=larmor,
@@ -1071,24 +1077,38 @@ class MainWindow(QMainWindow):
     def apply_processing(self, ops: list, use_raw: bool):
         if not self.source_path:
             return
+        # only the 1D workbench is processed live; ignore while a 2D map is up
+        if self.central_stack.currentWidget() is not self.view:
+            return
+        if not use_raw and not self.exp_ppm.size:
+            return
         from larmor import processing as proc
         from larmor.io import bruker
 
-        self.statusBar().showMessage("processing…")
-        QApplication.processEvents()
+        live = getattr(self.proc_panel, "chkLive", None)
+        live = bool(live and live.isChecked())
+        if not live:
+            self.statusBar().showMessage("processing…")
+            QApplication.processEvents()
         try:
             if use_raw:
                 if not bruker.is_expno(Path(self.source_path)):
                     raise ValueError("raw-fid processing needs a Bruker EXPNO")
                 s = proc.from_bruker_fid(self.source_path)
             else:
+                # apply the pipeline from the UNPROCESSED baseline every time, so
+                # a live slider shows the absolute phase rather than compounding
+                if self._proc_base is None:
+                    self._proc_base = (self.exp_ppm.copy(), self.exp_amp.copy())
+                base_ppm, base_amp = self._proc_base
                 sfo1 = self.recipe.get("larmor_frequency_MHz", 0.0) if self.recipe else 0.0
-                s = proc.from_processed(self.exp_ppm, self.exp_amp, sfo1)
+                s = proc.from_processed(base_ppm, base_amp, sfo1)
             s = proc.apply(s, ops)
             if s.domain != "freq":
                 raise ValueError("pipeline must end in the frequency domain")
         except Exception as exc:
-            QMessageBox.warning(self, "Processing failed", str(exc))
+            if not live:                       # never nag on every keystroke
+                QMessageBox.warning(self, "Processing failed", str(exc))
             self.statusBar().showMessage("processing failed")
             return
         order = np.argsort(s.x_ppm)
