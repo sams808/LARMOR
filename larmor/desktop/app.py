@@ -307,6 +307,8 @@ class MainWindow(QMainWindow):
                                  self.run_auto_fit)
         self.actErrors = self._add(m_dec, "&Errors Analysis (χ² profile)…",
                                    self.run_errors_analysis)
+        self._add(m_dec, "Co-&fit datasets…  (shared model, 1D + MQMAS)",
+                  self.open_cofit)
         self._add(m_dec, "&Compute", self.request_simulation, "F9")
         m_dec.addSeparator()
         self._add(m_dec, "Add fit &zone", self.add_zone)
@@ -1572,6 +1574,37 @@ class MainWindow(QMainWindow):
         from larmor.desktop.figure_dialog import FigureDialog
 
         FigureDialog(self, self.source_path, self.recipe).exec()
+
+    def open_cofit(self):
+        from larmor.desktop.cofit_dialog import CofitDialog
+
+        if not self.recipe or not self.recipe.get("sites"):
+            self.statusBar().showMessage(
+                "set up the shared fit (add lines) on one dataset first")
+            return
+        # the current dataset becomes co-fit dataset 0
+        if self.central_stack.currentWidget() is self.view2d and self._data2d:
+            base = {"kind": "2d", "label": Path(self.source_path or "2D").name,
+                    "data2d": self._data2d, "nucleus": self._data2d.nucleus,
+                    "larmor": self._data2d.larmor_MHz}
+        else:
+            base = {"kind": "1d",
+                    "label": self.recipe.get("sample") or "current",
+                    "ppm": self.exp_ppm, "amp": self.exp_amp,
+                    "nucleus": self.recipe.get("nucleus", ""),
+                    "larmor": self.recipe.get("larmor_frequency_MHz", 0.0)}
+        dlg = CofitDialog(self, self.recipe, base)
+        dlg.applied.connect(self._cofit_applied)
+        dlg.exec()
+
+    def _cofit_applied(self, recipe_dict):
+        self.snapshot()
+        self.recipe = recipe_dict
+        self.lines_table.rebuild(self.recipe, self.hidden)
+        self._update_paddles()
+        if self.central_stack.currentWidget() is self.view:
+            self.request_simulation()
+        self.statusBar().showMessage("co-fit shared parameters applied")
 
     def open_qcpmg(self):
         from larmor.desktop.qcpmg_dialog import QcpmgDialog
