@@ -219,6 +219,7 @@ class MainWindow(QMainWindow):
         self._build_toolbar()
         self._build_sidebar()
         self._build_explorer_dock()
+        self._build_datasets_dock()
         self._build_bottom_docks()
         self._build_right_dock()
 
@@ -407,6 +408,24 @@ class MainWindow(QMainWindow):
         self.explorer_dock.setWidget(self.explorer)
         self.explorer_dock.setMinimumWidth(230)
         self.addDockWidget(Qt.LeftDockWidgetArea, self.explorer_dock)
+
+    def _build_datasets_dock(self):
+        from larmor.desktop.datasets import DatasetsPanel
+
+        self._overlays: list[dict] = []
+        self.datasets_dock = QDockWidget("Datasets", self)
+        self.datasets_dock.setFeatures(QDockWidget.DockWidgetMovable |
+                                       QDockWidget.DockWidgetClosable)
+        self.datasets_panel = DatasetsPanel()
+        self.datasets_panel.add_requested.connect(self.add_overlay_dialog)
+        self.datasets_panel.make_active.connect(self.overlay_make_active)
+        self.datasets_panel.remove.connect(self.overlay_remove)
+        self.datasets_panel.visibility_changed.connect(self.overlay_visibility)
+        self.datasets_panel.offset_changed.connect(lambda _: self._refresh_overlays())
+        self.datasets_dock.setWidget(self.datasets_panel)
+        self.addDockWidget(Qt.LeftDockWidgetArea, self.datasets_dock)
+        self.tabifyDockWidget(self.explorer_dock, self.datasets_dock)
+        self.explorer_dock.raise_()
 
     # ------------------------------------------------------------- docks
     def _build_bottom_docks(self):
@@ -753,6 +772,7 @@ class MainWindow(QMainWindow):
         self._update_enabled()
         if self.recipe["sites"]:
             self.request_simulation()
+        self._refresh_overlays()
         self._persist_session()
 
     def _load_nonfittable(self, path: str) -> bool:
@@ -809,6 +829,86 @@ class MainWindow(QMainWindow):
             return True
         return False
 
+    # --------------------------------------------------------- overlays
+    def add_overlay_dialog(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Add a spectrum to compare", self._last_dir(),
+            "Spectra (*.fxmla *.json 1r 2rr *.txt *.csv);;All files (*)")
+        if not path:
+            return
+        try:
+            recipe, ppm, amp, *_ = _load_any(path)
+            label = recipe.get("sample") or Path(path).name
+        except Exception:
+            try:
+                from larmor.io import bruker
+
+                d = bruker.read(path)
+                if d.ndim != 1 or d.domain != "freq":
+                    raise ValueError("not a 1D spectrum")
+                ppm, amp = np.asarray(d.axes[0].values), np.asarray(d.data, float)
+                label = Path(path).name
+            except Exception as exc:
+                QMessageBox.warning(self, "Add overlay", f"cannot read: {exc}")
+                return
+        self._add_overlay(label, np.asarray(ppm), np.asarray(amp), path)
+
+    def _add_overlay(self, label, ppm, amp, source=""):
+        from larmor.desktop.datasets import overlay_color
+
+        self._overlays.append({
+            "label": label, "ppm": np.asarray(ppm), "amp": np.asarray(amp),
+            "color": overlay_color(len(self._overlays)), "visible": True,
+            "source": source})
+        self._refresh_overlays()
+        self.datasets_dock.raise_()
+
+    def overlay_remove(self, i: int):
+        if 0 <= i < len(self._overlays):
+            del self._overlays[i]
+            self._refresh_overlays()
+
+    def overlay_visibility(self, i: int, on: bool):
+        if 0 <= i < len(self._overlays):
+            self._overlays[i]["visible"] = on
+            self._refresh_overlays()
+
+    def overlay_make_active(self, i: int):
+        if not (0 <= i < len(self._overlays)):
+            return
+        ov = self._overlays[i]
+        if not ov.get("source"):
+            return
+        prev = None
+        if self.exp_ppm.size and self.source_path:
+            prev = (self.recipe.get("sample") if self.recipe else None,
+                    self.exp_ppm.copy(), self.exp_amp.copy(), self.source_path)
+        del self._overlays[i]
+        self.load_source(ov["source"])
+        if prev and prev[3] != self.source_path:
+            self._add_overlay(prev[0] or Path(prev[3]).name, prev[1], prev[2],
+                              prev[3])
+        self._refresh_overlays()
+
+    def _refresh_overlays(self):
+        if not hasattr(self, "datasets_panel"):
+            return
+        span = 1.0
+        if self.exp_amp.size:
+            span = float(np.nanmax(self.exp_amp) - np.nanmin(self.exp_amp)) or 1.0
+        step = self.datasets_panel.offset.value() * span
+        drawn = []
+        for k, ov in enumerate(self._overlays):
+            if ov.get("visible", True):
+                drawn.append((ov["ppm"], ov["amp"] + step * (k + 1),
+                              ov["color"], ov["label"]))
+        self.view.set_overlays(drawn)
+        label = ""
+        if self.recipe is not None:
+            label = self.recipe.get("sample") or (
+                Path(self.source_path).name if self.source_path else "")
+        self.datasets_panel.rebuild(label, self._overlays)
+
     def _show_2d(self, data2d, title: str, kind: str):
         from larmor.recipe import Recipe
 
@@ -847,6 +947,7 @@ class MainWindow(QMainWindow):
         self.zoom_full()
         self.lines_table.rebuild(self.recipe, self.hidden)
         self._update_paddles(); self._update_exp_label(); self._update_enabled()
+        self._refresh_overlays()
 
     def _trace_to_workbench(self, ppm, amp, label):
         """A 1D trace pulled out of the 2D view becomes the working spectrum."""

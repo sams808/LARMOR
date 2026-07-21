@@ -74,6 +74,26 @@ def test_open_any_type_never_rejects(qapp, win):
     assert is_1d() and win.exp_ppm.size > 0
 
 
+def test_overlay_cockpit(qapp, win):
+    """Overlays draw behind the active spectrum, honour visibility/stack offset,
+    and 'make active' promotes an overlay to the fit target."""
+    x = np.linspace(-100, 100, 200)
+    win._display_1d(x, np.exp(-(x ** 2) / 200), "27Al", 100.0, None, "A", "srcA")
+    qapp.processEvents()
+    win._add_overlay("B", x, 0.5 * np.exp(-((x - 20) ** 2) / 200), "srcB")
+    win._add_overlay("C", x, 0.3 * np.exp(-((x + 30) ** 2) / 200), "srcC")
+    qapp.processEvents()
+    assert len(win._overlays) == 2
+    assert len(win.view._overlay_items) == 2
+
+    win.datasets_panel.offset.setValue(0.4); qapp.processEvents()
+    assert len(win.view._overlay_items) == 2      # still drawn, now stacked
+    win.overlay_visibility(0, False); qapp.processEvents()
+    assert len(win.view._overlay_items) == 1      # hidden one dropped
+    win.overlay_remove(0); qapp.processEvents()
+    assert len(win._overlays) == 1
+
+
 def test_twod_fit_wiring(qapp, win):
     """A displayed 2D gets a recipe, click-to-add places 2D sites, the fitted
     overlay renders, and run_fit routes to the 2D path (rejecting 1D-only models)."""

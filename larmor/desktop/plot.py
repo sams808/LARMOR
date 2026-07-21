@@ -90,6 +90,8 @@ class SpectrumView(pg.PlotWidget):
         # calibrate (click a peak) and measure (two-cursor ruler)
         self._cal_mode = False
         self._measure_lines: list[pg.InfiniteLine] = []
+        # comparison overlays (other datasets drawn behind the active one)
+        self._overlay_items: list[pg.PlotDataItem] = []
 
     # ---------- drag & drop ----------
     def dragEnterEvent(self, ev):
@@ -306,6 +308,18 @@ class SpectrumView(pg.PlotWidget):
                 item.setData(x, ys, fillLevel=0.0, fillBrush=pg.mkBrush(fill))
             else:
                 item.setData([], [])
+
+    # ---------- comparison overlays ----------
+    def set_overlays(self, overlays: list[tuple]):
+        """overlays: [(x, y, color, label), ...] drawn behind the active data."""
+        for it in self._overlay_items:
+            self.removeItem(it)
+        self._overlay_items.clear()
+        for x, y, color, label in overlays:
+            item = self.plot(x, y, pen=pg.mkPen(color, width=1.1),
+                             name=label, antialias=True)
+            item.setZValue(-10)
+            self._overlay_items.append(item)
 
     # ---------- markers (legacy InfiniteLine API kept for tests) ----------
     def set_markers(self, positions: list[tuple[int, float, bool]]):
