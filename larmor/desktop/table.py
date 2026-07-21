@@ -8,12 +8,25 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QAction, QColor
 from PySide6.QtWidgets import (
-    QCheckBox, QDoubleSpinBox, QHBoxLayout, QHeaderView, QInputDialog,
-    QLabel, QMenu, QPushButton, QSpinBox, QTableWidget, QTableWidgetItem,
-    QVBoxLayout, QWidget,
+    QCheckBox, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit,
+    QMenu, QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
+from larmor import cellparse
 from larmor.desktop.plot import site_color
+
+
+def _param_unit(model: str, key: str) -> str:
+    """The declared unit of a parameter (from the model registry)."""
+    try:
+        from larmor import models
+
+        for pd in models.get(model).params:
+            if pd.name == key:
+                return pd.unit or ""
+    except Exception:
+        pass
+    return ""
 
 #: column order and short headers, dmfit-style
 PARAM_COLUMNS = [
@@ -29,58 +42,92 @@ PARAM_COLUMNS = [
 
 
 class _Cell(QWidget):
-    """value spinbox + pin checkbox (checked = FIXED, dmfit convention)."""
+    """A smart value field + pin checkbox (checked = FIXED, dmfit convention).
+
+    The field is a text box: type a number, a link to another component by its
+    LETTER (A+20, A+20kHz, 0.5B), or bounds ([0..100]); see larmor.cellparse.
+    """
 
     edited = Signal()
     pinned = Signal()
+    error = Signal(str)
 
-    def __init__(self, p: dict):
+    def __init__(self, p: dict, param_name: str, param_unit: str,
+                 this_index: int, n_sites: int, larmor_MHz: float):
         super().__init__()
         self.p = p
+        self.ctx = dict(param_name=param_name, param_unit=param_unit,
+                        this_index=this_index, n_sites=n_sites,
+                        larmor_MHz=larmor_MHz)
         lay = QHBoxLayout(self)
         lay.setContentsMargins(2, 0, 2, 0)
         lay.setSpacing(2)
-        self.spin = QDoubleSpinBox()
-        self.spin.setDecimals(4)
-        self.spin.setRange(-1e12, 1e12)
-        self.spin.setKeyboardTracking(False)
-        self.spin.setStepType(QDoubleSpinBox.AdaptiveDecimalStepType)
-        self.spin.setButtonSymbols(QDoubleSpinBox.NoButtons)
-        self.spin.setFrame(False)
-        # keep the editor from letting a value out of its own bounds
-        if p.get("min") is not None:
-            self.spin.setMinimum(float(p["min"]))
-        if p.get("max") is not None:
-            self.spin.setMaximum(float(p["max"]))
-        self.spin.setValue(p["value"])
-        self.spin.setEnabled(not p.get("expr"))
+        self.edit = QLineEdit()
+        self.edit.setFrame(False)
+        self.edit.setText(self._display_text())
         self.pin = QCheckBox()
         self.pin.setToolTip("pin: hold this parameter fixed during the fit")
         self.pin.setChecked(not p.get("vary", True) and not p.get("expr"))
         self.pin.setEnabled(not p.get("expr"))
+        self._style()
+        lay.addWidget(self.edit, 1)
+        lay.addWidget(self.pin)
+        self.edit.editingFinished.connect(self._on_edit)
+        self.pin.toggled.connect(self._on_pin)
 
+    # ---- display ----
+    def _display_text(self) -> str:
+        if self.p.get("expr"):
+            return cellparse.format_link(self.p["expr"], self.ctx["param_name"])
+        v = self.p["value"]
+        return f"{v:.5g}" if abs(v) < 1e5 or v == 0 else f"{v:.6g}"
+
+    def _style(self):
+        p = self.p
         tips = []
         bounded = p.get("min") is not None or p.get("max") is not None
+        css = ""
         if bounded:
             lo = "−∞" if p.get("min") is None else f"{p['min']:g}"
             hi = "+∞" if p.get("max") is None else f"{p['max']:g}"
-            tips.append(f"constrained to [{lo}, {hi}]")
-            # a teal left border marks a bounded parameter at a glance
-            self.setStyleSheet("_Cell { border-left: 3px solid #0e7c86; }")
+            tips.append(f"constrained to [{lo}, {hi}]  ·  edit inline as [{lo}..{hi}]")
+            css += "QLineEdit { border-left: 3px solid #0e7c86; }"
         if p.get("expr"):
-            tips.append("linked: " + p["expr"])
-            self.setStyleSheet("background: #e2f0f0;")
+            tips.append("linked: " + p["expr"] + "  ·  type a number to unlink")
+            css += "QLineEdit { background: #e2f0f0; }"
+        else:
+            tips.append("type a value, a link (A+20, A+20kHz, 0.5B), "
+                        "or bounds [0..100]")
         if p.get("stderr"):
             tips.append(f"± {p['stderr']:.3g}")
-        if tips:
-            self.spin.setToolTip("  ·  ".join(tips))
-        lay.addWidget(self.spin, 1)
-        lay.addWidget(self.pin)
-        self.spin.valueChanged.connect(self._on_value)
-        self.pin.toggled.connect(self._on_pin)
+        self.edit.setStyleSheet(css)
+        self.edit.setToolTip("  ·  ".join(tips))
 
-    def _on_value(self, v):
-        self.p["value"] = float(v)
+    # ---- edits ----
+    def _on_edit(self):
+        res = cellparse.parse_cell(self.edit.text(), **self.ctx)
+        if res.error:
+            self.error.emit(res.error)
+            self.edit.setText(self._display_text())     # revert
+            return
+        if res.set_value:
+            self.p["value"] = res.value
+        if res.set_expr:
+            self.p["expr"] = res.expr
+            if res.expr:
+                self.p["vary"] = True
+        if res.set_min:
+            self.p["min"] = res.min
+        if res.set_max:
+            self.p["max"] = res.max
+        # clamp the stored value into any new bounds
+        if self.p.get("min") is not None and self.p["value"] < self.p["min"]:
+            self.p["value"] = self.p["min"]
+        if self.p.get("max") is not None and self.p["value"] > self.p["max"]:
+            self.p["value"] = self.p["max"]
+        self.pin.setEnabled(not self.p.get("expr"))
+        self.edit.setText(self._display_text())
+        self._style()
         self.edited.emit()
 
     def _on_pin(self, checked):
@@ -88,13 +135,17 @@ class _Cell(QWidget):
         self.pinned.emit()
 
     def wheelEvent(self, ev):  # scroll on the cell nudges the value
-        if not self.spin.isEnabled():
+        if self.p.get("expr"):
             return
-        step = (abs(self.p["value"]) or 1.0) * (0.1 if ev.modifiers() & Qt.ShiftModifier else 0.02)
+        step = (abs(self.p["value"]) or 1.0) * (
+            0.1 if ev.modifiers() & Qt.ShiftModifier else 0.02)
         self.p["value"] += step if ev.angleDelta().y() > 0 else -step
-        self.spin.blockSignals(True)
-        self.spin.setValue(self.p["value"])
-        self.spin.blockSignals(False)
+        lo, hi = self.p.get("min"), self.p.get("max")
+        if lo is not None:
+            self.p["value"] = max(self.p["value"], lo)
+        if hi is not None:
+            self.p["value"] = min(self.p["value"], hi)
+        self.edit.setText(self._display_text())
         self.edited.emit()
 
 
@@ -134,10 +185,16 @@ class LinesTable(QWidget):
         foot.addSpacing(16)
         foot.addWidget(self.chi2)
         foot.addStretch(1)
-        self.hint = QLabel("pin ☑ = fixed · right-click a cell for link / bounds · scroll a cell to nudge")
-        self.hint.setStyleSheet("color: #93a0a8; font-size: 10px;")
-        foot.addWidget(self.hint)
         v.addLayout(foot)
+        # a full-width, always-visible hint (was previously cut off at the edge)
+        self.hint = QLabel(
+            "Type in a cell:  a value  ·  a bound  [0..100]  ·  a link to "
+            "another line by its letter:  A  ·  A+20  ·  A+20kHz (→ppm)  ·  "
+            "0.5B  ·  A+20 [50..80].   pin ☑ = fixed   ·   scroll = nudge   ·   "
+            "right-click for menus")
+        self.hint.setStyleSheet("color: #5a6871; font-size: 10px; padding: 2px 4px;")
+        self.hint.setWordWrap(True)
+        v.addWidget(self.hint)
         self._recipe: dict | None = None
 
     # ------------------------------------------------------------------
@@ -153,12 +210,19 @@ class LinesTable(QWidget):
         t.setColumnCount(2 + len(used))
         t.setHorizontalHeaderLabels(["line", "model"] + [h for _, h in used])
         t.setRowCount(len(sites))
+        larmor = (recipe or {}).get("larmor_frequency_MHz", 0.0)
+        n = len(sites)
+        # vertical header shows the component LETTER (A, B, C…), dmfit-style
+        t.setVerticalHeaderLabels([cellparse.index_to_letter(i)
+                                   for i in range(n)])
         for i, site in enumerate(sites):
-            head = QTableWidgetItem(f"■ {site.get('label') or f's{i}'}")
+            letter = cellparse.index_to_letter(i)
+            head = QTableWidgetItem(f"■ {letter} · {site.get('label') or ''}".rstrip(" ·"))
             head.setForeground(QColor(site_color(i)))
             if i in hidden:
                 head.setForeground(QColor("#b9c1bc"))
-            head.setToolTip("double-click to rename; right-click for actions")
+            head.setToolTip("double-click to rename; right-click for actions. "
+                            f"Reference this line in a link as “{letter}”.")
             t.setItem(i, 0, head)
             model_item = QTableWidgetItem(site["model"])
             model_item.setFlags(Qt.ItemIsEnabled)
@@ -166,9 +230,11 @@ class LinesTable(QWidget):
             t.setItem(i, 1, model_item)
             for c, key in enumerate(self._used_keys, start=2):
                 if key in site["params"]:
-                    cell = _Cell(site["params"][key])
+                    cell = _Cell(site["params"][key], key,
+                                 _param_unit(site["model"], key), i, n, larmor)
                     cell.edited.connect(self.edited)
                     cell.pinned.connect(self.edited)
+                    cell.error.connect(self._cell_error)
                     t.setCellWidget(i, c, cell)
                 else:
                     blank = QTableWidgetItem("")
@@ -184,11 +250,21 @@ class LinesTable(QWidget):
         t.blockSignals(False)
         t.itemChanged.connect(self._renamed)
 
+    def _cell_error(self, msg: str):
+        # surface a bad link/bounds entry without crashing the edit
+        w = self.window()
+        if w is not None and hasattr(w, "statusBar"):
+            w.statusBar().showMessage("⚠ " + msg, 6000)
+
     def _renamed(self, item):
         if self._recipe and item.column() == 0:
             i = item.row()
             if i < len(self._recipe["sites"]):
-                self._recipe["sites"][i]["label"] = item.text().lstrip("■ ").strip()
+                # strip the "■ A · " prefix, keep the user's own name
+                txt = item.text()
+                if "·" in txt:
+                    txt = txt.split("·", 1)[1]
+                self._recipe["sites"][i]["label"] = txt.strip()
 
     def set_chi2(self, text: str):
         self.chi2.setText(text)
@@ -292,7 +368,7 @@ class LinesTable(QWidget):
         from larmor.desktop.dialogs import BoundsDialog
 
         p = site["params"][key]
-        from larmor.desktop.table import PARAM_LABELS as _PL
+        from larmor.desktop.panels import PARAM_LABELS as _PL
 
         dlg = BoundsDialog(self, _PL.get(key, key), p)
         if dlg.exec():

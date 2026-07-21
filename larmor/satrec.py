@@ -72,7 +72,18 @@ def process_slices(expno: str | Path, lb_hz: float = 100.0,
     """
     from larmor.io import bruker
 
-    data = bruker.read(expno)          # 2D time-domain NMRData, rows = slices
+    # read the RAW arrayed data (ser/fid), never the processed 2rr: an EXPNO
+    # folder resolves to its processed pdata by default, so point at the ser
+    p = Path(expno)
+    if p.is_dir():
+        if (p / "ser").exists():
+            p = p / "ser"
+        elif (p / "fid").exists():
+            p = p / "fid"
+    data = bruker.read(p)              # 2D time-domain NMRData, rows = slices
+    if data.domain != "time":
+        raise ValueError("process_slices needs the raw ser/fid, but got a "
+                         "processed spectrum")
     if data.ndim == 1:
         ser = data.data[None, :]
     else:
