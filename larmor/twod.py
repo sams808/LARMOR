@@ -29,16 +29,33 @@ METHODS = {"3QMAS": "ThreeQ_VAS", "5QMAS": "FiveQ_VAS", "ST1": "ST1_VAS"}
 # --------------------------------------------------------------------------
 @dataclass
 class Data2D:
-    """A processed 2D spectrum on ppm axes. F2 = direct/MAS, F1 = indirect."""
+    """A processed 2D spectrum on ppm axes. F2 = direct/MAS, F1 = indirect.
+
+    ``z`` is the real-real quadrant. When the imaginary quadrants ``ri`` (imag
+    along F2), ``ir`` (imag along F1) and ``ii`` are present, phase correction
+    is exact (true hypercomplex) instead of Hilbert-reconstructed.
+    """
 
     f2_ppm: np.ndarray               # (n2,) ascending
     f1_ppm: np.ndarray               # (n1,) ascending
-    z: np.ndarray                    # (n1, n2) real
+    z: np.ndarray                    # (n1, n2) real (rr)
     nucleus: str = ""
     larmor_MHz: float = 0.0
     spin_rate_Hz: float = 0.0
     source: str = ""
     notes: list[str] = field(default_factory=list)
+    ri: np.ndarray | None = None     # imag along F2 (direct)
+    ir: np.ndarray | None = None     # imag along F1 (indirect)
+    ii: np.ndarray | None = None     # imag-imag
+
+    @property
+    def has_hyper(self) -> bool:
+        return self.ri is not None and self.ir is not None and self.ii is not None
+
+    def _like(self, z, ri=None, ir=None, ii=None) -> "Data2D":
+        return Data2D(self.f2_ppm, self.f1_ppm, z, self.nucleus,
+                      self.larmor_MHz, self.spin_rate_Hz, self.source,
+                      list(self.notes), ri, ir, ii)
 
     def region(self, f2_range=None, f1_range=None) -> "Data2D":
         s2 = np.ones(self.f2_ppm.shape, bool)
@@ -47,17 +64,19 @@ class Data2D:
             s2 = ((self.f2_ppm >= min(f2_range)) & (self.f2_ppm <= max(f2_range)))
         if f1_range:
             s1 = ((self.f1_ppm >= min(f1_range)) & (self.f1_ppm <= max(f1_range)))
+        ix = np.ix_(s1, s2)
+        cut = (lambda a: a[ix] if a is not None else None)
         return Data2D(f2_ppm=self.f2_ppm[s2], f1_ppm=self.f1_ppm[s1],
-                      z=self.z[np.ix_(s1, s2)], nucleus=self.nucleus,
+                      z=self.z[ix], nucleus=self.nucleus,
                       larmor_MHz=self.larmor_MHz,
                       spin_rate_Hz=self.spin_rate_Hz, source=self.source,
-                      notes=list(self.notes))
+                      notes=list(self.notes),
+                      ri=cut(self.ri), ir=cut(self.ir), ii=cut(self.ii))
 
     def normalized(self) -> "Data2D":
-        d = self.z / (np.abs(self.z).max() or 1.0)
-        return Data2D(self.f2_ppm, self.f1_ppm, d, self.nucleus,
-                      self.larmor_MHz, self.spin_rate_Hz, self.source,
-                      list(self.notes))
+        k = np.abs(self.z).max() or 1.0
+        sc = (lambda a: a / k if a is not None else None)
+        return self._like(self.z / k, sc(self.ri), sc(self.ir), sc(self.ii))
 
     def projection(self, axis: str = "f2", mode: str = "skyline") -> np.ndarray:
         red = np.max if mode == "skyline" else np.sum
@@ -76,23 +95,51 @@ class Data2D:
         """
         if p0_deg == 0.0 and p1_deg == 0.0:
             return self
-        from scipy.signal import hilbert
-
         ax = 1 if axis == "f2" else 0
         coords = self.f2_ppm if axis == "f2" else self.f1_ppm
         n = self.z.shape[ax]
         if n < 2:
             return self
-        analytic = hilbert(np.asarray(self.z, float), axis=ax)
         piv = _pivot_index(coords, pivot_ppm)
         ramp = (np.arange(n) - piv) / max(n - 1, 1)
         phase = np.deg2rad(p0_deg + p1_deg * ramp)
         shape = [1, 1]; shape[ax] = n
+        if self.has_hyper:
+            # exact hypercomplex rotation of all four quadrants
+            c = np.cos(phase).reshape(tuple(shape))
+            s = np.sin(phase).reshape(tuple(shape))
+            rr, ri, ir, ii = self.z, self.ri, self.ir, self.ii
+            if axis == "f2":
+                return self._like(rr * c + ri * s, -rr * s + ri * c,
+                                  ir * c + ii * s, -ir * s + ii * c)
+            return self._like(rr * c + ir * s, ri * c + ii * s,
+                              -rr * s + ir * c, -ri * s + ii * c)
+        # fallback: reconstruct the dispersive part from the real spectrum
+        from scipy.signal import hilbert
+
+        analytic = hilbert(np.asarray(self.z, float), axis=ax)
         out = np.real(analytic * np.exp(-1j * phase).reshape(tuple(shape)))
-        d = Data2D(self.f2_ppm, self.f1_ppm, out, self.nucleus,
-                   self.larmor_MHz, self.spin_rate_Hz, self.source,
-                   list(self.notes))
-        return d
+        return self._like(out)
+
+    def phase_line(self, axis: str, idx: int, p0_deg: float, p1_deg: float,
+                   pivot_ppm: float | None = None) -> np.ndarray:
+        """Phased 1D reference row/column for the live phasing preview, exact
+        when the imaginary quadrant is available."""
+        if axis == "f2":
+            rr = self.z[idx]
+            im = self.ri[idx] if self.ri is not None else None
+            coords = self.f2_ppm
+        else:
+            rr = self.z[:, idx]
+            im = self.ir[:, idx] if self.ir is not None else None
+            coords = self.f1_ppm
+        if im is None:
+            return phase_1d(rr, coords, p0_deg, p1_deg, pivot_ppm)
+        n = rr.size
+        piv = _pivot_index(coords, pivot_ppm)
+        ramp = (np.arange(n) - piv) / max(n - 1, 1)
+        phase = np.deg2rad(p0_deg + p1_deg * ramp)
+        return rr * np.cos(phase) + im * np.sin(phase)
 
 
 def _pivot_index(coords: np.ndarray, pivot_ppm: float | None) -> int:
@@ -137,10 +184,12 @@ def read_bruker_2d(expno: str | Path, procno: int = 1) -> Data2D:
         raise ValueError("this is a raw 2D FID; Fourier-transform it first "
                          "(larmor.fourier.ft2d)")
     f1_axis, f2_axis = data.axes
+    h = data.hyper or {}
     d = Data2D(f2_ppm=f2_axis.values, f1_ppm=f1_axis.values, z=data.data,
                nucleus=data.nucleus, larmor_MHz=data.meta["larmor_MHz"],
                spin_rate_Hz=data.meta.get("masr_Hz") or 0.0,
-               source=str(expno))
+               source=str(expno),
+               ri=h.get("ri"), ir=h.get("ir"), ii=h.get("ii"))
     d.notes = list(data.warnings)
     if data.is_pseudo2d:
         d.notes.append(f"pseudo-2D: F1 is '{f1_axis.label}' in {f1_axis.unit}")

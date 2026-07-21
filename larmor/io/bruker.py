@@ -66,6 +66,9 @@ class NMRData:
     is_pseudo2d: bool = False
     warnings: list = field(default_factory=list)
     source: str = ""
+    #: for a processed 2D, the imaginary quadrants {"ri","ir","ii"} oriented
+    #: like ``data`` (rr), enabling exact hypercomplex phase correction
+    hyper: dict | None = None
 
     @property
     def nucleus(self) -> str:
@@ -220,7 +223,24 @@ def _read_1r(ref: BrukerRef) -> NMRData:
 
 def _read_2rr(ref: BrukerRef) -> NMRData:
     pdata = ref.expno / "pdata" / str(ref.procno)
-    dic, z = ng.bruker.read_pdata(str(pdata))
+    hyper_raw = None
+    z = None
+    dic = None
+    # read all four quadrants when they genuinely exist, so phasing can be exact
+    try:
+        dic2, comps = ng.bruker.read_pdata(str(pdata), all_components=True)
+        if (isinstance(comps, (list, tuple)) and len(comps) == 4
+                and all(np.ndim(c) == 2 for c in comps)):
+            dic = dic2
+            z = np.asarray(comps[0], float)
+            hyper_raw = [np.asarray(comps[1], float),   # ri
+                         np.asarray(comps[2], float),   # ir
+                         np.asarray(comps[3], float)]   # ii
+    except Exception:
+        pass
+    if z is None:                          # not hypercomplex: plain real read
+        dic, z = ng.bruker.read_pdata(str(pdata))
+        z = np.asarray(z, float)
     procs, proc2s = dic["procs"], dic["proc2s"]
     f2 = _ppm_axis(procs, z.shape[1])
     pseudo = _pseudo2d(ref.expno, proc2s)
@@ -237,7 +257,12 @@ def _read_2rr(ref: BrukerRef) -> NMRData:
         f1_vals = _ppm_axis(proc2s, z.shape[0])
         f1_unit, f1_label = "ppm", _isotope(dic, "acqu2s") or "F1"
     o2, o1 = np.argsort(f2), np.argsort(f1_vals)
-    z = np.asarray(z, float)[np.ix_(o1, o2)]
+    ix = np.ix_(o1, o2)
+    z = np.asarray(z, float)[ix]
+    hyper = None
+    if hyper_raw is not None and not pseudo:
+        hyper = {"ri": hyper_raw[0][ix], "ir": hyper_raw[1][ix],
+                 "ii": hyper_raw[2][ix]}
     acqus = dic.get("acqus", {})
     meta = _meta_1d(acqus, _read_title(pdata), ref.expno)
     meta["fnmode"] = FNMODE.get(int(proc2s.get("MC2", 0) or 0), "?")
@@ -246,7 +271,7 @@ def _read_2rr(ref: BrukerRef) -> NMRData:
             Axis(meta["nucleus"], "ppm", f2[o2],
                  obs_MHz=float(procs.get("SF", 0.0)))]
     return NMRData(ndim=2, domain="freq", data=z, axes=axes, meta=meta,
-                   is_pseudo2d=pseudo, warnings=warnings)
+                   is_pseudo2d=pseudo, warnings=warnings, hyper=hyper)
 
 
 def _read_fid(ref: BrukerRef) -> NMRData:

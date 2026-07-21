@@ -8,6 +8,27 @@ from larmor.recipe import Param, Recipe, SiteModel
 from conftest import CAALGLASS_MQ, require
 
 
+def test_hypercomplex_phasing_is_exact():
+    """With the imaginary quadrant present, a p0 rotation exactly recovers the
+    absorption spectrum (Hilbert can only approximate this)."""
+    n2, n1 = 256, 48
+    f2 = np.linspace(-100, 100, n2); f1 = np.linspace(-50, 50, n1)
+    x = (f2 - 10) / 2.0
+    absorption = (1 / (1 + x ** 2))[None, :] * np.ones((n1, 1))
+    dispersion = (x / (1 + x ** 2))[None, :] * np.ones((n1, 1))
+    th = np.deg2rad(50.0)
+    rr = absorption * np.cos(th) - dispersion * np.sin(th)
+    ri = absorption * np.sin(th) + dispersion * np.cos(th)
+    d = twod.Data2D(f2_ppm=f2, f1_ppm=f1, z=rr, ri=ri,
+                    ir=np.zeros_like(rr), ii=np.zeros_like(rr))
+    assert d.has_hyper
+    fixed = d.phased("f2", 50.0, 0.0, pivot_ppm=10.0)
+    assert np.max(np.abs(fixed.z - absorption)) < 1e-9
+    # phase_line preview matches the applied row exactly
+    line = d.phase_line("f2", n1 // 2, 50.0, 0.0, 10.0)
+    assert np.allclose(line, fixed.z[n1 // 2], atol=1e-9)
+
+
 def _small_kernel():
     """A deliberately small kernel: these tests check physics and plumbing,
     not resolution."""

@@ -1647,10 +1647,12 @@ def _nmrdata_to_data2d(data):
     from larmor.twod import Data2D
 
     f1, f2 = data.axes
+    h = data.hyper or {}
     d = Data2D(f2_ppm=np.asarray(f2.values), f1_ppm=np.asarray(f1.values),
                z=np.asarray(data.data, float), nucleus=data.nucleus,
                larmor_MHz=data.meta.get("larmor_MHz", 0.0),
-               source=data.source)
+               source=data.source,
+               ri=h.get("ri"), ir=h.get("ir"), ii=h.get("ii"))
     d.notes = list(data.warnings)
     if data.is_pseudo2d:
         d.notes.append("pseudo-2D (arrayed)")

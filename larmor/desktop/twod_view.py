@@ -289,6 +289,7 @@ class Contour2DView(QWidget):
         coords = c.f2_ppm if self._pick_axis == "f2" else c.f1_ppm
         self.phase_glw.clear()
         self._pref = []
+        exact = c.has_hyper
         for k, idx in enumerate(self._picks):
             raw = c.z[idx] if self._pick_axis == "f2" else c.z[:, idx]
             plot = self.phase_glw.addPlot(row=k, col=0)
@@ -296,15 +297,16 @@ class Contour2DView(QWidget):
             plot.getViewBox().invertX(True)
             other = (c.f1_ppm if self._pick_axis == "f2" else c.f2_ppm)[idx]
             lab = "Row" if self._pick_axis == "f2" else "Col"
+            tag = "" if exact else "  (Hilbert)"
             plot.setTitle(f"<span style='color:#1f6feb'>{lab} {idx} "
-                          f"/ {other:.1f} ppm</span>")
+                          f"/ {other:.1f} ppm{tag}</span>")
             curve = plot.plot(coords, np.asarray(raw, float),
                               pen=pg.mkPen("#1f6feb", width=1.2))
             plot.addItem(pg.InfiniteLine(pos=self._pivot, angle=90,
                          pen=pg.mkPen("#d62728", width=1.2)))
             if k == len(self._picks) - 1:
                 plot.setLabel("bottom", "ppm")
-            self._pref.append((coords, np.asarray(raw, float), curve))
+            self._pref.append((coords, idx, curve))
         self.stack.setCurrentWidget(self.phase_glw)
         self.phasehint.setText(f"pivot={self._pivot:.1f} ppm · "
                                f"ph0={self.p0v.value():.0f} ph1={self.p1v.value():.0f}")
@@ -320,11 +322,10 @@ class Contour2DView(QWidget):
     def _phase_changed(self, *_):
         if not self._pref or self.stack.currentWidget() is not self.phase_glw:
             return
-        from larmor import twod
-
-        for coords, raw, curve in self._pref:
-            y = twod.phase_1d(raw, coords, self.p0v.value(), self.p1v.value(),
-                              self._pivot)
+        for coords, idx, curve in self._pref:
+            y = self._committed.phase_line(self._pick_axis, idx,
+                                           self.p0v.value(), self.p1v.value(),
+                                           self._pivot)
             curve.setData(coords, y)
         self.phasehint.setText(f"pivot={self._pivot:.1f} ppm · "
                                f"ph0={self.p0v.value():.0f} ph1={self.p1v.value():.0f}")
@@ -384,7 +385,7 @@ class Contour2DView(QWidget):
         def sh(src):
             return Data2D(src.f2_ppm + d2, src.f1_ppm + d1, src.z, src.nucleus,
                           src.larmor_MHz, src.spin_rate_Hz, src.source,
-                          list(src.notes))
+                          list(src.notes), src.ri, src.ir, src.ii)
         self._orig = sh(self._orig)
         self._committed = sh(self._committed)
         self.data = sh(self.data)
