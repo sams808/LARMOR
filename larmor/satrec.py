@@ -107,7 +107,11 @@ def process_slices(expno: str | Path, lb_hz: float = 100.0,
     if mode == "magnitude":
         out = np.abs(spec)
     else:
-        ref = spec[-1]                       # longest delay = max signal
+        # phase on the MAX-SIGNAL slice, not blindly the last row. A Bruker ser
+        # often carries a trailing dummy/setup acquisition (acqu2s TD1 exceeds
+        # len(vdlist)) whose phase is unrelated; using it as the reference would
+        # corrupt the phase -- and therefore the build-up -- of every slice.
+        ref = spec[int(np.argmax(np.abs(spec).sum(axis=1)))]
         phis = np.linspace(-np.pi, np.pi, 721)
         scores = [(np.real(ref * np.exp(1j * p))).sum() for p in phis]
         p0 = float(phis[int(np.argmax(scores))])

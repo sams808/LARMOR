@@ -111,7 +111,10 @@ def model_curve(kind: str, p, t: np.ndarray, stretched: bool) -> np.ndarray:
     b = p["beta"].value if stretched else 1.0
     tau = p["tau"].value
     if kind == "satrec":
-        return p["i0"] * (1.0 - np.exp(-((t / tau) ** b)))
+        # TopSpin uxnmrt1 form I(t) = I0 + P*exp(-t/T1), written here as
+        # I0*(1 - sat*exp): sat floats to absorb imperfect saturation / a
+        # baseline offset instead of forcing the curve through 0 at t=0.
+        return p["i0"] * (1.0 - p["sat"] * np.exp(-((t / tau) ** b)))
     if kind == "invrec":
         return p["i0"] * (1.0 - 2.0 * p["f"] * np.exp(-((t / tau) ** b)))
     if kind in ("cpmg", "t1rho", "decay"):
@@ -139,6 +142,8 @@ def fit_series(t: np.ndarray, y: np.ndarray, kind: str = "satrec",
         idx = int(np.argmin(np.abs(np.abs(yn) - 0.37 * np.abs(yn).max())))
     tau0 = float(t[idx]) or float(t[pos].min() if pos.any() else 1.0)
     params.add("tau", value=max(tau0, 1e-6), min=1e-9)
+    if kind == "satrec":
+        params.add("sat", value=1.0, min=0.1, max=2.0)
     if kind == "invrec":
         params.add("f", value=1.0, min=0.3, max=1.2)
     if stretched:

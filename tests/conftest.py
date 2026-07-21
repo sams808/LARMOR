@@ -23,6 +23,9 @@ BRUKER_FID = _D / "2026-05/04272026_P1-Bi1-12_SS_ALP/2702/fid"
 BRUKER_2RR_PSEUDO = _D / "2026-01/01202026_SR31649_Base4Ca_SS_ALP/32/pdata/1/2rr"
 BRUKER_SER = _D / "2026-01/01202026_SR31649_Base4Ca_SS_ALP/32/ser"
 BRUKER_2RR_MQMAS = _D / "2025-12/neg8A2O-0F/35/pdata/1/2rr"
+# a real DQ/SQ 2D correlation (indirect dim is double-quantum, not a delay)
+BRUKER_2RR_DQSQ = Path(
+    "C:/Users/samso/Desktop/SAVE_PC_PRO/THESE/RMN/Data/ISG-2GPa/1181/pdata/1")
 
 
 def require(path: Path):

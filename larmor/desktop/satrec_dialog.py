@@ -24,6 +24,14 @@ from PySide6.QtWidgets import (
 
 ZONE_COLORS = ["#0e7c86", "#d62728", "#2ca02c", "#9467bd", "#e377c2"]
 
+#: the model actually fitted, shown above the build-up like TopSpin's report
+FORMULAE = {
+    "satrec": "I(t) = I₀·(1 − f·e<sup>−(t/T1)<sup>β</sup></sup>)",
+    "invrec": "I(t) = I₀·(1 − 2f·e<sup>−(t/T1)<sup>β</sup></sup>)",
+    "cpmg": "I(t) = I₀·e<sup>−(t/T2)<sup>β</sup></sup>",
+    "t1rho": "I(t) = I₀·e<sup>−(t/T1ρ)<sup>β</sup></sup>",
+}
+
 
 class SatrecDialog(QDialog):
     def __init__(self, parent, expno: str | None):
@@ -89,6 +97,14 @@ class SatrecDialog(QDialog):
         build_box = QWidget(); bb = QVBoxLayout(build_box); bb.setContentsMargins(0, 0, 0, 0)
         brow = QHBoxLayout()
         brow.addWidget(QLabel("Build-up — click a point to exclude an outlier"))
+        self.logx = QCheckBox("log delay")
+        self.logx.toggled.connect(self._set_logx)
+        brow.addWidget(self.logx)
+        self.btnAuto = QPushButton("Fit view")
+        self.btnAuto.setToolTip("rescale to the points; then zoom/pan freely")
+        self.btnAuto.clicked.connect(lambda: self.build_plot.getViewBox()
+                                     .autoRange(padding=0.06))
+        brow.addWidget(self.btnAuto)
         brow.addStretch(1)
         self.btnFit = QPushButton("Fit T1 / T2")
         self.btnFit.setDefault(True)
@@ -98,8 +114,9 @@ class SatrecDialog(QDialog):
         brow.addWidget(self.btnFit); brow.addWidget(self.btnCsv)
         bb.addLayout(brow)
         self.build_plot = pg.PlotWidget(background="#fcfdfc")
-        self.build_plot.setLogMode(x=True, y=False)
-        self.build_plot.setLabel("bottom", "delay", units="s")
+        # NB: never pass units= on this axis. pyqtgraph's auto-SI-prefix turns
+        # a log axis into nonsense ("delay (e27 s)"); keep the unit in the text.
+        self.build_plot.setLabel("bottom", "delay (s)")
         self.build_plot.setLabel("left", "integral (norm.)")
         self.build_plot.showGrid(x=True, y=True, alpha=0.15)
         bb.addWidget(self.build_plot)
@@ -250,8 +267,12 @@ class SatrecDialog(QDialog):
                 summaries.append(f"zone {zi + 1}: {exc}")
                 continue
             self.results[zi] = r
-            tt = np.logspace(np.log10(max(self.delays[self.delays > 0].min(), 1e-4)),
-                             np.log10(self.delays.max() * 1.3), 300)
+            if self.logx.isChecked():
+                tt = np.logspace(
+                    np.log10(max(self.delays[self.delays > 0].min(), 1e-4)),
+                    np.log10(self.delays.max() * 1.3), 400)
+            else:
+                tt = np.linspace(0.0, self.delays.max() * 1.05, 400)
             self.build_plot.plot(tt, r["curve"](tt) / (r["norm"] / norm),
                                  pen=pg.mkPen(col, width=1.6))
             name = {"satrec": "T1", "invrec": "T1", "cpmg": "T2",
@@ -260,8 +281,20 @@ class SatrecDialog(QDialog):
             b = (f", β={r['beta']:.2f}" if r["beta"] != 1.0 else "")
             summaries.append(f"<span style='color:{col}'>zone {zi + 1}</span>: "
                              f"{name} = {r['tau']:.4g}{err} s{b}")
-        self.res.setText("   ·   ".join(summaries))
+        head = FORMULAE.get(self._kind() or "satrec", "")
+        joined = "   ·   ".join(summaries)
+        self.res.setText(f"<span style='color:#8a97a0'>{head}</span>&nbsp;&nbsp;"
+                         f"&nbsp;&nbsp;{joined}" if head else joined)
+        # rescale to the points, then leave the user free to zoom / pan
+        self.build_plot.getViewBox().autoRange(padding=0.06)
         self.btnCsv.setEnabled(bool(self.results))
+
+    def _set_logx(self, on: bool):
+        self.build_plot.setLogMode(x=on, y=False)
+        if self.results:
+            self._fit()                       # redraw with the right t-sampling
+        else:
+            self.build_plot.getViewBox().autoRange(padding=0.06)
 
     def _plot_points(self, zi: int, y_norm: np.ndarray, col: str):
         keep = self.keep[zi]

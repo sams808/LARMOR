@@ -5,8 +5,9 @@ import os
 import numpy as np
 import pytest
 
-from conftest import (BRUKER_1R, BRUKER_2RR_MQMAS, BRUKER_2RR_PSEUDO,
-                      BRUKER_FID, BRUKER_SER, CAALGLASS, require)
+from conftest import (BRUKER_1R, BRUKER_2RR_DQSQ, BRUKER_2RR_MQMAS,
+                      BRUKER_2RR_PSEUDO, BRUKER_FID, BRUKER_SER, CAALGLASS,
+                      require)
 
 pyside = pytest.importorskip("PySide6")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -60,6 +61,12 @@ def test_open_any_type_never_rejects(qapp, win):
     win.load_source(str(require(BRUKER_SER)), keep_fit=False)
     qapp.processEvents()
     assert not is_1d()
+
+    # a DQ/SQ 2D correlation (indirect dim = double quantum) → the 2D view
+    win.load_source(str(require(BRUKER_2RR_DQSQ)), keep_fit=False)
+    qapp.processEvents()
+    assert not is_1d()
+    assert win.view2d.data is not None and win.view2d.data.z.ndim == 2
 
     # pull a 1D projection out of the 2D → back to the workbench
     win.view2d._emit_projection("skyline")
