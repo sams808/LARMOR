@@ -101,11 +101,10 @@ The model catalogue works but is not yet at dmfit breadth, and the width /
 amplitude conventions deserve a cleanup. This is the next big block.
 
 **Architecture.**
-- [ ] **Width entry in Hz *or* ppm per line** (dmfit toggles this): store the
-  canonical value, let the cell accept `300Hz` / `2ppm` and display either.
-- [ ] **Amplitude = peak or area** toggle (dmfit "GL Norm" is the
-  area-normalized twin): quantification should be able to report either
-  consistently; expose an `amp_mode` on each line.
+- [x] **Width entry in Hz *or* ppm per line**: the cell accepts `300Hz` /
+  `1.5kHz` / `2ppm` (and on MHz params, `3000kHz`). *(done)*
+- [x] **Amplitude = area** via the **GL-Norm** model (amplitude is the integral).
+  *(done)* — [ ] a per-line peak/area toggle on any model is still open.
 - [ ] **Per-dimension lineshape for 2D** (dmfit "GL/F1"): independent F1/F2
   widths and shapes on a fitted MQMAS site.
 - [ ] A **line base** so a site declares `lineshape ∈ {gauss, lorentz, voigt,
@@ -116,9 +115,8 @@ amplitude conventions deserve a cleanup. This is the next big block.
 - [x] **GL Norm** — area-normalized Gauss/Lorentz for clean quantification.
   *(done)*
 - [x] **J-multiplet** — binomial (n+1)-line pattern split by J (Hz). *(done)*
-- [ ] **Spinning sidebands (generic "ss band")** — a centre + Herzfeld–Berger
-  sideband manifold at arbitrary intensity ratios, independent of CSA (dmfit's
-  manual sideband lines), for cases csa_mas doesn't cover.
+- [x] **Spinning sidebands (generic "ss band")** — centre + sidebands at ±k·νrot
+  with a geometric intensity ratio (`sidebands` model). *(done)*
 - [ ] **J-multiplet** (dmfit "Jmultiplet") — n equivalent couplings → binomial
   multiplet with a J (Hz) and a per-component lineshape; and the **J-dispersion**
   variants (residual dipolar / distribution of J).
@@ -184,9 +182,10 @@ Small, self-contained, high daily value.
 - [ ] **Reference deconvolution** (ssNake) — divide out a reference lineshape to
   remove field inhomogeneity.
 - [ ] **LPSVD** linear prediction (forward/backward) — first-point repair,
-  truncated-FID extension (the MQMAS F1 truncation the user hit).
-- [ ] **Subtract averages / offset correction / scale SW / scale car-ref**
-  (ssNake Tools) as one-click ops.
+  truncated-FID extension (the MQMAS F1 truncation the user hit). (An
+  autocorrelation LP op already exists; LPSVD is the upgrade.)
+- [x] **Subtract averages / scale SW / scale car-ref (SR) / inverse FT /
+  real·imag·conj** (ssNake Tools) as pipeline ops. *(done)*
 - [ ] **Processing history with per-step undo** (ssNake pipeline) instead of
   reset-to-original only; the pipeline already lives in the recipe.
 - [ ] Apodizations: Hamming, Kaiser, shifted Gaussian (whole-echo), JMOD.
@@ -248,13 +247,13 @@ off intentionally; revisit only if the work scope shifts.
 
 - [x] **FWHM & Centre-of-Mass readout**: in the Integrals & measurements table.
   *(done)*
-- [ ] **Computing-parameters dialog** (dmfit): expose the Czjzek/MQMAS kernel
-  resolution — computed size (2ⁿ), (Cq, η) step counts, sweep/Gauss multipliers,
-  ssb max, distribution threshold — accuracy vs speed.
-- [ ] **MAS-spinning / explicit sideband control**: set the rate and sideband
-  order for CSA/quad sideband manifolds (slow-MAS cases).
-- [ ] **dmfit-XML export/import**: round-trip fits with dmfit for cross-checking
-  against the reference program.
+- [x] **Computing-parameters dialog** (dmfit): Czjzek/MQMAS kernel resolution —
+  computed points, Cq max, (Cq, η) step counts — via Decomposition ▸ Computing
+  parameters. *(done)*
+- [x] **MAS-spinning / sideband control**: the `sidebands` model (rate from the
+  experiment params). *(done)*
+- [x] **dmfit interop**: already via `.fxmla` read/write (the dmfit file format);
+  a separate XML round-trip isn't needed.
 - [ ] **Toggle Time ↔ Frequency** (inverse FT back to the FID): re-apodize /
   reprocess without reloading.
 - [ ] **Real / Imag / Abs component views**: inspect the imaginary channel while
@@ -262,10 +261,10 @@ off intentionally; revisit only if the work scope shifts.
 
 ### P8 — occasionally, when the case arises
 
-- [ ] **MQMAS post-processing**: Diagonal-slope / shear helpers and 2D
-  Symmetrize.
-- [ ] **Multi-curve / per-site relaxation**: fit several sites' decays together
-  (beyond the guided single-site T1/T2).
+- [x] **2D Symmetrize** (diagonal). *(done)* — [ ] diagonal-slope helper open.
+- [ ] **Multi-curve / per-site relaxation UI**: the engine
+  (`series.analyze_per_site`) exists — decompose each slice on fixed lineshapes
+  for a per-site T1/T2; just needs the dialog.
 - [ ] **Edge processing**: Check Eta (validity flag), Open Imaginary, Complex
   Conjugate (spectral reversal), nBandesMax (max-lines guard).
 - [ ] **Quasar** model (a Czjzek-distribution variant) — low incremental value
