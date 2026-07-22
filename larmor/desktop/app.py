@@ -23,9 +23,9 @@ import numpy as np
 from PySide6.QtCore import QSettings, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
-    QApplication, QDockWidget, QFileDialog, QLabel, QMainWindow, QMessageBox,
-    QPlainTextEdit, QPushButton, QTableWidget, QTableWidgetItem, QToolBar,
-    QVBoxLayout, QWidget, QHBoxLayout,
+    QApplication, QCheckBox, QDockWidget, QFileDialog, QLabel, QMainWindow,
+    QMessageBox, QPlainTextEdit, QPushButton, QSplitter, QTableWidget,
+    QTableWidgetItem, QToolBar, QVBoxLayout, QWidget, QHBoxLayout,
 )
 
 from larmor import models as model_registry
@@ -213,6 +213,7 @@ class MainWindow(QMainWindow):
         self.central_stack = QStackedWidget()
         self.central_stack.addWidget(self.view)      # index 0: 1D
         self.central_stack.addWidget(self.view2d)    # index 1: 2D
+        self._build_cofit_page()                     # index 2: co-fit split
         self.setCentralWidget(self.central_stack)
 
         self.view.add_requested.connect(self.add_site_at)
@@ -1756,11 +1757,14 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------- simulate
     def request_simulation(self):
+        if getattr(self, "_cofit", None) is not None and self._cofit_active():
+            self._cofit_timer.start()             # live preview on both panels
+            return
         self._sim_timer.start()
 
     def _simulate_now(self):
         # the 2D map has its own (explicit) fit path; skip the live 1D sim there
-        if self.central_stack.currentWidget() is self.view2d:
+        if self.central_stack.currentWidget() in (self.view2d, self.cofit_page):
             return
         if not self.recipe or not self.recipe["sites"]:
             self.view.set_model(None, None, None, None, self.hidden)
@@ -2183,36 +2187,210 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"spectrum saved to {Path(path).name} "
                                      "(reopen it with File ▸ Open…)")
 
-    def open_cofit(self):
-        from larmor.desktop.cofit_dialog import CofitDialog
+    # ------------------------------------------------------------- co-fit page
+    def _build_cofit_page(self):
+        """A split central page (1D top, 2D bottom) driven by the SAME shared
+        model + bottom parameter table — the co-fit lives in the main window."""
+        from larmor.desktop.twod_view import Contour2DView
 
+        page = QWidget(); v = QVBoxLayout(page); v.setContentsMargins(2, 2, 2, 2)
+        bar = QHBoxLayout()
+        bar.addWidget(QLabel("<b>Co-fit</b> — shared model on both datasets · "
+                             "tie:"))
+        from larmor.multifit import DEFAULT_SHARE
+        self._cofit_share = {}
+        for name in DEFAULT_SHARE:
+            cb = QCheckBox(name.replace("_", " ").replace(" ppm", "")
+                           .replace(" MHz", ""))
+            cb.setChecked(True); self._cofit_share[name] = cb; bar.addWidget(cb)
+        bar.addSpacing(12)
+        self.btnCofitAdd = QPushButton("＋ Add / replace dataset…")
+        self.btnCofitAdd.clicked.connect(self._cofit_add_dataset)
+        self.btnCofitPrev = QPushButton("Preview")
+        self.btnCofitPrev.clicked.connect(lambda: self._cofit_simulate())
+        self.btnCofitRun = QPushButton("Run co-fit")
+        self.btnCofitRun.clicked.connect(self.run_cofit_fit)
+        self.btnCofitClose = QPushButton("Close co-fit")
+        self.btnCofitClose.clicked.connect(self.close_cofit)
+        for b in (self.btnCofitAdd, self.btnCofitPrev, self.btnCofitRun,
+                  self.btnCofitClose):
+            bar.addWidget(b)
+        bar.addStretch(1)
+        self.cofit_rmsd = QLabel("")
+        self.cofit_rmsd.setStyleSheet("color:#5a6871;")
+        bar.addWidget(self.cofit_rmsd)
+        v.addLayout(bar)
+        self.cofit_view1d = SpectrumView()
+        self.cofit_view2d = Contour2DView()
+        split = QSplitter(Qt.Vertical)
+        split.addWidget(self.cofit_view1d); split.addWidget(self.cofit_view2d)
+        split.setSizes([300, 420])
+        v.addWidget(split, 1)
+        self.cofit_page = page
+        self.central_stack.addWidget(page)           # index 2
+        self._cofit = None
+        self._cofit_timer = QTimer(self); self._cofit_timer.setSingleShot(True)
+        self._cofit_timer.setInterval(200)
+        self._cofit_timer.timeout.connect(self._cofit_simulate_now)
+
+    def open_cofit(self):
         if not self.recipe or not self.recipe.get("sites"):
             self.statusBar().showMessage(
                 "set up the shared fit (add lines) on one dataset first")
             return
-        # the current dataset becomes co-fit dataset 0
+        self._sync_active()
+        st = {"d1": None, "d2": None}
         if self.central_stack.currentWidget() is self.view2d and self._data2d:
-            base = {"kind": "2d", "label": Path(self.source_path or "2D").name,
-                    "data2d": self._data2d, "nucleus": self._data2d.nucleus,
-                    "larmor": self._data2d.larmor_MHz}
-        else:
-            base = {"kind": "1d",
-                    "label": self.recipe.get("sample") or "current",
-                    "ppm": self.exp_ppm, "amp": self.exp_amp,
-                    "nucleus": self.recipe.get("nucleus", ""),
-                    "larmor": self.recipe.get("larmor_frequency_MHz", 0.0)}
-        dlg = CofitDialog(self, self.recipe, base)
-        dlg.applied.connect(self._cofit_applied)
-        dlg.exec()
+            st["d2"] = (self._data2d, Path(self.source_path or "2D").name)
+        elif self.exp_ppm is not None and np.asarray(self.exp_ppm).size:
+            st["d1"] = (np.asarray(self.exp_ppm), np.asarray(self.exp_amp),
+                        self.recipe.get("sample") or "current")
+        self._cofit = st
+        self.central_stack.setCurrentWidget(self.cofit_page)
+        self._cofit_refresh_panels()
+        need = "a 2D MQMAS map" if st["d2"] is None else "a 1D MAS spectrum"
+        self.statusBar().showMessage(
+            f"co-fit: shared model from the current fit — add {need} "
+            "(＋ Add dataset), then Preview / Run co-fit")
+        if st["d1"] is None or st["d2"] is None:
+            self._cofit_add_dataset()
 
-    def _cofit_applied(self, recipe_dict):
+    def _cofit_add_dataset(self):
+        if self._cofit is None:
+            return
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Add a dataset to co-fit", self._last_dir(),
+            "Spectra / maps (*.fxmla *.json 1r 2rr *.txt *.csv);;All files (*)")
+        if not path:
+            path = QFileDialog.getExistingDirectory(self, "…or a 2D EXPNO/pdata")
+        if not path:
+            return
+        try:
+            kind, payload = self._cofit_load(path)
+        except Exception as exc:
+            QMessageBox.warning(self, "Add dataset", f"cannot read: {exc}")
+            return
+        self._cofit[kind] = payload
+        self._cofit_refresh_panels()
+        self._cofit_simulate()
+
+    def _cofit_load(self, path: str):
+        from larmor import twod
+        from larmor.io import bruker
+
+        try:
+            ref = bruker.resolve(path)
+            if ref.ndim == 2 and ref.target == "2rr":
+                d = twod.read_bruker_2d(path)
+                if d.z.ndim == 2:
+                    return "d2", (d, Path(path).name)
+        except Exception:
+            pass
+        ppm, amp, *_ = _load_any(path)
+        return "d1", (np.asarray(ppm), np.asarray(amp), Path(path).name)
+
+    def _cofit_refresh_panels(self):
+        st = self._cofit or {}
+        if st.get("d1"):
+            ppm, amp, label = st["d1"]
+            self.cofit_view1d.set_experiment(ppm, amp)
+            self.cofit_view1d.set_title(f"1D — {label}")
+        if st.get("d2"):
+            d, label = st["d2"]
+            self.cofit_view2d.set_data(d, f"2D — {label}")
+
+    def _cofit_active(self) -> bool:
+        return (self._cofit is not None
+                and self.central_stack.currentWidget() is self.cofit_page)
+
+    def _cofit_simulate(self):
+        if self._cofit_active():
+            self._cofit_timer.start()
+
+    def _cofit_simulate_now(self):
+        """Live overlay of the shared model on both co-fit panels (no fit)."""
+        st = self._cofit
+        if not st or not self.recipe or not self.recipe.get("sites"):
+            return
+        labels = [s.get("label") or s["model"] for s in self.recipe["sites"]]
+        if st.get("d1"):
+            from larmor import engine
+            ppm, amp, _ = st["d1"]
+            rec = Recipe.from_dict(json.loads(json.dumps(self.recipe)))
+            try:
+                x, total, per = engine.simulate(rec, exp_ppm=ppm)
+                self.cofit_view1d.set_model(x, total, per, labels, self.hidden,
+                                            ppm, amp)
+            except Exception as exc:
+                self.statusBar().showMessage(f"co-fit 1D sim: {exc}")
+        if st.get("d2"):
+            self._cofit_sim_2d(st["d2"][0])
+
+    def _cofit_sim_2d(self, d2):
+        from larmor import twod
+        rec = Recipe.from_dict(json.loads(json.dumps(self.recipe)))
+        d = d2.normalized()
+        kernel = twod._kernel_for(rec, d)
+        total, per = twod.simulate_2d(rec, kernel)
+        if getattr(rec, "mqmas_f1_ref_vary", True):     # auto-align β for preview
+            from scipy.interpolate import RegularGridInterpolator
+            itp = RegularGridInterpolator((d.f1_ppm, d.f2_ppm), d.z,
+                                          bounds_error=False, fill_value=0.0)
+            G1, G2 = np.meshgrid(kernel.f1_ppm, kernel.f2_ppm, indexing="ij")
+            mf = total.ravel(); mn = np.sqrt((mf * mf).sum()) or 1.0
+            best = (-1.0, 0.0)
+            for b in np.linspace(-40, 40, 81):
+                ev = itp(np.stack([(G1 + b).ravel(), G2.ravel()], -1)).ravel()
+                den = np.sqrt((ev * ev).sum()) * mn
+                cc = float((ev * mf).sum()) / den if den > 0 else 0.0
+                if cc > best[0]:
+                    best = (cc, float(b))
+            rec.mqmas_f1_ref_ppm = best[1]
+        # respect show/hide: zero hidden sites (keeps site-index colours)
+        per_disp = [p if i not in self.hidden else np.zeros_like(p)
+                    for i, p in enumerate(per)]
+        self.cofit_view2d.set_model(np.sum(per_disp, axis=0), kernel.f2_ppm,
+                                    twod.mqmas_f1_axis(kernel, rec),
+                                    per_site=per_disp)
+
+    def run_cofit_fit(self):
+        from larmor.multifit import fit_cofit
+
+        st = self._cofit
+        if not st or not st.get("d1") or not st.get("d2"):
+            self.statusBar().showMessage("co-fit needs both a 1D and a 2D dataset")
+            return
         self.snapshot()
-        self.recipe = recipe_dict
+        share = tuple(n for n, cb in self._cofit_share.items() if cb.isChecked())
+        entries = []
+        for spec in ((st["d1"][0], st["d1"][1]), st["d2"][0]):
+            r = Recipe.from_dict(json.loads(json.dumps(self.recipe)))
+            entries.append((r, spec))
+        self.statusBar().showMessage("running co-fit… (building any MQMAS kernels)")
+        self.btnCofitRun.setEnabled(False); QApplication.processEvents()
+        try:
+            result = fit_cofit(entries, share=share)
+        except Exception as exc:
+            self.btnCofitRun.setEnabled(True)
+            QMessageBox.warning(self, "Co-fit", f"co-fit failed: {exc}")
+            return
+        self.btnCofitRun.setEnabled(True)
+        self.recipe = result.recipes[0].to_dict()
         self.lines_table.rebuild(self.recipe, self.hidden)
         self._update_paddles()
-        if self.central_stack.currentWidget() is self.view:
-            self.request_simulation()
-        self.statusBar().showMessage("co-fit shared parameters applied")
+        self._cofit_simulate_now()
+        self.cofit_rmsd.setText(
+            "RMSD  " + " · ".join(f"{k} {r:.4f}" for k, r in
+                                  zip(("1D", "2D"), result.rmsd)))
+        self.statusBar().showMessage("co-fit done — shared parameters updated")
+
+    def close_cofit(self):
+        self._cofit = None
+        back = self.view2d if (self._data2d is not None
+                               and getattr(self, "_data2d_fittable", False)) \
+            else self.view
+        self.central_stack.setCurrentWidget(back)
+        self.statusBar().showMessage("co-fit closed")
 
     def open_per_site_relaxation(self):
         """Decompose every relaxation slice on the CURRENT fit's lineshapes → a

@@ -210,6 +210,29 @@ def fit_cofit(entries: list[tuple], share: tuple[str, ...] = DEFAULT_SHARE,
         apply_params(p)
         return np.concatenate([resid_vec(e) for e in prep])
 
+    # per-dataset amplitude pre-scale: a 1D (raw counts) and a normalised 2D map
+    # start at wildly different magnitudes, so put every dataset's model on the
+    # scale of its experiment before optimising (only free, non-tied amplitudes)
+    apply_params(params)
+    for k, e in enumerate(prep):
+        if e["kind"] == "1d":
+            model = np.sum([simulate_site(s, e["ctx"]) for s in e["r"].sites],
+                           axis=0)
+            model = np.interp(e["ppm"][e["sel"]], e["ctx"].x_ppm, model)
+            exp = e["exp"]
+        else:
+            model, _ = twod.simulate_2d(e["r"], e["kernel"])
+            exp = e["sample_exp"](getattr(e["r"], "mqmas_f1_ref_ppm", 0.0)).ravel()
+            model = model.ravel()
+        den = float(model @ model)
+        sc = float(exp @ model) / den if den > 0 else 1.0
+        if not (0 < sc < 1e12):
+            continue
+        for i, site in enumerate(e["r"].sites):
+            nm = _pname(k, i, site, "amplitude")
+            if nm in params and params[nm].vary and not params[nm].expr:
+                params[nm].value = float(params[nm].value) * sc
+
     result = lmfit.minimize(residual, params, method="least_squares")
     if not result.errorbars:
         retry = lmfit.minimize(residual, result.params.copy(), method="leastsq")

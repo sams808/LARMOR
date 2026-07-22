@@ -507,3 +507,47 @@ def test_twod_display_modes_and_per_site_colours(qapp):
     assert dv._model_sites is not None and len(dv._model_sites) == 2
     assert site_color(0) != site_color(1)
     dv.deleteLater()
+
+
+def test_cofit_in_main_window_split_page(qapp, win):
+    """Co-fit lives in the main window: a split page (1D + 2D) driven by the
+    shared recipe and bottom table; preview overlays both, Run fits both."""
+    from larmor import twod
+    from larmor.recipe import Recipe
+
+    x = np.linspace(-50, 120, 500); amp = np.exp(-0.5 * ((x - 60) / 11) ** 2) * 1e6
+    win.exp_ppm, win.exp_amp = x, amp
+    win.recipe = {"nucleus": "27Al", "larmor_frequency_MHz": 130.3,
+                  "mqmas_f1_ref_ppm": 0.0, "mqmas_f1_ref_vary": True, "sites": [
+                      {"model": "czjzek", "label": "AlIV", "params": {
+                          "isotropic_chemical_shift_ppm": {"value": 60.0,
+                              "vary": True, "min": 0, "max": 120},
+                          "sigma_Cq_MHz": {"value": 1.6, "vary": True, "min": 0.3,
+                                           "max": 4},
+                          "shift_fwhm_ppm": {"value": 13.0, "vary": True, "min": 1,
+                                             "max": 30},
+                          "line_fwhm_ppm": {"value": 4.0, "vary": True, "min": 0},
+                          "amplitude": {"value": 1e6, "vary": True, "min": 0}}}]}
+    # a self-consistent 2D from the same model
+    f2 = np.linspace(-40, 110, 72); f1 = np.linspace(-30, 90, 60)
+    kd = twod.Data2D(f2_ppm=f2, f1_ppm=f1, z=np.zeros((60, 72)),
+                     nucleus="27Al", larmor_MHz=130.3)
+    k = twod._kernel_for(Recipe.from_dict(win.recipe), kd)
+    Z, _ = twod.simulate_2d(Recipe.from_dict(win.recipe), k)
+    d2 = twod.Data2D(f2_ppm=k.f2_ppm, f1_ppm=k.f1_ppm, z=Z / Z.max(),
+                     nucleus="27Al", larmor_MHz=130.3)
+
+    win._cofit = {"d1": (x, amp, "MAS"), "d2": (d2, "2rr")}
+    win.central_stack.setCurrentWidget(win.cofit_page)
+    assert win._cofit_active()
+    win._cofit_simulate_now()                    # live preview both panels
+    assert win.cofit_view1d._model is not None
+    assert win.cofit_view2d._model_sites is not None
+
+    win.run_cofit_fit()                          # joint fit
+    assert "2D" in win.cofit_rmsd.text()
+    assert 40 < win.recipe["sites"][0]["params"][
+        "isotropic_chemical_shift_ppm"]["value"] < 80
+
+    win.close_cofit()
+    assert win.central_stack.currentWidget() is not win.cofit_page
