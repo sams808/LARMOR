@@ -2204,7 +2204,13 @@ class MainWindow(QMainWindow):
         self.cofit_view2d = Contour2DView()
         split = QSplitter(Qt.Horizontal)            # 1D | 2D, side by side
         split.addWidget(self.cofit_view1d); split.addWidget(self.cofit_view2d)
-        split.setSizes([500, 520])
+        # an empty 2D panel must still hold its half: never collapse, equal
+        # stretch, and a floor width so the 1D can't take the whole page
+        split.setChildrenCollapsible(False)
+        split.setStretchFactor(0, 1); split.setStretchFactor(1, 1)
+        self.cofit_view1d.setMinimumWidth(280)
+        self.cofit_view2d.setMinimumWidth(280)
+        self.cofit_split = split
         v.addWidget(split, 1)
         self.cofit_page = page
         self.central_stack.addWidget(page)           # index 2
@@ -2260,6 +2266,7 @@ class MainWindow(QMainWindow):
         self.central_stack.setCurrentWidget(self.cofit_page)
         self.cofit_bar.setVisible(True)
         self.lines_dock.raise_()                      # bring the shared table up
+        self._cofit_split_even()
         self._cofit_refresh_panels()
         need = "a 2D MQMAS map" if st["d2"] is None else "a 1D MAS spectrum"
         self.statusBar().showMessage(
@@ -2267,6 +2274,15 @@ class MainWindow(QMainWindow):
             "(＋ Add dataset), then Preview / Run co-fit")
         if st["d1"] is None or st["d2"] is None:
             self._cofit_add_dataset()
+
+    def _cofit_split_even(self):
+        """Give the 1D and 2D panels half the page each. Qt ignores setSizes on a
+        splitter that has not been laid out yet, so do it once the page is up."""
+        def apply():
+            w = self.cofit_split.width() or self.cofit_page.width() or 1000
+            self.cofit_split.setSizes([w // 2, w - w // 2])
+        apply()
+        QTimer.singleShot(0, apply)                   # again after the layout pass
 
     def _cofit_add_dataset(self):
         if self._cofit is None:

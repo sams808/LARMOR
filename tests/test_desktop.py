@@ -551,3 +551,23 @@ def test_cofit_in_main_window_split_page(qapp, win):
 
     win.close_cofit()
     assert win.central_stack.currentWidget() is not win.cofit_page
+
+
+def test_cofit_split_stays_even_with_empty_2d(qapp, win):
+    """The co-fit page splits 1D | 2D in half side by side — the 2D panel must
+    keep its half even before a 2D map is added (it used to collapse to zero)."""
+    from PySide6.QtCore import Qt
+
+    win.resize(1400, 800); win.show(); qapp.processEvents()
+    assert win.cofit_split.orientation() == Qt.Horizontal
+    assert win.cofit_split.childrenCollapsible() is False
+
+    x = np.linspace(-50, 120, 300); amp = np.exp(-0.5 * ((x - 60) / 11) ** 2) * 1e6
+    win.exp_ppm, win.exp_amp = x, amp
+    win._cofit = {"d1": (x, amp, "MAS"), "d2": None}     # no 2D added yet
+    win.central_stack.setCurrentWidget(win.cofit_page)
+    win._cofit_split_even(); win._cofit_refresh_panels()
+    for _ in range(4):
+        qapp.processEvents()
+    sizes = win.cofit_split.sizes(); total = sum(sizes) or 1
+    assert sizes[1] > 0.4 * total, f"2D half collapsed: {sizes}"
