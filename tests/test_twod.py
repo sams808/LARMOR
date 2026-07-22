@@ -227,3 +227,11 @@ def test_2d_operations():
     assert np.allclose(dr.z, np.flip(Z, 1))
     g, amp = d.diagonal()
     assert g.size == 60 and amp.shape == g.shape
+
+
+def test_2d_symmetrize():
+    f2 = np.linspace(-40, 40, 50); f1 = np.linspace(-40, 40, 50)
+    Z = (np.exp(-((f2[None, :] - 10) / 6) ** 2)
+         * np.exp(-((f1[:, None] + 10) / 6) ** 2))
+    ds = twod.Data2D(f2_ppm=f2, f1_ppm=f1, z=Z).symmetrized()
+    assert np.max(np.abs(ds.z - ds.z.T)) < 1e-9            # symmetric now

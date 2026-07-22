@@ -97,6 +97,25 @@ class Data2D:
         return self._like(np.flip(self.z, ax), flip(self.ri), flip(self.ir),
                           flip(self.ii))
 
+    def symmetrized(self) -> "Data2D":
+        """Symmetrize about the F1=F2 diagonal (dmfit 2D 'Symmetric'): average z
+        with its transpose on a common square grid. Useful to clean MQMAS
+        auto-correlation ridges."""
+        from scipy.interpolate import RegularGridInterpolator
+
+        lo = max(self.f1_ppm.min(), self.f2_ppm.min())
+        hi = min(self.f1_ppm.max(), self.f2_ppm.max())
+        n = max(self.z.shape)
+        g = np.linspace(lo, hi, n)
+        interp = RegularGridInterpolator((self.f1_ppm, self.f2_ppm), self.z,
+                                         bounds_error=False, fill_value=0.0)
+        G1, G2 = np.meshgrid(g, g, indexing="ij")
+        zg = interp(np.stack([G1.ravel(), G2.ravel()], -1)).reshape(n, n)
+        zs = 0.5 * (zg + zg.T)
+        return Data2D(g, g, zs, self.nucleus, self.larmor_MHz,
+                      self.spin_rate_Hz, self.source, list(self.notes) +
+                      ["symmetrized about the diagonal"])
+
     def diagonal(self) -> tuple[np.ndarray, np.ndarray]:
         """The trace along F1 = F2 (dmfit Extract Diag). Returns (ppm, amp)."""
         from scipy.interpolate import RegularGridInterpolator

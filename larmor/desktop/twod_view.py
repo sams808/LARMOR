@@ -106,6 +106,7 @@ class Contour2DView(QWidget):
         ops.addAction("Transpose F1↔F2", lambda: self._op("transpose"))
         ops.addAction("Reverse F2", lambda: self._op("rev_f2"))
         ops.addAction("Reverse F1", lambda: self._op("rev_f1"))
+        ops.addAction("Symmetrize (diagonal)", lambda: self._op("symmetrize"))
         ops.addSeparator()
         ops.addAction("Diagonal → fit", lambda: self._op("diagonal"))
         ops.addAction("F2 skyline → fit", lambda: self._emit_projection("skyline"))
@@ -473,6 +474,8 @@ class Contour2DView(QWidget):
             new = self._committed.reversed_axis("f2")
         elif kind == "rev_f1":
             new = self._committed.reversed_axis("f1")
+        elif kind == "symmetrize":
+            new = self._committed.symmetrized()
         else:
             return
         self._orig = self._committed = self.data = new

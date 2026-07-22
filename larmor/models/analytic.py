@@ -118,6 +118,46 @@ register(Model(
 ))
 
 
+def _render_sidebands(v: dict, ctx: SimContext) -> np.ndarray:
+    """Empirical spinning-sideband manifold (dmfit 'ss band'): a centre band
+    plus sidebands at ±k·νrot with a geometric intensity ratio — for modelling
+    an observed sideband pattern without a full CSA fit."""
+    pos = v["isotropic_chemical_shift_ppm"]
+    fwhm = v["shift_fwhm_ppm"]; amp = v["amplitude"]; gl = v.get("gl", 1.0)
+    r = float(v.get("ssb_ratio", 0.3))
+    n = int(round(v.get("n_ssb", 4)))
+    nu = ctx.spin_rate_Hz; lar = ctx.larmor_MHz or 1.0
+    y = amp * gauss_lor(ctx.x_ppm, pos, fwhm, 1.0, gl)
+    if nu > 0:
+        spacing = nu / lar                          # ppm between sidebands
+        for k in range(1, n + 1):
+            w = amp * r ** k
+            y += w * gauss_lor(ctx.x_ppm, pos + k * spacing, fwhm, 1.0, gl)
+            y += w * gauss_lor(ctx.x_ppm, pos - k * spacing, fwhm, 1.0, gl)
+    return y
+
+
+register(Model(
+    name="sidebands",
+    label="Spinning sidebands",
+    description="Empirical MAS sideband manifold (dmfit 'ss band'): a centre band "
+                "plus sidebands at ±k·νrot with a geometric intensity ratio. Set "
+                "the MAS rate in the experiment parameters.",
+    params=(
+        ParamDef("isotropic_chemical_shift_ppm", "pos", 0.0, "ppm", "centre band"),
+        ParamDef("shift_fwhm_ppm", "fwhm", 2.0, "ppm", "band FWHM", min=0.05),
+        ParamDef("amplitude", "amp", 1.0, "", "centre-band height", min=0.0),
+        ParamDef("ssb_ratio", "r", 0.3, "", "intensity ratio between successive "
+                 "sidebands", min=0.0, max=1.0),
+        ParamDef("n_ssb", "nssb", 4.0, "", "sidebands each side (integer)",
+                 min=0.0, max=32.0, vary=False),
+        ParamDef("gl", "gl", 1.0, "", "Gaussian fraction", min=0.0, max=1.0,
+                 vary=False),
+    ),
+    render=_render_sidebands,
+))
+
+
 def voigt(x_ppm: np.ndarray, pos_ppm: float, gauss_fwhm_ppm: float,
           lorentz_fwhm_ppm: float, amplitude: float) -> np.ndarray:
     """Peak-normalized TRUE Voigt: the convolution of a Gaussian and a

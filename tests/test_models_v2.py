@@ -184,3 +184,21 @@ def test_jmultiplet_binomial_pattern():
     assert ratios[0] == pytest.approx(1 / 3, abs=0.05)    # 1:3:3:1
     assert ratios[-1] == pytest.approx(1.0, abs=0.02)
     assert abs(xc[pk[1]] - xc[pk[0]]) == pytest.approx(3.0, abs=0.1)  # J/ν0
+
+
+def test_sidebands_manifold():
+    """Spinning sidebands at ±k·νrot with a geometric intensity ratio."""
+    import numpy as np
+    from scipy.signal import find_peaks
+    from larmor import engine
+    r = Recipe(nucleus="1H", larmor_frequency_MHz=100.0, spin_rate_Hz=1000.0,
+               sites=[SiteModel(model="sidebands", label="S", params={
+                   "isotropic_chemical_shift_ppm": Param(0.0),
+                   "shift_fwhm_ppm": Param(1.0), "amplitude": Param(1.0),
+                   "ssb_ratio": Param(0.4), "n_ssb": Param(3.0),
+                   "gl": Param(1.0)})])
+    x = np.linspace(-50, 50, 4000)
+    xc, y, _ = engine.simulate(r, exp_ppm=x)
+    pk, _ = find_peaks(y, height=y.max() * 0.02, distance=30)
+    assert len(pk) == 7                                    # centre + 3 each side
+    assert abs(xc[pk[1]] - xc[pk[0]]) == pytest.approx(10.0, abs=0.2)  # νrot/ν0
