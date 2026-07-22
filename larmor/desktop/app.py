@@ -381,6 +381,14 @@ class MainWindow(QMainWindow):
                   self.open_convert)
 
         m_help = mb.addMenu("&?")
+        m_man = m_help.addMenu("User &manuals")
+        for name, title in (("spectra-1d", "1D spectra — processing & fitting"),
+                            ("mqmas", "MQMAS (2D)"),
+                            ("correlation-hmqc", "HMQC & correlation"),
+                            ("relaxation", "Relaxation (T1/T2)"),
+                            ("qcpmg", "QCPMG")):
+            self._add(m_man, title,
+                      lambda _=False, n=name, t=title: self._open_manual(n, t))
         self._add(m_help, "About LARMOR", self._about)
 
     def _add(self, menu, text, slot, shortcut=None, checkable=False, checked=False):
@@ -476,6 +484,11 @@ class MainWindow(QMainWindow):
         sfo = (self.recipe.get("larmor_frequency_MHz", 100.0)
                if self.recipe else 100.0) or 100.0
         ConvertDialog(self, sfo).exec()
+
+    def _open_manual(self, name: str, title: str):
+        from larmor.desktop.help_dialog import show_help
+
+        show_help(self, name, title)
 
     def _about(self):
         QMessageBox.information(
