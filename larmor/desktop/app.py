@@ -343,6 +343,8 @@ class MainWindow(QMainWindow):
         self._add(m_dec, "&Compute", self.request_simulation, "F9")
         self._add(m_dec, "Computing &parameters…  (kernel resolution)",
                   self.edit_computing_params)
+        self._add(m_dec, "MQMAS F1 &reference…  (isotropic-axis align)",
+                  self.edit_mqmas_f1_ref)
         m_dec.addSeparator()
         self._add(m_dec, "Add fit &zone", self.add_zone)
         self._add(m_dec, "Clear zones", self.clear_zones)
@@ -521,6 +523,33 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(
                 "computing parameters updated — kernels rebuild on the next fit")
             self.request_simulation()
+
+    def edit_mqmas_f1_ref(self):
+        """View / set / fix the MQMAS isotropic-axis (F1) reference offset — the
+        alignment between mrsimulator's kernel and the experiment's F1 axis.
+        Auto-fitted by default; fix it (dmfit-style) to hold your value."""
+        from PySide6.QtWidgets import QInputDialog
+
+        if not self.recipe:
+            self.statusBar().showMessage("open a 2D MQMAS map first")
+            return
+        cur = float(self.recipe.get("mqmas_f1_ref_ppm", 0.0))
+        vary = bool(self.recipe.get("mqmas_f1_ref_vary", True))
+        val, ok = QInputDialog.getDouble(
+            self, "MQMAS F1 reference",
+            "Isotropic-axis (F1) reference offset [ppm].\n"
+            "This aligns the model's F1 axis to the experiment's convention.\n\n"
+            "Cancel = keep auto-fitting it; OK = hold it fixed at this value.",
+            cur, -80.0, 80.0, 2)
+        if ok:
+            self.recipe["mqmas_f1_ref_ppm"] = float(val)
+            self.recipe["mqmas_f1_ref_vary"] = False
+            self.statusBar().showMessage(
+                f"MQMAS F1 reference fixed at {val:+.2f} ppm — Fit to apply "
+                "(uncheck by re-running with auto)")
+        else:
+            self.recipe["mqmas_f1_ref_vary"] = True
+            self.statusBar().showMessage("MQMAS F1 reference set to auto-fit")
 
     def _open_manual(self, name: str, title: str):
         from larmor.desktop.help_dialog import show_help
@@ -1817,9 +1846,14 @@ class MainWindow(QMainWindow):
         self.view2d.set_model(result.z_fit, result.kernel.f2_ppm,
                               result.kernel.f1_ppm)
         self.lines_table.set_chi2(f"RMSD {result.rmsd:.4f}")
-        self.results_summary.setText(f"2D MQMAS fit · RMSD {result.rmsd:.4f}")
-        self.report.setPlainText(result.report)
-        self.statusBar().showMessage(f"2D fit done · RMSD {result.rmsd:.4f}")
+        f1ref = getattr(result.recipe, "mqmas_f1_ref_ppm", 0.0)
+        held = not getattr(result.recipe, "mqmas_f1_ref_vary", True)
+        refmsg = f" · F1 ref {f1ref:+.1f} ppm{' (fixed)' if held else ''}"
+        self.results_summary.setText(f"2D MQMAS fit · RMSD {result.rmsd:.4f}{refmsg}")
+        self.report.setPlainText(
+            f"MQMAS F1 isotropic-axis reference offset: {f1ref:+.2f} ppm"
+            f"{' (held fixed)' if held else ' (auto-fitted)'}\n\n" + result.report)
+        self.statusBar().showMessage(f"2D fit done · RMSD {result.rmsd:.4f}{refmsg}")
         self._persist_session()
 
     def _fit_failed(self, msg: str):

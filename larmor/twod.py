@@ -471,9 +471,28 @@ def _shift_2d(z: np.ndarray, f2: np.ndarray, f1: np.ndarray,
     return out2
 
 
-def simulate_2d(recipe, kernel: Kernel2D):
-    """(total, per_site) 2D arrays for a recipe on the kernel grid."""
+def _shift_f1_only(z: np.ndarray, f1: np.ndarray, off_ppm: float) -> np.ndarray:
+    """Translate a 2D subspectrum along F1 (axis 0) only, by off_ppm."""
+    if abs(off_ppm) < 1e-9:
+        return z
+    out = np.empty_like(z)
+    for j in range(z.shape[1]):
+        out[:, j] = np.interp(f1 - off_ppm, f1, z[:, j], left=0.0, right=0.0)
+    return out
+
+
+def simulate_2d(recipe, kernel: Kernel2D, f1_ref_ppm: float | None = None):
+    """(total, per_site) 2D arrays for a recipe on the kernel grid.
+
+    The MQMAS isotropic (F1) reference offset re-references the model's F1 axis
+    to the experiment's convention (see Recipe.mqmas_f1_ref_ppm). Pass f1_ref_ppm
+    to override the value stored on the recipe (fit_2d does this per iteration).
+    """
+    ref = (getattr(recipe, "mqmas_f1_ref_ppm", 0.0) if f1_ref_ppm is None
+           else f1_ref_ppm)
     per_site = [simulate_site_2d(s, kernel) for s in recipe.sites]
+    if abs(ref) > 1e-9:
+        per_site = [_shift_f1_only(z, kernel.f1_ppm, ref) for z in per_site]
     total = (np.sum(per_site, axis=0) if per_site
              else np.zeros(kernel.shape))
     return total, per_site
@@ -530,13 +549,33 @@ def fit_2d(recipe, data: Data2D, kernel: Kernel2D | None = None,
 
     params = _make_params(recipe)
 
+    # Global MQMAS F1 (isotropic-axis) reference offset: mrsimulator's kernel and
+    # the experimental F1 axis use different referencing conventions, so the model
+    # must be shifted along F1 to align. Auto-initialise from the centroid gap so
+    # the optimiser starts aligned, then let it refine. δiso (diagonal) and this
+    # F1-only offset span the plane independently, so they are not degenerate.
+    _apply_params(recipe, params)
+    vary_ref = getattr(recipe, "mqmas_f1_ref_vary", True)
+    if vary_ref:
+        F1g = kernel.f1_ppm[:, None] + 0.0 * kernel.f2_ppm[None, :]
+        m0, _ = simulate_2d(recipe, kernel, f1_ref_ppm=0.0)
+        def _f1_centroid(z):
+            zc = np.clip(z, 0, None); s = zc.sum()
+            return float((zc * F1g).sum() / s) if s > 0 else 0.0
+        f1_ref0 = float(np.clip(_f1_centroid(z_exp) - _f1_centroid(m0), -80.0, 80.0))
+    else:                                   # user holds the referencing fixed
+        f1_ref0 = float(getattr(recipe, "mqmas_f1_ref_ppm", 0.0))
+    params.add("mqmas_f1_ref_ppm", value=f1_ref0, min=-80.0, max=80.0,
+               vary=vary_ref)
+
     def residual(p):
         _apply_params(recipe, p)
+        recipe.mqmas_f1_ref_ppm = float(p["mqmas_f1_ref_ppm"].value)
         total, _ = simulate_2d(recipe, kernel)
         return ((total - z_exp) / scale).ravel()
 
     # amplitude pre-scale so the optimizer starts on-scale
-    _apply_params(recipe, params)
+    recipe.mqmas_f1_ref_ppm = f1_ref0
     total0, _ = simulate_2d(recipe, kernel)
     denom = float((total0 * total0).sum())
     if denom > 0:
@@ -550,6 +589,7 @@ def fit_2d(recipe, data: Data2D, kernel: Kernel2D | None = None,
 
     result = lmfit.minimize(residual, params, method="least_squares")
     _apply_params(recipe, result.params)
+    recipe.mqmas_f1_ref_ppm = float(result.params["mqmas_f1_ref_ppm"].value)
     z_fit, per_site = simulate_2d(recipe, kernel)
     rmsd = float(np.sqrt(np.mean((z_fit - z_exp) ** 2)) / scale)
     recipe.fit_rmsd = rmsd

@@ -140,6 +140,26 @@ def fit_cofit(entries: list[tuple], share: tuple[str, ...] = DEFAULT_SHARE,
                 params.add(_pname(k, i, site, pname), value=p.value, vary=p.vary,
                            min=p.min if p.min is not None else -np.inf,
                            max=p.max if p.max is not None else np.inf)
+    # each 2D (MQMAS) dataset gets its own isotropic-axis (F1) reference offset,
+    # auto-initialised from the experiment/model centroid gap: mrsimulator's
+    # kernel and the experimental F1 axis use different referencing conventions
+    # (see Recipe.mqmas_f1_ref_ppm / twod.fit_2d).
+    for k, e in enumerate(prep):
+        if e["kind"] != "2d":
+            continue
+        f1 = e["kernel"].f1_ppm[:, None]
+        def _cg(z):
+            zc = np.clip(z, 0, None); s = zc.sum()
+            return float((zc * f1).sum() / s) if s > 0 else 0.0
+        vary_ref = getattr(e["r"], "mqmas_f1_ref_vary", True)
+        if vary_ref:
+            e["r"].mqmas_f1_ref_ppm = 0.0
+            m0, _ = twod.simulate_2d(e["r"], e["kernel"], f1_ref_ppm=0.0)
+            init = float(np.clip(_cg(e["z_exp"]) - _cg(m0), -80.0, 80.0))
+        else:
+            init = float(getattr(e["r"], "mqmas_f1_ref_ppm", 0.0))
+        params.add(f"mqmas_f1_ref_{k}", value=init, min=-80.0, max=80.0,
+                   vary=vary_ref)
     for k, e in enumerate(prep):
         for i, site in enumerate(e["r"].sites):
             for pname, p in site.params.items():
@@ -170,6 +190,8 @@ def fit_cofit(entries: list[tuple], share: tuple[str, ...] = DEFAULT_SHARE,
                     site.params[pname].value = float(lp.value)
                     site.params[pname].stderr = (float(lp.stderr)
                                                  if lp.stderr is not None else None)
+            if e["kind"] == "2d" and f"mqmas_f1_ref_{k}" in p:
+                e["r"].mqmas_f1_ref_ppm = float(p[f"mqmas_f1_ref_{k}"].value)
 
     def model_vec(e):
         r = e["r"]

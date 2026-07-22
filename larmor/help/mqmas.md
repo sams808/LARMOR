@@ -31,6 +31,16 @@ hypercomplex quadrants present the correction is exact.
 **Apply shear** for data processed without xfshear. (mrsimulator MQMAS is already
 sheared.) Use the F1 axis referencing conventions for your spin/method.
 
+## Isotropic-axis (F1) referencing
+mrsimulator's kernel puts a pure-CS site on the diagonal (F1 = δiso), but an
+experimental Bruker/dmfit F1 axis is referenced by its own convention — often
+tens of ppm away. The fit therefore carries a single **F1 reference offset** that
+slides the whole model along F1 to line up with your data (δiso still sets the
+diagonal position, so the two don't fight). It is **auto-fitted** and reported
+after every 2D fit. To pin it (dmfit-style manual referencing) use
+**Decomposition ▸ MQMAS F1 reference…**; re-run with Cancel to return to auto.
+If a Czjzek 2D fit looks well-shaped but sits off in F1, this is the knob.
+
 ## Fit
 1. Pick **Czjzek** (glasses) or **ext. Czjzek / Quad CT** (crystalline) from
    Models, then **click the contour** to place a site (its δiso starts at the

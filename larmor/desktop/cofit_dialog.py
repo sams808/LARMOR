@@ -222,7 +222,11 @@ class CofitDialog(QDialog):
         lines = [f"shared: {', '.join(share)}", ""]
         for ds, r, rmsd in zip(self.datasets, self._result.recipes,
                                self._result.rmsd):
-            lines.append(f"[{ds['kind']}] {ds['label']}: RMSD {rmsd:.4f}")
+            extra = ""
+            if ds["kind"] == "2d":
+                extra = (f"  ·  F1 ref "
+                         f"{getattr(r, 'mqmas_f1_ref_ppm', 0.0):+.1f} ppm")
+            lines.append(f"[{ds['kind']}] {ds['label']}: RMSD {rmsd:.4f}{extra}")
         lines.append("")
         for i, site in enumerate(self._result.recipes[0].sites):
             lines.append(f"site {site.label or i} ({site.model}):")

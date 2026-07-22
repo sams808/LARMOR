@@ -240,6 +240,28 @@ def test_fit_2d_recovers_a_synthetic_czjzek_site():
 
 
 @pytest.mark.slow
+def test_fit_2d_recovers_the_f1_reference_offset():
+    """mrsimulator's kernel and an experimental F1 axis differ by a referencing
+    offset; fit_2d fits it (isotropic-axis alignment) and holds it when fixed."""
+    k = _small_kernel()
+    truth = _czjzek_recipe(sigma=2.0, pos=55.0)
+    truth.mqmas_f1_ref_ppm = 15.0                    # data carries a +15 ppm F1 shift
+    z, _ = twod.simulate_2d(truth, k)
+    data = twod.Data2D(f2_ppm=k.f2_ppm, f1_ppm=k.f1_ppm, z=z,
+                       nucleus="27Al", larmor_MHz=195.483)
+
+    auto = _czjzek_recipe(sigma=2.0, pos=55.0)        # ref unknown -> fitted
+    twod.fit_2d(auto, data, kernel=k)
+    assert auto.mqmas_f1_ref_ppm == pytest.approx(15.0, abs=3.0)
+
+    held = _czjzek_recipe(sigma=2.0, pos=55.0)        # user fixes the referencing
+    held.mqmas_f1_ref_ppm = 5.0
+    held.mqmas_f1_ref_vary = False
+    twod.fit_2d(held, data, kernel=k)
+    assert held.mqmas_f1_ref_ppm == 5.0              # untouched by the fit
+
+
+@pytest.mark.slow
 def test_fit_2d_reports_uncertainties():
     k = _small_kernel()
     truth = _czjzek_recipe(sigma=2.0, pos=60.0)

@@ -84,6 +84,16 @@ class Recipe:
     #: the fit residual is evaluated only inside their union
     fit_zones: list = field(default_factory=list)
     fit_rmsd: float | None = None
+    #: MQMAS isotropic-axis (F1) reference offset in ppm. mrsimulator's ThreeQ_VAS
+    #: puts a pure-CS site on the diagonal (F1 = δiso); an experimental Bruker/
+    #: dmfit F1 axis is referenced by its own convention, so the model must be
+    #: shifted along F1 by this amount to align. Fitted by fit_2d, then reused by
+    #: the display overlay. δiso still handles the diagonal position, so this is
+    #: independent (F1-only) and not degenerate with the shifts.
+    mqmas_f1_ref_ppm: float = 0.0
+    #: when True (default) fit_2d auto-fits mqmas_f1_ref_ppm; set False to hold it
+    #: at the user's value (dmfit-style manual referencing).
+    mqmas_f1_ref_vary: bool = True
     notes: list[str] = field(default_factory=list)
 
     # ---------- serialization ----------
