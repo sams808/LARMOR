@@ -22,6 +22,14 @@ from larmor.recipe import Recipe, SiteModel
 
 _KERNEL_CACHE: dict[tuple, "CzjzekKernel"] = {}
 
+#: user-tunable 1D Czjzek kernel resolution (dmfit's Computing parameters).
+#: Edited via the Computing-parameters dialog; the cache is cleared on change.
+KERNEL_SETTINGS = {"npts": 2048, "cq_max_MHz": 25.0, "n_cq": 80, "n_eta": 11}
+
+
+def clear_kernel_cache():
+    _KERNEL_CACHE.clear()
+
 
 @dataclass
 class Axis:
@@ -110,7 +118,11 @@ def make_context(recipe: Recipe, exp_ppm: np.ndarray | None = None) -> SimContex
     """Build the simulation context; picks the axis a recipe should render on."""
     if needs_kernel(recipe):
         kernel = build_kernel(recipe.nucleus, recipe.larmor_frequency_MHz,
-                              recipe.spin_rate_Hz)
+                              recipe.spin_rate_Hz,
+                              npts=KERNEL_SETTINGS["npts"],
+                              cq_max_MHz=KERNEL_SETTINGS["cq_max_MHz"],
+                              n_cq=KERNEL_SETTINGS["n_cq"],
+                              n_eta=KERNEL_SETTINGS["n_eta"])
         x = kernel.x_ppm
     elif exp_ppm is not None:
         x = np.asarray(exp_ppm)[np.argsort(exp_ppm)]

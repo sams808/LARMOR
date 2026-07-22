@@ -331,6 +331,8 @@ class MainWindow(QMainWindow):
         self._add(m_dec, "Co-&fit datasets…  (shared model, 1D + MQMAS)",
                   self.open_cofit)
         self._add(m_dec, "&Compute", self.request_simulation, "F9")
+        self._add(m_dec, "Computing &parameters…  (kernel resolution)",
+                  self.edit_computing_params)
         m_dec.addSeparator()
         self._add(m_dec, "Add fit &zone", self.add_zone)
         self._add(m_dec, "Clear zones", self.clear_zones)
@@ -486,6 +488,14 @@ class MainWindow(QMainWindow):
         sfo = (self.recipe.get("larmor_frequency_MHz", 100.0)
                if self.recipe else 100.0) or 100.0
         ConvertDialog(self, sfo).exec()
+
+    def edit_computing_params(self):
+        from larmor.desktop.dialogs import ComputingParamsDialog
+
+        if ComputingParamsDialog(self).exec():
+            self.statusBar().showMessage(
+                "computing parameters updated — kernels rebuild on the next fit")
+            self.request_simulation()
 
     def _open_manual(self, name: str, title: str):
         from larmor.desktop.help_dialog import show_help

@@ -159,6 +159,55 @@ class ExperimentDialog(QDialog):
                 self.sr.setToolTip(f"could not read SR: {exc}")
 
 
+class ComputingParamsDialog(QDialog):
+    """Tune the Czjzek / MQMAS kernel resolution (dmfit's Computing parameters):
+    accuracy vs speed. Clears the kernel caches on OK."""
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setWindowTitle("Computing parameters")
+        from larmor import engine, twod
+
+        self.engine, self.twod = engine, twod
+        form = QFormLayout(self)
+        e, m = engine.KERNEL_SETTINGS, twod.MQMAS_SETTINGS
+
+        def spin(val, lo, hi, dec=0):
+            s = QDoubleSpinBox(); s.setDecimals(dec); s.setRange(lo, hi)
+            s.setValue(val); return s
+
+        form.addRow(QLabel("<b>1D Czjzek kernel</b>"))
+        self.npts = spin(e["npts"], 256, 65536); form.addRow("computed points", self.npts)
+        self.cqmax = spin(e["cq_max_MHz"], 2, 60, 1); form.addRow("Cq max (MHz)", self.cqmax)
+        self.ncq = spin(e["n_cq"], 10, 200); form.addRow("Cq steps", self.ncq)
+        self.neta = spin(e["n_eta"], 3, 41); form.addRow("η steps", self.neta)
+        form.addRow(QLabel("<b>MQMAS kernel</b>"))
+        self.n2 = spin(m["n2"], 48, 512); form.addRow("F2 points", self.n2)
+        self.n1 = spin(m["n1"], 32, 512); form.addRow("F1 points", self.n1)
+        self.mncq = spin(m["n_cq"], 8, 120); form.addRow("Cq steps (2D)", self.mncq)
+        self.mneta = spin(m["n_eta"], 3, 21); form.addRow("η steps (2D)", self.mneta)
+        self.mcqmax = spin(m["cq_max_MHz"], 2, 40, 1); form.addRow("Cq max (2D, MHz)", self.mcqmax)
+
+        note = QLabel("More steps/points = more accurate but slower; a change "
+                      "rebuilds the kernels on the next fit.")
+        note.setWordWrap(True); note.setStyleSheet("color: #93a0a8;")
+        form.addRow(note)
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.accepted.connect(self._accept); bb.rejected.connect(self.reject)
+        form.addRow(bb)
+
+    def _accept(self):
+        self.engine.KERNEL_SETTINGS.update(
+            npts=int(self.npts.value()), cq_max_MHz=float(self.cqmax.value()),
+            n_cq=int(self.ncq.value()), n_eta=int(self.neta.value()))
+        self.twod.MQMAS_SETTINGS.update(
+            n2=int(self.n2.value()), n1=int(self.n1.value()),
+            n_cq=int(self.mncq.value()), n_eta=int(self.mneta.value()),
+            cq_max_MHz=float(self.mcqmax.value()))
+        self.engine.clear_kernel_cache(); self.twod.clear_kernel_cache()
+        self.accept()
+
+
 def _other_lines(recipe: dict, exclude: int) -> list[tuple[int, str]]:
     return [(j, s.get("label") or f"s{j}")
             for j, s in enumerate(recipe.get("sites", [])) if j != exclude]

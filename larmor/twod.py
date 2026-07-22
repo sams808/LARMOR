@@ -25,6 +25,13 @@ _KERNEL2D_CACHE: dict[tuple, "Kernel2D"] = {}
 
 METHODS = {"3QMAS": "ThreeQ_VAS", "5QMAS": "FiveQ_VAS", "ST1": "ST1_VAS"}
 
+#: user-tunable MQMAS kernel resolution (dmfit Computing parameters, nuQ block).
+MQMAS_SETTINGS = {"n2": 192, "n1": 96, "n_cq": 40, "n_eta": 6, "cq_max_MHz": 16.0}
+
+
+def clear_kernel_cache():
+    _KERNEL2D_CACHE.clear()
+
 
 # --------------------------------------------------------------------------
 @dataclass
@@ -474,7 +481,9 @@ def fit_2d(recipe, data: Data2D, kernel: Kernel2D | None = None,
             recipe.larmor_frequency_MHz or data.larmor_MHz,
             f2_window=(float(data.f2_ppm.max()), float(data.f2_ppm.min())),
             f1_window=(float(data.f1_ppm.max()), float(data.f1_ppm.min())),
-            method=method)
+            method=method, n2=MQMAS_SETTINGS["n2"], n1=MQMAS_SETTINGS["n1"],
+            n_cq=MQMAS_SETTINGS["n_cq"], n_eta=MQMAS_SETTINGS["n_eta"],
+            cq_max_MHz=MQMAS_SETTINGS["cq_max_MHz"])
 
     # interpolate the experiment onto the kernel grid once
     from scipy.interpolate import RegularGridInterpolator
