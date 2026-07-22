@@ -605,7 +605,7 @@ class Fit2DResult:
 
 
 def fit_2d(recipe, data: Data2D, kernel: Kernel2D | None = None,
-           method: str = "3QMAS") -> Fit2DResult:
+           method: str = "3QMAS", iter_cb=None) -> Fit2DResult:
     """Fit a recipe against a 2D dataset (MQMAS).
 
     Same registry, same constraints, same uncertainties as 1D -- only the
@@ -676,7 +676,8 @@ def fit_2d(recipe, data: Data2D, kernel: Kernel2D | None = None,
             if params[name].vary:
                 params[name].value *= kk
 
-    result = lmfit.minimize(residual, params, method="least_squares")
+    result = lmfit.minimize(residual, params, method="least_squares",
+                            iter_cb=iter_cb)
     _apply_params(recipe, result.params)
     recipe.mqmas_f1_ref_ppm = float(result.params["mqmas_f1_ref_ppm"].value)
     z_fit, per_site = simulate_2d(recipe, kernel)

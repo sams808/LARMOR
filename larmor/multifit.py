@@ -99,7 +99,7 @@ def _prepare_2d(rec: Recipe, data2d, method: str):
 
 def fit_cofit(entries: list[tuple], share: tuple[str, ...] = DEFAULT_SHARE,
               windows: list | None = None, method: str = "3QMAS",
-              ) -> MultiFitResult:
+              iter_cb=None) -> MultiFitResult:
     """Co-fit a mix of 1D and 2D (MQMAS) datasets with shared physical model.
 
     Each entry is ``(recipe, spec)`` where ``spec`` is a ``(ppm, amp)`` pair for
@@ -233,9 +233,11 @@ def fit_cofit(entries: list[tuple], share: tuple[str, ...] = DEFAULT_SHARE,
             if nm in params and params[nm].vary and not params[nm].expr:
                 params[nm].value = float(params[nm].value) * sc
 
-    result = lmfit.minimize(residual, params, method="least_squares")
+    result = lmfit.minimize(residual, params, method="least_squares",
+                            iter_cb=iter_cb)
     if not result.errorbars:
-        retry = lmfit.minimize(residual, result.params.copy(), method="leastsq")
+        retry = lmfit.minimize(residual, result.params.copy(),
+                               method="leastsq", iter_cb=iter_cb)
         if retry.errorbars:
             result = retry
     apply_params(result.params)

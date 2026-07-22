@@ -24,8 +24,8 @@ from PySide6.QtCore import QSettings, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QDockWidget, QFileDialog, QLabel, QMainWindow,
-    QMessageBox, QPlainTextEdit, QPushButton, QSplitter, QTableWidget,
-    QTableWidgetItem, QToolBar, QVBoxLayout, QWidget, QHBoxLayout,
+    QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QSplitter,
+    QTableWidget, QTableWidgetItem, QToolBar, QVBoxLayout, QWidget, QHBoxLayout,
 )
 
 from larmor import models as model_registry
@@ -105,9 +105,25 @@ def _light_palette():
     return p
 
 
+def _emit_progress(sig):
+    """An lmfit iter_cb that reports (iteration, residual RMS) to a Qt signal."""
+    state = {"n": 0}
+
+    def cb(params, it, resid, *args, **kws):
+        state["n"] += 1
+        try:
+            rms = float(np.sqrt(np.mean(np.asarray(resid, float) ** 2)))
+        except Exception:
+            rms = float("nan")
+        sig.emit(state["n"], rms)
+        return None                              # never abort the fit
+    return cb
+
+
 class FitWorker(QThread):
     done = Signal(object)
     failed = Signal(str)
+    progress = Signal(int, float)                # (iteration, residual rms)
 
     def __init__(self, recipe_dict, ppm, amp, window):
         super().__init__()
@@ -120,7 +136,8 @@ class FitWorker(QThread):
 
             recipe = Recipe.from_dict(self.recipe_dict)
             result = fitmod.fit(recipe, self.ppm, self.amp,
-                                window_ppm=self.window)
+                                window_ppm=self.window,
+                                iter_cb=_emit_progress(self.progress))
             self.done.emit(result)
         except Exception as exc:
             self.failed.emit(str(exc))
@@ -129,6 +146,7 @@ class FitWorker(QThread):
 class Fit2DWorker(QThread):
     done = Signal(object)
     failed = Signal(str)
+    progress = Signal(int, float)
 
     def __init__(self, recipe_dict, data2d, method):
         super().__init__()
@@ -140,7 +158,8 @@ class Fit2DWorker(QThread):
             from larmor import twod
 
             recipe = Recipe.from_dict(self.recipe_dict)
-            result = twod.fit_2d(recipe, self.data2d, method=self.method)
+            result = twod.fit_2d(recipe, self.data2d, method=self.method,
+                                 iter_cb=_emit_progress(self.progress))
             self.done.emit(result)
         except Exception as exc:
             self.failed.emit(str(exc))
@@ -215,6 +234,7 @@ class MainWindow(QMainWindow):
         self.central_stack.addWidget(self.view2d)    # index 1: 2D
         self._build_cofit_page()                     # index 2: co-fit split
         self.setCentralWidget(self.central_stack)
+        self._build_progress()
 
         self.view.add_requested.connect(self.add_site_at)
         self.view.paddle_moved.connect(self.on_paddle_moved)
@@ -1813,8 +1833,10 @@ class MainWindow(QMainWindow):
             f"fitting in {len(zones)} zone(s) …" if zones
             else f"fitting in {hi:.1f} … {lo:.1f} ppm …")
         self.lines_table.btnFit.setEnabled(False)
+        self._progress_start("1D fit")
         self._fit_worker = FitWorker(json.loads(json.dumps(self.recipe)),
                                      self.exp_ppm, self.exp_amp, (hi, lo))
+        self._fit_worker.progress.connect(self._progress_tick)
         self._fit_worker.done.connect(self._fit_done)
         self._fit_worker.failed.connect(self._fit_failed)
         self._fit_worker.start()
@@ -1841,14 +1863,17 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             "fitting the 2D (building the MQMAS kernel, first time is slow)…")
         self.lines_table.btnFit.setEnabled(False)
+        self._progress_start("2D MQMAS fit")
         self._fit2d_worker = Fit2DWorker(
             json.loads(json.dumps(self.recipe)), self._data2d, method)
+        self._fit2d_worker.progress.connect(self._progress_tick)
         self._fit2d_worker.done.connect(self._fit2d_done)
         self._fit2d_worker.failed.connect(self._fit_failed)
         self._fit2d_worker.start()
 
     def _fit2d_done(self, result):
         self.lines_table.btnFit.setEnabled(True)
+        self._progress_end(True)
         self.recipe = result.recipe.to_dict()
         self.lines_table.rebuild(self.recipe, self.hidden)
         from larmor import twod
@@ -1869,11 +1894,13 @@ class MainWindow(QMainWindow):
 
     def _fit_failed(self, msg: str):
         self.lines_table.btnFit.setEnabled(True)
+        self._progress_end(False)
         QMessageBox.warning(self, "Fit failed", msg)
         self.statusBar().showMessage("fit failed")
 
     def _fit_done(self, result):
         self.lines_table.btnFit.setEnabled(True)
+        self._progress_end(True)
         self.recipe = result.recipe.to_dict()
         self.lines_table.rebuild(self.recipe, self.hidden)
         self._update_paddles()
@@ -2216,9 +2243,58 @@ class MainWindow(QMainWindow):
         self.central_stack.addWidget(page)           # index 2
         self._build_cofit_bar()
         self._cofit = None
+        self._cofit_last = None                      # stash for quick re-entry
+        # anything that switches the central view (loading data, changing
+        # workspace, Back to 2D…) must leave co-fit mode cleanly, or the co-fit
+        # bar is left over a normal view in a half-active state
+        self.central_stack.currentChanged.connect(self._on_central_changed)
         self._cofit_timer = QTimer(self); self._cofit_timer.setSingleShot(True)
         self._cofit_timer.setInterval(200)
         self._cofit_timer.timeout.connect(self._cofit_simulate_now)
+
+    # ------------------------------------------------------------- progress
+    def _build_progress(self):
+        """A live fit-progress bar in the status bar: iteration count and the
+        current residual RMS, so a long fit shows what it is doing."""
+        self.progress = QProgressBar()
+        self.progress.setRange(0, 100)
+        self.progress.setFixedWidth(340)
+        self.progress.setTextVisible(True)
+        self.progress.setStyleSheet("""
+            QProgressBar {
+                border: 1px solid #b9c4bd; border-radius: 7px;
+                background: #eef2ef; height: 16px;
+                color: #16202a; font-size: 11px; text-align: center;
+            }
+            QProgressBar::chunk {
+                border-radius: 6px;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #16a3a3, stop:0.55 #2fbf8f, stop:1 #7fd66a);
+            }
+        """)
+        self.progress.setVisible(False)
+        self.statusBar().addPermanentWidget(self.progress)
+        self._prog_label = "fitting"
+
+    def _progress_start(self, label: str):
+        self._prog_label = label
+        self.progress.setValue(0)
+        self.progress.setFormat(f"{label} — starting…  %p%")
+        self.progress.setVisible(True)
+        QApplication.processEvents()
+
+    def _progress_tick(self, it: int, rms: float):
+        """Iterations have no known total, so approach 100 % asymptotically —
+        the bar always advances but never claims to be finished early."""
+        pct = int(min(97.0, 100.0 * (1.0 - np.exp(-max(it, 0) / 35.0))))
+        self.progress.setValue(pct)
+        self.progress.setFormat(
+            f"{self._prog_label} — iter {it} · rms {rms:.3g}   %p%")
+
+    def _progress_end(self, ok: bool = True):
+        self.progress.setValue(100)
+        self.progress.setFormat(("done" if ok else "stopped") + "  %p%")
+        QTimer.singleShot(1200, lambda: self.progress.setVisible(False))
 
     def _build_cofit_bar(self):
         """The co-fit controls (tie + Add/Preview/Run/Close), shown above the
@@ -2256,24 +2332,47 @@ class MainWindow(QMainWindow):
                 "set up the shared fit (add lines) on one dataset first")
             return
         self._sync_active()
-        st = {"d1": None, "d2": None}
-        if self.central_stack.currentWidget() is self.view2d and self._data2d:
-            st["d2"] = (self._data2d, Path(self.source_path or "2D").name)
-        elif self.exp_ppm is not None and np.asarray(self.exp_ppm).size:
-            st["d1"] = (np.asarray(self.exp_ppm), np.asarray(self.exp_amp),
-                        self.recipe.get("sample") or "current")
+        prev = self._cofit_last
+        if prev and (prev.get("d1") or prev.get("d2")):
+            st = prev                                 # resume the paused co-fit
+        else:
+            st = {"d1": None, "d2": None}
+            if self.central_stack.currentWidget() is self.view2d and self._data2d:
+                st["d2"] = (self._data2d, Path(self.source_path or "2D").name)
+            elif self.exp_ppm is not None and np.asarray(self.exp_ppm).size:
+                st["d1"] = (np.asarray(self.exp_ppm), np.asarray(self.exp_amp),
+                            self.recipe.get("sample") or "current")
         self._cofit = st
         self.central_stack.setCurrentWidget(self.cofit_page)
         self.cofit_bar.setVisible(True)
         self.lines_dock.raise_()                      # bring the shared table up
         self._cofit_split_even()
         self._cofit_refresh_panels()
+        if st.get("d1") and st.get("d2"):
+            self.statusBar().showMessage(
+                "co-fit: both datasets loaded — Preview / Run co-fit")
+            self._cofit_simulate()
+            return
         need = "a 2D MQMAS map" if st["d2"] is None else "a 1D MAS spectrum"
         self.statusBar().showMessage(
             f"co-fit: shared model from the current fit — add {need} "
             "(＋ Add dataset), then Preview / Run co-fit")
-        if st["d1"] is None or st["d2"] is None:
-            self._cofit_add_dataset()
+        self._cofit_add_dataset()
+
+    def _on_central_changed(self, *_):
+        """Leaving the co-fit page (loading data, switching workspace, …) exits
+        co-fit mode. The datasets are stashed so Decomposition ▸ Co-fit puts you
+        straight back without re-picking the files."""
+        if getattr(self, "_cofit", None) is None:
+            return
+        if self.central_stack.currentWidget() is self.cofit_page:
+            return
+        self._cofit_last = self._cofit
+        self._cofit = None
+        self.cofit_bar.setVisible(False)
+        self.statusBar().showMessage(
+            "co-fit paused (another dataset is showing) — Decomposition ▸ "
+            "Co-fit datasets returns to it with both datasets still loaded")
 
     def _cofit_split_even(self):
         """Give the 1D and 2D panels half the page each. Qt ignores setSizes on a
@@ -2395,14 +2494,25 @@ class MainWindow(QMainWindow):
         for spec in ((st["d1"][0], st["d1"][1]), st["d2"][0]):
             r = Recipe.from_dict(json.loads(json.dumps(self.recipe)))
             entries.append((r, spec))
-        self.statusBar().showMessage("running co-fit… (building any MQMAS kernels)")
-        self.btnCofitRun.setEnabled(False); QApplication.processEvents()
+        self.btnCofitRun.setEnabled(False)
+        self._progress_start("co-fit (building MQMAS kernel…)")
+
+        def _cb(params, it, resid, *a, **k):     # runs on this thread
+            self._prog_label = "co-fit"
+            try:
+                rms = float(np.sqrt(np.mean(np.asarray(resid, float) ** 2)))
+            except Exception:
+                rms = float("nan")
+            self._progress_tick(it if isinstance(it, int) else 0, rms)
+            QApplication.processEvents()
         try:
-            result = fit_cofit(entries, share=share)
+            result = fit_cofit(entries, share=share, iter_cb=_cb)
         except Exception as exc:
+            self._progress_end(False)
             self.btnCofitRun.setEnabled(True)
             QMessageBox.warning(self, "Co-fit", f"co-fit failed: {exc}")
             return
+        self._progress_end(True)
         self.btnCofitRun.setEnabled(True)
         self.recipe = result.recipes[0].to_dict()
         self.lines_table.rebuild(self.recipe, self.hidden)
@@ -2415,6 +2525,7 @@ class MainWindow(QMainWindow):
 
     def close_cofit(self):
         self._cofit = None
+        self._cofit_last = None                # deliberate close: do not resume
         self.cofit_bar.setVisible(False)
         back = self.view2d if (self._data2d is not None
                                and getattr(self, "_data2d_fittable", False)) \

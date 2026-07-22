@@ -571,3 +571,63 @@ def test_cofit_split_stays_even_with_empty_2d(qapp, win):
         qapp.processEvents()
     sizes = win.cofit_split.sizes(); total = sum(sizes) or 1
     assert sizes[1] > 0.4 * total, f"2D half collapsed: {sizes}"
+
+
+def test_cofit_pauses_and_resumes_on_view_switch(qapp, win):
+    """Switching the central view while co-fitting (e.g. opening another dataset)
+    must leave co-fit cleanly — not a half-active bar over a normal view — and
+    Decomposition ▸ Co-fit resumes it with both datasets still loaded."""
+    from larmor import twod
+
+    x = np.linspace(-20, 120, 200); amp = np.exp(-0.5 * ((x - 60) / 10) ** 2) * 1e6
+    win.exp_ppm, win.exp_amp = x, amp
+    win.recipe = {"nucleus": "27Al", "larmor_frequency_MHz": 130.3, "sites": [
+        {"model": "czjzek", "label": "AlIV", "params": {
+            "isotropic_chemical_shift_ppm": {"value": 60.0, "vary": True},
+            "sigma_Cq_MHz": {"value": 1.6, "vary": True},
+            "shift_fwhm_ppm": {"value": 13.0, "vary": True},
+            "amplitude": {"value": 1e6, "vary": True}}}]}
+    d2 = twod.Data2D(f2_ppm=np.linspace(-40, 110, 40),
+                     f1_ppm=np.linspace(-30, 90, 30),
+                     z=np.abs(np.random.RandomState(1).rand(30, 40)),
+                     nucleus="27Al", larmor_MHz=130.3)
+    win._cofit = {"d1": (x, amp, "MAS"), "d2": (d2, "2rr")}
+    win.central_stack.setCurrentWidget(win.cofit_page); win.cofit_bar.setVisible(True)
+
+    win.central_stack.setCurrentWidget(win.view)     # user switches away
+    assert win._cofit is None and not win.cofit_bar.isVisible()   # no zombie
+    assert win._cofit_last is not None and win._cofit_last["d2"] is not None
+
+    win.open_cofit()                                  # resume
+    assert win.central_stack.currentWidget() is win.cofit_page
+    assert win._cofit["d1"] is not None and win._cofit["d2"] is not None
+
+    win.close_cofit()
+    assert win._cofit_last is None                    # deliberate close forgets it
+
+
+def test_fit_progress_bar_ticks(qapp, win):
+    """The fit progress bar advances on lmfit iterations (iter_cb wired through
+    the fit functions and the worker's progress signal)."""
+    from larmor.desktop.app import FitWorker
+    from larmor.engine import make_context, simulate_site
+    from larmor.recipe import Recipe, SiteModel, Param
+
+    x = np.linspace(-20, 120, 300)
+    r = Recipe(nucleus="27Al", larmor_frequency_MHz=130.3, sites=[
+        SiteModel(model="gauss_lor", label="p", params={
+            "isotropic_chemical_shift_ppm": Param(60, min=0, max=120),
+            "shift_fwhm_ppm": Param(8, min=1, max=40),
+            "gl": Param(0.5, min=0, max=1),
+            "amplitude": Param(1e6, min=0)})])
+    ctx = make_context(r, exp_ppm=x)
+    y = np.sum([simulate_site(s, ctx) for s in r.sites], axis=0)
+    ticks = []
+    fw = FitWorker(r.to_dict(), x, y * 1.05, (120, -20))
+    fw.progress.connect(lambda it, rms: ticks.append((it, rms)))
+    fw.run()                                          # synchronous
+    assert ticks and ticks[-1][0] >= 1
+    win._progress_start("t"); win._progress_tick(20, 0.01)
+    assert 0 < win.progress.value() < 100
+    win._progress_end(True)
+    assert win.progress.value() == 100

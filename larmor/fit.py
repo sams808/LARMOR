@@ -124,7 +124,7 @@ def _model(recipe: Recipe, params: lmfit.Parameters, ctx,
 
 def fit(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
         window_ppm: tuple[float, float] | None = None,
-        kernel=None) -> FitResult:
+        kernel=None, iter_cb=None) -> FitResult:
     """Refine `recipe` against (exp_ppm, exp_amp). Modifies recipe in place.
 
     `kernel` is accepted for backward compatibility and ignored; kernels are
@@ -181,7 +181,8 @@ def fit(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
         y, _ = _model(recipe, p, ctx)
         return np.interp(xw, ctx.x_ppm, y) - yw
 
-    result = lmfit.minimize(residual, params, method="least_squares")
+    result = lmfit.minimize(residual, params, method="least_squares",
+                            iter_cb=iter_cb)
 
     def _at_bounds(res) -> list[str]:
         names = []
@@ -214,7 +215,8 @@ def fit(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
             if abs(retry_params[amp_names[i]].value) <= 1e-6 * amp_scale:
                 for pname in site.params:
                     retry_params[_lmfit_name(i, site, pname)].vary = False
-        retry = lmfit.minimize(residual, retry_params, method="leastsq")
+        retry = lmfit.minimize(residual, retry_params, method="leastsq",
+                               iter_cb=iter_cb)
         if retry.errorbars:
             result = retry
     _apply_params(recipe, result.params)
