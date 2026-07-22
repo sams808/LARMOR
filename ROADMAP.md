@@ -112,9 +112,10 @@ amplitude conventions deserve a cleanup. This is the next big block.
   pseudo-voigt}` instead of separate models where it's just a shape choice.
 
 **New analytic / physical models (dmfit parity, ranked by usefulness).**
-- [x] **Voigt (true)** — Gaussian ⊗ Lorentzian, independent widths. *(done
-  2026-07-21)*
-- [ ] **GL Norm** — area-normalized Gauss/Lorentz for clean quantification.
+- [x] **Voigt (true)** — Gaussian ⊗ Lorentzian, independent widths. *(done)*
+- [x] **GL Norm** — area-normalized Gauss/Lorentz for clean quantification.
+  *(done)*
+- [x] **J-multiplet** — binomial (n+1)-line pattern split by J (Hz). *(done)*
 - [ ] **Spinning sidebands (generic "ss band")** — a centre + Herzfeld–Berger
   sideband manifold at arbitrary intensity ratios, independent of CSA (dmfit's
   manual sideband lines), for cases csa_mas doesn't cover.
@@ -146,9 +147,8 @@ Heteronuclear-correlation processing is central to our work; the current overlay
 + un-correlated-difference is only the start.
 
 **Improve HMQC processing (near-term).**
-- [ ] **Robust projection ↔ 1D scaling**: least-squares over a user-chosen region
-  (and per-peak options), not only peak-match — so the subtraction is trustworthy
-  when the strongest peak isn't fully correlated.
+- [x] **Robust projection ↔ 1D scaling**: least-squares "fit scale" over the
+  visible range, not only peak-match. *(done)* — [ ] still: per-peak / region UI.
 - [ ] **Projection choice**: skyline / sum / integral, and an **external
   projection** (use a separately-acquired 1D as the projection reference) on
   either F1 or F2.
@@ -169,13 +169,12 @@ architecture may be built ahead of time, but it is not wired into the app yet.
 ## Priority 1 — Utilities & tools (ssNake Utilities menu)
 
 Small, self-contained, high daily value.
-- [ ] **NMR table** — interactive periodic table of Larmor frequencies at a
-  settable B0 (or set the ¹H frequency of *your* magnet and read every nucleus).
-  Double-click an element → isotopes with spin, natural abundance, γ, Q,
-  receptivity, reference compound. (ssNake `nmrTable`.)
-- [ ] **Chemical-shift / Cq / dipolar-distance / MQMAS-parameter** conversion
-  tools (ssNake): the standard algebra (δiso↔ν, Cq↔νQ↔PQ, r↔D, MQMAS δ1/δ2 → δiso,
-  PQ) as dialogs, with copy-to-clipboard.
+- [x] **NMR table** — interactive periodic table of Larmor frequencies at a
+  settable B0 (or set the ¹H frequency of *your* magnet). Double-click an element
+  → isotopes with spin, abundance, γ, Q, receptivity. *(done)*
+- [x] **Chemical-shift / Cq / dipolar-distance** conversion tools *(done)*;
+  [ ] **MQMAS-parameter extraction** (δ1/δ2 → δiso, PQ) still pending
+  (convention-sensitive; ships when validated against a literature example).
 - [ ] **Temperature-calibration** helper (Pb(NO3)2 / MeOH / etc.).
 - [ ] **Reference manager** (ssNake): named references (Set / Save / Load /
   Apply) reused across spectra — SR presets per nucleus.
@@ -195,9 +194,9 @@ Small, self-contained, high daily value.
 
 ## Priority 3 — 2D depth (dmfit 2D menu)
 
-- [ ] **2D operations**: transpose, reverse F1/F2, save row/col/projection,
-  extract diagonal, "make all 1Ds", diff-by-row, add-sidebands (dmfit 2D
-  right-click).
+- [x] **2D operations** (partial): transpose, reverse F1/F2, extract diagonal,
+  send projections/rows to fit (contour "2D ops ▾"). *(done)* — [ ] still: save
+  row/col/proj to file, "make all 1Ds", diff-by-row, add-sidebands.
 - [ ] **DQ/SQ and Make-MQ**: build the double-quantum axis; sum/projection
   combinations (dmfit `Sum F2/F1`, `Proj`), 2D↔3D handling.
 - [ ] **Referencing/shear conventions** per method (3Q/5Q ratios, Amoureux F1
@@ -234,24 +233,21 @@ off intentionally; revisit only if the work scope shifts.
 
 ### P6 — very likely, do first
 
-- [ ] **Integration tool + integral table** (ssNake Integrals / TopSpin
-  integration): drag regions → integrals with errors, exportable — quantify site
-  fractions without a full fit.
-- [ ] **Copy plot / export image** (dmfit copy-to-clipboard): as-presented,
-  spec-only, and **"with all lines"** (each component) to clipboard and to
-  file (png/svg) — figures for papers and slides.
-- [ ] **Export residual (Diff)** and **per-component export** ("with all lines"):
-  data + total + each line as columns / traces for publication figures.
-- [ ] **Recent files / "Open Last fit"**: reopen the last datasets/recipes in a
-  click.
+- [x] **Integration tool + integral table** (Tools ▸ Integrals & measurements):
+  drag regions → integral, %, centre, FWHM; Copy CSV. *(done)*
+- [x] **Copy plot / export image** "with all lines" to clipboard and png/svg.
+  *(done)*
+- [x] **Export residual (Diff)** + per-component columns (export_text now writes
+  ppm, experiment, model, residual, per-line). *(done)*
+- [x] **Recent files** (File ▸ Open recent, last 12). *(done)*
 - [ ] **Dual / compare display**: aligned side-by-side or overlaid two (or N)
   datasets for composition series (e.g. LAW3Cl0→4Ca, Na series), beyond the
   current overlay cockpit.
 
 ### P7 — likely, regular use
 
-- [ ] **FWHM & Centre-of-Mass readout** (ssNake): measure linewidth / centroid
-  over a region without fitting.
+- [x] **FWHM & Centre-of-Mass readout**: in the Integrals & measurements table.
+  *(done)*
 - [ ] **Computing-parameters dialog** (dmfit): expose the Czjzek/MQMAS kernel
   resolution — computed size (2ⁿ), (Cq, η) step counts, sweep/Gauss multipliers,
   ssb max, distribution threshold — accuracy vs speed.
