@@ -366,6 +366,11 @@ class MainWindow(QMainWindow):
         self._add(m_tools, "Multi-dataset fit (CLI): larmor multifit a.json b.json",
                   lambda: None).setEnabled(False)
 
+        m_util = mb.addMenu("&Utilities")
+        self._add(m_util, "&NMR table…  (Larmor frequencies)", self.open_nmr_table)
+        self._add(m_util, "&Conversion tools…  (shift / Cq / dipolar)",
+                  self.open_convert)
+
         m_help = mb.addMenu("&?")
         self._add(m_help, "About LARMOR", self._about)
 
@@ -378,6 +383,29 @@ class MainWindow(QMainWindow):
         a.triggered.connect(slot)
         menu.addAction(a)
         return a
+
+    def open_nmr_table(self):
+        from larmor.desktop.utilities import NmrTableDialog
+
+        h1 = 400.0
+        if self.recipe and self.recipe.get("larmor_frequency_MHz") and self.recipe.get("nucleus"):
+            try:
+                from larmor import nuclei as N
+
+                iso = next(i for i in N.all_isotopes()
+                           if i.symbol == self.recipe["nucleus"])
+                # back out the magnet's ¹H frequency from this nucleus
+                h1 = self.recipe["larmor_frequency_MHz"] * N.GAMMA_1H / abs(iso.gamma_MHz_T)
+            except Exception:
+                pass
+        NmrTableDialog(self, h1).exec()
+
+    def open_convert(self):
+        from larmor.desktop.utilities import ConvertDialog
+
+        sfo = (self.recipe.get("larmor_frequency_MHz", 100.0)
+               if self.recipe else 100.0) or 100.0
+        ConvertDialog(self, sfo).exec()
 
     def _about(self):
         QMessageBox.information(
