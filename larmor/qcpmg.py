@@ -199,3 +199,35 @@ def autophase0(spec: np.ndarray) -> float:
     ph = np.linspace(-np.pi, np.pi, 361)
     scores = [np.real(spec * np.exp(1j * p)).sum() for p in ph]
     return float(np.degrees(ph[int(np.argmax(scores))]))
+
+
+def autophase(spec: np.ndarray) -> tuple[float, float]:
+    """Zero- and first-order phase (deg) for a mostly-absorptive lineshape.
+
+    Minimises the area of the negative part of the real spectrum (a robust
+    criterion for a powder pattern that should be all-positive), with a light
+    penalty on p1 to avoid runaway first-order twists. Returns (p0, p1).
+    """
+    from scipy.optimize import minimize
+
+    spec = np.asarray(spec)
+    n = spec.size
+    ramp = np.arange(n) / n
+    norm = np.abs(spec).sum() or 1.0
+
+    def penalty(ph):
+        p0, p1 = ph
+        r = np.real(spec * np.exp(-1j * (np.deg2rad(p0) + np.deg2rad(p1) * ramp)))
+        neg = np.abs(r[r < 0]).sum() / norm
+        return neg + 1e-6 * (p1 ** 2)
+
+    p0_0 = autophase0(spec)
+    best = None
+    # a few p1 starts so we don't fall into a local twist
+    for p1_0 in (0.0, 180.0, -180.0, 360.0, -360.0):
+        res = minimize(penalty, [p0_0, p1_0], method="Nelder-Mead",
+                       options={"xatol": 0.5, "fatol": 1e-4, "maxiter": 800})
+        if best is None or res.fun < best.fun:
+            best = res
+    p0 = ((best.x[0] + 180) % 360) - 180
+    return float(p0), float(best.x[1])

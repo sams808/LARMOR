@@ -69,17 +69,29 @@ class QcpmgDialog(QDialog):
         self.gb.valueChanged.connect(self._recompute)
         ctl.addWidget(self.gb)
         ctl.addWidget(QLabel("p0"))
-        self.p0 = QSlider(Qt.Horizontal); self.p0.setRange(-180, 180)
-        self.p0.setMaximumWidth(150); self.p0.valueChanged.connect(self._rephase)
+        self.p0 = QDoubleSpinBox(); self.p0.setRange(-720, 720); self.p0.setDecimals(2)
+        self.p0.setWrapping(True); self.p0.valueChanged.connect(self._rephase)
         ctl.addWidget(self.p0)
         ctl.addWidget(QLabel("p1"))
-        self.p1 = QSlider(Qt.Horizontal); self.p1.setRange(-3600, 3600)
-        self.p1.setMaximumWidth(150); self.p1.valueChanged.connect(self._rephase)
+        self.p1 = QDoubleSpinBox(); self.p1.setRange(-36000, 36000); self.p1.setDecimals(2)
+        self.p1.valueChanged.connect(self._rephase)
         ctl.addWidget(self.p1)
+        ctl.addWidget(QLabel("step"))
+        self.pstep = QDoubleSpinBox(); self.pstep.setRange(0.01, 90.0)
+        self.pstep.setDecimals(2); self.pstep.setValue(1.0)
+        self.pstep.setToolTip("phase increment per click/scroll — lower it for "
+                              "fine control (the arrows/scroll move by this much)")
+        self.pstep.valueChanged.connect(self._set_pstep)
+        ctl.addWidget(self.pstep)
         self.btnAuto = QPushButton("Autophase"); self.btnAuto.clicked.connect(self._autophase)
         ctl.addWidget(self.btnAuto)
+        self.btnHelp = QPushButton("Help")
+        self.btnHelp.setToolTip("open the QCPMG processing guide")
+        self.btnHelp.clicked.connect(self._help)
+        ctl.addWidget(self.btnHelp)
         ctl.addStretch(1)
         v.addLayout(ctl)
+        self._set_pstep()
 
         split = QSplitter(Qt.Horizontal)
         # left: echo train + T2 decay
@@ -170,8 +182,11 @@ class QcpmgDialog(QDialog):
                        symbolSize=5, symbolBrush="#6a4fb0")
         tt = np.linspace(0, t.max() if t.size else 1, 300)
         self.p_t2.plot(tt, curve(tt), pen=pg.mkPen("#6a4fb0", width=1.6))
-        self.t2lbl.setText(f"T2 = {self.T2 * 1e3:.2f} ms   "
-                           f"(τecho = {tau * 1e3:.3f} ms, {ech.shape[0]} echoes)")
+        lb = 1.0 / (np.pi * self.T2) if self.T2 else 0.0
+        self.t2lbl.setText(
+            f"T2 = {self.T2 * 1e3:.2f} ms  →  matched apodization "
+            f"LB = {lb:.0f} Hz  (= 1/πT2)    "
+            f"(τecho = {tau * 1e3:.3f} ms, {ech.shape[0]} echoes)")
 
     def _draw_train(self):
         self.p_fid.clear()
@@ -223,15 +238,24 @@ class QcpmgDialog(QDialog):
             f"· spikelet spacing {spc:.1f} ppm · {self._kind} · "
             f"p0 {self.p0.value()}° p1 {self.p1.value()}°")
 
+    def _set_pstep(self, *_):
+        s = self.pstep.value()
+        self.p0.setSingleStep(s); self.p1.setSingleStep(s)
+
     def _autophase(self):
         from larmor import qcpmg
 
         if self._spec_raw is None:
             return
-        self.p0.blockSignals(True)
-        self.p0.setValue(int(qcpmg.autophase0(self._spec_raw)))
-        self.p0.blockSignals(False)
+        p0, p1 = qcpmg.autophase(self._spec_raw)
+        for w, val in ((self.p0, p0), (self.p1, p1)):
+            w.blockSignals(True); w.setValue(val); w.blockSignals(False)
         self._rephase()
+
+    def _help(self):
+        from larmor.desktop.help_dialog import show_help
+
+        show_help(self, "qcpmg", "QCPMG processing guide")
 
     def _send(self):
         if self._ppm is None:

@@ -39,6 +39,8 @@ hiddenimports += [
 
 # --- LARMOR's own resources -------------------------------------------------
 datas += [(str(ROOT / "larmor" / "static"), "larmor/static")]
+if (ROOT / "larmor" / "help").exists():
+    datas += [(str(ROOT / "larmor" / "help"), "larmor/help")]
 if (ROOT / "assets").exists():
     datas += [(str(ROOT / "assets"), "assets")]
 for doc in ("README.md", "ROADMAP.md"):
