@@ -665,7 +665,11 @@ class MainWindow(QMainWindow):
         self.lines_table.structure.connect(self.on_site_structure)
         self.lines_table.compute.connect(self.request_simulation)
         self.lines_table.fit.connect(self.run_fit)
-        self.lines_dock.setWidget(self.lines_table)
+        # the co-fit control bar sits directly above the parameter table
+        _lines_box = QWidget(); _lv = QVBoxLayout(_lines_box)
+        _lv.setContentsMargins(0, 0, 0, 0); _lv.setSpacing(2)
+        _lv.addWidget(self.cofit_bar); _lv.addWidget(self.lines_table)
+        self.lines_dock.setWidget(_lines_box)
         self.addDockWidget(Qt.BottomDockWidgetArea, self.lines_dock)
 
         self.results_dock = QDockWidget("Report", self)
@@ -2189,14 +2193,33 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------- co-fit page
     def _build_cofit_page(self):
-        """A split central page (1D top, 2D bottom) driven by the SAME shared
-        model + bottom parameter table — the co-fit lives in the main window."""
+        """A split central page (1D left, 2D right) driven by the SAME shared
+        model + bottom parameter table — the co-fit lives in the main window.
+        The co-fit control bar sits above the Fit-parameters table (built in
+        _build_cofit_bar, placed by the dock setup)."""
         from larmor.desktop.twod_view import Contour2DView
 
         page = QWidget(); v = QVBoxLayout(page); v.setContentsMargins(2, 2, 2, 2)
-        bar = QHBoxLayout()
-        bar.addWidget(QLabel("<b>Co-fit</b> — shared model on both datasets · "
-                             "tie:"))
+        self.cofit_view1d = SpectrumView()
+        self.cofit_view2d = Contour2DView()
+        split = QSplitter(Qt.Horizontal)            # 1D | 2D, side by side
+        split.addWidget(self.cofit_view1d); split.addWidget(self.cofit_view2d)
+        split.setSizes([500, 520])
+        v.addWidget(split, 1)
+        self.cofit_page = page
+        self.central_stack.addWidget(page)           # index 2
+        self._build_cofit_bar()
+        self._cofit = None
+        self._cofit_timer = QTimer(self); self._cofit_timer.setSingleShot(True)
+        self._cofit_timer.setInterval(200)
+        self._cofit_timer.timeout.connect(self._cofit_simulate_now)
+
+    def _build_cofit_bar(self):
+        """The co-fit controls (tie + Add/Preview/Run/Close), shown above the
+        Fit-parameters table only while co-fitting."""
+        self.cofit_bar = QWidget()
+        bar = QHBoxLayout(self.cofit_bar); bar.setContentsMargins(4, 2, 4, 2)
+        bar.addWidget(QLabel("<b>Co-fit</b> · tie:"))
         from larmor.multifit import DEFAULT_SHARE
         self._cofit_share = {}
         for name in DEFAULT_SHARE:
@@ -2219,19 +2242,7 @@ class MainWindow(QMainWindow):
         self.cofit_rmsd = QLabel("")
         self.cofit_rmsd.setStyleSheet("color:#5a6871;")
         bar.addWidget(self.cofit_rmsd)
-        v.addLayout(bar)
-        self.cofit_view1d = SpectrumView()
-        self.cofit_view2d = Contour2DView()
-        split = QSplitter(Qt.Vertical)
-        split.addWidget(self.cofit_view1d); split.addWidget(self.cofit_view2d)
-        split.setSizes([300, 420])
-        v.addWidget(split, 1)
-        self.cofit_page = page
-        self.central_stack.addWidget(page)           # index 2
-        self._cofit = None
-        self._cofit_timer = QTimer(self); self._cofit_timer.setSingleShot(True)
-        self._cofit_timer.setInterval(200)
-        self._cofit_timer.timeout.connect(self._cofit_simulate_now)
+        self.cofit_bar.setVisible(False)
 
     def open_cofit(self):
         if not self.recipe or not self.recipe.get("sites"):
@@ -2247,6 +2258,8 @@ class MainWindow(QMainWindow):
                         self.recipe.get("sample") or "current")
         self._cofit = st
         self.central_stack.setCurrentWidget(self.cofit_page)
+        self.cofit_bar.setVisible(True)
+        self.lines_dock.raise_()                      # bring the shared table up
         self._cofit_refresh_panels()
         need = "a 2D MQMAS map" if st["d2"] is None else "a 1D MAS spectrum"
         self.statusBar().showMessage(
@@ -2386,6 +2399,7 @@ class MainWindow(QMainWindow):
 
     def close_cofit(self):
         self._cofit = None
+        self.cofit_bar.setVisible(False)
         back = self.view2d if (self._data2d is not None
                                and getattr(self, "_data2d_fittable", False)) \
             else self.view
