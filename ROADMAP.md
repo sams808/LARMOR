@@ -168,9 +168,61 @@ Small, self-contained, high daily value.
 
 ---
 
+## dmfit / ssNake / TopSpin parity — remaining items, tiered by likely use
+
+Ranked by the probability they're needed for *this* work (solid-state NMR of
+glasses/materials: quadrupolar nuclei, Czjzek, MQMAS, QCPMG, relaxation, figures
+for papers/talks). The "unlikely for this scope" tier (DOSY, 3D data, SpinEv /
+Shape Hole / Rector, Scroll F1 / Shuffle Imag Power, Print, File Manager) is left
+off intentionally; revisit only if the work scope shifts.
+
+### P6 — very likely, do first
+
+- [ ] **Integration tool + integral table** (ssNake Integrals / TopSpin
+  integration): drag regions → integrals with errors, exportable — quantify site
+  fractions without a full fit.
+- [ ] **Copy plot / export image** (dmfit copy-to-clipboard): as-presented,
+  spec-only, and **"with all lines"** (each component) to clipboard and to
+  file (png/svg) — figures for papers and slides.
+- [ ] **Export residual (Diff)** and **per-component export** ("with all lines"):
+  data + total + each line as columns / traces for publication figures.
+- [ ] **Recent files / "Open Last fit"**: reopen the last datasets/recipes in a
+  click.
+- [ ] **Dual / compare display**: aligned side-by-side or overlaid two (or N)
+  datasets for composition series (e.g. LAW3Cl0→4Ca, Na series), beyond the
+  current overlay cockpit.
+
+### P7 — likely, regular use
+
+- [ ] **FWHM & Centre-of-Mass readout** (ssNake): measure linewidth / centroid
+  over a region without fitting.
+- [ ] **Computing-parameters dialog** (dmfit): expose the Czjzek/MQMAS kernel
+  resolution — computed size (2ⁿ), (Cq, η) step counts, sweep/Gauss multipliers,
+  ssb max, distribution threshold — accuracy vs speed.
+- [ ] **MAS-spinning / explicit sideband control**: set the rate and sideband
+  order for CSA/quad sideband manifolds (slow-MAS cases).
+- [ ] **dmfit-XML export/import**: round-trip fits with dmfit for cross-checking
+  against the reference program.
+- [ ] **Toggle Time ↔ Frequency** (inverse FT back to the FID): re-apodize /
+  reprocess without reloading.
+- [ ] **Real / Imag / Abs component views**: inspect the imaginary channel while
+  phasing 2D and echoes.
+
+### P8 — occasionally, when the case arises
+
+- [ ] **MQMAS post-processing**: Diagonal-slope / shear helpers and 2D
+  Symmetrize.
+- [ ] **Multi-curve / per-site relaxation**: fit several sites' decays together
+  (beyond the guided single-site T1/T2).
+- [ ] **Edge processing**: Check Eta (validity flag), Open Imaginary, Complex
+  Conjugate (spectral reversal), nBandesMax (max-lines guard).
+- [ ] **Quasar** model (a Czjzek-distribution variant) — low incremental value
+  since `czjzek`/`ext_czjzek` already cover the amorphous quadrupolar case.
+
+---
+
 ## To think about (not scheduled)
 
-- Copy-to-clipboard "with all lines" as an image/metafile (dmfit) for slides.
 - Multiplet/J-coupling in the indirect dimension; homonuclear recoupling shapes.
 - A scripting/macro layer (ssNake macros) for batch processing.
 - Cloud/collaborative recipes; a public recipe library for common materials.
