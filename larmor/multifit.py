@@ -83,17 +83,18 @@ def _prepare_2d(rec: Recipe, data2d, method: str):
     from larmor import twod
 
     d = data2d.normalized()
-    kernel = twod.build_mqmas_kernel(
-        rec.nucleus or d.nucleus, rec.larmor_frequency_MHz or d.larmor_MHz,
-        f2_window=(float(d.f2_ppm.max()), float(d.f2_ppm.min())),
-        f1_window=(float(d.f1_ppm.max()), float(d.f1_ppm.min())), method=method)
+    kernel = twod._kernel_for(rec, d, method)      # δ1-isotropic F1 kernel
     interp = RegularGridInterpolator((d.f1_ppm, d.f2_ppm), d.z,
                                      bounds_error=False, fill_value=0.0)
     G1, G2 = np.meshgrid(kernel.f1_ppm, kernel.f2_ppm, indexing="ij")
-    z_exp = interp(np.stack([G1.ravel(), G2.ravel()], axis=-1)).reshape(
-        kernel.shape)
-    return {"kind": "2d", "r": rec, "kernel": kernel, "z_exp": z_exp,
-            "exp": z_exp.ravel(), "w": 1.0 / (np.abs(z_exp).max() or 1.0)}
+
+    def sample_exp(b):                             # experiment at (f1_iso + β)
+        pts = np.stack([(G1 + b).ravel(), G2.ravel()], axis=-1)
+        return interp(pts).reshape(kernel.shape)
+
+    z0 = sample_exp(0.0)
+    return {"kind": "2d", "r": rec, "kernel": kernel, "sample_exp": sample_exp,
+            "z_exp": z0, "w": 1.0 / (np.abs(z0).max() or 1.0)}
 
 
 def fit_cofit(entries: list[tuple], share: tuple[str, ...] = DEFAULT_SHARE,
@@ -140,22 +141,24 @@ def fit_cofit(entries: list[tuple], share: tuple[str, ...] = DEFAULT_SHARE,
                 params.add(_pname(k, i, site, pname), value=p.value, vary=p.vary,
                            min=p.min if p.min is not None else -np.inf,
                            max=p.max if p.max is not None else np.inf)
-    # each 2D (MQMAS) dataset gets its own isotropic-axis (F1) reference offset,
-    # auto-initialised from the experiment/model centroid gap: mrsimulator's
-    # kernel and the experimental F1 axis use different referencing conventions
-    # (see Recipe.mqmas_f1_ref_ppm / twod.fit_2d).
+    # each 2D (MQMAS) dataset gets its own isotropic-axis (F1) reference offset β
+    # (the kernel is δ1-isotropic; a Bruker F1 axis differs only by β). Coarse
+    # search for the β that best overlaps model and experiment at the start.
     for k, e in enumerate(prep):
         if e["kind"] != "2d":
             continue
-        f1 = e["kernel"].f1_ppm[:, None]
-        def _cg(z):
-            zc = np.clip(z, 0, None); s = zc.sum()
-            return float((zc * f1).sum() / s) if s > 0 else 0.0
         vary_ref = getattr(e["r"], "mqmas_f1_ref_vary", True)
         if vary_ref:
-            e["r"].mqmas_f1_ref_ppm = 0.0
-            m0, _ = twod.simulate_2d(e["r"], e["kernel"], f1_ref_ppm=0.0)
-            init = float(np.clip(_cg(e["z_exp"]) - _cg(m0), -80.0, 80.0))
+            m0, _ = twod.simulate_2d(e["r"], e["kernel"]); m0f = m0.ravel()
+            m0n = float(np.sqrt((m0f * m0f).sum())) or 1.0
+            best = (-1.0, 0.0)
+            for b in np.linspace(-60.0, 60.0, 121):
+                ev = e["sample_exp"](b).ravel()
+                den = np.sqrt((ev * ev).sum()) * m0n
+                corr = float((ev * m0f).sum()) / den if den > 0 else 0.0
+                if corr > best[0]:
+                    best = (corr, float(b))
+            init = best[1]
         else:
             init = float(getattr(e["r"], "mqmas_f1_ref_ppm", 0.0))
         params.add(f"mqmas_f1_ref_{k}", value=init, min=-80.0, max=80.0,
@@ -193,17 +196,19 @@ def fit_cofit(entries: list[tuple], share: tuple[str, ...] = DEFAULT_SHARE,
             if e["kind"] == "2d" and f"mqmas_f1_ref_{k}" in p:
                 e["r"].mqmas_f1_ref_ppm = float(p[f"mqmas_f1_ref_{k}"].value)
 
-    def model_vec(e):
+    def resid_vec(e):
         r = e["r"]
         if e["kind"] == "1d":
             total = np.sum([simulate_site(s, e["ctx"]) for s in r.sites], axis=0)
-            return np.interp(e["ppm"][e["sel"]], e["ctx"].x_ppm, total)
+            model = np.interp(e["ppm"][e["sel"]], e["ctx"].x_ppm, total)
+            return (model - e["exp"]) * e["w"]
         total, _ = twod.simulate_2d(r, e["kernel"])
-        return total.ravel()
+        exp = e["sample_exp"](r.mqmas_f1_ref_ppm)    # experiment at (f1_iso + β)
+        return (total - exp).ravel() * e["w"]
 
     def residual(p):
         apply_params(p)
-        return np.concatenate([(model_vec(e) - e["exp"]) * e["w"] for e in prep])
+        return np.concatenate([resid_vec(e) for e in prep])
 
     result = lmfit.minimize(residual, params, method="least_squares")
     if not result.errorbars:
@@ -215,9 +220,9 @@ def fit_cofit(entries: list[tuple], share: tuple[str, ...] = DEFAULT_SHARE,
     rmsds, per_dataset = [], []
     for e in prep:
         r = e["r"]
-        yi = model_vec(e)
-        yw = e["exp"]
-        rmsds.append(float(np.sqrt(np.mean((yi - yw) ** 2)) / (np.abs(yw).max() or 1)))
+        rv = resid_vec(e) / (e["w"] or 1.0)          # model - experiment
+        norm = np.abs(e["z_exp"] if e["kind"] == "2d" else e["exp"]).max() or 1.0
+        rmsds.append(float(np.sqrt(np.mean(rv ** 2)) / norm))
         r.fit_rmsd = rmsds[-1]
         if e["kind"] == "1d":
             total = np.sum([simulate_site(s, e["ctx"]) for s in r.sites], axis=0)
@@ -226,7 +231,7 @@ def fit_cofit(entries: list[tuple], share: tuple[str, ...] = DEFAULT_SHARE,
         else:
             total, per = twod.simulate_2d(r, e["kernel"])
             per_dataset.append({"kind": "2d", "f2": e["kernel"].f2_ppm,
-                                "f1": e["kernel"].f1_ppm, "z_fit": total,
-                                "per_site": per})
+                                "f1": e["kernel"].f1_ppm + r.mqmas_f1_ref_ppm,
+                                "z_fit": total, "per_site": per})
     return MultiFitResult(recipes=recipes, lmfit_result=result, rmsd=rmsds,
                           per_dataset=per_dataset)

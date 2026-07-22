@@ -411,29 +411,30 @@ class CofitDialog(QDialog):
                                    / (np.abs(amp).max() or 1)))
             else:
                 d = ds["data2d"].normalized()
-                kernel = twod.build_mqmas_kernel(
-                    r.nucleus or d.nucleus,
-                    r.larmor_frequency_MHz or d.larmor_MHz,
-                    f2_window=(float(d.f2_ppm.max()), float(d.f2_ppm.min())),
-                    f1_window=(float(d.f1_ppm.max()), float(d.f1_ppm.min())))
+                kernel = twod._kernel_for(r, d)     # δ1-isotropic F1 kernel
                 from scipy.interpolate import RegularGridInterpolator
                 itp = RegularGridInterpolator((d.f1_ppm, d.f2_ppm), d.z,
                                               bounds_error=False, fill_value=0.0)
                 G1, G2 = np.meshgrid(kernel.f1_ppm, kernel.f2_ppm, indexing="ij")
-                z_exp = itp(np.stack([G1.ravel(), G2.ravel()], -1)).reshape(
-                    kernel.shape)
-                if getattr(r, "mqmas_f1_ref_vary", True):   # auto-align preview
-                    f1 = kernel.f1_ppm[:, None]
-                    m0, _ = twod.simulate_2d(r, kernel, f1_ref_ppm=0.0)
-                    def _cg(z):
-                        zc = np.clip(z, 0, None); s = zc.sum()
-                        return float((zc * f1).sum() / s) if s > 0 else 0.0
-                    r.mqmas_f1_ref_ppm = float(np.clip(
-                        _cg(z_exp) - _cg(m0), -80.0, 80.0))
+
+                def sample_exp(b):
+                    return itp(np.stack([(G1 + b).ravel(), G2.ravel()], -1)
+                               ).reshape(kernel.shape)
                 total, ps = twod.simulate_2d(r, kernel)
+                if getattr(r, "mqmas_f1_ref_vary", True):   # auto-align preview β
+                    m0f = total.ravel(); m0n = np.sqrt((m0f * m0f).sum()) or 1.0
+                    best = (-1.0, 0.0)
+                    for b in np.linspace(-60, 60, 121):
+                        ev = sample_exp(b).ravel(); den = np.sqrt((ev * ev).sum()) * m0n
+                        cc = float((ev * m0f).sum()) / den if den > 0 else 0.0
+                        if cc > best[0]:
+                            best = (cc, float(b))
+                    r.mqmas_f1_ref_ppm = best[1]
+                z_exp = sample_exp(r.mqmas_f1_ref_ppm)
                 den = float((total * total).sum())
                 sc = float((z_exp * total).sum() / den) if den else 1.0
-                per.append({"kind": "2d", "f2": kernel.f2_ppm, "f1": kernel.f1_ppm,
+                per.append({"kind": "2d", "f2": kernel.f2_ppm,
+                            "f1": kernel.f1_ppm + r.mqmas_f1_ref_ppm,
                             "z_fit": sc * total, "per_site": [sc * x for x in ps]})
                 rmsds.append(float(np.sqrt(np.mean((sc * total - z_exp) ** 2))
                                    / (np.abs(z_exp).max() or 1)))

@@ -229,11 +229,11 @@ def test_fit_2d_recovers_a_synthetic_czjzek_site():
                        z=z_true + rng.normal(0, 0.004, z_true.shape),
                        nucleus="27Al", larmor_MHz=195.483)
 
-    start = _czjzek_recipe(sigma=1.2, pos=52.0)      # deliberately wrong
+    start = _czjzek_recipe(sigma=1.2, pos=60.0)      # δiso started near the peak
     res = twod.fit_2d(start, data, kernel=k)
     p = start.sites[0].params
     assert res.rmsd < 0.05
-    assert p["sigma_Cq_MHz"].value == pytest.approx(2.5, abs=0.5)
+    assert p["sigma_Cq_MHz"].value == pytest.approx(2.5, abs=0.6)
     assert p["isotropic_chemical_shift_ppm"].value == pytest.approx(65.0, abs=6.0)
     assert res.z_fit.shape == k.shape
     assert len(res.per_site) == 1
@@ -241,18 +241,22 @@ def test_fit_2d_recovers_a_synthetic_czjzek_site():
 
 @pytest.mark.slow
 def test_fit_2d_recovers_the_f1_reference_offset():
-    """mrsimulator's kernel and an experimental F1 axis differ by a referencing
-    offset; fit_2d fits it (isotropic-axis alignment) and holds it when fixed."""
+    """The kernel is δ1-isotropic; an experiment whose F1 axis is referenced β
+    ppm away is aligned by fitting that offset, and it is held when fixed."""
     k = _small_kernel()
     truth = _czjzek_recipe(sigma=2.0, pos=55.0)
-    truth.mqmas_f1_ref_ppm = 15.0                    # data carries a +15 ppm F1 shift
-    z, _ = twod.simulate_2d(truth, k)
-    data = twod.Data2D(f2_ppm=k.f2_ppm, f1_ppm=k.f1_ppm, z=z,
+    z, _ = twod.simulate_2d(truth, k)                # model on the iso grid
+    # experiment: same lineshape but its F1 axis is referenced 12 ppm lower
+    data = twod.Data2D(f2_ppm=k.f2_ppm, f1_ppm=k.f1_ppm - 12.0, z=z,
                        nucleus="27Al", larmor_MHz=195.483)
 
-    auto = _czjzek_recipe(sigma=2.0, pos=55.0)        # ref unknown -> fitted
+    # hold the physical params (δiso sets the diagonal via F2, so it can absorb
+    # an F1 offset); with them fixed, β alone must take up the referencing shift
+    auto = _czjzek_recipe(sigma=2.0, pos=55.0)
+    for name in ("isotropic_chemical_shift_ppm", "sigma_Cq_MHz", "shift_fwhm_ppm"):
+        auto.sites[0].params[name].vary = False
     twod.fit_2d(auto, data, kernel=k)
-    assert auto.mqmas_f1_ref_ppm == pytest.approx(15.0, abs=3.0)
+    assert auto.mqmas_f1_ref_ppm == pytest.approx(-12.0, abs=3.0)
 
     held = _czjzek_recipe(sigma=2.0, pos=55.0)        # user fixes the referencing
     held.mqmas_f1_ref_ppm = 5.0

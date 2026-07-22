@@ -1843,8 +1843,10 @@ class MainWindow(QMainWindow):
         self.lines_table.btnFit.setEnabled(True)
         self.recipe = result.recipe.to_dict()
         self.lines_table.rebuild(self.recipe, self.hidden)
+        from larmor import twod
+
         self.view2d.set_model(result.z_fit, result.kernel.f2_ppm,
-                              result.kernel.f1_ppm)
+                              twod.mqmas_f1_axis(result.kernel, result.recipe))
         self.lines_table.set_chi2(f"RMSD {result.rmsd:.4f}")
         f1ref = getattr(result.recipe, "mqmas_f1_ref_ppm", 0.0)
         held = not getattr(result.recipe, "mqmas_f1_ref_vary", True)

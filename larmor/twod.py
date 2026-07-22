@@ -267,6 +267,48 @@ def shear(data: Data2D, factor: float, ref_ppm: float = 0.0) -> Data2D:
 
 
 # --------------------------------------------------------------------------
+_CS_SCALE_CACHE: dict = {}
+
+
+def f1_cs_scale(nucleus: str, larmor_MHz: float, method: str = "3QMAS") -> float:
+    """The factor c by which an isotropic chemical shift moves the F1 (indirect)
+    axis relative to F2 in mrsimulator's named MQMAS method.
+
+    A pure-CS site at δiso lands at F2 = δiso but F1 = c·δiso — for ²⁷Al 3QMAS
+    c = -17/31 ≈ -0.548, NOT +1. This is the shear/scaling convention of the
+    isotropic dimension and is spin- and coherence-order dependent; measuring it
+    once from a reference simulation keeps it correct for every nucleus/method.
+    """
+    key = (nucleus, round(larmor_MHz, 3), method)
+    if key in _CS_SCALE_CACHE:
+        return _CS_SCALE_CACHE[key]
+    from mrsimulator import Simulator
+    from mrsimulator.method import SpectralDimension
+    from mrsimulator.method import lib as method_lib
+    from mrsimulator.spin_system.isotope import Isotope
+    from mrsimulator.utils.collection import single_site_system_generator
+
+    B0 = larmor_MHz / abs(Isotope(symbol=nucleus).gyromagnetic_ratio)
+    ref = 50.0                                   # a pure-CS probe shift (ppm)
+    sw = 400.0 * larmor_MHz                       # wide window so it never clips
+    systems = single_site_system_generator(
+        isotope=nucleus, isotropic_chemical_shift=[ref],
+        quadrupolar={"Cq": [2e4], "eta": [0.0]}, abundance=[100.0])
+    m = getattr(method_lib, METHODS[method])(
+        channels=[nucleus], magnetic_flux_density=B0,
+        spectral_dimensions=[SpectralDimension(count=256, spectral_width=sw),
+                             SpectralDimension(count=256, spectral_width=sw)])
+    sim = Simulator(spin_systems=systems, methods=[m]); sim.run()
+    ds = sim.methods[0].simulation
+    c1 = ds.x[1].coordinates
+    f1 = c1.value if str(c1.unit) == "ppm" else c1.to("Hz").value / larmor_MHz
+    z = np.asarray(ds.y[0].components[0].real, float)   # (x1, x0)
+    proj = np.clip(z.sum(axis=1), 0, None)              # onto F1
+    c = float((proj * f1).sum() / proj.sum() / ref) if proj.sum() else 1.0
+    _CS_SCALE_CACHE[key] = c
+    return c
+
+
 @dataclass
 class Kernel2D:
     f2_ppm: np.ndarray               # (n2,)
@@ -274,6 +316,7 @@ class Kernel2D:
     K: np.ndarray                    # (ngrid, n1, n2) basis subspectra
     cq_grid_MHz: np.ndarray
     eta_grid: np.ndarray
+    f1_cs_scale: float = 1.0         # δiso moves F1 by c·δiso (see f1_cs_scale())
 
     @property
     def shape(self) -> tuple[int, int]:
@@ -345,10 +388,17 @@ def build_mqmas_kernel(nucleus: str, larmor_MHz: float,
         quadrupolar={"Cq": (CQ * 1e6).ravel(), "eta": ETA.ravel()},
         abundance=np.full(n, 100.0 / n))
 
+    # f1_window is the desired δ1-ISOTROPIC range (CS on the diagonal, ≈ δiso).
+    # mrsimulator returns its sheared F1 scaled by c (= f1_cs_scale), so simulate
+    # over the native window c·(iso window) and rescale the result back to iso.
+    cs = f1_cs_scale(nucleus, larmor_MHz, method)
+    nat = sorted((cs * f1_window[0], cs * f1_window[1]))
+    f1n_lo, f1n_hi = nat[0], nat[1]
+
     sw2 = abs(f2_window[0] - f2_window[1]) * larmor_MHz
-    sw1 = abs(f1_window[0] - f1_window[1]) * larmor_MHz
+    sw1 = abs(f1n_hi - f1n_lo) * larmor_MHz
     ro2 = 0.5 * (f2_window[0] + f2_window[1]) * larmor_MHz
-    ro1 = 0.5 * (f1_window[0] + f1_window[1]) * larmor_MHz
+    ro1 = 0.5 * (f1n_hi + f1n_lo) * larmor_MHz
     m = method_cls(
         channels=[nucleus], magnetic_flux_density=B0,
         spectral_dimensions=[
@@ -367,11 +417,12 @@ def build_mqmas_kernel(nucleus: str, larmor_MHz: float,
     c1 = ds.x[1].coordinates
     f2 = c2.value if str(c2.unit) == "ppm" else c2.to("Hz").value / larmor_MHz
     f1 = c1.value if str(c1.unit) == "ppm" else c1.to("Hz").value / larmor_MHz
-    o2, o1 = np.argsort(f2), np.argsort(f1)
+    f1 = np.asarray(f1) / cs                       # sheared native -> δ1-isotropic
+    o2, o1 = np.argsort(f2), np.argsort(f1)        # (cs < 0 flips F1 -> re-sort)
     K = np.array([np.asarray(dv.components[0].real, float)[np.ix_(o1, o2)]
                   for dv in ds.y])
     kernel = Kernel2D(f2_ppm=np.asarray(f2)[o2], f1_ppm=np.asarray(f1)[o1],
-                      K=K, cq_grid_MHz=cq_grid, eta_grid=eta_grid)
+                      K=K, cq_grid_MHz=cq_grid, eta_grid=eta_grid, f1_cs_scale=cs)
     _KERNEL2D_CACHE[key] = kernel
     return kernel
 
@@ -415,21 +466,20 @@ def simulate_site_2d(site, kernel: Kernel2D) -> np.ndarray:
 
     z = np.tensordot(w, kernel.K, axes=(0, 0))          # (n1, n2)
     pos = v["isotropic_chemical_shift_ppm"]
+    # The kernel's F1 axis is the δ1-isotropic convention (rescaled at build
+    # time, see build_mqmas_kernel), so a pure-CS site lies on the diagonal:
+    # δiso moves F2 and F1 together (slope 1).
     if model in ("czjzek", "ext_czjzek"):
-        # Glass: the isotropic-shift *distribution* (dmfit's dCS) spreads the
-        # peak along the diagonal -- a change in delta_iso moves F2 and F1
-        # together -- while the round point broadening (dmfit's wid) is
-        # isotropic.  Modelling them separately is what lets a Czjzek MQMAS
-        # peak elongate along the CS axis the way dmfit does.
+        # Glass: the isotropic-shift *distribution* (dmfit's dCS) elongates the
+        # peak ALONG THE DIAGONAL (both dims move with δiso), while the round
+        # point broadening (dmfit's wid) is isotropic.
         z = _shift_smear_2d(z, kernel.f2_ppm, kernel.f1_ppm, pos,
                             v.get("shift_fwhm_ppm", 0.0))
         line = v.get("line_fwhm_ppm", 0.0)
         if line > 0.05:
             z = _broaden_2d(z, kernel.f1_ppm, kernel.f2_ppm, line, line)
     else:
-        # isotropic shift moves BOTH dimensions: F2 directly, F1 through the
-        # isotropic axis convention (mrsimulator already scaled F1)
-        z = _shift_2d(z, kernel.f2_ppm, kernel.f1_ppm, pos)
+        z = _shift_2d(z, kernel.f2_ppm, kernel.f1_ppm, pos, pos)
         fw = v.get("shift_fwhm_ppm", 1.0)
         z = _broaden_2d(z, kernel.f1_ppm, kernel.f2_ppm, fw, fw)
     peak = z.max()
@@ -438,61 +488,55 @@ def simulate_site_2d(site, kernel: Kernel2D) -> np.ndarray:
 
 def _shift_smear_2d(z: np.ndarray, f2: np.ndarray, f1: np.ndarray,
                     pos_ppm: float, cs_fwhm_ppm: float) -> np.ndarray:
-    """Shift to pos_ppm and, if cs_fwhm_ppm > 0, smear along the delta_iso
-    (diagonal) direction by a Gaussian chemical-shift distribution.
-
-    A distribution of isotropic shifts moves F2 and F1 by the *same* amount, so
-    the smear is a directional (1,1) blur -- the along-diagonal elongation seen
-    for disordered/glassy sites -- as opposed to the round point broadening.
-    """
+    """Place at δiso = pos_ppm on the diagonal (F2 and F1 both +pos) and, if
+    cs_fwhm_ppm > 0, smear the chemical-shift *distribution* along the diagonal
+    — the along-CS elongation of a disordered/glassy site, distinct from the
+    round point broadening. (The kernel F1 axis is the δ1-isotropic convention,
+    so the CS axis is the diagonal.)"""
     if cs_fwhm_ppm <= 0.1:
-        return _shift_2d(z, f2, f1, pos_ppm)
+        return _shift_2d(z, f2, f1, pos_ppm, pos_ppm)
     sigma = cs_fwhm_ppm / (2.0 * np.sqrt(2.0 * np.log(2.0)))
     offs = np.linspace(-2.0 * sigma, 2.0 * sigma, 5)
     w = np.exp(-0.5 * (offs / sigma) ** 2)
     w /= w.sum()
     out = np.zeros_like(z)
     for o, wi in zip(offs, w):
-        out += wi * _shift_2d(z, f2, f1, pos_ppm + float(o))
+        d = pos_ppm + float(o)
+        out += wi * _shift_2d(z, f2, f1, d, d)
     return out
 
 
 def _shift_2d(z: np.ndarray, f2: np.ndarray, f1: np.ndarray,
-              pos_ppm: float) -> np.ndarray:
-    """Translate a delta_iso = 0 subspectrum to pos_ppm along both axes."""
-    if abs(pos_ppm) < 1e-12:
+              pos_f2: float, pos_f1: float) -> np.ndarray:
+    """Translate a δiso = 0 subspectrum by pos_f2 along F2 and pos_f1 along F1."""
+    if abs(pos_f2) < 1e-12 and abs(pos_f1) < 1e-12:
         return z
     out = np.empty_like(z)
     for i in range(z.shape[0]):
-        out[i] = np.interp(f2 - pos_ppm, f2, z[i], left=0.0, right=0.0)
-    out2 = np.empty_like(out)
-    for j in range(z.shape[1]):
-        out2[:, j] = np.interp(f1 - pos_ppm, f1, out[:, j], left=0.0, right=0.0)
-    return out2
-
-
-def _shift_f1_only(z: np.ndarray, f1: np.ndarray, off_ppm: float) -> np.ndarray:
-    """Translate a 2D subspectrum along F1 (axis 0) only, by off_ppm."""
-    if abs(off_ppm) < 1e-9:
-        return z
-    out = np.empty_like(z)
-    for j in range(z.shape[1]):
-        out[:, j] = np.interp(f1 - off_ppm, f1, z[:, j], left=0.0, right=0.0)
+        out[i] = np.interp(f2 - pos_f2, f2, z[i], left=0.0, right=0.0)
+    if abs(pos_f1) >= 1e-12:
+        out2 = np.empty_like(out)
+        for j in range(z.shape[1]):
+            out2[:, j] = np.interp(f1 - pos_f1, f1, out[:, j], left=0.0, right=0.0)
+        return out2
     return out
 
 
-def simulate_2d(recipe, kernel: Kernel2D, f1_ref_ppm: float | None = None):
-    """(total, per_site) 2D arrays for a recipe on the kernel grid.
+def mqmas_f1_axis(kernel: Kernel2D, recipe) -> np.ndarray:
+    """The kernel's δ1-isotropic F1 axis mapped to the experiment's F1 axis by
+    the fitted reference offset β (Recipe.mqmas_f1_ref_ppm)."""
+    b = float(getattr(recipe, "mqmas_f1_ref_ppm", 0.0))
+    return np.asarray(kernel.f1_ppm) + b
 
-    The MQMAS isotropic (F1) reference offset re-references the model's F1 axis
-    to the experiment's convention (see Recipe.mqmas_f1_ref_ppm). Pass f1_ref_ppm
-    to override the value stored on the recipe (fit_2d does this per iteration).
+
+def simulate_2d(recipe, kernel: Kernel2D):
+    """(total, per_site) 2D model arrays on the kernel's NATIVE grid.
+
+    The isotropic-axis affine (mqmas_f1_scale/ref) is a property of how the
+    experiment's F1 was referenced, not of the model — apply it to the F1 axis
+    (mqmas_f1_axis) when comparing to or displaying over the experiment.
     """
-    ref = (getattr(recipe, "mqmas_f1_ref_ppm", 0.0) if f1_ref_ppm is None
-           else f1_ref_ppm)
     per_site = [simulate_site_2d(s, kernel) for s in recipe.sites]
-    if abs(ref) > 1e-9:
-        per_site = [_shift_f1_only(z, kernel.f1_ppm, ref) for z in per_site]
     total = (np.sum(per_site, axis=0) if per_site
              else np.zeros(kernel.shape))
     return total, per_site
@@ -528,70 +572,88 @@ def fit_2d(recipe, data: Data2D, kernel: Kernel2D | None = None,
 
     data = data.normalized()
     if kernel is None:
-        kernel = build_mqmas_kernel(
-            recipe.nucleus or data.nucleus,
-            recipe.larmor_frequency_MHz or data.larmor_MHz,
-            f2_window=(float(data.f2_ppm.max()), float(data.f2_ppm.min())),
-            f1_window=(float(data.f1_ppm.max()), float(data.f1_ppm.min())),
-            method=method, n2=MQMAS_SETTINGS["n2"], n1=MQMAS_SETTINGS["n1"],
-            n_cq=MQMAS_SETTINGS["n_cq"], n_eta=MQMAS_SETTINGS["n_eta"],
-            cq_max_MHz=MQMAS_SETTINGS["cq_max_MHz"])
+        kernel = _kernel_for(recipe, data, method)
 
-    # interpolate the experiment onto the kernel grid once
+    # The kernel F1 axis is the δ1-isotropic convention (CS on the diagonal); an
+    # experimental F1 axis differs only by a small referencing offset β, so
+    # sample the experiment at (f1_iso + β) and fit β (the isotropic-axis
+    # reference). δiso sets the diagonal position, so β is independent.
     from scipy.interpolate import RegularGridInterpolator
 
     interp = RegularGridInterpolator(
         (data.f1_ppm, data.f2_ppm), data.z, bounds_error=False, fill_value=0.0)
-    G1, G2 = np.meshgrid(kernel.f1_ppm, kernel.f2_ppm, indexing="ij")
-    z_exp = interp(np.stack([G1.ravel(), G2.ravel()], axis=-1)).reshape(
-        kernel.shape)
-    scale = np.abs(z_exp).max() or 1.0
+    G1n, G2 = np.meshgrid(kernel.f1_ppm, kernel.f2_ppm, indexing="ij")
 
+    def sample_exp(b):
+        pts = np.stack([(G1n + b).ravel(), G2.ravel()], axis=-1)
+        return interp(pts).reshape(kernel.shape)
+
+    scale = float(np.abs(data.z).max()) or 1.0
     params = _make_params(recipe)
-
-    # Global MQMAS F1 (isotropic-axis) reference offset: mrsimulator's kernel and
-    # the experimental F1 axis use different referencing conventions, so the model
-    # must be shifted along F1 to align. Auto-initialise from the centroid gap so
-    # the optimiser starts aligned, then let it refine. δiso (diagonal) and this
-    # F1-only offset span the plane independently, so they are not degenerate.
     _apply_params(recipe, params)
     vary_ref = getattr(recipe, "mqmas_f1_ref_vary", True)
+    # β is the isotropic-axis (F1) referencing offset. Peaks that start far apart
+    # in F1 give the local optimiser no gradient, so coarse-search β once for the
+    # best model/experiment overlap at the initial params (place δiso near the
+    # peaks first — δiso sets the diagonal and is anchored by F2).
     if vary_ref:
-        F1g = kernel.f1_ppm[:, None] + 0.0 * kernel.f2_ppm[None, :]
-        m0, _ = simulate_2d(recipe, kernel, f1_ref_ppm=0.0)
-        def _f1_centroid(z):
-            zc = np.clip(z, 0, None); s = zc.sum()
-            return float((zc * F1g).sum() / s) if s > 0 else 0.0
-        f1_ref0 = float(np.clip(_f1_centroid(z_exp) - _f1_centroid(m0), -80.0, 80.0))
-    else:                                   # user holds the referencing fixed
-        f1_ref0 = float(getattr(recipe, "mqmas_f1_ref_ppm", 0.0))
-    params.add("mqmas_f1_ref_ppm", value=f1_ref0, min=-80.0, max=80.0,
-               vary=vary_ref)
+        m0, _ = simulate_2d(recipe, kernel)
+        m0f = m0.ravel(); m0n = float(np.sqrt((m0f * m0f).sum())) or 1.0
+        best = (-1.0, 0.0)
+        for b in np.linspace(-40.0, 40.0, 81):
+            e = sample_exp(b).ravel()
+            den = np.sqrt((e * e).sum()) * m0n
+            corr = float((e * m0f).sum()) / den if den > 0 else 0.0
+            if corr > best[0]:
+                best = (corr, float(b))
+        b0 = best[1]
+    else:
+        b0 = float(getattr(recipe, "mqmas_f1_ref_ppm", 0.0))
+    params.add("mqmas_f1_ref_ppm", value=b0, min=-40.0, max=40.0, vary=vary_ref)
 
     def residual(p):
         _apply_params(recipe, p)
         recipe.mqmas_f1_ref_ppm = float(p["mqmas_f1_ref_ppm"].value)
         total, _ = simulate_2d(recipe, kernel)
-        return ((total - z_exp) / scale).ravel()
+        return ((total - sample_exp(recipe.mqmas_f1_ref_ppm)) / scale).ravel()
 
     # amplitude pre-scale so the optimizer starts on-scale
-    recipe.mqmas_f1_ref_ppm = f1_ref0
+    recipe.mqmas_f1_ref_ppm = b0
     total0, _ = simulate_2d(recipe, kernel)
+    e0 = sample_exp(b0)
     denom = float((total0 * total0).sum())
     if denom > 0:
-        k = float((z_exp * total0).sum()) / denom
+        kk = float((e0 * total0).sum()) / denom
         for i, site in enumerate(recipe.sites):
             from larmor.fit import _lmfit_name
 
             name = _lmfit_name(i, site, "amplitude")
             if params[name].vary:
-                params[name].value *= k
+                params[name].value *= kk
 
     result = lmfit.minimize(residual, params, method="least_squares")
     _apply_params(recipe, result.params)
     recipe.mqmas_f1_ref_ppm = float(result.params["mqmas_f1_ref_ppm"].value)
     z_fit, per_site = simulate_2d(recipe, kernel)
+    z_exp = sample_exp(recipe.mqmas_f1_ref_ppm)
     rmsd = float(np.sqrt(np.mean((z_fit - z_exp) ** 2)) / scale)
     recipe.fit_rmsd = rmsd
     return Fit2DResult(recipe=recipe, lmfit_result=result, kernel=kernel,
                        z_fit=z_fit, per_site=per_site, rmsd=rmsd)
+
+
+def _kernel_for(recipe, data: "Data2D", method: str = "3QMAS") -> Kernel2D:
+    """Build (or fetch) the MQMAS kernel for a dataset. The kernel F1 grid is the
+    δ1-isotropic convention; a Bruker MQMAS F1 axis is already ≈ that convention,
+    so use the experiment's F1 range (padded) as the iso window — the sites'
+    diagonal placements (≈ δiso) then land on-grid."""
+    f2w = (float(data.f2_ppm.max()), float(data.f2_ppm.min()))
+    f1lo, f1hi = float(data.f1_ppm.min()), float(data.f1_ppm.max())
+    pad = 0.15 * (f1hi - f1lo)
+    return build_mqmas_kernel(
+        recipe.nucleus or data.nucleus,
+        recipe.larmor_frequency_MHz or data.larmor_MHz,
+        f2_window=f2w, f1_window=(f1hi + pad, f1lo - pad),
+        method=method, n2=MQMAS_SETTINGS["n2"], n1=MQMAS_SETTINGS["n1"],
+        n_cq=MQMAS_SETTINGS["n_cq"], n_eta=MQMAS_SETTINGS["n_eta"],
+        cq_max_MHz=MQMAS_SETTINGS["cq_max_MHz"])

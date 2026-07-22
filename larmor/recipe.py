@@ -91,8 +91,12 @@ class Recipe:
     #: the display overlay. δiso still handles the diagonal position, so this is
     #: independent (F1-only) and not degenerate with the shifts.
     mqmas_f1_ref_ppm: float = 0.0
-    #: when True (default) fit_2d auto-fits mqmas_f1_ref_ppm; set False to hold it
-    #: at the user's value (dmfit-style manual referencing).
+    #: F1 isotropic-axis affine SCALE α (with mqmas_f1_ref_ppm = offset β): the
+    #: experiment's F1 axis is F1_exp = α·F1_model + β relative to mrsimulator's
+    #: sheared convention. Both are fitted by fit_2d (isotropic-axis referencing).
+    mqmas_f1_scale: float = 1.0
+    #: when True (default) fit_2d auto-fits the F1 affine (α, β); set False to
+    #: hold them at the user's values (dmfit-style manual referencing).
     mqmas_f1_ref_vary: bool = True
     notes: list[str] = field(default_factory=list)
 
