@@ -27,8 +27,9 @@ def export_text(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
 
     x, total, per_site = engine.simulate(recipe, exp_ppm=exp_ppm)
     exp_on_x = np.interp(x, exp_ppm, exp_amp)
-    cols = [x, exp_on_x, total, *per_site]
-    labels = ["ppm", "experiment", "model"] + \
+    residual = exp_on_x - total
+    cols = [x, exp_on_x, total, residual, *per_site]
+    labels = ["ppm", "experiment", "model", "residual"] + \
         [s.label or f"site{i}" for i, s in enumerate(recipe.sites)]
     lines = ["# " + "\t".join(labels)]
     for row in zip(*cols):

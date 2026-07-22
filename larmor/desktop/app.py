@@ -288,6 +288,10 @@ class MainWindow(QMainWindow):
                   self.save_fit_as, "Ctrl+Shift+E")
         self._add(m_file, "Save s&pectrum as…  (CSV, reopenable in LARMOR)",
                   self.save_spectrum)
+        m_file.addSeparator()
+        self._add(m_file, "&Copy plot to clipboard  (with all lines)",
+                  self.copy_plot, "Ctrl+Shift+C")
+        self._add(m_file, "Save plot &image…  (png / svg)", self.save_plot_image)
         self._add(m_file, "Figure…", self.open_figure_dialog)
         m_file.addSeparator()
         self._add(m_file, "E&xit", self.close)
@@ -409,6 +413,38 @@ class MainWindow(QMainWindow):
         paths.insert(0, path)
         s.setValue("recent", paths[:12])
         self._rebuild_recent()
+
+    def _active_plot_widget(self):
+        return (self.view2d.glw if self.central_stack.currentWidget() is self.view2d
+                else self.view)
+
+    def copy_plot(self):
+        """Copy the current plot (spectrum + model + all component lines, as
+        shown) to the clipboard as an image."""
+        pix = self._active_plot_widget().grab()
+        QApplication.clipboard().setPixmap(pix)
+        self.statusBar().showMessage("plot copied to clipboard")
+
+    def save_plot_image(self):
+        w = self._active_plot_widget()
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save plot image", str(Path(self._last_dir()) / "plot.png"),
+            "PNG image (*.png);;SVG vector (*.svg)")
+        if not path:
+            return
+        if path.lower().endswith(".svg"):
+            try:
+                from pyqtgraph.exporters import SVGExporter
+
+                scene = (self.view.getPlotItem().scene()
+                         if w is self.view else self.view2d.p_main.scene())
+                SVGExporter(scene).export(path)
+            except Exception as exc:
+                QMessageBox.warning(self, "Save image", f"SVG export failed: {exc}")
+                return
+        else:
+            w.grab().save(path)
+        self.statusBar().showMessage(f"plot saved to {Path(path).name}")
 
     def open_integrals(self):
         from larmor.desktop.integrate_dialog import IntegralsDialog
