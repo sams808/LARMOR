@@ -19,7 +19,7 @@ import pyqtgraph as pg
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFileDialog,
-    QHBoxLayout, QLabel, QPushButton, QSplitter, QVBoxLayout, QWidget,
+    QHBoxLayout, QLabel, QPushButton, QSpinBox, QSplitter, QVBoxLayout, QWidget,
 )
 
 ZONE_COLORS = ["#0e7c86", "#d62728", "#2ca02c", "#9467bd", "#e377c2"]
@@ -67,10 +67,22 @@ class SatrecDialog(QDialog):
         top.addWidget(self.magnitude)
         self.stretched = QCheckBox("stretched β")
         top.addWidget(self.stretched)
+        top.addWidget(QLabel("slices"))
+        self.firstSlice = QSpinBox(); self.firstSlice.setRange(1, 1)
+        self.firstSlice.setToolTip("first slice to use (1-based)")
+        top.addWidget(self.firstSlice)
+        top.addWidget(QLabel("to"))
+        self.lastSlice = QSpinBox(); self.lastSlice.setRange(1, 1)
+        self.lastSlice.setToolTip("last slice to use — trim early-stopped or "
+                                  "already-relaxed acquisitions")
+        top.addWidget(self.lastSlice)
+        self.firstSlice.valueChanged.connect(self._apply_slice_range)
+        self.lastSlice.valueChanged.connect(self._apply_slice_range)
         self.btnProcess = QPushButton("Process slices")
         self.btnProcess.clicked.connect(self._process)
         top.addWidget(self.btnProcess)
         v.addLayout(top)
+        self._all_delays = self._all_slices = None
 
         # ---- two stacked plots ----
         split = QSplitter(Qt.Vertical)
@@ -159,30 +171,45 @@ class SatrecDialog(QDialog):
         self.res.setText("processing slices…")
         QApplication.processEvents()
         try:
-            self.delays, src = series.read_delays(p)
+            delays, self._src = series.read_delays(p)
             mode = "magnitude" if self.magnitude.isChecked() else "phase"
-            self.x_ppm, self.slices = satrec.process_slices(
+            self.x_ppm, slices = satrec.process_slices(
                 p, lb_hz=self.lb.value(), mode=mode)
-            n = min(len(self.delays), self.slices.shape[0])
-            self.delays, self.slices = self.delays[:n], self.slices[:n]
+            n = min(len(delays), slices.shape[0])
+            self._all_delays, self._all_slices = delays[:n], slices[:n]
         except Exception as exc:
             self.res.setText(f"failed: {exc}")
             self.btnProcess.setEnabled(True)
             return
-        # show the LAST slice (fully relaxed) as the reference spectrum
+        # let the user restrict the slice range (early-stopped / already-relaxed)
+        self.firstSlice.blockSignals(True); self.lastSlice.blockSignals(True)
+        self.firstSlice.setRange(1, n); self.lastSlice.setRange(1, n)
+        self.firstSlice.setValue(1); self.lastSlice.setValue(n)
+        self.firstSlice.blockSignals(False); self.lastSlice.blockSignals(False)
+        self._apply_slice_range()
+        self.btnProcess.setEnabled(True)
+
+    def _apply_slice_range(self, *_):
+        if self._all_slices is None:
+            return
+        lo = self.firstSlice.value() - 1
+        hi = max(lo + 2, self.lastSlice.value())
+        self.delays = self._all_delays[lo:hi]
+        self.slices = self._all_slices[lo:hi]
         self.spec_plot.clear()
-        ref = self.slices[-1]
-        self.spec_plot.plot(self.x_ppm, ref, pen=pg.mkPen("#1a2831", width=1.2))
+        self.spec_plot.plot(self.x_ppm, self.slices[-1],
+                            pen=pg.mkPen("#1a2831", width=1.2))
         self._readd_zone_items()
-        # zoom to the real peak region so the default zone lands on the signal
         pk = self._robust_peak_ppm()
         span = self.x_ppm.max() - self.x_ppm.min()
         self.spec_plot.setXRange(pk + 0.18 * span, pk - 0.18 * span, padding=0)
         if not self.zones:
-            self._add_zone()             # start with one zone on the peak
-        self.res.setText(f"{self.slices.shape[0]} slices · delays from {src} · "
-                         "drag the zone over your peak, then Fit")
-        self.btnProcess.setEnabled(True)
+            self._add_zone()
+        self.res.setText(
+            f"{self.slices.shape[0]} of {self._all_slices.shape[0]} slices · "
+            f"delays from {self._src} · drag the zone over your peak, then Fit")
+        if self.results:
+            self._fit()                  # refit on the new slice range
 
     def _robust_peak_ppm(self) -> float:
         """Peak of the relaxed slice after removing its rolling baseline and
