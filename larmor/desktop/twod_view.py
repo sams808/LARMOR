@@ -20,8 +20,8 @@ import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QComboBox, QDoubleSpinBox, QHBoxLayout, QLabel, QPushButton, QSlider,
-    QStackedWidget, QVBoxLayout, QWidget,
+    QComboBox, QDoubleSpinBox, QHBoxLayout, QLabel, QMenu, QPushButton, QSlider,
+    QStackedWidget, QToolButton, QVBoxLayout, QWidget,
 )
 
 
@@ -100,6 +100,18 @@ class Contour2DView(QWidget):
                                 "extract un-correlated features")
         self.btnHmqc.toggled.connect(lambda on: self.hmqcbar.setVisible(on))
         bar.addWidget(self.btnHmqc)
+        self.btnOps = QToolButton(); self.btnOps.setText("2D ops ▾")
+        self.btnOps.setPopupMode(QToolButton.InstantPopup)
+        ops = QMenu(self.btnOps)
+        ops.addAction("Transpose F1↔F2", lambda: self._op("transpose"))
+        ops.addAction("Reverse F2", lambda: self._op("rev_f2"))
+        ops.addAction("Reverse F1", lambda: self._op("rev_f1"))
+        ops.addSeparator()
+        ops.addAction("Diagonal → fit", lambda: self._op("diagonal"))
+        ops.addAction("F2 skyline → fit", lambda: self._emit_projection("skyline"))
+        ops.addAction("F2 sum → fit", lambda: self._emit_projection("sum"))
+        self.btnOps.setMenu(ops)
+        bar.addWidget(self.btnOps)
         v.addLayout(bar)
         self._mtargets: list = []
 
@@ -438,6 +450,26 @@ class Contour2DView(QWidget):
         self._orig = twod.shear(self._committed, self.shearv.value())
         self._committed = self._orig
         self.data = self._orig
+        self._redraw()
+
+    # ---------- 2D operations ----------
+    def _op(self, kind: str):
+        if self.data is None:
+            return
+        if kind == "diagonal":
+            g, amp = self._committed.diagonal()
+            self.slice_to_fit.emit(np.asarray(g), np.asarray(amp),
+                                   f"diagonal of {self.title.text()}")
+            return
+        if kind == "transpose":
+            new = self._committed.transposed()
+        elif kind == "rev_f2":
+            new = self._committed.reversed_axis("f2")
+        elif kind == "rev_f1":
+            new = self._committed.reversed_axis("f1")
+        else:
+            return
+        self._orig = self._committed = self.data = new
         self._redraw()
 
     # ---------- calibrate + measure ----------

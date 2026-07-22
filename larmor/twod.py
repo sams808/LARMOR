@@ -82,6 +82,32 @@ class Data2D:
         red = np.max if mode == "skyline" else np.sum
         return red(self.z, axis=0 if axis == "f2" else 1)
 
+    def transposed(self) -> "Data2D":
+        """Swap F1 and F2 (dmfit Transpose RR)."""
+        t = (lambda a: a.T if a is not None else None)
+        return Data2D(self.f1_ppm, self.f2_ppm, self.z.T, self.nucleus,
+                      self.larmor_MHz, self.spin_rate_Hz, self.source,
+                      list(self.notes),
+                      ri=t(self.ir), ir=t(self.ri), ii=t(self.ii))
+
+    def reversed_axis(self, axis: str) -> "Data2D":
+        """Mirror the intensity along one axis (dmfit Reverse F1/F2)."""
+        ax = 1 if axis == "f2" else 0
+        flip = (lambda a: np.flip(a, ax) if a is not None else None)
+        return self._like(np.flip(self.z, ax), flip(self.ri), flip(self.ir),
+                          flip(self.ii))
+
+    def diagonal(self) -> tuple[np.ndarray, np.ndarray]:
+        """The trace along F1 = F2 (dmfit Extract Diag). Returns (ppm, amp)."""
+        from scipy.interpolate import RegularGridInterpolator
+
+        lo = max(self.f1_ppm.min(), self.f2_ppm.min())
+        hi = min(self.f1_ppm.max(), self.f2_ppm.max())
+        g = np.linspace(lo, hi, max(self.z.shape))
+        interp = RegularGridInterpolator((self.f1_ppm, self.f2_ppm), self.z,
+                                         bounds_error=False, fill_value=0.0)
+        return g, interp(np.stack([g, g], axis=-1))
+
     def phased(self, axis: str, p0_deg: float, p1_deg: float,
                pivot_ppm: float | None = None) -> "Data2D":
         """Zero/first-order phase along one axis, TopSpin-style.

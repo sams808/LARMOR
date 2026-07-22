@@ -212,3 +212,18 @@ def test_caalglass_mq_parses_as_2d():
     recipe, warnings = fxmla.to_recipe(dm)
     assert [s.model for s in recipe.sites] == ["czjzek", "czjzek"]
     assert any("MQMAS" in w for w in warnings)
+
+
+def test_2d_operations():
+    """Transpose, reverse, and diagonal extraction (dmfit 2D ops)."""
+    f2 = np.linspace(-40, 80, 60); f1 = np.linspace(20, 60, 30)
+    Z = (np.exp(-((f2[None, :] - 30) / 6) ** 2)
+         * np.exp(-((f1[:, None] - 40) / 6) ** 2))
+    d = twod.Data2D(f2_ppm=f2, f1_ppm=f1, z=Z, nucleus="27Al", larmor_MHz=156.0)
+    dt = d.transposed()
+    assert dt.z.shape == (60, 30) and np.allclose(dt.z, Z.T)
+    assert np.allclose(dt.f2_ppm, f1) and np.allclose(dt.f1_ppm, f2)
+    dr = d.reversed_axis("f2")
+    assert np.allclose(dr.z, np.flip(Z, 1))
+    g, amp = d.diagonal()
+    assert g.size == 60 and amp.shape == g.shape
