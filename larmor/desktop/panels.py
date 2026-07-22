@@ -18,6 +18,9 @@ PARAM_LABELS = {
     "eta": "η",
     "zeta_ppm": "ζ CSA (ppm)",
     "shift_fwhm_ppm": "FWHM (ppm)",
+    "gauss_fwhm_ppm": "Gauss FWHM (ppm)",
+    "lorentz_fwhm_ppm": "Lorentz FWHM (ppm)",
+    "shift_ppm": "shift (ppm)",
     "amplitude": "amplitude",
     "gl": "g/l fraction",
 }

@@ -39,3 +39,39 @@ register(Model(
     ),
     render=_render,
 ))
+
+
+def voigt(x_ppm: np.ndarray, pos_ppm: float, gauss_fwhm_ppm: float,
+          lorentz_fwhm_ppm: float, amplitude: float) -> np.ndarray:
+    """Peak-normalized TRUE Voigt: the convolution of a Gaussian and a
+    Lorentzian (not the pseudo-Voigt sum). Independent Gaussian and Lorentzian
+    widths, e.g. Gaussian from disorder + Lorentzian from T2."""
+    from scipy.special import voigt_profile
+
+    sigma = max(gauss_fwhm_ppm, 1e-9) * FWHM_TO_SIGMA
+    gamma = max(lorentz_fwhm_ppm, 0.0) / 2.0
+    y = voigt_profile(x_ppm - pos_ppm, sigma, gamma)
+    peak = voigt_profile(0.0, sigma, gamma) or 1.0
+    return amplitude * y / peak
+
+
+def _render_voigt(v: dict, ctx: SimContext) -> np.ndarray:
+    return voigt(ctx.x_ppm, v["isotropic_chemical_shift_ppm"],
+                 v["gauss_fwhm_ppm"], v["lorentz_fwhm_ppm"], v["amplitude"])
+
+
+register(Model(
+    name="voigt",
+    label="Voigt (true)",
+    description="True Voigt profile: a Gaussian convolved with a Lorentzian, "
+                "with independent widths (Gaussian ← disorder, Lorentzian ← T2). "
+                "Unlike Gauss/Lorentz this is a genuine convolution.",
+    params=(
+        ParamDef("isotropic_chemical_shift_ppm", "pos", 0.0, "ppm", "peak position"),
+        ParamDef("gauss_fwhm_ppm", "gfwhm", 3.0, "ppm", "Gaussian FWHM", min=0.0),
+        ParamDef("lorentz_fwhm_ppm", "lfwhm", 3.0, "ppm", "Lorentzian FWHM",
+                 min=0.0),
+        ParamDef("amplitude", "amp", 1.0, "", "peak height", min=0.0),
+    ),
+    render=_render_voigt,
+))

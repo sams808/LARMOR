@@ -128,3 +128,29 @@ def test_spectrum_background_component_fits():
     assert res.recipe.sites[0].params["amplitude"].value == pytest.approx(3.0, abs=0.05)
     assert res.recipe.sites[1].params["amplitude"].value == pytest.approx(5.0, abs=0.05)
     assert res.rmsd < 1e-3
+
+
+def test_voigt_is_true_convolution_and_fits():
+    """The Voigt model has independent Gaussian and Lorentzian widths and is a
+    genuine convolution (peak-normalized); the fit recovers both widths."""
+    import numpy as np
+    from larmor import engine
+    x = np.linspace(-60, 60, 1000)
+    r = Recipe(nucleus="1H", larmor_frequency_MHz=500.0, sites=[SiteModel(
+        model="voigt", label="V", params={
+            "isotropic_chemical_shift_ppm": Param(5.0),
+            "gauss_fwhm_ppm": Param(4.0, min=0.0),
+            "lorentz_fwhm_ppm": Param(6.0, min=0.0),
+            "amplitude": Param(1.0, min=0.0)})])
+    xc, y, _ = engine.simulate(r, exp_ppm=x)
+    assert y.max() == pytest.approx(1.0, abs=1e-3)          # peak-normalized
+    r2 = Recipe(nucleus="1H", larmor_frequency_MHz=500.0, sites=[SiteModel(
+        model="voigt", label="V", params={
+            "isotropic_chemical_shift_ppm": Param(0.0),
+            "gauss_fwhm_ppm": Param(2.0, min=0.0),
+            "lorentz_fwhm_ppm": Param(2.0, min=0.0),
+            "amplitude": Param(0.5, min=0.0)})])
+    res = fitmod.fit(r2, xc, y, window_ppm=(60.0, -60.0))
+    p = res.recipe.sites[0].params
+    assert p["gauss_fwhm_ppm"].value == pytest.approx(4.0, abs=0.1)
+    assert p["lorentz_fwhm_ppm"].value == pytest.approx(6.0, abs=0.1)
