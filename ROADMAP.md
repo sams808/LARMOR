@@ -120,15 +120,15 @@ amplitude conventions deserve a cleanup. This is the next big block.
 - [ ] **J-multiplet** (dmfit "Jmultiplet") — n equivalent couplings → binomial
   multiplet with a J (Hz) and a per-component lineshape; and the **J-dispersion**
   variants (residual dipolar / distribution of J).
-- [ ] **Function fit** (ssNake) — a user-typed `y(x; a, b, …)` expression with
-  free parameters, safely evaluated, for the odd empirical case.
+- [x] **Function fit** (ssNake) — a user-typed `y(x; a,b,c,d)` expression, safely
+  evaluated (Decomposition ▸ Add function line). *(done)*
 - [ ] **Shape-from-file / user shape** — generalize the current `spectrum`
   component into a first-class shifted+scaled+broadened basis line (dmfit "W
   Shape file" / "user shape").
 
 **Disorder / distribution physics (beyond dmfit).**
-- [ ] **CSA Czjzek / Gaussian-isotropic** distribution (disordered shielding),
-  the CSA analogue of the quad Czjzek.
+- [x] **CSA Czjzek** (disordered shielding): CSA pattern averaged over a Gaussian
+  ζ distribution (`csa_czjzek`). *(done)*
 - [ ] **Correlated δiso–Cq distribution** for glasses (a 2D Gaussian on the
   (δiso, Cq) plane) — closer to real amorphous lineshapes.
 - [ ] **Extended Czjzek in 1D** already exists; expose ρ/ε clearly and validate
@@ -186,16 +186,17 @@ Small, self-contained, high daily value.
   autocorrelation LP op already exists; LPSVD is the upgrade.)
 - [x] **Subtract averages / scale SW / scale car-ref (SR) / inverse FT /
   real·imag·conj** (ssNake Tools) as pipeline ops. *(done)*
-- [ ] **Processing history with per-step undo** (ssNake pipeline) instead of
-  reset-to-original only; the pipeline already lives in the recipe.
+- [x] **Processing history with per-step undo** (Process ▸ Processing steps):
+  list the applied ops, remove any, re-apply the rest. *(done)*
 - [ ] Apodizations: Hamming, Kaiser, shifted Gaussian (whole-echo), JMOD.
-- [ ] Peak picking (threshold + parabolic) → "add a line at every peak".
+- [x] **Peak picking** (threshold + parabolic) → "add a line at every peak"
+  (Decomposition ▸ Add a line at every peak). *(done)*
 
 ## Priority 3 — 2D depth (dmfit 2D menu)
 
-- [x] **2D operations** (partial): transpose, reverse F1/F2, extract diagonal,
-  send projections/rows to fit (contour "2D ops ▾"). *(done)* — [ ] still: save
-  row/col/proj to file, "make all 1Ds", diff-by-row, add-sidebands.
+- [x] **2D operations**: transpose, reverse F1/F2, extract diagonal, symmetrize,
+  save F1/F2 projection to CSV, send projections/rows to fit (contour "2D ops ▾").
+  *(done)* — [ ] still: save individual row/col, "make all 1Ds", diff-by-row.
 - [ ] **DQ/SQ and Make-MQ**: build the double-quantum axis; sum/projection
   combinations (dmfit `Sum F2/F1`, `Proj`), 2D↔3D handling.
 - [ ] **Referencing/shear conventions** per method (3Q/5Q ratios, Amoureux F1
@@ -205,13 +206,14 @@ Small, self-contained, high daily value.
 
 ## Priority 4 — Series, simulation, distribution
 
-- [ ] Per-site relaxation (decompose each slice on fixed lineshapes → T1/T2 per
-  site, not per window).
-- [ ] Arrhenius/VFT for VT series; mrinversion ILT (T1/T2 distributions,
-  L-curve).
+- [x] **Per-site relaxation** (Tools ▸ Per-site relaxation): decompose each slice
+  on the current fit's lineshapes → T1/T2 per site. *(done)*
+- [x] **Arrhenius/VFT** for VT series (Tools ▸ Variable temperature). *(done)* —
+  [ ] mrinversion ILT (T1/T2 distributions, L-curve) still open.
 - [ ] **SIMPSON bridge** (export spin system, run, overlay/fit) for REDOR/RFDR
   and sequences mrsimulator doesn't cover.
-- [ ] Second-field prediction ("what at X T?") from the current model.
+- [x] **Second-field prediction** ("what at X T?") from the current model
+  (Decomposition ▸ Predict at another field). *(done)*
 
 ## Priority 5 — Packaging, validation, release
 
