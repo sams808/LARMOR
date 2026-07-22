@@ -426,3 +426,60 @@ def test_twod_axis_orientation_defaults_and_flip(qapp):
     dv.toggle_axis_flip("f1", False)
     assert dv.p_main.getViewBox().yInverted() is False
     dv.deleteLater()
+
+
+def test_cofit_dialog_editable_param_grid_and_preview(qapp):
+    """The co-fit dialog exposes an editable parameter grid (value + Fix + the
+    MQMAS F1 reference) and a Preview that simulates the current values."""
+    from PySide6.QtCore import Qt
+
+    from larmor import twod
+    from larmor.desktop.cofit_dialog import CofitDialog
+
+    x = np.linspace(-50, 120, 300); amp = np.exp(-0.5 * ((x - 60) / 8) ** 2) * 1e6
+    base = {"kind": "1d", "label": "MAS", "ppm": x, "amp": amp,
+            "nucleus": "27Al", "larmor": 130.3}
+    f2 = np.linspace(-40, 110, 48); f1 = np.linspace(-30, 90, 40)
+    Z = np.exp(-0.5 * (((f2[None, :] - 50) / 12) ** 2 + ((f1[:, None] - 65) / 12) ** 2))
+    d2 = twod.Data2D(f2_ppm=f2, f1_ppm=f1, z=Z, nucleus="27Al", larmor_MHz=130.3)
+    d2ds = {"kind": "2d", "label": "2rr", "data2d": d2,
+            "nucleus": "27Al", "larmor": 130.3}
+    recipe = {"nucleus": "27Al", "larmor_frequency_MHz": 130.3,
+              "mqmas_f1_ref_ppm": 0.0, "mqmas_f1_ref_vary": True, "sites": [
+                  {"model": "czjzek", "label": "AlIV", "params": {
+                      "isotropic_chemical_shift_ppm": {"value": 60.0, "vary": True,
+                                                       "min": 0, "max": 120},
+                      "sigma_Cq_MHz": {"value": 1.6, "vary": True, "min": 0.2,
+                                       "max": 8},
+                      "shift_fwhm_ppm": {"value": 13.0, "vary": True, "min": 1,
+                                         "max": 30},
+                      "line_fwhm_ppm": {"value": 4.0, "vary": True, "min": 0},
+                      "amplitude": {"value": 1e6, "vary": True, "min": 0}}}]}
+
+    dlg = CofitDialog(None, recipe, base)
+    dlg.datasets = [base, d2ds]
+    dlg._build_param_rows()
+    # a row per site-param plus a trailing MQMAS F1-reference row
+    assert dlg._row_map[-1] == ("f1ref",)
+    assert dlg.params_table.rowCount() == 6
+
+    # edit δiso, fix σ, fix F1 ref at 12 ppm
+    dlg.params_table.item(0, 2).setText("62")
+    dlg.params_table.item(1, 3).setCheckState(Qt.Checked)
+    lr = dlg.params_table.rowCount() - 1
+    dlg.params_table.item(lr, 2).setText("12")
+    dlg.params_table.item(lr, 3).setCheckState(Qt.Checked)
+    dlg._apply_param_edits()
+    sp = dlg.base_recipe["sites"][0]["params"]
+    assert sp["isotropic_chemical_shift_ppm"]["value"] == 62.0
+    assert sp["sigma_Cq_MHz"]["vary"] is False
+    assert dlg.base_recipe["mqmas_f1_ref_ppm"] == 12.0
+    assert dlg.base_recipe["mqmas_f1_ref_vary"] is False
+
+    # Preview simulates (no fit) and draws both overlays
+    import pyqtgraph as pg
+    dlg._preview()
+    n = sum(1 for i in range(dlg._plot_v.count())
+            if isinstance(dlg._plot_v.itemAt(i).widget(), pg.PlotWidget))
+    assert n == 2
+    dlg.close()
