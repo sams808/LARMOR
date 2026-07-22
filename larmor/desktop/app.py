@@ -378,6 +378,8 @@ class MainWindow(QMainWindow):
                   self.open_integrals)
         m_tools.addSeparator()
         self._add(m_tools, "Relaxation / series (T1, T2)…", self.open_satrec)
+        self._add(m_tools, "Per-site relaxation…  (uses the current fit)",
+                  self.open_per_site_relaxation)
         self._add(m_tools, "QCPMG (echo train → spectrum)…", self.open_qcpmg)
         self._add(m_tools, "Variable temperature (Arrhenius / VFT)…", self.open_vt)
         self._add(m_tools, "REDOR (dipolar coupling)…", self.open_redor)
@@ -2142,6 +2144,48 @@ class MainWindow(QMainWindow):
         if self.central_stack.currentWidget() is self.view:
             self.request_simulation()
         self.statusBar().showMessage("co-fit shared parameters applied")
+
+    def open_per_site_relaxation(self):
+        """Decompose every relaxation slice on the CURRENT fit's lineshapes → a
+        T1/T2 per site (not per integration window). Needs a fitted recipe and a
+        relaxation ser."""
+        from PySide6.QtCore import Qt
+
+        if not (self.recipe and self.recipe.get("sites")):
+            self.statusBar().showMessage(
+                "fit the most-relaxed slice first — its lines define the sites")
+            return
+        expno = None
+        if self.source_path:
+            try:
+                from larmor.io import bruker
+
+                ref = bruker.resolve(self.source_path)
+                if (ref.expno / "ser").exists():
+                    expno = str(ref.expno)
+            except Exception:
+                expno = None
+        if expno is None:
+            expno = QFileDialog.getExistingDirectory(
+                self, "Relaxation EXPNO (ser + vdlist)")
+        if not expno:
+            return
+        from larmor.recipe import Recipe
+        from larmor import series
+
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        self.statusBar().showMessage("decomposing every slice on the fitted lines…")
+        QApplication.processEvents()
+        try:
+            results = series.analyze_per_site(expno, Recipe.from_dict(self.recipe))
+        except Exception as exc:
+            QApplication.restoreOverrideCursor()
+            QMessageBox.warning(self, "Per-site relaxation", str(exc))
+            return
+        QApplication.restoreOverrideCursor()
+        msg = "\n".join(r.summary for r in results) or "no results"
+        QMessageBox.information(self, "Per-site relaxation (τ per site)", msg)
+        self.statusBar().showMessage("per-site relaxation done")
 
     def open_vt(self):
         from larmor.desktop.vt_dialog import VtDialog
