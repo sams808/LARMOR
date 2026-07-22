@@ -65,6 +65,36 @@ REDOR, `.magres` DFT tensor import, experiment params incl. SR.
 
 ---
 
+## Documentation — extensive user manuals (parallel workstream ⭐)
+
+Every feature gets a written, in-app manual (Markdown opened by a **Help**
+button, like `larmor/help/qcpmg.md` already does). Manuals are **organized by
+data type**, not by feature, so a user opening the manual for what's in front of
+them gets everything relevant — opening, processing, fitting, and the tools for
+that experiment — in one place. Shared processing content (apodization, phasing,
+baseline, referencing) is **deliberately duplicated** into each data-type manual
+so nobody has to hunt across documents.
+
+Planned manuals (`larmor/help/*.md`), each with worked examples on real data:
+- [ ] `getting-started.md` — the workspace model, the Explorer, opening any type.
+- [ ] `spectra-1d.md` — 1D processing (WDW/LB/GB, phasing, baseline, SR/calibrate)
+  and fitting (models, paddles, zones, constraints, quantify, S/N).
+- [x] `qcpmg.md` — wide-line QCPMG / echo trains (done; expand as features land).
+- [ ] `relaxation.md` — guided T1/T2, slice selection, T2-weighting, buildups.
+- [ ] `mqmas.md` — 2D MQMAS: contours, shear/referencing, in-app fit, projections.
+- [ ] `correlation-hmqc.md` — HMQC/DQ-SQ, projection overlays, un-correlated
+  extraction, and the multi-experiment correlation decomposition (P0.5).
+- [ ] `2d-processing.md` — 2D phasing (hypercomplex), contours, measure/calibrate.
+- [ ] `multi-dataset.md` — overlays/compare, co-fit (multi-field, 1D + MQMAS).
+- [ ] `models-reference.md` — every lineshape, its parameters, and when to use it.
+- [ ] `processing-reference.md` — the full op list (shared source for the
+  per-data-type sections above).
+
+Standing rule addition: **a feature merges with its manual section.** A short
+docs index lists them; the Help button in each tool opens the matching manual.
+
+---
+
 ## Priority 0 — Lineshape rework  ⭐ (the user's headline)
 
 The model catalogue works but is not yet at dmfit breadth, and the width /
@@ -107,6 +137,48 @@ amplitude conventions deserve a cleanup. This is the next big block.
 
 *Accept for P0: reproduce a published glass fit (e.g. CaAlGlass variants) with
 Voigt + GL-Norm + sidebands, and a J-multiplet crystal, within uncertainties.*
+
+---
+
+## Priority 0.5 — HMQC & multi-experiment correlation  ⭐⭐ (a very big deal for us)
+
+Heteronuclear-correlation processing is central to our work; the current overlay
++ un-correlated-difference is only the start.
+
+**Improve HMQC processing (near-term).**
+- [ ] **Robust projection ↔ 1D scaling**: least-squares over a user-chosen region
+  (and per-peak options), not only peak-match — so the subtraction is trustworthy
+  when the strongest peak isn't fully correlated.
+- [ ] **Projection choice**: skyline / sum / integral, and an **external
+  projection** (use a separately-acquired 1D as the projection reference) on
+  either F1 or F2.
+- [ ] **Indirect-dimension processing**: F1 apodization / phasing / zero-fill and
+  **F1 referencing** (the indirect nucleus' SR), plus **t1-noise ridge
+  suppression** (median) — HMQC F1 is usually the ugly axis.
+- [ ] **Un-correlated extraction polish**: keep/normalize options, error bars on
+  the difference, and send *both* the correlated and un-correlated parts to
+  separate workspaces.
+- [ ] Manual: a dedicated **HMQC / correlation** guide (see Documentation).
+
+**Generalized multi-experiment correlation decomposition (ambitious; conceived
+here, scheduled P8).**
+- [ ] Given N datasets that **share a nucleus/dimension** — any mix of 1D, MQMAS,
+  HMQC, REDOR — align their axes/projections and decompose features into
+  **correlated vs un-correlated across arbitrary combinations**. Generalizes the
+  HMQC (1D − projection) idea to a set:
+  - *1D + HMQC*: what correlates heteronuclearly (done); the rest is
+    un-correlated.
+  - *1D + MQMAS*: which sites are resolved by the quadrupolar-isotropic axis vs
+    lumped in the 1D.
+  - *1D + HMQC + REDOR*: species that both correlate **and** show dipolar
+    dephasing → assign; subtract to isolate the others.
+  - *1D + MQMAS + HMQC*: cross-check site assignments across three experiments.
+- [ ] Engine: a small "experiment-set" model (each dataset declares its shared
+  axis + a projection/observable), a scaling/alignment step, and set algebra
+  (intersection = correlated, difference = specific-to-one), each result a new
+  workspace you can fit.
+  *Accept: reproduce the HMQC 1D−projection result as the two-dataset special
+  case, then a 1D+HMQC+REDOR three-way isolation on real data.*
 
 ---
 
@@ -210,6 +282,9 @@ off intentionally; revisit only if the work scope shifts.
 
 ### P8 — occasionally, when the case arises
 
+- [ ] **Multi-experiment correlation decomposition** (our own idea, defined in
+  Priority 0.5): correlated/un-correlated feature extraction across any set of
+  shared-nucleus datasets (1D + MQMAS + HMQC, 1D + HMQC + REDOR, …).
 - [ ] **MQMAS post-processing**: Diagonal-slope / shear helpers and 2D
   Symmetrize.
 - [ ] **Multi-curve / per-site relaxation**: fit several sites' decays together
@@ -238,3 +313,5 @@ off intentionally; revisit only if the work scope shifts.
    is none.
 5. Manage resources: one reused widget set, lightweight snapshots, shared
    caches; free on close.
+6. A feature merges with its **manual section** (Markdown in `larmor/help/`,
+   organized by data type) and a Help button that opens it.
