@@ -509,46 +509,78 @@ def test_twod_display_modes_and_per_site_colours(qapp):
     dv.deleteLater()
 
 
-def test_cofit_in_main_window_split_page(qapp, win):
-    """Co-fit lives in the main window: a split page (1D + 2D) driven by the
-    shared recipe and bottom table; preview overlays both, Run fits both."""
+def _cofit_czjzek_recipe():
+    return {"nucleus": "27Al", "larmor_frequency_MHz": 130.3,
+            "mqmas_f1_ref_ppm": 0.0, "mqmas_f1_ref_vary": True, "sites": [
+                {"model": "czjzek", "label": "AlIV", "params": {
+                    "isotropic_chemical_shift_ppm": {"value": 60.0, "vary": True,
+                                                     "min": 0, "max": 120},
+                    "sigma_Cq_MHz": {"value": 1.6, "vary": True, "min": 0.3,
+                                     "max": 4},
+                    "shift_fwhm_ppm": {"value": 13.0, "vary": True, "min": 1,
+                                       "max": 30},
+                    "line_fwhm_ppm": {"value": 4.0, "vary": True, "min": 0},
+                    "amplitude": {"value": 1e6, "vary": True, "min": 0}}}]}
+
+
+def _cofit_setup(win, r):
+    """Put win into co-fit with a 1D and a self-consistent 2D, two recipes."""
+    import json
+
     from larmor import twod
     from larmor.recipe import Recipe
 
-    x = np.linspace(-50, 120, 500); amp = np.exp(-0.5 * ((x - 60) / 11) ** 2) * 1e6
-    win.exp_ppm, win.exp_amp = x, amp
-    win.recipe = {"nucleus": "27Al", "larmor_frequency_MHz": 130.3,
-                  "mqmas_f1_ref_ppm": 0.0, "mqmas_f1_ref_vary": True, "sites": [
-                      {"model": "czjzek", "label": "AlIV", "params": {
-                          "isotropic_chemical_shift_ppm": {"value": 60.0,
-                              "vary": True, "min": 0, "max": 120},
-                          "sigma_Cq_MHz": {"value": 1.6, "vary": True, "min": 0.3,
-                                           "max": 4},
-                          "shift_fwhm_ppm": {"value": 13.0, "vary": True, "min": 1,
-                                             "max": 30},
-                          "line_fwhm_ppm": {"value": 4.0, "vary": True, "min": 0},
-                          "amplitude": {"value": 1e6, "vary": True, "min": 0}}}]}
-    # a self-consistent 2D from the same model
-    f2 = np.linspace(-40, 110, 72); f1 = np.linspace(-30, 90, 60)
-    kd = twod.Data2D(f2_ppm=f2, f1_ppm=f1, z=np.zeros((60, 72)),
+    x = np.linspace(-50, 120, 400); amp = np.exp(-0.5 * ((x - 60) / 11) ** 2) * 1e6
+    win.exp_ppm, win.exp_amp = x, amp; win.recipe = r
+    kd = twod.Data2D(f2_ppm=np.linspace(-40, 110, 72),
+                     f1_ppm=np.linspace(-30, 90, 60), z=np.zeros((60, 72)),
                      nucleus="27Al", larmor_MHz=130.3)
-    k = twod._kernel_for(Recipe.from_dict(win.recipe), kd)
-    Z, _ = twod.simulate_2d(Recipe.from_dict(win.recipe), k)
+    k = twod._kernel_for(Recipe.from_dict(r), kd)
+    Z, _ = twod.simulate_2d(Recipe.from_dict(r), k)
     d2 = twod.Data2D(f2_ppm=k.f2_ppm, f1_ppm=k.f1_ppm, z=Z / Z.max(),
                      nucleus="27Al", larmor_MHz=130.3)
-
-    win._cofit = {"d1": (x, amp, "MAS"), "d2": (d2, "2rr")}
+    win._cofit = {"d1": (x, amp, "MAS"), "d2": (d2, "2rr"),
+                  "r1": json.loads(json.dumps(r)), "r2": json.loads(json.dumps(r)),
+                  "tie": set(win._default_tie(r))}
     win.central_stack.setCurrentWidget(win.cofit_page)
+    win._cofit_tie_rebuild(); win._cofit_rebuild_tables()
+    return x, amp, d2
+
+
+def test_cofit_two_recipes_tables_tie_and_fit(qapp, win):
+    """Co-fit page has a parameter table per dataset (two independent recipes);
+    the tie bar only offers the model's real params; untied params fit
+    independently; Preview overlays each panel; Run fits both."""
+    r = _cofit_czjzek_recipe()
+    _cofit_setup(win, r)
     assert win._cofit_active()
-    win._cofit_simulate_now()                    # live preview both panels
+    # tie bar shows only czjzek params that influence the lineshape (no Cq/eta/…)
+    tie_keys = set(win._cofit_tie.keys())
+    assert tie_keys == {"isotropic_chemical_shift_ppm", "sigma_Cq_MHz",
+                        "shift_fwhm_ppm", "line_fwhm_ppm"}
+    # two independent tables bound to r1 and r2
+    assert win.cofit_table1d._recipe is win._cofit["r1"]
+    assert win.cofit_table2d._recipe is win._cofit["r2"]
+
+    # untie δiso, then a 1D edit must NOT propagate to the 2D recipe
+    win._cofit_tie_toggled("isotropic_chemical_shift_ppm", False)
+    win._cofit["r1"]["sites"][0]["params"][
+        "isotropic_chemical_shift_ppm"]["value"] = 58.0
+    win._cofit_on_edit(1)
+    assert win._cofit["r2"]["sites"][0]["params"][
+        "isotropic_chemical_shift_ppm"]["value"] == 60.0     # decorrelated
+
+    # a TIED edit does propagate
+    win._cofit["r1"]["sites"][0]["params"]["sigma_Cq_MHz"]["value"] = 2.2
+    win._cofit_on_edit(1)
+    assert win._cofit["r2"]["sites"][0]["params"]["sigma_Cq_MHz"]["value"] == 2.2
+
+    win._cofit_simulate_now()
     assert win.cofit_view1d._model is not None
     assert win.cofit_view2d._model_sites is not None
 
-    win.run_cofit_fit()                          # joint fit
+    win.run_cofit_fit()
     assert "2D" in win.cofit_rmsd.text()
-    assert 40 < win.recipe["sites"][0]["params"][
-        "isotropic_chemical_shift_ppm"]["value"] < 80
-
     win.close_cofit()
     assert win.central_stack.currentWidget() is not win.cofit_page
 
@@ -564,7 +596,8 @@ def test_cofit_split_stays_even_with_empty_2d(qapp, win):
 
     x = np.linspace(-50, 120, 300); amp = np.exp(-0.5 * ((x - 60) / 11) ** 2) * 1e6
     win.exp_ppm, win.exp_amp = x, amp
-    win._cofit = {"d1": (x, amp, "MAS"), "d2": None}     # no 2D added yet
+    win._cofit = {"d1": (x, amp, "MAS"), "d2": None, "r1": None, "r2": None,
+                  "tie": set()}
     win.central_stack.setCurrentWidget(win.cofit_page)
     win._cofit_split_even(); win._cofit_refresh_panels()
     for _ in range(4):
@@ -574,36 +607,22 @@ def test_cofit_split_stays_even_with_empty_2d(qapp, win):
 
 
 def test_cofit_pauses_and_resumes_on_view_switch(qapp, win):
-    """Switching the central view while co-fitting (e.g. opening another dataset)
-    must leave co-fit cleanly — not a half-active bar over a normal view — and
+    """Switching the central view while co-fitting must leave co-fit cleanly and
     Decomposition ▸ Co-fit resumes it with both datasets still loaded."""
-    from larmor import twod
+    r = _cofit_czjzek_recipe()
+    _cofit_setup(win, r)
 
-    x = np.linspace(-20, 120, 200); amp = np.exp(-0.5 * ((x - 60) / 10) ** 2) * 1e6
-    win.exp_ppm, win.exp_amp = x, amp
-    win.recipe = {"nucleus": "27Al", "larmor_frequency_MHz": 130.3, "sites": [
-        {"model": "czjzek", "label": "AlIV", "params": {
-            "isotropic_chemical_shift_ppm": {"value": 60.0, "vary": True},
-            "sigma_Cq_MHz": {"value": 1.6, "vary": True},
-            "shift_fwhm_ppm": {"value": 13.0, "vary": True},
-            "amplitude": {"value": 1e6, "vary": True}}}]}
-    d2 = twod.Data2D(f2_ppm=np.linspace(-40, 110, 40),
-                     f1_ppm=np.linspace(-30, 90, 30),
-                     z=np.abs(np.random.RandomState(1).rand(30, 40)),
-                     nucleus="27Al", larmor_MHz=130.3)
-    win._cofit = {"d1": (x, amp, "MAS"), "d2": (d2, "2rr")}
-    win.central_stack.setCurrentWidget(win.cofit_page); win.cofit_bar.setVisible(True)
-
-    win.central_stack.setCurrentWidget(win.view)     # user switches away
-    assert win._cofit is None and not win.cofit_bar.isVisible()   # no zombie
+    win.central_stack.setCurrentWidget(win.view)      # user switches away
+    assert win._cofit is None                          # no zombie state
     assert win._cofit_last is not None and win._cofit_last["d2"] is not None
 
-    win.open_cofit()                                  # resume
+    win.open_cofit()                                   # resume
     assert win.central_stack.currentWidget() is win.cofit_page
     assert win._cofit["d1"] is not None and win._cofit["d2"] is not None
+    assert win._cofit.get("r1") and win._cofit.get("r2")
 
     win.close_cofit()
-    assert win._cofit_last is None                    # deliberate close forgets it
+    assert win._cofit_last is None                     # deliberate close forgets it
 
 
 def test_fit_progress_bar_ticks(qapp, win):

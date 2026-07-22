@@ -685,11 +685,7 @@ class MainWindow(QMainWindow):
         self.lines_table.structure.connect(self.on_site_structure)
         self.lines_table.compute.connect(self.request_simulation)
         self.lines_table.fit.connect(self.run_fit)
-        # the co-fit control bar sits directly above the parameter table
-        _lines_box = QWidget(); _lv = QVBoxLayout(_lines_box)
-        _lv.setContentsMargins(0, 0, 0, 0); _lv.setSpacing(2)
-        _lv.addWidget(self.cofit_bar); _lv.addWidget(self.lines_table)
-        self.lines_dock.setWidget(_lines_box)
+        self.lines_dock.setWidget(self.lines_table)
         self.addDockWidget(Qt.BottomDockWidgetArea, self.lines_dock)
 
         self.results_dock = QDockWidget("Report", self)
@@ -2220,33 +2216,75 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------- co-fit page
     def _build_cofit_page(self):
-        """A split central page (1D left, 2D right) driven by the SAME shared
-        model + bottom parameter table — the co-fit lives in the main window.
-        The co-fit control bar sits above the Fit-parameters table (built in
-        _build_cofit_bar, placed by the dock setup)."""
+        """The co-fit central page: 1D (left) and 2D (right) side by side, each
+        with its OWN parameter table under it. Parameters are per-dataset so they
+        can be decorrelated; a tie bar chooses which ones are shared in the fit."""
         from larmor.desktop.twod_view import Contour2DView
 
         page = QWidget(); v = QVBoxLayout(page); v.setContentsMargins(2, 2, 2, 2)
+        v.setSpacing(3)
+        # -- control bar --
+        ctl = QHBoxLayout()
+        ctl.addWidget(QLabel("<b>Co-fit</b>"))
+        self.btnCofitAdd = QPushButton("＋ Add / replace dataset…")
+        self.btnCofitAdd.clicked.connect(self._cofit_add_dataset)
+        self.btnCofitPrev = QPushButton("Preview")
+        self.btnCofitPrev.clicked.connect(lambda: self._cofit_simulate())
+        self.btnCofitRun = QPushButton("Run co-fit")
+        self.btnCofitRun.clicked.connect(self.run_cofit_fit)
+        self.btnCofitClose = QPushButton("Close co-fit")
+        self.btnCofitClose.clicked.connect(self.close_cofit)
+        for b in (self.btnCofitAdd, self.btnCofitPrev, self.btnCofitRun,
+                  self.btnCofitClose):
+            ctl.addWidget(b)
+        ctl.addStretch(1)
+        self.cofit_rmsd = QLabel("")
+        self.cofit_rmsd.setStyleSheet("color:#5a6871;")
+        ctl.addWidget(self.cofit_rmsd)
+        v.addLayout(ctl)
+        # -- tie bar (rebuilt from the model's actual parameters) --
+        self.cofit_tie_bar = QWidget()
+        self._cofit_tie_lay = QHBoxLayout(self.cofit_tie_bar)
+        self._cofit_tie_lay.setContentsMargins(2, 0, 2, 0)
+        self._cofit_tie = {}                         # param -> QCheckBox
+        v.addWidget(self.cofit_tie_bar)
+
+        # -- two columns: plot over its own parameter table --
         self.cofit_view1d = SpectrumView()
         self.cofit_view2d = Contour2DView()
+        self.cofit_table1d = LinesTable()
+        self.cofit_table2d = LinesTable()
+        self.cofit_table1d.setMaximumHeight(180)
+        self.cofit_table2d.setMaximumHeight(180)
+        self.cofit_table1d.edited.connect(lambda: self._cofit_on_edit(1))
+        self.cofit_table2d.edited.connect(lambda: self._cofit_on_edit(2))
+        self.cofit_table1d.constraint_edited.connect(lambda: self._cofit_on_edit(1))
+        self.cofit_table2d.constraint_edited.connect(lambda: self._cofit_on_edit(2))
+        self.cofit_table1d.structure.connect(lambda r, a: self._cofit_struct(1, r, a))
+        self.cofit_table2d.structure.connect(lambda r, a: self._cofit_struct(2, r, a))
+
+        def _col(view, table, header):
+            w = QWidget(); cv = QVBoxLayout(w); cv.setContentsMargins(0, 0, 0, 0)
+            cv.setSpacing(2)
+            cv.addWidget(view, 1)
+            cv.addWidget(QLabel(header))
+            cv.addWidget(table)
+            w.setMinimumWidth(300)
+            return w
+
         split = QSplitter(Qt.Horizontal)            # 1D | 2D, side by side
-        split.addWidget(self.cofit_view1d); split.addWidget(self.cofit_view2d)
-        # an empty 2D panel must still hold its half: never collapse, equal
-        # stretch, and a floor width so the 1D can't take the whole page
+        split.addWidget(_col(self.cofit_view1d, self.cofit_table1d,
+                             "<b>1D parameters</b>"))
+        split.addWidget(_col(self.cofit_view2d, self.cofit_table2d,
+                             "<b>2D parameters</b>"))
         split.setChildrenCollapsible(False)
         split.setStretchFactor(0, 1); split.setStretchFactor(1, 1)
-        self.cofit_view1d.setMinimumWidth(280)
-        self.cofit_view2d.setMinimumWidth(280)
         self.cofit_split = split
         v.addWidget(split, 1)
         self.cofit_page = page
         self.central_stack.addWidget(page)           # index 2
-        self._build_cofit_bar()
         self._cofit = None
         self._cofit_last = None                      # stash for quick re-entry
-        # anything that switches the central view (loading data, changing
-        # workspace, Back to 2D…) must leave co-fit mode cleanly, or the co-fit
-        # bar is left over a normal view in a half-active state
         self.central_stack.currentChanged.connect(self._on_central_changed)
         self._cofit_timer = QTimer(self); self._cofit_timer.setSingleShot(True)
         self._cofit_timer.setInterval(200)
@@ -2296,40 +2334,68 @@ class MainWindow(QMainWindow):
         self.progress.setFormat(("done" if ok else "stopped") + "  %p%")
         QTimer.singleShot(1200, lambda: self.progress.setVisible(False))
 
-    def _build_cofit_bar(self):
-        """The co-fit controls (tie + Add/Preview/Run/Close), shown above the
-        Fit-parameters table only while co-fitting."""
-        self.cofit_bar = QWidget()
-        bar = QHBoxLayout(self.cofit_bar); bar.setContentsMargins(4, 2, 4, 2)
-        bar.addWidget(QLabel("<b>Co-fit</b> · tie:"))
-        from larmor.multifit import DEFAULT_SHARE
-        self._cofit_share = {}
-        for name in DEFAULT_SHARE:
-            cb = QCheckBox(name.replace("_", " ").replace(" ppm", "")
-                           .replace(" MHz", ""))
-            cb.setChecked(True); self._cofit_share[name] = cb; bar.addWidget(cb)
-        bar.addSpacing(12)
-        self.btnCofitAdd = QPushButton("＋ Add / replace dataset…")
-        self.btnCofitAdd.clicked.connect(self._cofit_add_dataset)
-        self.btnCofitPrev = QPushButton("Preview")
-        self.btnCofitPrev.clicked.connect(lambda: self._cofit_simulate())
-        self.btnCofitRun = QPushButton("Run co-fit")
-        self.btnCofitRun.clicked.connect(self.run_cofit_fit)
-        self.btnCofitClose = QPushButton("Close co-fit")
-        self.btnCofitClose.clicked.connect(self.close_cofit)
-        for b in (self.btnCofitAdd, self.btnCofitPrev, self.btnCofitRun,
-                  self.btnCofitClose):
-            bar.addWidget(b)
-        bar.addStretch(1)
-        self.cofit_rmsd = QLabel("")
-        self.cofit_rmsd.setStyleSheet("color:#5a6871;")
-        bar.addWidget(self.cofit_rmsd)
-        self.cofit_bar.setVisible(False)
+    # short, model-aware labels for the tie bar
+    _COFIT_LABEL = {
+        "isotropic_chemical_shift_ppm": "δiso", "sigma_Cq_MHz": "σCq",
+        "shift_fwhm_ppm": "dCS", "line_fwhm_ppm": "line", "Cq_MHz": "Cq",
+        "eta": "η", "eta_q": "ηq", "eps": "eps", "zeta_ppm": "ζ",
+        "eta_cs": "ηcs", "gl": "G/L", "gauss_fwhm_ppm": "G",
+        "lorentz_fwhm_ppm": "L",
+    }
+
+    def _cofit_tieable(self) -> list:
+        """Parameters that actually influence the current model's lineshape (the
+        union of the sites' params, minus amplitude) — so the tie bar never
+        offers parameters the selected lineshape doesn't have."""
+        st = self._cofit or {}
+        seen, order = set(), []
+        for site in (st.get("r1") or {}).get("sites", []):
+            for p in site.get("params", {}):
+                if p != "amplitude" and p not in seen:
+                    seen.add(p); order.append(p)
+        return order
+
+    def _cofit_tie_rebuild(self):
+        lay = self._cofit_tie_lay
+        while lay.count():
+            w = lay.takeAt(0).widget()
+            if w is not None:
+                w.setParent(None)
+        self._cofit_tie = {}
+        lay.addWidget(QLabel("Tie 1D↔2D:"))
+        tie = (self._cofit or {}).get("tie", set())
+        for p in self._cofit_tieable():
+            cb = QCheckBox(self._COFIT_LABEL.get(p, p))
+            cb.setChecked(p in tie)
+            cb.toggled.connect(lambda on, name=p: self._cofit_tie_toggled(name, on))
+            self._cofit_tie[p] = cb; lay.addWidget(cb)
+        lay.addStretch(1)
+
+    def _cofit_tie_toggled(self, param: str, on: bool):
+        st = self._cofit
+        if not st:
+            return
+        tie = st.setdefault("tie", set())
+        if on:
+            tie.add(param)
+            self._cofit_copy_param(st["r1"], st["r2"], param)   # sync 2D <- 1D
+            self._cofit_rebuild_tables()
+        else:
+            tie.discard(param)
+        self._cofit_simulate()
+
+    @staticmethod
+    def _cofit_copy_param(src, dst, param):
+        for i, s in enumerate(src.get("sites", [])):
+            if i < len(dst.get("sites", [])) and param in s.get("params", {}) \
+                    and param in dst["sites"][i].get("params", {}):
+                dst["sites"][i]["params"][param]["value"] = \
+                    s["params"][param]["value"]
 
     def open_cofit(self):
         if not self.recipe or not self.recipe.get("sites"):
             self.statusBar().showMessage(
-                "set up the shared fit (add lines) on one dataset first")
+                "set up the fit (add lines) on one dataset first")
             return
         self._sync_active()
         prev = self._cofit_last
@@ -2337,6 +2403,10 @@ class MainWindow(QMainWindow):
             st = prev                                 # resume the paused co-fit
         else:
             st = {"d1": None, "d2": None}
+            base = json.loads(json.dumps(self.recipe))
+            st["r1"] = json.loads(json.dumps(base))   # independent per-dataset
+            st["r2"] = json.loads(json.dumps(base))   # copies of the model
+            st["tie"] = set(self._default_tie(base))
             if self.central_stack.currentWidget() is self.view2d and self._data2d:
                 st["d2"] = (self._data2d, Path(self.source_path or "2D").name)
             elif self.exp_ppm is not None and np.asarray(self.exp_ppm).size:
@@ -2344,44 +2414,91 @@ class MainWindow(QMainWindow):
                             self.recipe.get("sample") or "current")
         self._cofit = st
         self.central_stack.setCurrentWidget(self.cofit_page)
-        self.cofit_bar.setVisible(True)
-        self.lines_dock.raise_()                      # bring the shared table up
+        self._cofit_tie_rebuild()
+        self._cofit_rebuild_tables()
         self._cofit_split_even()
         self._cofit_refresh_panels()
         if st.get("d1") and st.get("d2"):
             self.statusBar().showMessage(
-                "co-fit: both datasets loaded — Preview / Run co-fit")
+                "co-fit: both datasets loaded — untie the parameters that differ, "
+                "then Preview / Run co-fit")
             self._cofit_simulate()
             return
         need = "a 2D MQMAS map" if st["d2"] is None else "a 1D MAS spectrum"
         self.statusBar().showMessage(
-            f"co-fit: shared model from the current fit — add {need} "
-            "(＋ Add dataset), then Preview / Run co-fit")
+            f"co-fit: model from the current fit — add {need} (＋ Add dataset)")
         self._cofit_add_dataset()
+
+    @staticmethod
+    def _default_tie(recipe) -> list:
+        from larmor.multifit import DEFAULT_SHARE
+        present = {p for s in recipe.get("sites", []) for p in s.get("params", {})}
+        return [p for p in DEFAULT_SHARE if p in present]
 
     def _on_central_changed(self, *_):
         """Leaving the co-fit page (loading data, switching workspace, …) exits
-        co-fit mode. The datasets are stashed so Decomposition ▸ Co-fit puts you
-        straight back without re-picking the files."""
+        co-fit mode. The datasets are stashed so Decomposition ▸ Co-fit resumes
+        without re-picking the files."""
         if getattr(self, "_cofit", None) is None:
             return
         if self.central_stack.currentWidget() is self.cofit_page:
             return
         self._cofit_last = self._cofit
         self._cofit = None
-        self.cofit_bar.setVisible(False)
         self.statusBar().showMessage(
             "co-fit paused (another dataset is showing) — Decomposition ▸ "
             "Co-fit datasets returns to it with both datasets still loaded")
 
     def _cofit_split_even(self):
-        """Give the 1D and 2D panels half the page each. Qt ignores setSizes on a
-        splitter that has not been laid out yet, so do it once the page is up."""
+        """Give the 1D and 2D columns half the page each. Qt ignores setSizes on
+        a splitter not yet laid out, so re-apply on the next event-loop pass."""
         def apply():
             w = self.cofit_split.width() or self.cofit_page.width() or 1000
             self.cofit_split.setSizes([w // 2, w - w // 2])
         apply()
-        QTimer.singleShot(0, apply)                   # again after the layout pass
+        QTimer.singleShot(0, apply)
+
+    def _cofit_rebuild_tables(self):
+        st = self._cofit or {}
+        if st.get("r1"):
+            self.cofit_table1d.rebuild(st["r1"], self.hidden)
+        if st.get("r2"):
+            self.cofit_table2d.rebuild(st["r2"], self.hidden)
+
+    def _cofit_on_edit(self, which: int):
+        """A value/constraint changed in one table. Push every TIED parameter to
+        the other recipe (last edit wins for tied params) and re-simulate."""
+        st = self._cofit
+        if not st:
+            return
+        src, dst = (st["r1"], st["r2"]) if which == 1 else (st["r2"], st["r1"])
+        for p in st.get("tie", set()):
+            self._cofit_copy_param(src, dst, p)
+        other = self.cofit_table2d if which == 1 else self.cofit_table1d
+        other.rebuild(dst, self.hidden)
+        self._cofit_simulate()
+
+    def _cofit_struct(self, which: int, row: int, action: str):
+        """Structure edits (remove/duplicate/visibility) keep BOTH recipes
+        identical — co-fit needs the same sites/models in each."""
+        st = self._cofit
+        if not st:
+            return
+        if action == "visibility":
+            (self.hidden.discard(row) if row in self.hidden
+             else self.hidden.add(row))
+        else:
+            for r in (st["r1"], st["r2"]):
+                sites = r.get("sites", [])
+                if action == "remove" and row < len(sites):
+                    sites.pop(row)
+                elif action == "duplicate" and row < len(sites):
+                    copy = json.loads(json.dumps(sites[row]))
+                    copy["label"] = (copy.get("label") or "line") + "-copy"
+                    sites.append(copy)
+            self.hidden.clear()
+        self._cofit_rebuild_tables()
+        self._cofit_simulate()
 
     def _cofit_add_dataset(self):
         if self._cofit is None:
@@ -2436,27 +2553,28 @@ class MainWindow(QMainWindow):
             self._cofit_timer.start()
 
     def _cofit_simulate_now(self):
-        """Live overlay of the shared model on both co-fit panels (no fit)."""
+        """Live overlay of EACH dataset's own model on its panel (no fit)."""
         st = self._cofit
-        if not st or not self.recipe or not self.recipe.get("sites"):
+        if not st:
             return
-        labels = [s.get("label") or s["model"] for s in self.recipe["sites"]]
-        if st.get("d1"):
+        if st.get("d1") and st.get("r1", {}).get("sites"):
             from larmor import engine
             ppm, amp, _ = st["d1"]
-            rec = Recipe.from_dict(json.loads(json.dumps(self.recipe)))
+            r1 = st["r1"]
+            labels = [s.get("label") or s["model"] for s in r1["sites"]]
+            rec = Recipe.from_dict(json.loads(json.dumps(r1)))
             try:
                 x, total, per = engine.simulate(rec, exp_ppm=ppm)
                 self.cofit_view1d.set_model(x, total, per, labels, self.hidden,
                                             ppm, amp)
             except Exception as exc:
                 self.statusBar().showMessage(f"co-fit 1D sim: {exc}")
-        if st.get("d2"):
-            self._cofit_sim_2d(st["d2"][0])
+        if st.get("d2") and st.get("r2", {}).get("sites"):
+            self._cofit_sim_2d(st["d2"][0], st["r2"])
 
-    def _cofit_sim_2d(self, d2):
+    def _cofit_sim_2d(self, d2, recipe_dict):
         from larmor import twod
-        rec = Recipe.from_dict(json.loads(json.dumps(self.recipe)))
+        rec = Recipe.from_dict(json.loads(json.dumps(recipe_dict)))
         d = d2.normalized()
         kernel = twod._kernel_for(rec, d)
         total, per = twod.simulate_2d(rec, kernel)
@@ -2474,7 +2592,6 @@ class MainWindow(QMainWindow):
                 if cc > best[0]:
                     best = (cc, float(b))
             rec.mqmas_f1_ref_ppm = best[1]
-        # respect show/hide: zero hidden sites (keeps site-index colours)
         per_disp = [p if i not in self.hidden else np.zeros_like(p)
                     for i, p in enumerate(per)]
         self.cofit_view2d.set_model(np.sum(per_disp, axis=0), kernel.f2_ppm,
@@ -2489,15 +2606,15 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("co-fit needs both a 1D and a 2D dataset")
             return
         self.snapshot()
-        share = tuple(n for n, cb in self._cofit_share.items() if cb.isChecked())
-        entries = []
-        for spec in ((st["d1"][0], st["d1"][1]), st["d2"][0]):
-            r = Recipe.from_dict(json.loads(json.dumps(self.recipe)))
-            entries.append((r, spec))
+        share = tuple(sorted(st.get("tie", set())))
+        entries = [(Recipe.from_dict(json.loads(json.dumps(st["r1"]))),
+                    (st["d1"][0], st["d1"][1])),
+                   (Recipe.from_dict(json.loads(json.dumps(st["r2"]))),
+                    st["d2"][0])]
         self.btnCofitRun.setEnabled(False)
         self._progress_start("co-fit (building MQMAS kernel…)")
 
-        def _cb(params, it, resid, *a, **k):     # runs on this thread
+        def _cb(params, it, resid, *a, **k):
             self._prog_label = "co-fit"
             try:
                 rms = float(np.sqrt(np.mean(np.asarray(resid, float) ** 2)))
@@ -2514,23 +2631,33 @@ class MainWindow(QMainWindow):
             return
         self._progress_end(True)
         self.btnCofitRun.setEnabled(True)
-        self.recipe = result.recipes[0].to_dict()
-        self.lines_table.rebuild(self.recipe, self.hidden)
-        self._update_paddles()
+        st["r1"] = result.recipes[0].to_dict()
+        st["r2"] = result.recipes[1].to_dict()
+        self._cofit_rebuild_tables()
         self._cofit_simulate_now()
         self.cofit_rmsd.setText(
             "RMSD  " + " · ".join(f"{k} {r:.4f}" for k, r in
                                   zip(("1D", "2D"), result.rmsd)))
-        self.statusBar().showMessage("co-fit done — shared parameters updated")
+        self.statusBar().showMessage(
+            "co-fit done — tied parameters shared, untied ones fit independently")
+
+    def _cofit_apply_to_main(self):
+        """Adopt the 1D recipe as the main fit when closing (so the workbench
+        keeps the shared model)."""
+        st = self._cofit or self._cofit_last
+        if st and st.get("r1", {}).get("sites"):
+            self.recipe = json.loads(json.dumps(st["r1"]))
 
     def close_cofit(self):
+        self._cofit_apply_to_main()
         self._cofit = None
         self._cofit_last = None                # deliberate close: do not resume
-        self.cofit_bar.setVisible(False)
         back = self.view2d if (self._data2d is not None
                                and getattr(self, "_data2d_fittable", False)) \
             else self.view
         self.central_stack.setCurrentWidget(back)
+        if self.recipe and self.recipe.get("sites"):
+            self.lines_table.rebuild(self.recipe, self.hidden)
         self.statusBar().showMessage("co-fit closed")
 
     def open_per_site_relaxation(self):
