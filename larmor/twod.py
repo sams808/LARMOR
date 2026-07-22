@@ -414,14 +414,47 @@ def simulate_site_2d(site, kernel: Kernel2D) -> np.ndarray:
                          "(2D supports czjzek, ext_czjzek, quad_ct, quad_csa)")
 
     z = np.tensordot(w, kernel.K, axes=(0, 0))          # (n1, n2)
-    # isotropic shift moves BOTH dimensions: F2 directly, F1 through the
-    # isotropic axis convention (mrsimulator already scaled F1)
     pos = v["isotropic_chemical_shift_ppm"]
-    z = _shift_2d(z, kernel.f2_ppm, kernel.f1_ppm, pos)
-    z = _broaden_2d(z, kernel.f1_ppm, kernel.f2_ppm,
-                    v.get("shift_fwhm_ppm", 1.0), v.get("shift_fwhm_ppm", 1.0))
+    if model in ("czjzek", "ext_czjzek"):
+        # Glass: the isotropic-shift *distribution* (dmfit's dCS) spreads the
+        # peak along the diagonal -- a change in delta_iso moves F2 and F1
+        # together -- while the round point broadening (dmfit's wid) is
+        # isotropic.  Modelling them separately is what lets a Czjzek MQMAS
+        # peak elongate along the CS axis the way dmfit does.
+        z = _shift_smear_2d(z, kernel.f2_ppm, kernel.f1_ppm, pos,
+                            v.get("shift_fwhm_ppm", 0.0))
+        line = v.get("line_fwhm_ppm", 0.0)
+        if line > 0.05:
+            z = _broaden_2d(z, kernel.f1_ppm, kernel.f2_ppm, line, line)
+    else:
+        # isotropic shift moves BOTH dimensions: F2 directly, F1 through the
+        # isotropic axis convention (mrsimulator already scaled F1)
+        z = _shift_2d(z, kernel.f2_ppm, kernel.f1_ppm, pos)
+        fw = v.get("shift_fwhm_ppm", 1.0)
+        z = _broaden_2d(z, kernel.f1_ppm, kernel.f2_ppm, fw, fw)
     peak = z.max()
     return v["amplitude"] * (z / peak) if peak > 0 else z
+
+
+def _shift_smear_2d(z: np.ndarray, f2: np.ndarray, f1: np.ndarray,
+                    pos_ppm: float, cs_fwhm_ppm: float) -> np.ndarray:
+    """Shift to pos_ppm and, if cs_fwhm_ppm > 0, smear along the delta_iso
+    (diagonal) direction by a Gaussian chemical-shift distribution.
+
+    A distribution of isotropic shifts moves F2 and F1 by the *same* amount, so
+    the smear is a directional (1,1) blur -- the along-diagonal elongation seen
+    for disordered/glassy sites -- as opposed to the round point broadening.
+    """
+    if cs_fwhm_ppm <= 0.1:
+        return _shift_2d(z, f2, f1, pos_ppm)
+    sigma = cs_fwhm_ppm / (2.0 * np.sqrt(2.0 * np.log(2.0)))
+    offs = np.linspace(-2.0 * sigma, 2.0 * sigma, 5)
+    w = np.exp(-0.5 * (offs / sigma) ** 2)
+    w /= w.sum()
+    out = np.zeros_like(z)
+    for o, wi in zip(offs, w):
+        out += wi * _shift_2d(z, f2, f1, pos_ppm + float(o))
+    return out
 
 
 def _shift_2d(z: np.ndarray, f2: np.ndarray, f1: np.ndarray,

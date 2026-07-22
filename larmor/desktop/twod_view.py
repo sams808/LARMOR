@@ -32,6 +32,8 @@ class Contour2DView(QWidget):
     add_requested = Signal(float, float)
     #: ask the app to load a 1D spectrum to overlay on a projection ("f2"/"f1")
     load_1d_for_projection = Signal(str)
+    #: easy 1D-on-2D overlay: (axis "f2"/"f1", source "current"/"file")
+    overlay_1d_request = Signal(str, str)
 
     def __init__(self):
         super().__init__()
@@ -94,6 +96,24 @@ class Contour2DView(QWidget):
         self.btnMeasure.setToolTip("two draggable markers: ΔF2 / ΔF1 in ppm and Hz")
         self.btnMeasure.toggled.connect(self._toggle_measure)
         bar.addWidget(self.btnMeasure)
+        self.btnOverlay = QToolButton(); self.btnOverlay.setText("Overlay 1D ▾")
+        self.btnOverlay.setPopupMode(QToolButton.InstantPopup)
+        self.btnOverlay.setToolTip("superpose a 1D spectrum on the F2 (direct) "
+                                   "or F1 (indirect) projection for comparison")
+        ovl = QMenu(self.btnOverlay)
+        ovl.addAction("Current 1D → F2 (direct)",
+                      lambda: self.overlay_1d_request.emit("f2", "current"))
+        ovl.addAction("Current 1D → F1 (indirect)",
+                      lambda: self.overlay_1d_request.emit("f1", "current"))
+        ovl.addSeparator()
+        ovl.addAction("From file → F2 (direct)…",
+                      lambda: self.overlay_1d_request.emit("f2", "file"))
+        ovl.addAction("From file → F1 (indirect)…",
+                      lambda: self.overlay_1d_request.emit("f1", "file"))
+        ovl.addSeparator()
+        ovl.addAction("Clear 1D overlays", self.clear_projection_1d)
+        self.btnOverlay.setMenu(ovl)
+        bar.addWidget(self.btnOverlay)
         self.btnHmqc = QPushButton("HMQC")
         self.btnHmqc.setCheckable(True)
         self.btnHmqc.setToolTip("overlay 1D spectra on the projections and "
@@ -107,6 +127,14 @@ class Contour2DView(QWidget):
         ops.addAction("Reverse F2", lambda: self._op("rev_f2"))
         ops.addAction("Reverse F1", lambda: self._op("rev_f1"))
         ops.addAction("Symmetrize (diagonal)", lambda: self._op("symmetrize"))
+        ops.addSeparator()
+        # view-only axis direction (data untouched) — match dmfit/TopSpin/figures
+        self.actFlipF2 = ops.addAction("Flip F2 axis (view)")
+        self.actFlipF2.setCheckable(True); self.actFlipF2.setChecked(True)
+        self.actFlipF2.toggled.connect(lambda on: self.toggle_axis_flip("f2", on))
+        self.actFlipF1 = ops.addAction("Flip F1 axis (view)")
+        self.actFlipF1.setCheckable(True); self.actFlipF1.setChecked(False)
+        self.actFlipF1.toggled.connect(lambda on: self.toggle_axis_flip("f1", on))
         ops.addSeparator()
         ops.addAction("Diagonal → fit", lambda: self._op("diagonal"))
         ops.addAction("F2 skyline → fit", lambda: self._emit_projection("skyline"))
@@ -216,12 +244,12 @@ class Contour2DView(QWidget):
         self.p_left.setMaximumWidth(80); self.p_left.hideAxis("left")
         self.p_main.setLabel("bottom", "F2 (ppm)")
         self.p_main.setLabel("right", "F1")
-        self.p_main.getViewBox().invertX(True)
-        self.p_main.getViewBox().invertY(True)
-        # the projections must share the main plot's inversion, else they mirror
-        # and pan the opposite way to the contour
-        self.p_top.getViewBox().invertX(True)
-        self.p_left.getViewBox().invertY(True)
+        # Standard NMR/dmfit convention: chemical shift decreases left-to-right
+        # (F2 high-ppm LEFT) and top-to-bottom (F1 high-ppm TOP).  So F2 is
+        # display-inverted, F1 is NOT.  Both are user-flippable to match any
+        # other software (see "Flip F2/F1 axis" in the 2D ops menu).
+        self._flip = {"f2": True, "f1": False}
+        self._apply_axis_dirs()
         self.p_top.setXLink(self.p_main)
         self.p_left.setYLink(self.p_main)
         self.p_main.scene().sigMouseClicked.connect(self._on_click)
@@ -596,6 +624,28 @@ class Contour2DView(QWidget):
         self.hmqcScale.blockSignals(False)
         if not self.btnHmqc.isChecked():
             self.btnHmqc.setChecked(True)
+        self._redraw()
+
+    def _apply_axis_dirs(self):
+        """Push the F2/F1 display directions onto the contour and both
+        projections so they never mirror or pan against each other."""
+        fx, fy = self._flip["f2"], self._flip["f1"]
+        self.p_main.getViewBox().invertX(fx)
+        self.p_main.getViewBox().invertY(fy)
+        self.p_top.getViewBox().invertX(fx)      # F2 projection shares F2
+        self.p_left.getViewBox().invertY(fy)     # F1 projection shares F1
+
+    def toggle_axis_flip(self, axis: str, on: bool):
+        """View-only flip of the F2 or F1 axis direction (to match dmfit,
+        TopSpin, a paper figure, …). Does not touch the data."""
+        self._flip[axis] = bool(on)
+        self._apply_axis_dirs()
+
+    def clear_projection_1d(self, axis: str | None = None):
+        """Remove one (or all) superposed 1D overlays."""
+        for a in (("f2", "f1") if axis is None else (axis,)):
+            self._hmqc[a] = None
+            self._hmqc_scale[a] = 1.0
         self._redraw()
 
     def _proj(self, axis: str):

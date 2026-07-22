@@ -106,6 +106,65 @@ def test_wider_czjzek_broadens_the_2d_footprint():
     assert area(4.0) > area(1.0)
 
 
+def _f2f1_correlation(z, k):
+    """Intensity-weighted Pearson correlation between the F2 and F1 axes."""
+    F2, F1 = np.meshgrid(k.f2_ppm, k.f1_ppm)      # z is (n1, n2)
+    p = z / z.sum()
+    m2 = (p * F2).sum(); m1 = (p * F1).sum()
+    v2 = (p * (F2 - m2) ** 2).sum(); v1 = (p * (F1 - m1) ** 2).sum()
+    cov = (p * (F2 - m2) * (F1 - m1)).sum()
+    return cov / np.sqrt(v2 * v1)
+
+
+@pytest.mark.slow
+def test_dCS_distribution_elongates_the_peak_along_the_diagonal():
+    """dmfit's dCS: a distribution of isotropic shifts moves F2 and F1 together,
+    so growing it must raise the F2-F1 correlation toward the +1 diagonal."""
+    k = _small_kernel()
+
+    def corr(dcs):
+        r = _czjzek_recipe(sigma=1.0, pos=50.0)
+        r.sites[0].params["shift_fwhm_ppm"].value = dcs
+        z, _ = twod.simulate_2d(r, k)
+        return _f2f1_correlation(z, k)
+
+    assert corr(25.0) > corr(3.0) + 0.1
+    assert corr(25.0) > 0.6                       # strongly diagonal
+
+
+@pytest.mark.slow
+def test_line_broadening_is_round_not_diagonal():
+    """The round point broadening (dmfit wid) must NOT elongate along the
+    diagonal the way the CS distribution does -- that is the whole reason they
+    are separate parameters."""
+    k = _small_kernel()
+
+    def corr_with(dcs, line):
+        r = _czjzek_recipe(sigma=1.0, pos=50.0)
+        r.sites[0].params["shift_fwhm_ppm"].value = dcs
+        r.sites[0].params["line_fwhm_ppm"] = Param(line, min=0.0)
+        z, _ = twod.simulate_2d(r, k)
+        return _f2f1_correlation(z, k)
+
+    # same tiny CS distribution; adding round broadening barely moves the
+    # correlation, while the CS distribution drives it strongly positive
+    round_corr = corr_with(2.0, 20.0)
+    diag_corr = corr_with(20.0, 0.0)
+    assert diag_corr > round_corr + 0.2
+
+
+def test_czjzek_1d_line_broadening_adds_in_quadrature():
+    """1D: dCS and the round line width both blur the single MAS dimension, so
+    they combine in quadrature -- and line=0 reproduces the legacy width."""
+    from larmor.models.quadrupolar import _czjzek_fwhm
+
+    assert _czjzek_fwhm({"shift_fwhm_ppm": 10.0}) == pytest.approx(10.0)
+    assert _czjzek_fwhm({"shift_fwhm_ppm": 10.0, "line_fwhm_ppm": 0.0}) == \
+        pytest.approx(10.0)
+    assert _czjzek_fwhm({"shift_fwhm_ppm": 8.0, "line_fwhm_ppm": 6.0}) == \
+        pytest.approx(10.0)
+
+
 @pytest.mark.slow
 def test_amplitude_scales_linearly():
     k = _small_kernel()

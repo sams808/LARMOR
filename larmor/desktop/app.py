@@ -15,6 +15,7 @@ Structure (mirroring dmfit's decomposition interface):
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -253,6 +254,7 @@ class MainWindow(QMainWindow):
         self._fit2d_worker = None
         self.view2d.add_requested.connect(self.add_site_2d)
         self.view2d.load_1d_for_projection.connect(self.load_projection_1d)
+        self.view2d.overlay_1d_request.connect(self.overlay_1d_on_2d)
         # workspace manager (TopSpin-style: open a 2D / extract a trace -> a new
         # workspace you can switch between, close, or save)
         self.workspaces: list[dict] = []
@@ -1275,6 +1277,36 @@ class MainWindow(QMainWindow):
     #: colour assigned to each HMQC projection axis (matches the overlay + the
     #: Explorer highlight)
     PROJ_COLOR = {"f2": "#e8832a", "f1": "#6a4fb0"}
+
+    def overlay_1d_on_2d(self, axis: str, source: str):
+        """Superpose a 1D spectrum on the F2 (direct) or F1 (indirect) projection
+        of the 2D map — the easy path: the current 1D or a file, no Explorer."""
+        if source == "current":
+            if self.exp_ppm is None or not np.asarray(self.exp_ppm).size:
+                self.statusBar().showMessage(
+                    "no current 1D spectrum — open one first, or use "
+                    "Overlay 1D ▸ From file…")
+                return
+            ppm, amp = np.asarray(self.exp_ppm), np.asarray(self.exp_amp)
+        else:                                    # from a file
+            path, _ = QFileDialog.getOpenFileName(
+                self, f"1D spectrum to overlay on {axis.upper()}", "",
+                "Spectra (*.fxmla *.json 1r *.txt *.csv);;All files (*)")
+            if not path:
+                path = QFileDialog.getExistingDirectory(
+                    self, "…or a 1D EXPNO/pdata folder")
+            if not path:
+                return
+            try:
+                ppm, amp = self._read_1d(path)
+            except Exception as exc:
+                QMessageBox.warning(self, "Overlay 1D", f"cannot read: {exc}")
+                return
+        self.view2d.set_projection_1d(axis, ppm, amp,
+                                      color=self.PROJ_COLOR[axis])
+        self.statusBar().showMessage(
+            f"1D superposed on the {axis.upper()} projection — tune 'scale' / "
+            "'fit scale' in the overlay bar")
 
     def load_projection_1d(self, axis: str):
         """HMQC: arm a pick — the next spectrum clicked in the Explorer (or via
@@ -2304,6 +2336,10 @@ class MainWindow(QMainWindow):
         s.setValue("session/recipe", json.dumps(self.recipe or {}))
 
     def _restore_session(self):
+        # tests (and clean-room launches) opt out so they never inherit a
+        # developer's real saved recipe from QSettings
+        if os.environ.get("LARMOR_NO_SESSION"):
+            return
         s = QSettings("LARMOR", "app")
         src = s.value("session/source", "")
         if not src or not Path(src).exists():

@@ -22,7 +22,8 @@ def qapp():
 
 
 @pytest.fixture()
-def win(qapp):
+def win(qapp, monkeypatch):
+    monkeypatch.setenv("LARMOR_NO_SESSION", "1")  # never inherit a real session
     from larmor.desktop.app import MainWindow
 
     w = MainWindow()
@@ -329,3 +330,99 @@ def test_add_site_and_paddles(qapp, win):
 
     # the fit-parameters table shows one row per line
     assert win.lines_table.table.rowCount() == n + 1
+
+
+def test_cofit_dialog_plots_both_datasets(qapp):
+    """The co-fit dialog draws one plot per dataset: a 1D exp-vs-fit overlay and
+    a 2D experiment/model contour overlay (not just the text report)."""
+    from types import SimpleNamespace
+
+    import pyqtgraph as pg
+
+    from larmor import twod
+    from larmor.desktop.cofit_dialog import CofitDialog
+    from larmor.recipe import Recipe
+
+    x = np.linspace(-50, 120, 400)
+    amp = np.exp(-0.5 * ((x - 60) / 8) ** 2)
+    base = {"kind": "1d", "label": "MAS", "ppm": x, "amp": amp,
+            "nucleus": "27Al", "larmor": 195.5}
+    f2 = np.linspace(-40, 110, 60); f1 = np.linspace(-30, 90, 50)
+    Z = np.exp(-0.5 * (((f2[None, :] - 55) / 12) ** 2
+                       + ((f1[:, None] - 60) / 10) ** 2))
+    d2 = twod.Data2D(f2_ppm=f2, f1_ppm=f1, z=Z, nucleus="27Al", larmor_MHz=195.5)
+    d2ds = {"kind": "2d", "label": "MQMAS", "data2d": d2,
+            "nucleus": "27Al", "larmor": 195.5}
+
+    recipe = {"nucleus": "27Al", "larmor_frequency_MHz": 195.5, "sites": [
+        {"model": "czjzek", "label": "AlIV", "params": {
+            "isotropic_chemical_shift_ppm": {"value": 60.0, "vary": True,
+                                             "min": 0, "max": 120},
+            "sigma_Cq_MHz": {"value": 2.0, "vary": True, "min": 0.2, "max": 8},
+            "shift_fwhm_ppm": {"value": 12.0, "vary": True, "min": 1, "max": 30},
+            "line_fwhm_ppm": {"value": 4.0, "vary": True, "min": 0},
+            "amplitude": {"value": 1.0, "vary": True, "min": 0}}}]}
+
+    dlg = CofitDialog(None, recipe, base)
+    dlg.datasets = [base, d2ds]
+    dlg._result = SimpleNamespace(
+        recipes=[Recipe.from_dict(recipe)], rmsd=[0.031, 0.048],
+        per_dataset=[{"kind": "1d", "x": x, "y_fit": 1.05 * amp},
+                     {"kind": "2d", "f2": f2, "f1": f1, "z_fit": Z * 0.98,
+                      "per_site": [Z * 0.98]}])
+    dlg._plot_result()
+    n_plots = sum(1 for i in range(dlg._plot_v.count())
+                  if isinstance(dlg._plot_v.itemAt(i).widget(), pg.PlotWidget))
+    assert n_plots == 2
+    dlg.close()
+
+
+def test_overlay_1d_on_2d_superposition(qapp, win):
+    """Overlay 1D ▸ Current 1D → F2/F1 superposes the current spectrum on the
+    map's projection; Clear removes it."""
+    from larmor import twod
+
+    f2 = np.linspace(-40, 110, 60); f1 = np.linspace(-30, 90, 50)
+    Z = np.exp(-0.5 * (((f2[None, :] - 55) / 12) ** 2
+                       + ((f1[:, None] - 60) / 10) ** 2))
+    d2 = twod.Data2D(f2_ppm=f2, f1_ppm=f1, z=Z, nucleus="27Al", larmor_MHz=195.5)
+    win._show_2d(d2, "MQMAS", "2D"); qapp.processEvents()
+
+    x = np.linspace(-50, 120, 400); amp = np.exp(-0.5 * ((x - 55) / 9) ** 2)
+    win.exp_ppm, win.exp_amp = x, amp
+    win.overlay_1d_on_2d("f2", "current")
+    assert win.view2d._hmqc["f2"] is not None
+    win.overlay_1d_on_2d("f1", "current")
+    assert win.view2d._hmqc["f1"] is not None
+    win.view2d.clear_projection_1d()
+    assert win.view2d._hmqc["f2"] is None and win.view2d._hmqc["f1"] is None
+
+    # no current 1D → no crash, nothing overlaid
+    win.exp_ppm, win.exp_amp = np.array([]), np.array([])
+    win.overlay_1d_on_2d("f2", "current")
+    assert win.view2d._hmqc["f2"] is None
+
+
+def test_twod_axis_orientation_defaults_and_flip(qapp):
+    """The 2D map defaults to the standard NMR/dmfit convention: F2 high-ppm
+    LEFT (invertX) and F1 high-ppm TOP (NOT invertY). Both are user-flippable
+    (view only) and the projections follow the contour."""
+    from larmor.desktop.twod_view import Contour2DView
+
+    dv = Contour2DView()
+    assert dv._flip == {"f2": True, "f1": False}
+    vb = dv.p_main.getViewBox()
+    assert vb.xInverted() is True and vb.yInverted() is False
+    # projections share the contour's directions
+    assert dv.p_top.getViewBox().xInverted() is True
+    assert dv.p_left.getViewBox().yInverted() is False
+    # menu checkmarks match the state
+    assert dv.actFlipF2.isChecked() and not dv.actFlipF1.isChecked()
+
+    # flipping F1 inverts the contour AND its projection together
+    dv.toggle_axis_flip("f1", True)
+    assert dv.p_main.getViewBox().yInverted() is True
+    assert dv.p_left.getViewBox().yInverted() is True
+    dv.toggle_axis_flip("f1", False)
+    assert dv.p_main.getViewBox().yInverted() is False
+    dv.deleteLater()

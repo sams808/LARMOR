@@ -24,6 +24,16 @@ def _broaden_shift(x: np.ndarray, y: np.ndarray, pos_ppm: float,
     return y
 
 
+def _czjzek_fwhm(v: dict) -> float:
+    """Total 1D Gaussian broadening: the isotropic-shift distribution (dmfit's
+    dCS) and the round point broadening (dmfit's wid) both blur the single MAS
+    dimension, so they add in quadrature.  In 2D they differ (diagonal vs
+    round) -- see larmor.twod.simulate_site_2d."""
+    cs = float(v.get("shift_fwhm_ppm", 0.0))
+    line = float(v.get("line_fwhm_ppm", 0.0))
+    return float(np.hypot(cs, line)) if line > 0.0 else cs
+
+
 # --------------------------------------------------------------------------
 # Czjzek distribution (kernel-reweighting; kernel built once in larmor.engine)
 
@@ -33,7 +43,7 @@ def _render_czjzek(v: dict, ctx: SimContext) -> np.ndarray:
     kernel = engine.build_kernel(ctx.nucleus, ctx.larmor_MHz, ctx.spin_rate_Hz)
     y = kernel.weights(v["sigma_Cq_MHz"]) @ kernel.K
     y = _broaden_shift(kernel.x_ppm, y, v["isotropic_chemical_shift_ppm"],
-                       v["shift_fwhm_ppm"])
+                       _czjzek_fwhm(v))
     peak = y.max()
     y = v["amplitude"] * (y / peak) if peak > 0 else y
     if kernel.x_ppm.shape == ctx.x_ppm.shape and \
@@ -53,8 +63,12 @@ register(Model(
                  "isotropic chemical shift"),
         ParamDef("sigma_Cq_MHz", "sigma", 2.0, "MHz",
                  "Czjzek width parameter (mode of |Cq| = 2 sigma)", min=0.05),
-        ParamDef("shift_fwhm_ppm", "fwhm", 10.0, "ppm",
-                 "isotropic shift distribution width", min=0.1),
+        ParamDef("shift_fwhm_ppm", "dCS", 10.0, "ppm",
+                 "isotropic-shift distribution FWHM (dmfit dCS; diagonal in 2D)",
+                 min=0.1),
+        ParamDef("line_fwhm_ppm", "line", 0.0, "ppm",
+                 "round point/line broadening (dmfit wid; isotropic in 2D)",
+                 min=0.0),
         ParamDef("amplitude", "amp", 1.0, "", "peak height", min=0.0),
     ),
     render=_render_czjzek,
@@ -81,7 +95,7 @@ def _render_ext_czjzek(v: dict, ctx: SimContext) -> np.ndarray:
         w = w / s
     y = w @ kernel.K
     y = _broaden_shift(kernel.x_ppm, y, v["isotropic_chemical_shift_ppm"],
-                       v["shift_fwhm_ppm"])
+                       _czjzek_fwhm(v))
     peak = y.max()
     y = v["amplitude"] * (y / peak) if peak > 0 else y
     if kernel.x_ppm.shape == ctx.x_ppm.shape and \
@@ -104,8 +118,12 @@ register(Model(
         ParamDef("eta", "eta", 0.2, "", "dominant asymmetry", min=0.0, max=1.0),
         ParamDef("eps", "eps", 0.3, "", "perturbation fraction",
                  min=0.01, max=3.0),
-        ParamDef("shift_fwhm_ppm", "fwhm", 5.0, "ppm",
-                 "isotropic shift distribution width", min=0.1),
+        ParamDef("shift_fwhm_ppm", "dCS", 5.0, "ppm",
+                 "isotropic-shift distribution FWHM (dmfit dCS; diagonal in 2D)",
+                 min=0.1),
+        ParamDef("line_fwhm_ppm", "line", 0.0, "ppm",
+                 "round point/line broadening (dmfit wid; isotropic in 2D)",
+                 min=0.0),
         ParamDef("amplitude", "amp", 1.0, "", "peak height", min=0.0),
     ),
     render=_render_ext_czjzek,

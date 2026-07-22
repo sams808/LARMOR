@@ -11,14 +11,38 @@ import json
 from pathlib import Path
 
 import numpy as np
-from PySide6.QtCore import Signal
+import pyqtgraph as pg
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox, QDialog, QFileDialog, QHBoxLayout, QLabel, QMessageBox,
-    QPlainTextEdit, QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout,
-    QWidget,
+    QPlainTextEdit, QPushButton, QScrollArea, QSplitter, QTableWidget,
+    QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from larmor.multifit import DEFAULT_SHARE
+
+
+def _add_contours(pw, z, f2, f1, color, style, n_levels=7, name=""):
+    """Draw log-spaced positive contours of z(f1, f2) into a PlotWidget, mapping
+    array indices to ppm coordinates (same approach as the main 2D view)."""
+    z = np.asarray(z, float)
+    # decimate so marching-squares stays cheap on fine grids
+    s2 = max(1, -(-z.shape[1] // 512)); s1 = max(1, -(-z.shape[0] // 512))
+    zc, f2c, f1c = z[::s1, ::s2], np.asarray(f2)[::s2], np.asarray(f1)[::s1]
+    top = float(np.nanmax(zc)) if zc.size else 0.0
+    if top <= 0 or f2c.size < 2 or f1c.size < 2:
+        return
+    levels = np.logspace(np.log10(0.06 * top), np.log10(top), n_levels)
+    tr = pg.QtGui.QTransform()
+    tr.translate(f2c[0], f1c[0])
+    tr.scale((f2c[-1] - f2c[0]) / max(zc.shape[1] - 1, 1),
+             (f1c[-1] - f1c[0]) / max(zc.shape[0] - 1, 1))
+    zt = np.ascontiguousarray(zc.T)
+    for lvl in levels:
+        iso = pg.IsocurveItem(data=zt, level=lvl,
+                              pen=pg.mkPen(color, width=1, style=style))
+        iso.setTransform(tr)
+        pw.addItem(iso)
 
 
 class CofitDialog(QDialog):
@@ -27,12 +51,15 @@ class CofitDialog(QDialog):
     def __init__(self, parent, base_recipe: dict, base_dataset: dict):
         super().__init__(parent)
         self.setWindowTitle("Co-fit datasets (shared model)")
-        self.resize(760, 560)
+        self.resize(1140, 620)
         self.base_recipe = base_recipe
         self.datasets: list[dict] = [base_dataset]   # each: kind, label, ...
         self._result = None
 
-        v = QVBoxLayout(self)
+        outer = QHBoxLayout(self)
+        split = QSplitter(Qt.Horizontal)
+        outer.addWidget(split)
+        left = QWidget(); v = QVBoxLayout(left); v.setContentsMargins(0, 0, 0, 0)
         n = len(base_recipe.get("sites", []))
         v.addWidget(QLabel(
             f"Shared model: <b>{n} site(s)</b> from the current fit. Add the "
@@ -79,6 +106,23 @@ class CofitDialog(QDialog):
         self.report = QPlainTextEdit(); self.report.setReadOnly(True)
         self.report.setStyleSheet("font-family: Consolas, monospace; font-size: 11px;")
         v.addWidget(self.report, 1)
+
+        # right: a live plot per dataset (experiment vs shared-model fit)
+        self.plot_host = QWidget()
+        self._plot_v = QVBoxLayout(self.plot_host)
+        self._plot_v.setContentsMargins(4, 4, 4, 4)
+        self._plot_hint = QLabel("Run the co-fit to see every dataset overlaid "
+                                 "with the shared model.")
+        self._plot_hint.setWordWrap(True); self._plot_hint.setAlignment(Qt.AlignCenter)
+        self._plot_v.addWidget(self._plot_hint)
+        self._plot_v.addStretch(1)
+        scroll = QScrollArea(); scroll.setWidgetResizable(True)
+        scroll.setWidget(self.plot_host)
+
+        split.addWidget(left)
+        split.addWidget(scroll)
+        split.setStretchFactor(0, 0); split.setStretchFactor(1, 1)
+        split.setSizes([460, 680])
 
         self._refresh()
 
@@ -186,6 +230,60 @@ class CofitDialog(QDialog):
                 err = f" ± {p.stderr:.4g}" if p.stderr else ""
                 lines.append(f"    {pn} = {p.value:.5g}{err}")
         self.report.setPlainText("\n".join(lines))
+        self._plot_result()
+
+    # ------------------------------------------------------------------ plots
+    def _clear_plots(self):
+        while self._plot_v.count():
+            it = self._plot_v.takeAt(0)
+            w = it.widget()
+            if w is not None:
+                w.setParent(None)
+
+    def _plot_result(self):
+        """One plot per dataset: 1D spectra as experiment-vs-fit overlays, 2D
+        maps as experiment contours with the shared-model contours on top."""
+        if self._result is None:
+            return
+        self._clear_plots()
+        per = self._result.per_dataset
+        for ds, pd, rmsd in zip(self.datasets, per, self._result.rmsd):
+            title = f"[{ds['kind']}] {ds['label']} — RMSD {rmsd:.4f}"
+            if ds["kind"] == "1d":
+                w = self._plot_1d(ds, pd, title)
+            else:
+                w = self._plot_2d(ds, pd, title)
+            self._plot_v.addWidget(w, 1)
+
+    def _plot_1d(self, ds, pd, title):
+        pw = pg.PlotWidget(title=title)
+        pw.setMinimumHeight(230)
+        pw.getViewBox().invertX(True)          # ppm high -> low
+        pw.setLabel("bottom", "ppm")
+        pw.addLegend(offset=(-10, 10))
+        pw.plot(np.asarray(ds["ppm"]), np.asarray(ds["amp"]),
+                pen=pg.mkPen("#888", width=1), name="experiment")
+        pw.plot(np.asarray(pd["x"]), np.asarray(pd["y_fit"]),
+                pen=pg.mkPen("#d62728", width=2), name="fit")
+        return pw
+
+    def _plot_2d(self, ds, pd, title):
+        pw = pg.PlotWidget(title=title)
+        pw.setMinimumHeight(300)
+        vb = pw.getViewBox()
+        vb.invertX(True); vb.invertY(True); vb.setAspectLocked(False)
+        pw.setLabel("bottom", "F2 (ppm)"); pw.setLabel("left", "F1 (ppm)")
+        d = ds["data2d"].normalized()
+        _add_contours(pw, d.z, d.f2_ppm, d.f1_ppm, "#3b7dd8",
+                      Qt.SolidLine, name="experiment")
+        _add_contours(pw, np.asarray(pd["z_fit"]), np.asarray(pd["f2"]),
+                      np.asarray(pd["f1"]), "#e8832a", Qt.DashLine, name="fit")
+        # legend proxies (IsocurveItems don't register in the legend)
+        leg = pw.addLegend(offset=(-10, 10))
+        leg.addItem(pg.PlotDataItem(pen=pg.mkPen("#3b7dd8", width=2)), "experiment")
+        leg.addItem(pg.PlotDataItem(pen=pg.mkPen("#e8832a", width=2,
+                                                 style=Qt.DashLine)), "model")
+        return pw
 
     def _apply(self):
         if self._result is None:
