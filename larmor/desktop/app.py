@@ -302,6 +302,8 @@ class MainWindow(QMainWindow):
         m_proc.addSeparator()
         self._add(m_proc, "Show processing panel",
                   lambda: self.proc_dock.show())
+        self._add(m_proc, "Processing s&teps…  (remove a step)",
+                  self.edit_processing_steps)
         self._add(m_proc, "Autophase (ACME)",
                   lambda: self.apply_processing([{"op": "autophase"}], False))
         self._add(m_proc, "Baseline auto (order 3)",
@@ -495,6 +497,18 @@ class MainWindow(QMainWindow):
         sfo = (self.recipe.get("larmor_frequency_MHz", 100.0)
                if self.recipe else 100.0) or 100.0
         ConvertDialog(self, sfo).exec()
+
+    def edit_processing_steps(self):
+        from larmor.desktop.dialogs import ProcessingStepsDialog
+
+        ops = (self.recipe.get("processing") if self.recipe else None) or []
+        if not ops:
+            self.statusBar().showMessage("no processing steps applied yet")
+            return
+        dlg = ProcessingStepsDialog(self, ops)
+        if dlg.exec():
+            self.apply_processing(dlg.result_ops(),
+                                  bool(self.recipe.get("processing_from_raw")))
 
     def edit_computing_params(self):
         from larmor.desktop.dialogs import ComputingParamsDialog

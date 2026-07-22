@@ -220,3 +220,16 @@ def test_function_fit_model():
     assert p["b"].value == pytest.approx(10.0, abs=0.1)
     assert p["c"].value == pytest.approx(6.0, abs=0.1)
     assert Recipe.from_dict(r.to_dict()).sites[0].func == "exp(-((x - b) / c)**2)"
+
+
+@pytest.mark.slow
+def test_csa_czjzek_broadens_with_disorder():
+    """A ζ distribution broadens the CSA powder pattern (disordered shielding)."""
+    ctx = SimContext("13C", 100.0, 0.0, np.linspace(-150, 150, 2048))
+    v = dict(isotropic_chemical_shift_ppm=0.0, zeta_ppm=80.0, eta=0.3,
+             shift_fwhm_ppm=2.0, amplitude=1.0)
+    y_single = models.get("csa_czjzek").render({**v, "sigma_zeta_ppm": 0.0}, ctx)
+    y_dist = models.get("csa_czjzek").render({**v, "sigma_zeta_ppm": 40.0}, ctx)
+    w = lambda y: int((y > y.max() / 2).sum())
+    assert w(y_dist) > w(y_single)
+    assert y_dist.max() == pytest.approx(1.0, abs=0.01)

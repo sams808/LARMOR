@@ -159,6 +159,50 @@ class ExperimentDialog(QDialog):
                 self.sr.setToolTip(f"could not read SR: {exc}")
 
 
+class ProcessingStepsDialog(QDialog):
+    """The applied processing pipeline as a removable list (ssNake per-step
+    undo). Delete steps; the remaining pipeline is re-applied from the raw
+    source."""
+
+    def __init__(self, parent, ops: list[dict]):
+        super().__init__(parent)
+        self.setWindowTitle("Processing steps")
+        self.resize(420, 380)
+        self.ops = [dict(o) for o in ops]
+        from PySide6.QtWidgets import QListWidget, QPushButton
+
+        v = QVBoxLayout(self)
+        v.addWidget(QLabel("Applied steps (top = first). Remove any, then OK to "
+                           "re-apply the rest."))
+        self.list = QListWidget()
+        self._fill()
+        v.addWidget(self.list, 1)
+        row = QHBoxLayout()
+        btnDel = QPushButton("Remove selected"); btnDel.clicked.connect(self._remove)
+        row.addWidget(btnDel); row.addStretch(1)
+        v.addLayout(row)
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.accepted.connect(self.accept); bb.rejected.connect(self.reject)
+        v.addWidget(bb)
+
+    def _fill(self):
+        from PySide6.QtWidgets import QListWidgetItem
+
+        self.list.clear()
+        for o in self.ops:
+            kw = ", ".join(f"{k}={v}" for k, v in o.items() if k != "op")
+            self.list.addItem(QListWidgetItem(f"{o['op']}"
+                                              + (f"  ({kw})" if kw else "")))
+
+    def _remove(self):
+        r = self.list.currentRow()
+        if 0 <= r < len(self.ops):
+            del self.ops[r]; self._fill()
+
+    def result_ops(self) -> list[dict]:
+        return self.ops
+
+
 class ComputingParamsDialog(QDialog):
     """Tune the Czjzek / MQMAS kernel resolution (dmfit's Computing parameters):
     accuracy vs speed. Clears the kernel caches on OK."""
