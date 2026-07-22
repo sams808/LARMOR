@@ -306,6 +306,8 @@ class MainWindow(QMainWindow):
                   lambda: self.apply_processing([{"op": "autophase"}], False))
         self._add(m_proc, "Baseline auto (order 3)",
                   lambda: self.apply_processing([{"op": "baseline", "order": 3}], False))
+        self._add(m_proc, "Subtract &averages  (offset from the edges)",
+                  lambda: self.apply_processing([{"op": "subtract_avg"}], False))
         self._add(m_proc, "Reset to original", self.reset_processing)
         m_proc.addSeparator()
         self._add(m_proc, "&Calibrate axis…  (click a peak, set its ppm)",

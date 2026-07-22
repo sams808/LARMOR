@@ -362,6 +362,59 @@ def op_scale(s: Spectrum1D, factor: float = 1.0) -> Spectrum1D:
     return s
 
 
+def op_subtract_avg(s: Spectrum1D, hi_ppm: float | None = None,
+                    lo_ppm: float | None = None) -> Spectrum1D:
+    """Subtract the mean of a (signal-free) region — a DC/offset correction
+    (ssNake 'Subtract Averages'). Defaults to the outer 10% edges."""
+    if s.domain != "freq":
+        raise ValueError("subtract-averages applies to the frequency domain")
+    if hi_ppm is not None and lo_ppm is not None:
+        sel = (s.x_ppm >= min(hi_ppm, lo_ppm)) & (s.x_ppm <= max(hi_ppm, lo_ppm))
+    else:
+        e = max(3, s.y.size // 10)
+        sel = np.zeros(s.y.size, bool); sel[:e] = True; sel[-e:] = True
+    s.y = s.y - np.mean(s.y[sel].real)
+    return s
+
+
+def op_scale_sw(s: Spectrum1D, factor: float = 1.0) -> Spectrum1D:
+    """Scale the spectral width / ppm axis about its centre (ssNake 'Scale SW')
+    — a stretch used to correct a mis-set SW or overlay mismatched axes."""
+    if s.domain != "freq" or s.x_ppm is None:
+        raise ValueError("scale-SW applies to a frequency-domain spectrum")
+    c = 0.5 * (float(s.x_ppm[0]) + float(s.x_ppm[-1]))
+    s.x_ppm = c + (s.x_ppm - c) * factor
+    return s
+
+
+def op_ift(s: Spectrum1D) -> Spectrum1D:
+    """Inverse Fourier transform back to the time domain (ssNake Toggle
+    Time/Frequency) so you can re-apodize / reprocess."""
+    if s.domain != "freq":
+        raise ValueError("inverse FT needs frequency-domain data")
+    y = np.asarray(s.y, complex)
+    s.y = np.fft.ifft(np.fft.ifftshift(y))          # inverse of fftshift(fft)
+    s.x_ppm = None
+    s.domain = "time"
+    return s
+
+
+def op_real(s: Spectrum1D) -> Spectrum1D:
+    s.y = s.y.real + 0j
+    return s
+
+
+def op_imag(s: Spectrum1D) -> Spectrum1D:
+    s.y = s.y.imag + 0j
+    return s
+
+
+def op_conj(s: Spectrum1D) -> Spectrum1D:
+    """Complex conjugate — reverses the spectral sense (ssNake)."""
+    s.y = np.conj(s.y)
+    return s
+
+
 def op_offset(s: Spectrum1D, value: float = 0.0) -> Spectrum1D:
     s.y = s.y + value
     return s
@@ -495,6 +548,12 @@ OPS = {
     "scale": op_scale,
     "offset": op_offset,
     "normalize": op_normalize,
+    "subtract_avg": op_subtract_avg,
+    "scale_sw": op_scale_sw,
+    "ift": op_ift,
+    "real": op_real,
+    "imag": op_imag,
+    "conj": op_conj,
 }
 
 
