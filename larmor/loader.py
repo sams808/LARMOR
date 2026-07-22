@@ -121,6 +121,7 @@ def load_any(path: str | Path, replay: bool = True):
             source_kind="bruker", source_path=str(ref.expno),
             nucleus=data.nucleus, larmor_frequency_MHz=data.meta["larmor_MHz"],
             spin_rate_Hz=data.meta.get("masr_Hz") or 0.0,
+            sr_hz=data.meta.get("sr_hz", 0.0),
         )
         return ppm, amp, recipe.to_dict(), data.summary, list(data.warnings)
 

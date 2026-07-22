@@ -43,6 +43,7 @@ class Contour2DView(QWidget):
         #: HMQC: an external 1D per projection axis, {"f2":(ppm,amp),"f1":...}
         self._hmqc = {"f2": None, "f1": None}
         self._hmqc_scale = {"f2": 1.0, "f1": 1.0}
+        self._hmqc_color = {"f2": "#e8832a", "f1": "#6a4fb0"}
         self._picks: list[int] = []  # reference row/column indices (1 or 2)
         self._pick_axis = "f2"
         self._pivot = None          # pivot ppm on the phased axis
@@ -489,12 +490,14 @@ class Contour2DView(QWidget):
         self._redraw()
 
     # ---------- HMQC: overlay 1D on projections + uncorrelated features ----------
-    def set_projection_1d(self, axis: str, ppm, amp):
+    def set_projection_1d(self, axis: str, ppm, amp, color: str | None = None):
         """Store an external 1D for the F2 or F1 projection and peak-match its
         scale to the HMQC sum-projection."""
         ppm = np.asarray(ppm, float); amp = np.asarray(amp, float)
         o = np.argsort(ppm)
         self._hmqc[axis] = (ppm[o], amp[o])
+        if color:
+            self._hmqc_color[axis] = color
         self._hmqc_scale[axis] = self._peak_match(axis)
         self.hmqcScale.blockSignals(True); self.hmqcScale.setValue(1.0)
         self.hmqcScale.blockSignals(False)
@@ -613,14 +616,14 @@ class Contour2DView(QWidget):
             self.p_top.plot(f2, self._eff_scale("f2") * d.projection("f2", "sum"),
                             pen=pg.mkPen("#0e7c86"))
             self.p_top.plot(f2, self._one_d_on("f2", f2),
-                            pen=pg.mkPen("#e8832a", width=1.2))
+                            pen=pg.mkPen(self._hmqc_color["f2"], width=1.2))
         else:
             self.p_top.plot(f2, z.max(axis=0), pen=pg.mkPen("#0e7c86"))
         if self._hmqc["f1"] is not None:
             self.p_left.plot(self._eff_scale("f1") * d.projection("f1", "sum"), f1,
                              pen=pg.mkPen("#0e7c86"))
             self.p_left.plot(self._one_d_on("f1", f1), f1,
-                             pen=pg.mkPen("#e8832a", width=1.2))
+                             pen=pg.mkPen(self._hmqc_color["f1"], width=1.2))
         else:
             self.p_left.plot(z.max(axis=1), f1, pen=pg.mkPen("#0e7c86"))
 

@@ -67,6 +67,8 @@ class Recipe:
     nucleus: str = ""
     larmor_frequency_MHz: float = 0.0
     spin_rate_Hz: float = 0.0
+    #: spectral reference SR = SF − BF1 (Hz); shifts the ppm axis by SR/SFO1
+    sr_hz: float = 0.0
     engine: str = "czjzek-kernel+lmfit"
     sites: list[SiteModel] = field(default_factory=list)
     #: ordered processing pipeline ({"op": name, ...}) applied to the source

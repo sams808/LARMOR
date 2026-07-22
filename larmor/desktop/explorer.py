@@ -61,6 +61,30 @@ class ExplorerPanel(QWidget):
 
         self.btnSample.clicked.connect(self._open_sample)
         self.btnBrowse.clicked.connect(self._browse)
+        self._hl: dict = {}          # color -> highlighted item
+
+    # ------------------------------------------------------------------
+    def _iter_items(self):
+        stack = [self.tree.topLevelItem(i)
+                 for i in range(self.tree.topLevelItemCount())]
+        while stack:
+            it = stack.pop()
+            yield it
+            for i in range(it.childCount()):
+                stack.append(it.child(i))
+
+    def highlight(self, path: str, color: str):
+        """Tint the tree row whose openable data path is ``path`` (used to mark
+        the spectrum picked for an HMQC projection). One row per colour."""
+        old = self._hl.pop(color, None)
+        if old is not None:
+            old.setBackground(0, QBrush())
+        target = next((it for it in self._iter_items()
+                       if it.data(0, _ROLE_OPEN) == path), None)
+        if target is not None:
+            c = QColor(color); c.setAlpha(60)
+            target.setBackground(0, QBrush(c))
+            self._hl[color] = target
 
     # ------------------------------------------------------------------
     def _open_sample(self):

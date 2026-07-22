@@ -219,6 +219,9 @@ def _read_1r(ref: BrukerRef) -> NMRData:
     order = np.argsort(ppm)
     title = _read_title(pdata)
     meta = _meta_1d(acqus, title, ref.expno)
+    # spectral reference SR = SF - BF1 (Hz)
+    meta["sr_hz"] = (float(procs.get("SF", 0.0))
+                     - float(acqus.get("BF1", 0.0))) * 1e6
     ax = Axis(meta["nucleus"], "ppm", ppm[order],
               obs_MHz=float(procs.get("SF", 0.0)), sw_Hz=meta.get("sw_Hz", 0.0))
     return NMRData(ndim=1, domain="freq", data=np.asarray(real, float)[order],

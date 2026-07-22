@@ -330,6 +330,7 @@ class MainWindow(QMainWindow):
         self.actPaddles = self._add(m_view, "Show paddles", self._toggle_paddles,
                                     checkable=True, checked=True)
         m_view.addSeparator()
+        self._add(m_view, "&Back to 2D map", self.back_to_2d, "Ctrl+2")
         self._add(m_view, "Zoom to sites", self.zoom_sites)
         self._add(m_view, "Full spectrum", self.zoom_full)
 
@@ -416,6 +417,7 @@ class MainWindow(QMainWindow):
             ("Paddles", "toggle the on-spectrum paddles", lambda: self.actPaddles.trigger()),
             ("Parts", "toggle the component curves", lambda: self.actComp.trigger()),
             ("Resid.", "toggle the residual", lambda: self.actResid.trigger()),
+            ("2D map", "back to the 2D contour map (Ctrl+2)", self.back_to_2d),
         ]:
             a = QAction(text, self)
             a.setToolTip(tip)
@@ -429,7 +431,8 @@ class MainWindow(QMainWindow):
         self.explorer_dock.setFeatures(QDockWidget.DockWidgetMovable |
                                        QDockWidget.DockWidgetClosable)
         self.explorer = ExplorerPanel()
-        self.explorer.open_requested.connect(self.load_source)
+        self._proj_pick_axis = None      # HMQC: awaiting an Explorer pick
+        self.explorer.open_requested.connect(self._explorer_open)
         self.explorer_dock.setWidget(self.explorer)
         self.explorer_dock.setMinimumWidth(230)
         self.addDockWidget(Qt.LeftDockWidgetArea, self.explorer_dock)
@@ -521,9 +524,11 @@ class MainWindow(QMainWindow):
             return
         nu = self.recipe.get("spin_rate_Hz", 0.0) or 0.0
         mas = f"νrot {nu:.0f} Hz" if nu else "static"
+        sr = self.recipe.get("sr_hz", 0.0) or 0.0
+        sr_txt = f" · SR {sr:.0f} Hz" if sr else ""
         self.exp_label.setText(
             f"{self.recipe.get('nucleus', '?')} · "
-            f"{self.recipe.get('larmor_frequency_MHz', 0):.3f} MHz · {mas}")
+            f"{self.recipe.get('larmor_frequency_MHz', 0):.3f} MHz · {mas}{sr_txt}")
 
     def edit_experiment(self):
         if self.recipe is None:
@@ -531,8 +536,19 @@ class MainWindow(QMainWindow):
         from larmor.desktop.dialogs import ExperimentDialog
 
         self.snapshot()
+        old_sr = self.recipe.get("sr_hz", 0.0) or 0.0
         dlg = ExperimentDialog(self, self.recipe)
         if dlg.exec():
+            # a changed SR re-references the ppm axis by ΔSR / SFO1
+            new_sr = self.recipe.get("sr_hz", 0.0) or 0.0
+            larmor = self.recipe.get("larmor_frequency_MHz", 0.0) or 0.0
+            if larmor and abs(new_sr - old_sr) > 1e-9 and self.exp_ppm.size:
+                d_ppm = (new_sr - old_sr) / larmor
+                self.exp_ppm = self.exp_ppm + d_ppm
+                if self._proc_base is not None:
+                    self._proc_base = (self._proc_base[0] + d_ppm,
+                                       self._proc_base[1])
+                self.view.set_experiment(self.exp_ppm, self.exp_amp)
             self._update_exp_label()
             self.statusBar().showMessage(
                 "experiment updated — re-simulating (a new spin rate builds "
@@ -955,31 +971,59 @@ class MainWindow(QMainWindow):
                 Path(self.source_path).name if self.source_path else "")
         self.datasets_panel.rebuild(label, self._overlays)
 
-    def load_projection_1d(self, axis: str):
-        """HMQC: load a 1D spectrum and overlay it on the F2/F1 projection."""
-        path, _ = QFileDialog.getOpenFileName(
-            self, f"1D spectrum for the {axis.upper()} projection",
-            self._last_dir(),
-            "Spectra (*.fxmla *.json 1r *.txt *.csv);;All files (*)")
-        if not path:
-            return
-        try:
-            ppm, amp, *_ = _load_any(path)
-        except Exception:
-            try:
-                from larmor.io import bruker
+    #: colour assigned to each HMQC projection axis (matches the overlay + the
+    #: Explorer highlight)
+    PROJ_COLOR = {"f2": "#e8832a", "f1": "#6a4fb0"}
 
-                d = bruker.read(path)
-                if d.ndim != 1 or d.domain != "freq":
-                    raise ValueError("not a 1D spectrum")
-                ppm, amp = np.asarray(d.axes[0].values), np.asarray(d.data, float)
-            except Exception as exc:
-                QMessageBox.warning(self, "Projection 1D", f"cannot read: {exc}")
-                return
-        self.view2d.set_projection_1d(axis, np.asarray(ppm), np.asarray(amp))
+    def load_projection_1d(self, axis: str):
+        """HMQC: arm a pick — the next spectrum clicked in the Explorer (or via
+        its Browse…) is overlaid on the F2/F1 projection and highlighted."""
+        self._proj_pick_axis = axis
+        self.explorer_dock.show(); self.explorer_dock.raise_()
+        self.statusBar().showMessage(
+            f"click a spectrum in the Explorer for the {axis.upper()} projection "
+            "(use Browse… to reach one elsewhere)")
+
+    def _explorer_open(self, path: str):
+        """Route an Explorer activation: an HMQC projection pick, else a load."""
+        axis = self._proj_pick_axis
+        if axis is None:
+            self.load_source(path)
+            return
+        self._proj_pick_axis = None
+        try:
+            ppm, amp = self._read_1d(path)
+        except Exception as exc:
+            QMessageBox.warning(self, "Projection 1D", f"cannot read: {exc}")
+            return
+        self.view2d.set_projection_1d(axis, ppm, amp,
+                                      color=self.PROJ_COLOR[axis])
+        self.explorer.highlight(path, self.PROJ_COLOR[axis])
         self.statusBar().showMessage(
             f"{axis.upper()} 1D overlaid — adjust scale, then 'uncorrelated "
             f"{axis.upper()} →' for the non-correlated features")
+
+    def _read_1d(self, path: str):
+        """A 1D (ppm, amp) from any supported source."""
+        try:
+            ppm, amp, *_ = _load_any(path)
+            return np.asarray(ppm), np.asarray(amp)
+        except Exception:
+            from larmor.io import bruker
+
+            d = bruker.read(path)
+            if d.ndim != 1 or d.domain != "freq":
+                raise ValueError("not a 1D spectrum")
+            return np.asarray(d.axes[0].values), np.asarray(d.data, float)
+
+    def back_to_2d(self):
+        """Return to the 2D map (with its overlays/HMQC state intact) after
+        pulling a trace to the workbench."""
+        if self._data2d is not None:
+            self.central_stack.setCurrentWidget(self.view2d)
+            self.statusBar().showMessage("back to the 2D map")
+        else:
+            self.statusBar().showMessage("no 2D map is loaded")
 
     def _show_2d(self, data2d, title: str, kind: str):
         from larmor.recipe import Recipe

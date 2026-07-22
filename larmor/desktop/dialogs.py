@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
-    QFormLayout, QHBoxLayout, QLabel, QLineEdit, QVBoxLayout,
+    QFormLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout,
 )
 
 
@@ -93,8 +93,22 @@ class ExperimentDialog(QDialog):
         self.mas.setValue(recipe.get("spin_rate_Hz", 0.0) or 0.0)
         form.addRow("MAS rate (νrot)", self.mas)
 
-        note = QLabel("Changing these re-simulates every line (kernels are "
-                      "cached per field / spin rate).")
+        sr_row = QHBoxLayout()
+        self.sr = QDoubleSpinBox()
+        self.sr.setDecimals(2); self.sr.setRange(-1e7, 1e7); self.sr.setSuffix(" Hz")
+        self.sr.setToolTip("spectral reference SR = SF − BF1; changing it shifts "
+                           "the ppm axis by SR/SFO1")
+        self.sr.setValue(recipe.get("sr_hz", 0.0) or 0.0)
+        sr_row.addWidget(self.sr, 1)
+        btnCopy = QPushButton("Copy from spectrum…")
+        btnCopy.setToolTip("read SR from another dataset and reference this "
+                           "spectrum to match it")
+        btnCopy.clicked.connect(self._copy_sr)
+        sr_row.addWidget(btnCopy)
+        form.addRow("SR (reference)", sr_row)
+
+        note = QLabel("Changing nucleus / field / νrot re-simulates every line; "
+                      "changing SR re-references the ppm axis.")
         note.setWordWrap(True)
         note.setStyleSheet("color: #93a0a8;")
         form.addRow(note)
@@ -118,7 +132,31 @@ class ExperimentDialog(QDialog):
         self.recipe["nucleus"] = nuc
         self.recipe["larmor_frequency_MHz"] = float(self.larmor.value())
         self.recipe["spin_rate_Hz"] = float(self.mas.value())
+        self.recipe["sr_hz"] = float(self.sr.value())
         self.accept()
+
+    def _copy_sr(self):
+        from PySide6.QtWidgets import QFileDialog
+
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Read SR from another spectrum", "",
+            "Spectra (*.fxmla *.json 1r 2rr *.csv *.txt);;All files (*)")
+        if not path:
+            return
+        try:
+            from larmor.io import bruker
+
+            ref = bruker.resolve(path)
+            data = bruker.read(path)
+            self.sr.setValue(float(data.meta.get("sr_hz", 0.0)))
+        except Exception:
+            try:
+                from larmor.loader import load_any
+
+                _, _, rec, *_ = load_any(path)
+                self.sr.setValue(float(rec.get("sr_hz", 0.0)))
+            except Exception as exc:
+                self.sr.setToolTip(f"could not read SR: {exc}")
 
 
 def _other_lines(recipe: dict, exclude: int) -> list[tuple[int, str]]:

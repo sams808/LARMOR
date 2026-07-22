@@ -94,6 +94,36 @@ def test_overlay_cockpit(qapp, win):
     assert len(win._overlays) == 1
 
 
+def test_hmqc_explorer_pick_and_back_nav(qapp, win, tmp_path):
+    """Arming an HMQC projection pick routes the next Explorer activation to the
+    overlay (colored), and Back-to-2D restores the map with overlays intact."""
+    from larmor import twod
+    from larmor.io import spectra
+
+    f2 = np.linspace(-50, 50, 120); f1 = np.linspace(-30, 30, 60)
+    Z = (np.exp(-((f2[None, :] - 10) / 4) ** 2)
+         * np.exp(-((f1[:, None] - 5) / 4) ** 2))
+    win._show_2d(twod.Data2D(f2_ppm=f2, f1_ppm=f1, z=Z, nucleus="1H",
+                             larmor_MHz=500.0), "HMQC", "2D")
+    qapp.processEvents()
+    csv = tmp_path / "n15.csv"
+    spectra.write_csv(csv, f1, np.exp(-((f1 - 5) / 4) ** 2), {"nucleus": "15N"})
+
+    win.load_projection_1d("f1")
+    assert win._proj_pick_axis == "f1"
+    win._explorer_open(str(csv))              # simulate the Explorer click
+    qapp.processEvents()
+    assert win._proj_pick_axis is None
+    assert win.view2d._hmqc["f1"] is not None
+    assert win.view2d._hmqc_color["f1"] == win.PROJ_COLOR["f1"]
+
+    win.view2d._emit_uncorrelated("f1"); qapp.processEvents()
+    assert win.central_stack.currentWidget() is win.view      # went to workbench
+    win.back_to_2d(); qapp.processEvents()
+    assert win.central_stack.currentWidget() is win.view2d
+    assert win.view2d._hmqc["f1"] is not None                 # state preserved
+
+
 def test_hmqc_uncorrelated_features(qapp):
     """Overlaying a 1D on an HMQC projection and subtracting the (scaled)
     projection isolates the features that do NOT correlate."""
