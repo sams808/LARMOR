@@ -30,6 +30,27 @@ _LINK_RE = re.compile(
     r"(?P<unit>ppm|khz|hz|mhz)?\s*$", re.IGNORECASE)
 _BOUNDS_RE = re.compile(r"\[\s*(?P<lo>[^\],:]*?)\s*(?:\.\.|:|,)\s*(?P<hi>[^\]]*?)\s*\]")
 _NUM_RE = re.compile(r"^[+-]?\d*\.?\d+([eE][+-]?\d+)?$")
+_NUM_UNIT_RE = re.compile(
+    r"^(?P<num>[+-]?\d*\.?\d+([eE][+-]?\d+)?)\s*(?P<unit>ppm|khz|hz|mhz)$",
+    re.IGNORECASE)
+
+
+def _abs_in_native(value: float, unit: str, param_unit: str,
+                   larmor_MHz: float) -> float:
+    """An absolute value typed with a unit (e.g. '300Hz', '2ppm'), converted to
+    the parameter's own unit — lets a width/position be entered in Hz OR ppm."""
+    u, pu = unit.lower(), (param_unit or "").lower()
+    if pu == "ppm" and larmor_MHz <= 0:
+        raise ValueError("no Larmor frequency set — cannot convert Hz↔ppm")
+    hz = {"hz": value, "khz": value * 1e3, "mhz": value * 1e6,
+          "ppm": value * larmor_MHz}[u]
+    if pu == "ppm":
+        return hz / larmor_MHz
+    if pu == "mhz":
+        return hz / 1e6
+    if pu == "hz":
+        return hz
+    raise ValueError(f"can't enter {unit} for a value in {param_unit or '—'}")
 
 
 # --------------------------------------------------------------------------
@@ -127,6 +148,19 @@ def parse_cell(text: str, *, param_name: str, param_unit: str,
         res.set_value = True
         res.value = float(text)
         res.set_expr = True               # clear any existing link
+        res.expr = None
+        return res
+
+    # 2b) a plain number WITH a unit (e.g. 300Hz, 1.5kHz, 2ppm) -> native unit
+    mu = _NUM_UNIT_RE.match(text)
+    if mu:
+        try:
+            res.value = _abs_in_native(float(mu.group("num")), mu.group("unit"),
+                                       param_unit, larmor_MHz)
+        except (ValueError, KeyError) as exc:
+            return CellResult(error=str(exc))
+        res.set_value = True
+        res.set_expr = True
         res.expr = None
         return res
 
