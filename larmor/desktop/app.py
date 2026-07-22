@@ -322,6 +322,10 @@ class MainWindow(QMainWindow):
         self._add(m_dec, "&New fit (clear lines)", self.new_fit)
         self._add(m_dec, "Add background &spectrum…  (fit another spectrum)",
                   self.add_background_spectrum)
+        self._add(m_dec, "Add a line at every &peak…  (auto peak-pick)",
+                  self.autopick_lines)
+        self._add(m_dec, "Predict at another &field…  (what at X T?)",
+                  self.predict_at_field)
         m_dec.addSeparator()
         self.actFit = self._add(m_dec, "&Fit", self.run_fit, "F5")
         self.actAuto = self._add(m_dec, "&Auto Fit (multi-start)…",
@@ -1433,6 +1437,78 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             f"added {name} #{n} — click to add more, or click {name} again "
             "(Esc) to stop")
+
+    def autopick_lines(self):
+        """Peak-pick the spectrum and drop a Gauss/Lorentz line at each peak."""
+        from PySide6.QtWidgets import QInputDialog
+
+        if self.recipe is None or not self.exp_ppm.size:
+            self.statusBar().showMessage("load a spectrum first")
+            return
+        thr, ok = QInputDialog.getDouble(
+            self, "Add lines at peaks", "Threshold (% of max):", 5.0, 0.1, 100.0, 1)
+        if not ok:
+            return
+        from larmor import processing as proc
+
+        span = float(np.ptp(self.exp_ppm)) if self.exp_ppm.size else 0.0
+        peaks = proc.pick_peaks(self.exp_ppm, self.exp_amp,
+                                threshold_frac=thr / 100.0,
+                                min_sep_ppm=span / 100.0)
+        if not peaks:
+            self.statusBar().showMessage("no peaks above that threshold")
+            return
+        self.snapshot()
+        m = model_registry.get("gauss_lor")
+        for pk in peaks:
+            params = {p.name: {"value": p.default, "stderr": None, "vary": p.vary,
+                               "min": p.min, "max": p.max, "expr": None}
+                      for p in m.params}
+            params["isotropic_chemical_shift_ppm"]["value"] = pk["ppm"]
+            params["amplitude"]["value"] = abs(pk["height"])
+            params["shift_fwhm_ppm"]["value"] = max(pk.get("fwhm_ppm") or 2.0, 0.2)
+            n = len(self.recipe["sites"])
+            self.recipe["sites"].append(
+                {"model": "gauss_lor", "label": f"pk-{n}", "params": params})
+        self.on_structure_changed()
+        self.statusBar().showMessage(f"added {len(peaks)} lines at peaks")
+
+    def predict_at_field(self):
+        """Simulate the current model at a different field (teaching/planning:
+        quadrupolar 2nd-order width ~ 1/B0, chemical shift constant in ppm)."""
+        import json
+        from PySide6.QtWidgets import QInputDialog
+
+        from larmor import engine, nuclei as N
+        from larmor.recipe import Recipe
+
+        if not (self.recipe and self.recipe.get("sites")):
+            self.statusBar().showMessage("build a model first")
+            return
+        nuc = self.recipe.get("nucleus", "")
+        cur = self.recipe.get("larmor_frequency_MHz", 0.0) or 0.0
+        try:
+            iso = next(i for i in N.all_isotopes() if i.symbol == nuc)
+            cur_h1 = cur * N.GAMMA_1H / abs(iso.gamma_MHz_T)
+        except Exception:
+            QMessageBox.warning(self, "Predict", f"unknown nucleus {nuc!r}")
+            return
+        h1, ok = QInputDialog.getDouble(
+            self, "Predict at another field", "Target ¹H frequency (MHz):",
+            round(cur_h1) or 400.0, 10.0, 1700.0, 1)
+        if not ok:
+            return
+        new_larmor = h1 * abs(iso.gamma_MHz_T) / N.GAMMA_1H
+        rec = Recipe.from_dict(json.loads(json.dumps(self.recipe)))
+        rec.larmor_frequency_MHz = new_larmor
+        x, total, _ = engine.simulate(
+            rec, exp_ppm=self.exp_ppm if self.exp_ppm.size else None)
+        self._ws_mode = "new"
+        self._display_1d(x, total, nuc, new_larmor, rec.spin_rate_Hz,
+                         f"{self.recipe.get('sample') or 'model'} @ {h1:.0f} MHz ¹H",
+                         "")
+        self.statusBar().showMessage(
+            f"predicted at {new_larmor:.1f} MHz ({nuc}, ¹H {h1:.0f})")
 
     def add_background_spectrum(self):
         """Add another measured spectrum as a fit component (background /
