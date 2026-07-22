@@ -132,6 +132,12 @@ class Contour2DView(QWidget):
                                   "subtracting it from the 1D")
         self.hmqcScale.valueChanged.connect(self._on_hmqc_scale)
         hb.addWidget(self.hmqcScale)
+        self.btnFitScale = QPushButton("fit scale")
+        self.btnFitScale.setToolTip("least-squares scale of the projection to the "
+                                    "1D over the visible range (robust; not just "
+                                    "peak-match)")
+        self.btnFitScale.clicked.connect(self._fit_scale)
+        hb.addWidget(self.btnFitScale)
         self.btnUncF2 = QPushButton("uncorrelated F2 →")
         self.btnUncF2.setToolTip("1D − scale·(F2 projection) → features that do "
                                  "NOT correlate, sent to the fit workbench")
@@ -590,6 +596,24 @@ class Contour2DView(QWidget):
         return self._hmqc_scale[axis] * (self.hmqcScale.value() or 1.0)
 
     def _on_hmqc_scale(self, *_):
+        self._redraw()
+
+    def _fit_scale(self):
+        """Least-squares scale of each loaded projection to its 1D over the
+        visible F2 range — robust when the strongest peak isn't fully correlated."""
+        (x0, x1), _ = self.p_main.getViewBox().viewRange()
+        lo, hi = min(x0, x1), max(x0, x1)
+        for axis in ("f2", "f1"):
+            if self._hmqc[axis] is None:
+                continue
+            coords, proj = self._proj(axis)
+            yi = self._one_d_on(axis, coords)
+            m = (coords >= lo) & (coords <= hi)
+            denom = float(proj[m] @ proj[m])
+            if denom > 0:
+                self._hmqc_scale[axis] = max(0.0, float(yi[m] @ proj[m]) / denom)
+        self.hmqcScale.blockSignals(True); self.hmqcScale.setValue(1.0)
+        self.hmqcScale.blockSignals(False)
         self._redraw()
 
     def _emit_uncorrelated(self, axis: str):
