@@ -320,3 +320,13 @@ def test_2d_symmetrize():
          * np.exp(-((f1[:, None] + 10) / 6) ** 2))
     ds = twod.Data2D(f2_ppm=f2, f1_ppm=f1, z=Z).symmetrized()
     assert np.max(np.abs(ds.z - ds.z.T)) < 1e-9            # symmetric now
+
+
+def test_qis_slope_is_spin_dependent():
+    """The QIS-axis slope (and F1 CS-scale) are computed from the nucleus spin —
+    27Al 3QMAS ≈ -0.58 with c = -17/31; a different spin gives different values."""
+    s_al = twod.qis_slope("27Al", 130.323)
+    c_al = twod.f1_cs_scale("27Al", 130.323)
+    assert s_al == pytest.approx(-0.58, abs=0.05)
+    assert c_al == pytest.approx(-17 / 31, abs=0.02)
+    assert twod.f1_cs_scale("11B", 160.0) != pytest.approx(c_al, abs=0.1)

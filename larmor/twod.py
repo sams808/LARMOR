@@ -309,6 +309,51 @@ def f1_cs_scale(nucleus: str, larmor_MHz: float, method: str = "3QMAS") -> float
     return c
 
 
+_QIS_SLOPE_CACHE: dict = {}
+
+
+def qis_slope(nucleus: str, larmor_MHz: float, method: str = "3QMAS") -> float:
+    """Slope dF1/dF2 of the quadrupolar-induced-shift (QIS) axis in the
+    δ1-isotropic MQMAS plane: the direction a site moves as C_Q grows at fixed
+    δiso. The chemical-shift (CS) axis is the diagonal (slope 1); the QIS axis
+    slope is spin/coherence dependent (≈ -0.58 for ²⁷Al 3QMAS). Measured from two
+    reference simulations so it is correct for any nucleus/method."""
+    key = (nucleus, round(larmor_MHz, 3), method)
+    if key in _QIS_SLOPE_CACHE:
+        return _QIS_SLOPE_CACHE[key]
+    from mrsimulator import Simulator
+    from mrsimulator.method import SpectralDimension
+    from mrsimulator.method import lib as method_lib
+    from mrsimulator.spin_system.isotope import Isotope
+    from mrsimulator.utils.collection import single_site_system_generator
+
+    cs = f1_cs_scale(nucleus, larmor_MHz, method)
+    B0 = larmor_MHz / abs(Isotope(symbol=nucleus).gyromagnetic_ratio)
+    cqs = [1.0e6, 6.0e6]                            # two probe C_Q at δiso = 0
+    sw = 400.0 * larmor_MHz
+    systems = single_site_system_generator(
+        isotope=nucleus, isotropic_chemical_shift=[0.0, 0.0],
+        quadrupolar={"Cq": cqs, "eta": [0.0, 0.0]}, abundance=[100.0, 100.0])
+    m = getattr(method_lib, METHODS[method])(
+        channels=[nucleus], magnetic_flux_density=B0,
+        spectral_dimensions=[SpectralDimension(count=384, spectral_width=sw),
+                             SpectralDimension(count=384, spectral_width=sw)])
+    sim = Simulator(spin_systems=systems, methods=[m])
+    sim.config.decompose_spectrum = "spin_system"; sim.run()
+    ds = sim.methods[0].simulation
+    a2 = np.asarray(ds.x[0].coordinates.value, float)
+    a1 = np.asarray(ds.x[1].coordinates.value, float) / cs      # -> δ1-isotropic
+    cg = []
+    for dv in ds.y:
+        z = np.clip(np.asarray(dv.components[0].real, float), 0, None)
+        p2 = z.sum(axis=0); p1 = z.sum(axis=1)
+        cg.append(((p2 * a2).sum() / p2.sum(), (p1 * a1).sum() / p1.sum()))
+    (f2a, f1a), (f2b, f1b) = cg
+    slope = (f1b - f1a) / (f2b - f2a) if abs(f2b - f2a) > 1e-9 else -0.5
+    _QIS_SLOPE_CACHE[key] = float(slope)
+    return float(slope)
+
+
 @dataclass
 class Kernel2D:
     f2_ppm: np.ndarray               # (n2,)

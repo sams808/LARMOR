@@ -96,6 +96,13 @@ class Contour2DView(QWidget):
         self.btnMeasure.setToolTip("two draggable markers: ΔF2 / ΔF1 in ppm and Hz")
         self.btnMeasure.toggled.connect(self._toggle_measure)
         bar.addWidget(self.btnMeasure)
+        self.btnAxes = QPushButton("CS/QIS axes")
+        self.btnAxes.setCheckable(True)
+        self.btnAxes.setToolTip("overlay the MQMAS reference lines: the chemical-"
+                                "shift axis (diagonal) and the quadrupolar-induced-"
+                                "shift axis (slope from the nucleus spin)")
+        self.btnAxes.toggled.connect(self._redraw)
+        bar.addWidget(self.btnAxes)
         self.btnOverlay = QToolButton(); self.btnOverlay.setText("Overlay 1D ▾")
         self.btnOverlay.setPopupMode(QToolButton.InstantPopup)
         self.btnOverlay.setToolTip("superpose a 1D spectrum on the F2 (direct) "
@@ -648,6 +655,37 @@ class Contour2DView(QWidget):
             self._hmqc_scale[a] = 1.0
         self._redraw()
 
+    def _draw_mqmas_axes(self, f2, f1):
+        """MQMAS reference lines: the chemical-shift (CS) axis is the diagonal
+        (F1 = F2); the quadrupolar-induced-shift (QIS) axis has a slope set by
+        the nucleus spin. A peak's CS-axis crossing reads δiso; its extent along
+        the QIS axis reads C_Q. Glass CS-distribution stretches along the CS
+        axis, the quadrupolar Czjzek tail along the QIS axis."""
+        d = self.data
+        nuc = getattr(d, "nucleus", "") or "27Al"
+        larmor = getattr(d, "larmor_MHz", 0.0) or 100.0
+        try:
+            from larmor.twod import qis_slope
+            slope = qis_slope(nuc, larmor)
+        except Exception:
+            return
+        f2lo, f2hi = float(min(f2)), float(max(f2))
+        lo = max(float(min(f2)), float(min(f1)))
+        hi = min(float(max(f2)), float(max(f1)))
+        self.p_main.plot([lo, hi], [lo, hi],
+                         pen=pg.mkPen("#2b6cb0", width=1.4))         # CS axis
+        d_lo = int(np.floor(min(float(f1.min()), f2lo) / 20.0) * 20)
+        d_hi = int(np.ceil(max(float(f1.max()), f2hi) / 20.0) * 20)
+        for diso in range(d_lo, d_hi + 1, 20):                       # QIS family
+            y = [diso + slope * (f2lo - diso), diso + slope * (f2hi - diso)]
+            self.p_main.plot([f2lo, f2hi], y,
+                             pen=pg.mkPen("#d62728", width=0.8, style=Qt.DotLine))
+        for text, x, y, col in (("CS (δiso)", hi, hi, "#2b6cb0"),
+                                (f"QIS · slope {slope:.2f} ({nuc})",
+                                 f2lo, d_lo + slope * (f2lo - d_lo), "#d62728")):
+            t = pg.TextItem(text, color=col, anchor=(0, 1))
+            t.setPos(x, y); self.p_main.addItem(t)
+
     def _proj(self, axis: str):
         d = self.data
         coords = d.f2_ppm if axis == "f2" else d.f1_ppm
@@ -771,6 +809,8 @@ class Contour2DView(QWidget):
         lo = max(min(f2), min(f1)); hi = min(max(f2), max(f1))
         self.p_main.plot([lo, hi], [lo, hi],
                          pen=pg.mkPen("#b9c1bc", style=Qt.DashLine))
+        if self.btnAxes.isChecked():
+            self._draw_mqmas_axes(f2, f1)
         # projections — or, in HMQC mode, the scaled sum-projection (correlated)
         # under the external 1D (total), so the gap is the uncorrelated part
         if self._hmqc["f2"] is not None:
