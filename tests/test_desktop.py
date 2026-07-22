@@ -483,3 +483,27 @@ def test_cofit_dialog_editable_param_grid_and_preview(qapp):
             if isinstance(dlg._plot_v.itemAt(i).widget(), pg.PlotWidget))
     assert n == 2
     dlg.close()
+
+
+def test_twod_display_modes_and_per_site_colours(qapp):
+    """The 2D view offers contour/density/filled/values display modes and draws
+    a fitted model's per-site components in the shared site colours."""
+    from larmor import twod
+    from larmor.desktop.plot import site_color
+    from larmor.desktop.twod_view import Contour2DView
+
+    f2 = np.linspace(-40, 110, 60); f1 = np.linspace(-30, 90, 50)
+    Z = np.exp(-0.5 * (((f2[None, :] - 55) / 12) ** 2 + ((f1[:, None] - 65) / 12) ** 2))
+    d = twod.Data2D(f2_ppm=f2, f1_ppm=f1, z=Z, nucleus="27Al", larmor_MHz=195.5)
+    dv = Contour2DView(); dv.set_data(d, "syn")
+    assert [dv.disp.itemText(i) for i in range(dv.disp.count())] == \
+        ["contour", "density", "filled", "contour+values"]
+    for mode in ("contour", "density", "filled", "contour+values"):
+        dv.disp.setCurrentText(mode)          # each mode redraws without error
+    # per-site overlay keeps the components for site-coloured drawing
+    s0 = np.exp(-0.5 * (((f2[None, :] - 55) / 8) ** 2 + ((f1[:, None] - 65) / 8) ** 2))
+    s1 = 0.4 * np.exp(-0.5 * (((f2[None, :] - 20) / 8) ** 2 + ((f1[:, None] - 30) / 8) ** 2))
+    dv.set_model(s0 + s1, f2, f1, per_site=[s0, s1])
+    assert dv._model_sites is not None and len(dv._model_sites) == 2
+    assert site_color(0) != site_color(1)
+    dv.deleteLater()

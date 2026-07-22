@@ -19,6 +19,8 @@ from __future__ import annotations
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import Qt, Signal
+
+from larmor.desktop.plot import site_color
 from PySide6.QtWidgets import (
     QComboBox, QDoubleSpinBox, QHBoxLayout, QLabel, QMenu, QPushButton, QSlider,
     QStackedWidget, QToolButton, QVBoxLayout, QWidget,
@@ -42,6 +44,7 @@ class Contour2DView(QWidget):
         self._committed = None      # phases the user has applied so far
         self._add_model = None      # model name while placing a 2D site
         self._model = None          # fitted overlay: (z, f2_ppm, f1_ppm)
+        self._model_sites = None    # optional per-site components (site colours)
         #: HMQC: an external 1D per projection axis, {"f2":(ppm,amp),"f1":...}
         self._hmqc = {"f2": None, "f1": None}
         self._hmqc_scale = {"f2": 1.0, "f1": 1.0}
@@ -63,6 +66,17 @@ class Contour2DView(QWidget):
         self.sign.addItems(["positive", "negative", "both"])
         self.sign.currentTextChanged.connect(self._redraw)
         bar.addWidget(self.sign)
+        bar.addWidget(QLabel("display"))
+        self.disp = QComboBox()
+        self.disp.addItems(["contour", "density", "filled", "contour+values"])
+        self.disp.setToolTip("contour lines · density (heatmap) · filled "
+                             "(heatmap + lines) · contour lines with level values")
+        self.disp.currentTextChanged.connect(self._redraw)
+        bar.addWidget(self.disp)
+        self.cmap = QComboBox()
+        self.cmap.addItems(["viridis", "magma", "inferno", "cividis", "gray"])
+        self.cmap.currentTextChanged.connect(self._redraw)
+        bar.addWidget(self.cmap)
         bar.addWidget(QLabel("levels"))
         self.nlevels = QDoubleSpinBox()
         self.nlevels.setRange(3, 40); self.nlevels.setValue(12)
@@ -608,13 +622,21 @@ class Contour2DView(QWidget):
         self._add_model = name
         self.setCursor(Qt.CrossCursor if name else Qt.ArrowCursor)
 
-    def set_model(self, z, f2_ppm, f1_ppm):
-        self._model = (np.asarray(z, float), np.asarray(f2_ppm),
-                       np.asarray(f1_ppm)) if z is not None else None
+    def set_model(self, z, f2_ppm, f1_ppm, per_site=None):
+        """Overlay a fitted 2D model. If per_site (a list of component arrays) is
+        given, each site is drawn in its own colour (matching the 1D components);
+        otherwise the total is drawn in one colour."""
+        if z is None:
+            self._model = None; self._model_sites = None
+        else:
+            self._model = (np.asarray(z, float), np.asarray(f2_ppm),
+                           np.asarray(f1_ppm))
+            self._model_sites = ([np.asarray(s, float) for s in per_site]
+                                 if per_site is not None else None)
         self._redraw()
 
     def clear_model(self):
-        self._model = None
+        self._model = None; self._model_sites = None
         self._redraw()
 
     # ---------- HMQC: overlay 1D on projections + uncorrelated features ----------
@@ -779,32 +801,56 @@ class Contour2DView(QWidget):
         tr = self._iso_transform(zc, f2c, f1c)
 
         sign = self.sign.currentText()
-        pos_cmap = pg.colormap.get("viridis").getLookupTable(0.0, 1.0, len(levels))
+        mode = self.disp.currentText()
+        cmap = pg.colormap.get(self.cmap.currentText())
         zt = np.ascontiguousarray(zc.T)
-        if sign in ("positive", "both"):
-            for lvl, col in zip(levels, pos_cmap):
-                iso = pg.IsocurveItem(data=zt, level=lvl,
-                                      pen=pg.mkPen(tuple(int(c) for c in col), width=1))
-                iso.setTransform(tr); self.p_main.addItem(iso)
-        if sign in ("negative", "both"):
-            for lvl in levels:
-                iso = pg.IsocurveItem(data=zt, level=-lvl,
-                                      pen=pg.mkPen("#d62728", width=1))
-                iso.setTransform(tr); self.p_main.addItem(iso)
+        floor = float(levels[0])
+        top = float(np.nanmax(np.abs(zc))) or 1.0
 
-        # fitted-model contours overlaid in orange, dashed
+        if mode in ("density", "filled"):        # heatmap image under everything
+            img = pg.ImageItem(zt)
+            img.setLookupTable(cmap.getLookupTable(0.0, 1.0, 256))
+            img.setLevels([floor, top])
+            img.setTransform(tr); self.p_main.addItem(img)
+        if mode in ("contour", "filled", "contour+values"):
+            line_lut = cmap.getLookupTable(0.0, 1.0, len(levels))
+            if sign in ("positive", "both"):
+                for lvl, col in zip(levels, line_lut):
+                    iso = pg.IsocurveItem(data=zt, level=lvl, pen=pg.mkPen(
+                        tuple(int(c) for c in col), width=1))
+                    iso.setTransform(tr); self.p_main.addItem(iso)
+            if sign in ("negative", "both"):
+                for lvl in levels:
+                    iso = pg.IsocurveItem(data=zt, level=-lvl,
+                                          pen=pg.mkPen("#d62728", width=1))
+                    iso.setTransform(tr); self.p_main.addItem(iso)
+        if mode == "contour+values":             # label a few levels (% of max)
+            for lvl in levels[::max(1, len(levels) // 5)]:
+                i1, i2 = np.unravel_index(int(np.argmin(np.abs(zc - lvl))),
+                                          zc.shape)
+                t = pg.TextItem(f"{100 * lvl / top:.0f}%", color="#556",
+                                anchor=(0.5, 0.5))
+                t.setPos(float(f2c[i2]), float(f1c[i1])); self.p_main.addItem(t)
+
+        # fitted model: one contour set per site, in that site's colour (matching
+        # the 1D component colours), so AlIV etc. read the same across datasets
         if self._model is not None:
-            mz, mf2, mf1 = self._decimate(*self._model)
-            mtop = float(np.nanmax(mz)) or 1.0
-            mlev = np.logspace(np.log10(max(0.05 * mtop, 1e-6)),
-                               np.log10(mtop), max(4, int(self.nlevels.value()) // 2))
-            mtr = self._iso_transform(mz, mf2, mf1)
-            mzt = np.ascontiguousarray(mz.T)
-            for lvl in mlev:
-                iso = pg.IsocurveItem(data=mzt, level=lvl,
-                                      pen=pg.mkPen("#e8832a", width=1,
-                                                   style=Qt.DashLine))
-                iso.setTransform(mtr); self.p_main.addItem(iso)
+            comps = self._model_sites or [self._model[0]]
+            for i, mzsrc in enumerate(comps):
+                mz, mf2, mf1 = self._decimate(np.asarray(mzsrc, float),
+                                              self._model[1], self._model[2])
+                mtop = float(np.nanmax(mz)) or 1.0
+                if mtop <= 0:
+                    continue
+                mlev = np.logspace(np.log10(0.06 * mtop), np.log10(mtop),
+                                   max(4, int(self.nlevels.value()) // 2))
+                mtr = self._iso_transform(mz, mf2, mf1)
+                mzt = np.ascontiguousarray(mz.T)
+                col = (site_color(i) if self._model_sites else "#e8832a")
+                for lvl in mlev:
+                    iso = pg.IsocurveItem(data=mzt, level=lvl, pen=pg.mkPen(
+                        col, width=1, style=Qt.DashLine))
+                    iso.setTransform(mtr); self.p_main.addItem(iso)
 
         lo = max(min(f2), min(f1)); hi = min(max(f2), max(f1))
         self.p_main.plot([lo, hi], [lo, hi],

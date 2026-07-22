@@ -1846,7 +1846,8 @@ class MainWindow(QMainWindow):
         from larmor import twod
 
         self.view2d.set_model(result.z_fit, result.kernel.f2_ppm,
-                              twod.mqmas_f1_axis(result.kernel, result.recipe))
+                              twod.mqmas_f1_axis(result.kernel, result.recipe),
+                              per_site=result.per_site)
         self.lines_table.set_chi2(f"RMSD {result.rmsd:.4f}")
         f1ref = getattr(result.recipe, "mqmas_f1_ref_ppm", 0.0)
         held = not getattr(result.recipe, "mqmas_f1_ref_vary", True)
