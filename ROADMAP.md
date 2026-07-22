@@ -160,25 +160,9 @@ Heteronuclear-correlation processing is central to our work; the current overlay
   separate workspaces.
 - [ ] Manual: a dedicated **HMQC / correlation** guide (see Documentation).
 
-**Generalized multi-experiment correlation decomposition (ambitious; conceived
-here, scheduled P8).**
-- [ ] Given N datasets that **share a nucleus/dimension** — any mix of 1D, MQMAS,
-  HMQC, REDOR — align their axes/projections and decompose features into
-  **correlated vs un-correlated across arbitrary combinations**. Generalizes the
-  HMQC (1D − projection) idea to a set:
-  - *1D + HMQC*: what correlates heteronuclearly (done); the rest is
-    un-correlated.
-  - *1D + MQMAS*: which sites are resolved by the quadrupolar-isotropic axis vs
-    lumped in the 1D.
-  - *1D + HMQC + REDOR*: species that both correlate **and** show dipolar
-    dephasing → assign; subtract to isolate the others.
-  - *1D + MQMAS + HMQC*: cross-check site assignments across three experiments.
-- [ ] Engine: a small "experiment-set" model (each dataset declares its shared
-  axis + a projection/observable), a scaling/alignment step, and set algebra
-  (intersection = correlated, difference = specific-to-one), each result a new
-  workspace you can fit.
-  *Accept: reproduce the HMQC 1D−projection result as the two-dataset special
-  case, then a 1D+HMQC+REDOR three-way isolation on real data.*
+The **generalized multi-experiment correlation decomposition** that grows out of
+this is deliberately scheduled **last** (see "Priority 9", below) — the engine
+architecture may be built ahead of time, but it is not wired into the app yet.
 
 ---
 
@@ -282,9 +266,6 @@ off intentionally; revisit only if the work scope shifts.
 
 ### P8 — occasionally, when the case arises
 
-- [ ] **Multi-experiment correlation decomposition** (our own idea, defined in
-  Priority 0.5): correlated/un-correlated feature extraction across any set of
-  shared-nucleus datasets (1D + MQMAS + HMQC, 1D + HMQC + REDOR, …).
 - [ ] **MQMAS post-processing**: Diagonal-slope / shear helpers and 2D
   Symmetrize.
 - [ ] **Multi-curve / per-site relaxation**: fit several sites' decays together
@@ -293,6 +274,29 @@ off intentionally; revisit only if the work scope shifts.
   Conjugate (spectral reversal), nBandesMax (max-lines guard).
 - [ ] **Quasar** model (a Czjzek-distribution variant) — low incremental value
   since `czjzek`/`ext_czjzek` already cover the amorphous quadrupolar case.
+
+---
+
+## Priority 9 (last, before "unlikely") — Multi-experiment correlation
+
+Our own idea, generalizing the HMQC (1D − projection) difference. **Scheduled
+last on purpose; the engine architecture may be built ahead but must NOT appear
+in the app until everything above is done.**
+
+- [ ] Given N datasets that **share a nucleus/dimension** — any mix of 1D, MQMAS,
+  HMQC, REDOR — align their axes/projections and decompose features into
+  **correlated vs un-correlated across arbitrary combinations**:
+  - *1D + HMQC*: what correlates heteronuclearly; the rest is un-correlated.
+  - *1D + MQMAS*: sites resolved by the isotropic axis vs lumped in the 1D.
+  - *1D + HMQC + REDOR*: species that correlate **and** dipolar-dephase → assign,
+    subtract to isolate the rest.
+  - *1D + MQMAS + HMQC*: cross-check assignments across three experiments.
+- [ ] Engine: an "experiment-set" model (each dataset declares its shared axis +
+  a projection/observable), a scaling/alignment step, and set algebra
+  (intersection = correlated, difference = specific-to-one) → each result a
+  fittable workspace.
+  *Accept: reproduce the HMQC 1D−projection result as the two-dataset special
+  case, then a 1D+HMQC+REDOR three-way isolation on real data.*
 
 ---
 
