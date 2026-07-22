@@ -47,3 +47,15 @@ def test_nmr_table_layout():
     # the primary isotope of chlorine is the most receptive one, 35Cl
     assert N.primary_isotope("Cl").symbol == "35Cl"
     assert N.primary_isotope("H").symbol == "1H"
+
+
+def test_measure_region():
+    from larmor import measure as M
+    x = np.linspace(-50, 50, 4000)
+    g = lambda c, w, a: a * np.exp(-4 * np.log(2) * ((x - c) / w) ** 2)
+    y = g(0, 6, 1.0) + g(20, 6, 0.5)
+    assert M.fwhm(x, y, (10, -10)) == pytest.approx(6.0, abs=0.05)
+    assert M.centre_of_mass(x, y, (10, -10)) == pytest.approx(0.0, abs=0.1)
+    rows = M.integrate_regions(x, y, [(10, -10), (30, 10)])
+    assert rows[0]["percent"] == pytest.approx(66.7, abs=0.5)
+    assert rows[1]["percent"] == pytest.approx(33.3, abs=0.5)

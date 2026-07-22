@@ -278,6 +278,8 @@ class MainWindow(QMainWindow):
                   self.open_sample, "Ctrl+Shift+S")
         self._add(m_file, "Open &EXPNO / folder…", self.open_expno,
                   "Ctrl+Shift+O")
+        self.m_recent = m_file.addMenu("Open &recent")
+        self._rebuild_recent()
         self._add(m_file, "Open &FID…  (process before FT)", self.open_fid,
                   "Ctrl+F")
         m_file.addSeparator()
@@ -356,6 +358,9 @@ class MainWindow(QMainWindow):
             self._model_actions[m["name"]] = a
 
         m_tools = mb.addMenu("&Tools")
+        self._add(m_tools, "&Integrals && measurements…  (integral, %, FWHM, CoM)",
+                  self.open_integrals)
+        m_tools.addSeparator()
         self._add(m_tools, "Relaxation / series (T1, T2)…", self.open_satrec)
         self._add(m_tools, "QCPMG (echo train → spectrum)…", self.open_qcpmg)
         self._add(m_tools, "REDOR (dipolar coupling)…", self.open_redor)
@@ -383,6 +388,35 @@ class MainWindow(QMainWindow):
         a.triggered.connect(slot)
         menu.addAction(a)
         return a
+
+    def _rebuild_recent(self):
+        self.m_recent.clear()
+        paths = QSettings("LARMOR", "app").value("recent", []) or []
+        if isinstance(paths, str):
+            paths = [paths]
+        for p in paths[:12]:
+            act = self.m_recent.addAction(f"{Path(p).name}   —   {Path(p).parent}")
+            act.triggered.connect(lambda _=False, pp=p: self.load_source(pp))
+        if not paths:
+            a = self.m_recent.addAction("(none yet)"); a.setEnabled(False)
+
+    def _add_recent(self, path: str):
+        s = QSettings("LARMOR", "app")
+        paths = s.value("recent", []) or []
+        if isinstance(paths, str):
+            paths = [paths]
+        paths = [p for p in paths if p != path]
+        paths.insert(0, path)
+        s.setValue("recent", paths[:12])
+        self._rebuild_recent()
+
+    def open_integrals(self):
+        from larmor.desktop.integrate_dialog import IntegralsDialog
+
+        if not self.exp_ppm.size:
+            self.statusBar().showMessage("open a 1D spectrum first")
+            return
+        IntegralsDialog(self, self.exp_ppm, self.exp_amp).exec()
 
     def open_nmr_table(self):
         from larmor.desktop.utilities import NmrTableDialog
@@ -924,6 +958,8 @@ class MainWindow(QMainWindow):
             self._load_source_body(path, keep_fit)
         finally:
             self._in_load_source = False
+        if Path(path).exists():
+            self._add_recent(path)
 
     def _load_source_body(self, path: str, keep_fit: bool | None):
         # First try the 1D-fittable path (dmfit / recipe / 1D processed).
