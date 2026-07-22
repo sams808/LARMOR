@@ -41,6 +41,83 @@ register(Model(
 ))
 
 
+def gl_unit_area(x_ppm: np.ndarray, pos_ppm: float, fwhm_ppm: float,
+                 gl: float) -> np.ndarray:
+    """Unit-AREA pseudo-Voigt (∫ = 1): area-normalized Gauss/Lorentz mix."""
+    dx = x_ppm - pos_ppm
+    w = max(fwhm_ppm, 1e-9)
+    sig = w * FWHM_TO_SIGMA
+    g = np.exp(-0.5 * (dx / sig) ** 2) / (sig * np.sqrt(2.0 * np.pi))
+    hw = w / 2.0
+    lo = (hw / np.pi) / (dx ** 2 + hw ** 2)
+    return gl * g + (1.0 - gl) * lo
+
+
+def _render_gl_norm(v: dict, ctx: SimContext) -> np.ndarray:
+    return v["amplitude"] * gl_unit_area(
+        ctx.x_ppm, v["isotropic_chemical_shift_ppm"], v["shift_fwhm_ppm"],
+        v.get("gl", 1.0))
+
+
+register(Model(
+    name="gl_norm",
+    label="Gauss/Lorentz (area)",
+    description="Area-normalized Gauss/Lorentz (dmfit's GL Norm): amplitude is "
+                "the integral, so amplitudes read directly as populations for "
+                "quantification.",
+    params=(
+        ParamDef("isotropic_chemical_shift_ppm", "pos", 0.0, "ppm", "peak position"),
+        ParamDef("shift_fwhm_ppm", "fwhm", 5.0, "ppm", "FWHM", min=0.1),
+        ParamDef("amplitude", "amp", 1.0, "", "area (integral)", min=0.0),
+        ParamDef("gl", "gl", 1.0, "", "Gaussian fraction (1=G, 0=L)",
+                 min=0.0, max=1.0, vary=False),
+    ),
+    render=_render_gl_norm,
+))
+
+
+def _render_jmultiplet(v: dict, ctx: SimContext) -> np.ndarray:
+    """n equivalent scalar couplings → binomial (n+1)-line multiplet."""
+    from math import comb
+
+    n = int(round(v.get("n_j", 1)))
+    j_hz = v.get("j_hz", 0.0)
+    larmor = ctx.larmor_MHz or 1.0
+    d_ppm = j_hz / larmor
+    pos = v["isotropic_chemical_shift_ppm"]
+    fwhm = v["shift_fwhm_ppm"]
+    amp = v["amplitude"]
+    gl = v.get("gl", 1.0)
+    total = float(2 ** n)
+    y = np.zeros_like(ctx.x_ppm)
+    for i in range(n + 1):
+        w = comb(n, i) / total
+        centre = pos + (i - n / 2.0) * d_ppm
+        y += amp * w * gauss_lor(ctx.x_ppm, centre, fwhm, 1.0, gl)
+    return y
+
+
+register(Model(
+    name="jmultiplet",
+    label="J-multiplet",
+    description="Scalar-coupling multiplet: n equivalent spin-½ couplings give a "
+                "binomial (n+1)-line pattern split by J (Hz). Each component is a "
+                "Gauss/Lorentz line.",
+    params=(
+        ParamDef("isotropic_chemical_shift_ppm", "pos", 0.0, "ppm",
+                 "multiplet centre"),
+        ParamDef("j_hz", "j", 100.0, "Hz", "scalar coupling J", min=0.0),
+        ParamDef("n_j", "nj", 1.0, "", "number of equivalent couplings (integer)",
+                 min=0.0, max=12.0, vary=False),
+        ParamDef("shift_fwhm_ppm", "fwhm", 1.0, "ppm", "component FWHM", min=0.05),
+        ParamDef("amplitude", "amp", 1.0, "", "total intensity", min=0.0),
+        ParamDef("gl", "gl", 1.0, "", "Gaussian fraction", min=0.0, max=1.0,
+                 vary=False),
+    ),
+    render=_render_jmultiplet,
+))
+
+
 def voigt(x_ppm: np.ndarray, pos_ppm: float, gauss_fwhm_ppm: float,
           lorentz_fwhm_ppm: float, amplitude: float) -> np.ndarray:
     """Peak-normalized TRUE Voigt: the convolution of a Gaussian and a

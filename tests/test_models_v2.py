@@ -154,3 +154,33 @@ def test_voigt_is_true_convolution_and_fits():
     p = res.recipe.sites[0].params
     assert p["gauss_fwhm_ppm"].value == pytest.approx(4.0, abs=0.1)
     assert p["lorentz_fwhm_ppm"].value == pytest.approx(6.0, abs=0.1)
+
+
+def test_gl_norm_is_area_normalized():
+    """GL-Norm amplitude is the integral: unit-area shape integrates to ~1."""
+    import numpy as np
+    from larmor.models import analytic
+    x = np.linspace(-80, 80, 8000)
+    trap = np.trapezoid if hasattr(np, "trapezoid") else np.trapz
+    assert float(trap(analytic.gl_unit_area(x, 0.0, 4.0, 1.0), x)) == pytest.approx(1.0, abs=1e-3)
+
+
+def test_jmultiplet_binomial_pattern():
+    """A quartet (n=3) is 1:3:3:1, split by J/ν0 in ppm."""
+    import numpy as np
+    from scipy.signal import find_peaks
+    from larmor import engine
+    x = np.linspace(-60, 60, 6000)
+    r = Recipe(nucleus="1H", larmor_frequency_MHz=100.0, sites=[SiteModel(
+        model="jmultiplet", label="J", params={
+            "isotropic_chemical_shift_ppm": Param(0.0),
+            "j_hz": Param(300.0), "n_j": Param(3.0),
+            "shift_fwhm_ppm": Param(0.3), "amplitude": Param(1.0),
+            "gl": Param(1.0)})])
+    xc, y, _ = engine.simulate(r, exp_ppm=x)
+    pk, _ = find_peaks(y, height=y.max() * 0.1, distance=50)
+    assert len(pk) == 4                                   # quartet
+    ratios = sorted(y[pk] / y[pk].max())
+    assert ratios[0] == pytest.approx(1 / 3, abs=0.05)    # 1:3:3:1
+    assert ratios[-1] == pytest.approx(1.0, abs=0.02)
+    assert abs(xc[pk[1]] - xc[pk[0]]) == pytest.approx(3.0, abs=0.1)  # J/ν0

@@ -21,6 +21,8 @@ PARAM_LABELS = {
     "gauss_fwhm_ppm": "Gauss FWHM (ppm)",
     "lorentz_fwhm_ppm": "Lorentz FWHM (ppm)",
     "shift_ppm": "shift (ppm)",
+    "j_hz": "J (Hz)",
+    "n_j": "n couplings",
     "amplitude": "amplitude",
     "gl": "g/l fraction",
 }
