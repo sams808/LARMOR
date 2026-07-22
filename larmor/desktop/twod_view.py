@@ -111,6 +111,9 @@ class Contour2DView(QWidget):
         ops.addAction("Diagonal → fit", lambda: self._op("diagonal"))
         ops.addAction("F2 skyline → fit", lambda: self._emit_projection("skyline"))
         ops.addAction("F2 sum → fit", lambda: self._emit_projection("sum"))
+        ops.addSeparator()
+        ops.addAction("Save F2 projection…", lambda: self._save_proj("f2"))
+        ops.addAction("Save F1 projection…", lambda: self._save_proj("f1"))
         self.btnOps.setMenu(ops)
         bar.addWidget(self.btnOps)
         v.addLayout(bar)
@@ -480,6 +483,23 @@ class Contour2DView(QWidget):
             return
         self._orig = self._committed = self.data = new
         self._redraw()
+
+    def _save_proj(self, axis: str):
+        from PySide6.QtWidgets import QFileDialog
+
+        from larmor.io import spectra
+
+        if self.data is None:
+            return
+        coords = self.data.f2_ppm if axis == "f2" else self.data.f1_ppm
+        amp = self.data.projection(axis, "sum")
+        path, _ = QFileDialog.getSaveFileName(
+            self, f"Save {axis.upper()} projection", f"{axis}_projection.csv",
+            "CSV (*.csv)")
+        if path:
+            spectra.write_csv(path, coords, amp,
+                              {"nucleus": self.data.nucleus,
+                               "larmor_MHz": self.data.larmor_MHz})
 
     # ---------- calibrate + measure ----------
     def _calibrate_at(self, p):

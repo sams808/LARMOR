@@ -375,6 +375,7 @@ class MainWindow(QMainWindow):
         m_tools.addSeparator()
         self._add(m_tools, "Relaxation / series (T1, T2)…", self.open_satrec)
         self._add(m_tools, "QCPMG (echo train → spectrum)…", self.open_qcpmg)
+        self._add(m_tools, "Variable temperature (Arrhenius / VFT)…", self.open_vt)
         self._add(m_tools, "REDOR (dipolar coupling)…", self.open_redor)
         self._add(m_tools, "Import DFT tensors (.magres)…", self.open_magres)
         m_tools.addSeparator()
@@ -2100,6 +2101,11 @@ class MainWindow(QMainWindow):
         if self.central_stack.currentWidget() is self.view:
             self.request_simulation()
         self.statusBar().showMessage("co-fit shared parameters applied")
+
+    def open_vt(self):
+        from larmor.desktop.vt_dialog import VtDialog
+
+        VtDialog(self).exec()
 
     def open_qcpmg(self):
         from larmor.desktop.qcpmg_dialog import QcpmgDialog
