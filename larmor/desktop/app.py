@@ -326,6 +326,8 @@ class MainWindow(QMainWindow):
                   self.autopick_lines)
         self._add(m_dec, "Predict at another &field…  (what at X T?)",
                   self.predict_at_field)
+        self._add(m_dec, "Add f&unction line…  (y = f(x; a,b,c,d))",
+                  self.add_function_line)
         m_dec.addSeparator()
         self.actFit = self._add(m_dec, "&Fit", self.run_fit, "F5")
         self.actAuto = self._add(m_dec, "&Auto Fit (multi-start)…",
@@ -1438,6 +1440,31 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             f"added {name} #{n} — click to add more, or click {name} again "
             "(Esc) to stop")
+
+    def add_function_line(self):
+        """Add a user y(x; a,b,c,d) expression line (ssNake Function fit)."""
+        from PySide6.QtWidgets import QInputDialog
+
+        if self.recipe is None:
+            self.statusBar().showMessage("load a spectrum first")
+            return
+        expr, ok = QInputDialog.getText(
+            self, "Function line",
+            "y = f(x; a, b, c, d)   (numpy: exp, sin, sqrt, pi …):",
+            text="a * exp(-((x - b) / c)**2) + d")
+        if not ok or not expr.strip():
+            return
+        self.snapshot()
+        m = model_registry.get("function")
+        params = {p.name: {"value": p.default, "stderr": None, "vary": p.vary,
+                           "min": p.min, "max": p.max, "expr": None}
+                  for p in m.params}
+        n = len(self.recipe["sites"])
+        self.recipe["sites"].append(
+            {"model": "function", "label": f"fn-{n}", "func": expr.strip(),
+             "params": params})
+        self.on_structure_changed()
+        self.statusBar().showMessage(f"added function line: {expr.strip()}")
 
     def autopick_lines(self):
         """Peak-pick the spectrum and drop a Gauss/Lorentz line at each peak."""

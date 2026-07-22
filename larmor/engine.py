@@ -141,8 +141,31 @@ def simulate_site(site: SiteModel, ctx) -> np.ndarray:
                          x_ppm=ctx.x_ppm) if isinstance(ctx, Axis) else _ctx_from_kernel(ctx)
     if site.model == "spectrum":
         return _render_spectrum(site, ctx)
+    if site.model == "function":
+        return _render_function(site, ctx)
     values = {k: v.value for k, v in site.params.items()}
     return model_registry.get(site.model).render(values, ctx)
+
+
+_SAFE_FUNCS = ("sin", "cos", "tan", "exp", "log", "log10", "sqrt", "abs",
+               "tanh", "arctan", "sign", "sinc")
+
+
+def _render_function(site, ctx) -> np.ndarray:
+    """Evaluate a user y(x; a,b,c,d) expression (ssNake Function fit) on the ppm
+    axis, scaled by amplitude. Restricted namespace (numpy funcs + the params)."""
+    expr = getattr(site, "func", None)
+    if not expr:
+        return np.zeros_like(ctx.x_ppm)
+    ns = {"x": ctx.x_ppm, "pi": np.pi, "np": np}
+    ns.update({fn: getattr(np, fn) for fn in _SAFE_FUNCS})
+    ns.update({k: v.value for k, v in site.params.items()})
+    try:
+        y = eval(expr, {"__builtins__": {}}, ns)  # noqa: S307 (trusted local user)
+    except Exception:
+        return np.zeros_like(ctx.x_ppm)
+    amp = site.params["amplitude"].value if "amplitude" in site.params else 1.0
+    return amp * (np.asarray(y, float) * np.ones_like(ctx.x_ppm))
 
 
 def _render_spectrum(site, ctx) -> np.ndarray:

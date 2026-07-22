@@ -56,6 +56,8 @@ class SiteModel:
     #: for the "spectrum" (background) model: the reference trace it renders,
     #: {"ppm": [...], "amp": [...]} (amp pre-normalized to unit peak)
     ref: dict | None = None
+    #: for the "function" model: a y(x; a,b,c,d) expression string
+    func: str | None = None
 
 
 @dataclass

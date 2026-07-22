@@ -18,6 +18,23 @@ def _placeholder(values: dict, ctx) -> np.ndarray:
 
 
 register(Model(
+    name="function",
+    label="Function fit",
+    description="a user y(x; a,b,c,d) expression (ssNake Function fit), evaluated "
+                "with numpy — x is the ppm axis, amplitude scales the result. "
+                "Set the expression when adding the line.",
+    params=(
+        ParamDef("amplitude", "amp", 1.0, "", "overall scale", min=0.0),
+        ParamDef("a", "a", 0.0, "", "free parameter a"),
+        ParamDef("b", "b", 0.0, "", "free parameter b"),
+        ParamDef("c", "c", 0.0, "", "free parameter c"),
+        ParamDef("d", "d", 0.0, "", "free parameter d"),
+    ),
+    render=_placeholder,
+))
+
+
+register(Model(
     name="spectrum",
     label="Spectrum (background)",
     description="an external measured spectrum used as a fit component "

@@ -15,7 +15,7 @@ def test_registry_contents():
     for m in models.REGISTRY.values():
         assert "amplitude" in m.param_names
         assert m.key_of("amplitude") == "amp"
-        if m.name != "spectrum":
+        if m.name not in ("spectrum", "function"):
             assert "isotropic_chemical_shift_ppm" in m.param_names
 
 

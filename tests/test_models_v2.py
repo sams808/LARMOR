@@ -202,3 +202,21 @@ def test_sidebands_manifold():
     pk, _ = find_peaks(y, height=y.max() * 0.02, distance=30)
     assert len(pk) == 7                                    # centre + 3 each side
     assert abs(xc[pk[1]] - xc[pk[0]]) == pytest.approx(10.0, abs=0.2)  # νrot/ν0
+
+
+def test_function_fit_model():
+    """A user y(x; a,b,c,d) expression fits, and the expression round-trips."""
+    import numpy as np
+    from larmor import engine
+    x = np.linspace(-50, 50, 600)
+    truth = 2.5 * np.exp(-((x - 10) / 6) ** 2)
+    r = Recipe(nucleus="1H", larmor_frequency_MHz=100.0, sites=[SiteModel(
+        model="function", label="fn", func="exp(-((x - b) / c)**2)", params={
+            "amplitude": Param(1.0, min=0.0), "a": Param(0.0), "b": Param(0.0),
+            "c": Param(3.0, min=0.1), "d": Param(0.0)})])
+    res = fitmod.fit(r, x, truth, window_ppm=(50.0, -50.0))
+    p = res.recipe.sites[0].params
+    assert p["amplitude"].value == pytest.approx(2.5, abs=0.05)
+    assert p["b"].value == pytest.approx(10.0, abs=0.1)
+    assert p["c"].value == pytest.approx(6.0, abs=0.1)
+    assert Recipe.from_dict(r.to_dict()).sites[0].func == "exp(-((x - b) / c)**2)"
