@@ -229,6 +229,7 @@ class MainWindow(QMainWindow):
         self._build_sidebar()
         self._build_explorer_dock()
         self._build_datasets_dock()
+        self._build_workspaces_dock()
         self._build_bottom_docks()
         self._build_right_dock()
 
@@ -252,6 +253,12 @@ class MainWindow(QMainWindow):
         self._fit2d_worker = None
         self.view2d.add_requested.connect(self.add_site_2d)
         self.view2d.load_1d_for_projection.connect(self.load_projection_1d)
+        # workspace manager (TopSpin-style: open a 2D / extract a trace -> a new
+        # workspace you can switch between, close, or save)
+        self.workspaces: list[dict] = []
+        self.active_ws: int | None = None
+        self._ws_mode = "auto"         # "auto" | "reuse" | "new"
+        self._in_load_source = False
 
         # give the spectrum the majority of the height; keep the parameter
         # dock compact so it does not swallow half the window when nearly empty
@@ -436,6 +443,21 @@ class MainWindow(QMainWindow):
         self.explorer_dock.setWidget(self.explorer)
         self.explorer_dock.setMinimumWidth(230)
         self.addDockWidget(Qt.LeftDockWidgetArea, self.explorer_dock)
+
+    def _build_workspaces_dock(self):
+        from larmor.desktop.workspaces import WorkspacePanel
+
+        self.ws_dock = QDockWidget("Workspaces", self)
+        self.ws_dock.setFeatures(QDockWidget.DockWidgetMovable |
+                                 QDockWidget.DockWidgetClosable)
+        self.ws_panel = WorkspacePanel()
+        self.ws_panel.switch.connect(self.switch_workspace)
+        self.ws_panel.close.connect(self.close_workspace)
+        self.ws_panel.save.connect(self.save_workspace)
+        self.ws_dock.setWidget(self.ws_panel)
+        self.addDockWidget(Qt.LeftDockWidgetArea, self.ws_dock)
+        self.tabifyDockWidget(self.explorer_dock, self.ws_dock)
+        self.explorer_dock.raise_()
 
     def _build_datasets_dock(self):
         from larmor.desktop.datasets import DatasetsPanel
@@ -740,13 +762,142 @@ class MainWindow(QMainWindow):
     def _last_dir(self) -> str:
         return QSettings("LARMOR", "app").value("lastDir", "")
 
+    # ------------------------------------------------------- workspaces
+    def _doc_title(self) -> str:
+        if self.central_stack.currentWidget() is self.view2d:
+            return self.view2d.title.text() or "2D"
+        if self.recipe:
+            return (self.recipe.get("sample")
+                    or (Path(self.source_path).name if self.source_path else "spectrum"))
+        return "empty"
+
+    def _snapshot_doc(self) -> dict:
+        is2d = self.central_stack.currentWidget() is self.view2d
+        snap = {"kind": "2d" if is2d else "1d",
+                "source_path": self.source_path,
+                "recipe": json.loads(json.dumps(self.recipe)) if self.recipe else None,
+                "hidden": set(self.hidden)}
+        if is2d:
+            snap["data2d"] = self._data2d
+            snap["view2d"] = self.view2d.get_state()
+            snap["fittable"] = getattr(self, "_data2d_fittable", False)
+        else:
+            snap["exp_ppm"] = np.array(self.exp_ppm, copy=True)
+            snap["exp_amp"] = np.array(self.exp_amp, copy=True)
+            snap["proc_base"] = self._proc_base
+            snap["overlays"] = [dict(o) for o in self._overlays]
+        return snap
+
+    def _apply_doc(self, snap: dict):
+        self.source_path = snap["source_path"]
+        self.recipe = (json.loads(json.dumps(snap["recipe"]))
+                       if snap["recipe"] else None)
+        self.hidden = set(snap["hidden"])
+        self.undo_stack.clear(); self.redo_stack.clear()
+        if snap["kind"] == "2d":
+            self._data2d = snap["data2d"]
+            self._data2d_fittable = snap.get("fittable", False)
+            self.view2d.set_state(snap["view2d"])
+            self.central_stack.setCurrentWidget(self.view2d)
+        else:
+            self.exp_ppm = snap["exp_ppm"]; self.exp_amp = snap["exp_amp"]
+            self._proc_base = snap["proc_base"]
+            self._overlays = list(snap["overlays"])
+            self.central_stack.setCurrentWidget(self.view)
+            self.view.set_experiment(self.exp_ppm, self.exp_amp)
+            self.view.set_title(self.recipe.get("sample", "") if self.recipe else "")
+            self.lines_table.rebuild(self.recipe, self.hidden)
+            self._update_paddles(); self._refresh_overlays(); self._update_sn()
+            if self.recipe and self.recipe.get("sites"):
+                self.request_simulation()
+            else:
+                self.view.set_model(None, None, None, None, self.hidden)
+        self._update_exp_label(); self._update_enabled()
+
+    def _sync_active(self):
+        if self.active_ws is None or not (0 <= self.active_ws < len(self.workspaces)):
+            return
+        ws = self.workspaces[self.active_ws]
+        ws["snap"] = self._snapshot_doc()
+        ws["kind"] = ws["snap"]["kind"]
+        ws["has_fit"] = bool(self.recipe and self.recipe.get("sites"))
+        ws["title"] = self._doc_title()
+
+    def _register_ws(self, kind: str):
+        mode, self._ws_mode = self._ws_mode, "auto"
+        entry = {"snap": self._snapshot_doc(), "kind": kind,
+                 "title": self._doc_title(),
+                 "has_fit": bool(self.recipe and self.recipe.get("sites"))}
+        reuse = False
+        if mode == "reuse":
+            reuse = self.active_ws is not None
+        elif mode == "auto" and self.active_ws is not None:
+            cur = self.workspaces[self.active_ws]
+            reuse = (kind == "1d" and cur["kind"] == "1d" and not cur["has_fit"])
+        if reuse:
+            self.workspaces[self.active_ws] = entry
+        else:
+            self.workspaces.append(entry)
+            self.active_ws = len(self.workspaces) - 1
+        self._refresh_ws_panel()
+
+    def _refresh_ws_panel(self):
+        items = []
+        for ws in self.workspaces:
+            icon = "▦" if ws["kind"] == "2d" else ("⤳" if ws["has_fit"] else "∿")
+            items.append((icon, ws["title"]))
+        self.ws_panel.rebuild(items, self.active_ws if self.active_ws is not None
+                              else -1)
+
+    def switch_workspace(self, i: int):
+        if i == self.active_ws or not (0 <= i < len(self.workspaces)):
+            return
+        self._sync_active()
+        self.active_ws = i
+        self._apply_doc(self.workspaces[i]["snap"])
+        self._refresh_ws_panel()
+        self.statusBar().showMessage(f"workspace: {self.workspaces[i]['title']}")
+
+    def close_workspace(self, i: int):
+        if not (0 <= i < len(self.workspaces)):
+            return
+        del self.workspaces[i]
+        if not self.workspaces:
+            self.active_ws = None
+            self._refresh_ws_panel()
+            return
+        if self.active_ws == i:
+            self.active_ws = min(i, len(self.workspaces) - 1)
+            self._apply_doc(self.workspaces[self.active_ws]["snap"])
+        elif self.active_ws is not None and self.active_ws > i:
+            self.active_ws -= 1
+        self._refresh_ws_panel()
+
+    def save_workspace(self, i: int):
+        if not (0 <= i < len(self.workspaces)):
+            return
+        self.switch_workspace(i)
+        if self.central_stack.currentWidget() is self.view2d:
+            self.save_recipe()
+        elif self.recipe and self.recipe.get("sites"):
+            self.save_recipe()
+        else:
+            self.save_spectrum()
+
     def load_source(self, path: str, keep_fit: bool | None = None):
         """Open ANY dataset with a basic display, then let the user choose a
         process. 1D spectra go to the fit workbench; 2D datasets show a contour
         map; raw fid/ser get a quick preview. Nothing is ever rejected."""
         self.statusBar().showMessage("loading…")
         QApplication.processEvents()
+        self._sync_active()               # persist the outgoing document
+        self._in_load_source = True
+        try:
+            self._load_source_body(path, keep_fit)
+        finally:
+            self._in_load_source = False
 
+    def _load_source_body(self, path: str, keep_fit: bool | None):
         # First try the 1D-fittable path (dmfit / recipe / 1D processed).
         try:
             ppm, amp, recipe, meta, warnings = _load_any(path)
@@ -818,6 +969,7 @@ class MainWindow(QMainWindow):
         if self.recipe["sites"]:
             self.request_simulation()
         self._refresh_overlays()
+        self._register_ws("1d")
         self._persist_session()
 
     def _load_nonfittable(self, path: str) -> bool:
@@ -946,6 +1098,7 @@ class MainWindow(QMainWindow):
             prev = (self.recipe.get("sample") if self.recipe else None,
                     self.exp_ppm.copy(), self.exp_amp.copy(), self.source_path)
         del self._overlays[i]
+        self._ws_mode = "reuse"           # swap the active spectrum in place
         self.load_source(ov["source"])
         if prev and prev[3] != self.source_path:
             self._add_overlay(prev[0] or Path(prev[3]).name, prev[1], prev[2],
@@ -1017,17 +1170,20 @@ class MainWindow(QMainWindow):
             return np.asarray(d.axes[0].values), np.asarray(d.data, float)
 
     def back_to_2d(self):
-        """Return to the 2D map (with its overlays/HMQC state intact) after
-        pulling a trace to the workbench."""
-        if self._data2d is not None:
-            self.central_stack.setCurrentWidget(self.view2d)
-            self.statusBar().showMessage("back to the 2D map")
-        else:
-            self.statusBar().showMessage("no 2D map is loaded")
+        """Switch to the most recent 2D workspace (the map you came from)."""
+        if self.central_stack.currentWidget() is self.view2d:
+            return
+        for i in range(len(self.workspaces) - 1, -1, -1):
+            if self.workspaces[i]["kind"] == "2d":
+                self.switch_workspace(i)
+                return
+        self.statusBar().showMessage("no 2D workspace is open")
 
     def _show_2d(self, data2d, title: str, kind: str):
         from larmor.recipe import Recipe
 
+        if not self._in_load_source:
+            self._sync_active()
         self._data2d = data2d
         self.view2d.set_data(data2d, f"{kind} — {title}")
         self.view2d.clear_model()
@@ -1044,11 +1200,14 @@ class MainWindow(QMainWindow):
             self.hidden.clear()
             self.lines_table.rebuild(self.recipe, self.hidden)
             self._update_exp_label(); self._update_enabled()
+        self._register_ws("2d")
 
     def _display_1d(self, ppm, amp, nucleus, larmor, masr, title, expno):
         """Put a bare 1D spectrum on the workbench (no fit), ready to fit."""
         from larmor.recipe import Recipe
 
+        if not self._in_load_source:
+            self._sync_active()
         self.central_stack.setCurrentWidget(self.view)
         self.exp_ppm, self.exp_amp = np.asarray(ppm), np.asarray(amp)
         self._proc_base = None
@@ -1065,14 +1224,17 @@ class MainWindow(QMainWindow):
         self.lines_table.rebuild(self.recipe, self.hidden)
         self._update_paddles(); self._update_exp_label(); self._update_enabled()
         self._refresh_overlays(); self._update_sn()
+        self._register_ws("1d")
 
     def _trace_to_workbench(self, ppm, amp, label):
-        """A 1D trace pulled out of the 2D view becomes the working spectrum."""
+        """A 1D trace pulled out of the 2D view becomes a NEW workspace, so the
+        2D map stays open in its own workspace."""
         nuc = self.view2d.data.nucleus if self.view2d.data else ""
         larmor = self.view2d.data.larmor_MHz if self.view2d.data else 0.0
+        self._ws_mode = "new"
         self._display_1d(ppm, amp, nuc, larmor, None, label,
                          self.source_path or "")
-        self.statusBar().showMessage(f"{label} — add lines and Fit")
+        self.statusBar().showMessage(f"{label} — new workspace; add lines and Fit")
 
     def new_fit(self):
         if self.recipe is None:
@@ -1563,6 +1725,7 @@ class MainWindow(QMainWindow):
     def reset_processing(self):
         if self.source_path:
             keep = json.loads(json.dumps(self.recipe)) if self.recipe else None
+            self._ws_mode = "reuse"        # reload in place, same workspace
             self.load_source(self.source_path)
             if keep is not None:
                 self.recipe = keep

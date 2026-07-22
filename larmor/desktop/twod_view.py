@@ -258,6 +258,38 @@ class Contour2DView(QWidget):
         self.stack.setCurrentWidget(self.glw)
         self._redraw()
 
+    # ---------- workspace state (for the workspace manager) ----------
+    def get_state(self) -> dict:
+        return {
+            "orig": self._orig, "committed": self._committed, "data": self.data,
+            "hmqc": dict(self._hmqc), "hmqc_scale": dict(self._hmqc_scale),
+            "hmqc_color": dict(self._hmqc_color), "model": self._model,
+            "sign": self.sign.currentText(),
+            "nlevels": self.nlevels.value(), "floor": self.floor.value(),
+            "title": self.title.text(),
+        }
+
+    def set_state(self, s: dict):
+        self._orig = s["orig"]; self._committed = s["committed"]
+        self.data = s["data"]
+        self._hmqc = dict(s["hmqc"]); self._hmqc_scale = dict(s["hmqc_scale"])
+        self._hmqc_color = dict(s["hmqc_color"]); self._model = s["model"]
+        self.title.setText(s["title"])
+        for w, val in ((self.nlevels, s["nlevels"]), (self.floor, s["floor"])):
+            w.blockSignals(True); w.setValue(val); w.blockSignals(False)
+        self.sign.blockSignals(True); self.sign.setCurrentText(s["sign"])
+        self.sign.blockSignals(False)
+        # drop any transient interaction state, then draw
+        self.btnPhase.blockSignals(True); self.btnPhase.setChecked(False)
+        self.btnPhase.blockSignals(False); self.phasebar.setVisible(False)
+        for b in (self.btnCal, self.btnMeasure, self.btnHmqc):
+            b.blockSignals(True); b.setChecked(False); b.blockSignals(False)
+        self.hmqcbar.setVisible(False)
+        self._toggle_measure(False)
+        self._picks = []; self._pivot = None; self._pref = []
+        self.stack.setCurrentWidget(self.glw)
+        self._redraw()
+
     # ---------- phasing: pick 1-2 peaks on the contour ----------
     def _axis(self) -> str:
         return "f2" if self.pdim.currentIndex() == 0 else "f1"

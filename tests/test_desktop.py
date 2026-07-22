@@ -94,6 +94,41 @@ def test_overlay_cockpit(qapp, win):
     assert len(win._overlays) == 1
 
 
+def test_workspaces_switch_close(qapp, win):
+    """Opening a 2D and extracting a trace create separate workspaces; switching
+    restores their state, and closing frees them."""
+    from larmor import twod
+
+    x = np.linspace(-100, 100, 200)
+    win._display_1d(x, np.exp(-(x / 20) ** 2), "27Al", 156.0, None, "A", "sA")
+    qapp.processEvents()
+    win._model_actions["gauss_lor"].setChecked(True)
+    win.add_site_at(0.0, 1.0); qapp.processEvents(); win._sync_active()
+    assert len(win.workspaces) == 1 and win.workspaces[0]["has_fit"]
+
+    f2 = np.linspace(-50, 50, 80); f1 = np.linspace(-30, 30, 40)
+    Z = (np.exp(-((f2[None, :] - 10) / 6) ** 2)
+         * np.exp(-((f1[:, None] - 5) / 6) ** 2))
+    win._show_2d(twod.Data2D(f2_ppm=f2, f1_ppm=f1, z=Z, nucleus="1H",
+                             larmor_MHz=500.0), "HMQC", "2D")
+    qapp.processEvents()
+    win.view2d.set_projection_1d("f2", f2, np.exp(-((f2 - 10) / 6) ** 2))
+    assert len(win.workspaces) == 2 and win.active_ws == 1
+
+    win.view2d._emit_projection("skyline"); qapp.processEvents()   # trace → new ws
+    assert len(win.workspaces) == 3 and win.central_stack.currentWidget() is win.view
+
+    win.back_to_2d(); qapp.processEvents()
+    assert win.active_ws == 1 and win.central_stack.currentWidget() is win.view2d
+    assert win.view2d._hmqc["f2"] is not None            # 2D state restored
+
+    win.switch_workspace(0); qapp.processEvents()
+    assert len(win.recipe["sites"]) == 1                 # the fit came back
+
+    win.close_workspace(1); qapp.processEvents()
+    assert len(win.workspaces) == 2
+
+
 def test_hmqc_explorer_pick_and_back_nav(qapp, win, tmp_path):
     """Arming an HMQC projection pick routes the next Explorer activation to the
     overlay (colored), and Back-to-2D restores the map with overlays intact."""
