@@ -195,6 +195,10 @@ class Contour2DView(QWidget):
         self.p_main.setLabel("right", "F1")
         self.p_main.getViewBox().invertX(True)
         self.p_main.getViewBox().invertY(True)
+        # the projections must share the main plot's inversion, else they mirror
+        # and pan the opposite way to the contour
+        self.p_top.getViewBox().invertX(True)
+        self.p_left.getViewBox().invertY(True)
         self.p_top.setXLink(self.p_main)
         self.p_left.setYLink(self.p_main)
         self.p_main.scene().sigMouseClicked.connect(self._on_click)

@@ -15,11 +15,15 @@ Design guarantees kept from the first version:
 from __future__ import annotations
 
 import re
+import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
 import nmrglue as ng
+
+# nmrglue warns when it can't parse a pulse program; harmless for our purposes
+warnings.filterwarnings("ignore", message="Error reading the pulse program")
 
 #: Bruker FnMODE codes for the indirect dimension
 FNMODE = {0: "undefined", 1: "QF", 2: "QSEQ", 3: "TPPI", 4: "States",
