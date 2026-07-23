@@ -32,10 +32,10 @@ def show_help(parent, name: str, title: str = "Help") -> None:
     tb.setOpenExternalLinks(True)
     tb.setStyleSheet("QTextBrowser { background: #ffffff; padding: 6px 10px; }")
     try:
-        from larmor.desktop.mdrender import HELP_CSS, render_math
+        from larmor.desktop.mdrender import HELP_CSS, render_help_html
 
         tb.document().setDefaultStyleSheet(HELP_CSS)
-        tb.setMarkdown(render_math(text))            # typeset the equations
+        tb.setHtml(render_help_html(text))           # typeset the equations
     except Exception:
         try:
             tb.setMarkdown(text)
