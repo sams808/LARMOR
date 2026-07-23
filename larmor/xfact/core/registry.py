@@ -7,7 +7,7 @@ import random
 
 from ..packs.birds import picker as _birds
 
-# LARMOR vendors only the birds pack of XFact (the birdfact easter egg).
+# LARMOR vendors only the birds pack.
 _PACKS = [_birds]
 
 

@@ -430,7 +430,7 @@ class MainWindow(QMainWindow):
             self._add(m_man, title,
                       lambda _=False, n=name, t=title: self._open_manual(n, t))
         self._add(m_help, "About LARMOR", self._about)
-        self._add(m_help, "More…", self._birdfact)      # hidden birdfact egg
+        self._add(m_help, "More…", self._show_more)
 
     def _add(self, menu, text, slot, shortcut=None, checkable=False, checked=False):
         a = QAction(text, self)
@@ -585,13 +585,12 @@ class MainWindow(QMainWindow):
             "mrsimulator + lmfit + pyqtgraph\n"
             "github.com/sams808/LARMOR")
 
-    def _birdfact(self):
-        """The birdfact easter egg (vendored from github.com/sams808/XFact):
-        a random real bird from iNaturalist, offline sample if no network."""
+    def _show_more(self):
+        """Open the 'More…' card."""
         try:
             from larmor.xfact import show_fact
 
-            self._birdfact_dlg = show_fact(parent=self, pack="birds")
+            self._more_dlg = show_fact(parent=self)
         except Exception as exc:
             self.statusBar().showMessage(f"…never mind ({exc})")
 

@@ -41,10 +41,10 @@ hiddenimports += [
 datas += [(str(ROOT / "larmor" / "static"), "larmor/static")]
 if (ROOT / "larmor" / "help").exists():
     datas += [(str(ROOT / "larmor" / "help"), "larmor/help")]
-# birdfact easter egg (vendored XFact): bundle its offline photo samples
-_egg = ROOT / "larmor" / "xfact" / "packs" / "birds" / "assets"
-if _egg.exists():
-    datas += [(str(_egg), "larmor/xfact/packs/birds/assets")]
+# xfact 'More…' card: bundle its offline photo samples
+_xf = ROOT / "larmor" / "xfact" / "packs" / "birds" / "assets"
+if _xf.exists():
+    datas += [(str(_xf), "larmor/xfact/packs/birds/assets")]
 hiddenimports += ["requests"]
 if (ROOT / "assets").exists():
     datas += [(str(ROOT / "assets"), "assets")]

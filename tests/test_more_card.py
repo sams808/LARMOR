@@ -1,5 +1,5 @@
-"""The birdfact easter egg (vendored from github.com/sams808/XFact): it must
-be birds-only, produce a card offline (no network), and open from the ? menu."""
+"""The ? ▸ More… card (vendored xfact): it must be a single pack, produce a
+card offline (no network), and open from the ? menu."""
 import os
 
 import pytest
@@ -9,7 +9,7 @@ pytest.importorskip("requests")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 
-def test_only_birds_pack_is_vendored():
+def test_single_pack_is_vendored():
     from larmor.xfact import list_packs
     assert list_packs() == ["birds"]
 
@@ -24,7 +24,7 @@ def test_offline_card_needs_no_network():
 
 def test_offline_pool_is_varied():
     """The offline fallback must have real variety — it used to be only three
-    birds (so a network-blocked user saw the same one or two over and over)."""
+    samples (so a network-blocked user saw the same one or two over and over)."""
     from larmor.xfact.packs.birds import offline
     names = {c["name"] for c in offline.OFFLINE_CARDS}
     assert len(names) >= 10
@@ -32,11 +32,11 @@ def test_offline_pool_is_varied():
         assert (offline.ASSETS_DIR / c["image_file"]).exists()
 
 
-def test_more_menu_item_opens_birdfact(monkeypatch):
+def test_more_menu_item_opens_card(monkeypatch):
     from PySide6.QtWidgets import QApplication, QMenu
 
     monkeypatch.setenv("LARMOR_NO_SESSION", "1")
-    # force the fully-offline path (no live iNaturalist / cataas calls)
+    # force the fully-offline path (no live network calls)
     import larmor.xfact.core.http as http
     monkeypatch.setattr(http, "get_json", lambda *a, **k: None)
     monkeypatch.setattr(http, "get_bytes", lambda *a, **k: None)
@@ -51,9 +51,9 @@ def test_more_menu_item_opens_birdfact(monkeypatch):
     # positioned directly below About LARMOR
     assert labels.index("More…") == labels.index("About LARMOR") + 1
 
-    win._birdfact()                      # trigger the egg
-    dlg = win._birdfact_dlg
+    win._show_more()
+    dlg = win._more_dlg
     dlg._worker.wait(4000)               # let the offline fallback resolve
     app.processEvents()
-    assert dlg.name_lab.text()           # a bird name got shown
+    assert dlg.name_lab.text()           # a card got shown
     dlg.close(); win.close()

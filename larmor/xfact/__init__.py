@@ -1,9 +1,6 @@
-"""XFact (birds pack only) — vendored into LARMOR from
-github.com/sams808/XFact. A hidden "random bird fact" popup card: the
-birdfact easter egg behind the ? menu.
-
-A live-data 'random fact' popup card, organized as independent packs
-sharing one Qt dialog, one background-thread worker, and one HTTP layer.
+"""XFact — a small live-data 'random fact' popup card, organized as
+independent packs sharing one Qt dialog, one background-thread worker,
+and one HTTP layer. Vendored into LARMOR from github.com/sams808/XFact.
 
     from xfact import show_fact
     show_fact(parent=my_main_window)             # random pack each time
