@@ -422,11 +422,16 @@ class MainWindow(QMainWindow):
 
         m_help = mb.addMenu("&?")
         m_man = m_help.addMenu("User &manuals")
-        for name, title in (("spectra-1d", "1D spectra — processing & fitting"),
-                            ("mqmas", "MQMAS (2D)"),
-                            ("correlation-hmqc", "HMQC & correlation"),
-                            ("relaxation", "Relaxation (T1/T2)"),
-                            ("qcpmg", "QCPMG")):
+        for name, title in (
+                ("getting-started", "Getting started"),
+                ("spectra-1d", "1D spectra — processing & fitting"),
+                ("2d-processing", "2D processing"),
+                ("mqmas", "MQMAS (2D)"),
+                ("correlation-hmqc", "HMQC & correlation"),
+                ("relaxation", "Relaxation (T1/T2)"),
+                ("qcpmg", "QCPMG"),
+                ("multi-dataset", "Multi-dataset & co-fitting"),
+                ("processing-reference", "Processing reference")):
             self._add(m_man, title,
                       lambda _=False, n=name, t=title: self._open_manual(n, t))
         self._add(m_help, "&Lineshapes — models && physics…",
