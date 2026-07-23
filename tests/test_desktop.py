@@ -651,6 +651,37 @@ def test_cofit_reseeds_on_new_dataset(qapp, win):
     assert d1 is not None and d1[0].shape == xb.shape       # it's dataset B
     assert np.allclose(d1[1], ampb)                          # not the stash
     assert win._cofit["d2"] is None                          # fresh: no old 2D
+
+
+def test_2d_reverse_tracks_model_overlay(qapp):
+    """Reversing (or transposing) the 2D data axis mirrors the fitted model
+    overlay too, and a later Compute (set_model) re-lands in the same
+    orientation — so the co-fit model stays registered with the experiment."""
+    from larmor import twod
+    from larmor.desktop.twod_view import Contour2DView
+
+    f2 = np.linspace(-20, 80, 40); f1 = np.linspace(-10, 60, 30)
+    z = np.random.RandomState(0).rand(30, 40)
+    d = twod.Data2D(f2_ppm=f2, f1_ppm=f1, z=z, nucleus="27Al", larmor_MHz=130.3)
+    v = Contour2DView(); v.set_data(d, "exp")
+    mz = np.outer(np.hanning(30), np.hanning(40))
+    v.set_model(mz, f2, f1, per_site=[mz])
+    assert np.allclose(v._model[0], mz)
+
+    v._op("rev_f2")                                    # user reverses F2
+    assert v._model_ops == ["rev_f2"]
+    assert np.allclose(v._model[0], np.flip(mz, 1))    # model followed the data
+    assert np.allclose(v._model_sites[0], np.flip(mz, 1))
+
+    v.set_model(mz, f2, f1, per_site=[mz])             # "Compute" re-simulates
+    assert np.allclose(v._model[0], np.flip(mz, 1))    # still reversed (ops replayed)
+
+    v._op("rev_f2")                                    # reverse again = undo
+    assert np.allclose(v._model[0], mz)
+    v.close()
+
+
+def test_fit_progress_bar_ticks(qapp, win):
     """The fit progress bar advances on lmfit iterations (iter_cb wired through
     the fit functions and the worker's progress signal)."""
     from larmor.desktop.app import FitWorker

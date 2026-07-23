@@ -45,6 +45,10 @@ class Contour2DView(QWidget):
         self._add_model = None      # model name while placing a 2D site
         self._model = None          # fitted overlay: (z, f2_ppm, f1_ppm)
         self._model_sites = None    # optional per-site components (site colours)
+        #: data-axis ops applied since load (reverse/transpose); the fitted model
+        #: is mirrored the same way so the overlay tracks the data — and so a
+        #: freshly simulated model (Compute) lands in the same orientation.
+        self._model_ops: list[str] = []
         #: HMQC: an external 1D per projection axis, {"f2":(ppm,amp),"f1":...}
         self._hmqc = {"f2": None, "f1": None}
         self._hmqc_scale = {"f2": 1.0, "f1": 1.0}
@@ -312,6 +316,7 @@ class Contour2DView(QWidget):
         self._orig = d
         self._committed = d
         self.data = d
+        self._model_ops = []                 # a new dataset starts un-reversed
         self.title.setText(title or "2D dataset")
         f1_kind = "arrayed (relaxation)" if getattr(data, "notes", None) and \
             any("pseudo" in n or "arrayed" in n for n in data.notes) else "F1"
@@ -531,6 +536,19 @@ class Contour2DView(QWidget):
         else:
             return
         self._orig = self._committed = self.data = new
+        # mirror the fitted model overlay the same way, and remember the op so a
+        # later Compute lands in the same orientation (symmetrize isn't a simple
+        # mirror -> drop the overlay, it will be rebuilt on the next Compute).
+        if kind == "symmetrize":
+            self._model = None; self._model_sites = None; self._model_ops = []
+        else:
+            self._model_ops.append(kind)
+            if self._model is not None:
+                self._model = self._apply_ops([kind], *self._model)
+            if self._model_sites is not None:
+                self._model_sites = [self._apply_ops([kind], s, self._model[1],
+                                                     self._model[2])[0]
+                                     for s in self._model_sites]
         self._redraw()
 
     def _save_proj(self, axis: str):
@@ -622,17 +640,36 @@ class Contour2DView(QWidget):
         self._add_model = name
         self.setCursor(Qt.CrossCursor if name else Qt.ArrowCursor)
 
+    @staticmethod
+    def _apply_ops(ops, z, f2, f1):
+        """Replay the data-axis ops on a model array so it stays registered with
+        the (possibly reversed/transposed) experiment."""
+        z = np.asarray(z, float); f2 = np.asarray(f2); f1 = np.asarray(f1)
+        for op in ops:
+            if op == "rev_f2":
+                z = np.flip(z, 1)
+            elif op == "rev_f1":
+                z = np.flip(z, 0)
+            elif op == "transpose":
+                z = z.T; f2, f1 = f1, f2
+        return z, f2, f1
+
     def set_model(self, z, f2_ppm, f1_ppm, per_site=None):
         """Overlay a fitted 2D model. If per_site (a list of component arrays) is
         given, each site is drawn in its own colour (matching the 1D components);
-        otherwise the total is drawn in one colour."""
+        otherwise the total is drawn in one colour. The model is mirrored to match
+        any data-axis ops (reverse/transpose) already applied to the experiment."""
         if z is None:
             self._model = None; self._model_sites = None
         else:
-            self._model = (np.asarray(z, float), np.asarray(f2_ppm),
-                           np.asarray(f1_ppm))
-            self._model_sites = ([np.asarray(s, float) for s in per_site]
-                                 if per_site is not None else None)
+            z, f2, f1 = self._apply_ops(self._model_ops, z, f2_ppm, f1_ppm)
+            self._model = (z, f2, f1)
+            if per_site is not None:
+                self._model_sites = [
+                    self._apply_ops(self._model_ops, s, f2_ppm, f1_ppm)[0]
+                    for s in per_site]
+            else:
+                self._model_sites = None
         self._redraw()
 
     def clear_model(self):
