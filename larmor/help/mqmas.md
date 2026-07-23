@@ -24,7 +24,7 @@ The centre of gravity of each site in the two dimensions is set by the isotropic
 chemical shift $\delta_\text{iso}$ and the second-order **quadrupolar isotropic
 shift**
 
-$$\delta_\text{QIS} = -\frac{3}{40}\left[\frac{I(I+1)-\tfrac{3}{4}}{I^2(2I-1)^2}\right]\left(\frac{P_Q}{\nu_0}\right)^2\times 10^6\ \text{(ppm)},\qquad P_Q = C_Q\sqrt{1+\eta_Q^2/3}$$
+$$\delta_\text{QIS} = -\frac{3}{40}\left[\frac{I(I+1)-\frac{3}{4}}{I^2(2I-1)^2}\right]\left(\frac{P_Q}{\nu_0}\right)^2\times 10^6\ \text{(ppm)},\qquad P_Q = C_Q\sqrt{1+\eta_Q^2/3}$$
 
 with Larmor frequency $\nu_0$ (Samoson, Kundla & Lippmaa 1982). The direct
 dimension F2 shows the full MAS powder lineshape centred at
@@ -41,9 +41,9 @@ a spin-dependent slope, not along the diagonal. A **shearing transformation**
 scaling of a pure-shift site in the unsheared representation is
 $\delta_\text{F1} = c\,\delta_\text{iso}$ with
 
-$$c = -\frac{p-R}{1+R},\qquad R = \left|\frac{C_4(I,\,p/2)}{C_4(I,\,1/2)}\right|,\qquad C_4(I,m) = m\big[18\,I(I+1) - 34m^2 - 5\big].$$
+$$c = -\frac{p-R}{1+R},\qquad R = \left|\frac{C_4(I,\,p/2)}{C_4(I,\,1/2)}\right|,\qquad C_4(I,m) = m\left[18\,I(I+1) - 34m^2 - 5\right].$$
 
-For $I=\tfrac52$ triple-quantum, $R = \tfrac{19}{12}$ and $c = -\tfrac{17}{31}$.
+For $I=\frac{5}{2}$ triple-quantum, $R = \frac{19}{12}$ and $c = -\frac{17}{31}$.
 **mrsimulator's `ThreeQ_VAS` returns F1 in exactly this sheared convention.**
 LARMOR rescales the kernel's F1 axis by $1/c$ at build time so that its internal
 convention is the **δ₁-isotropic** one (a pure-CS site sits on the diagonal),

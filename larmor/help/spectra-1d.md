@@ -47,9 +47,9 @@ Multiplying the FID by a window $w(t)$ trades resolution against sensitivity
 - **Exponential (EM)** — $w(t) = e^{-\pi\,\text{LB}\,t}$. A line-broadening of
   `LB` Hz; the classic S/N-boosting **matched filter** when `LB` equals the
   natural linewidth.
-- **Gaussian (GM)** — $w(t) = \exp\!\big[\pi\,\text{LB}\,t - (\pi\,\text{LB}\,t)^2/(2\cdot\text{GB}\,T)\big]$,
+- **Gaussian (GM)** — $w(t) = \exp\!\left[\pi\,\text{LB}\,t - (\pi\,\text{LB}\,t)^2/(2\cdot\text{GB}\,T)\right]$,
   resolution enhancement (negative `LB`, `GB` sets the Gaussian maximum).
-- **Sine / Sine² (SINE/QSINE)** — $w(t) = \sin\!\big(\pi(1-\phi)\,t/T + \phi\big)$
+- **Sine / Sine² (SINE/QSINE)** — $w(t) = \sin\!\left(\pi(1-\phi)\,t/T + \phi\right)$
   with a shift $\phi$ (`SSB`); $\phi = \pi/2$ is a pure cosine.
 - **TRAF** — the Traficante window (Traficante & Nemeth 1987), an optimal
   S/N-vs-resolution compromise.

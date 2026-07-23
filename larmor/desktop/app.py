@@ -2462,17 +2462,28 @@ class MainWindow(QMainWindow):
                 dst["sites"][i]["params"][param]["value"] = \
                     s["params"][param]["value"]
 
+    def _cofit_home(self):
+        """A stable identity for the workspace a co-fit was launched from, so a
+        stash is only resumed when the user returns to the *same* dataset — not
+        after they open something else (which would otherwise restore the stale
+        co-fit over the new data)."""
+        if self.active_ws is not None and 0 <= self.active_ws < len(self.workspaces):
+            return id(self.workspaces[self.active_ws])
+        return ("path", self.source_path)
+
     def open_cofit(self):
         if not self.recipe or not self.recipe.get("sites"):
             self.statusBar().showMessage(
                 "set up the fit (add lines) on one dataset first")
             return
         self._sync_active()
+        home = self._cofit_home()
         prev = self._cofit_last
-        if prev and (prev.get("d1") or prev.get("d2")):
+        if (prev and prev.get("home") == home
+                and (prev.get("d1") or prev.get("d2"))):
             st = prev                                 # resume the paused co-fit
         else:
-            st = {"d1": None, "d2": None}
+            st = {"d1": None, "d2": None, "home": home}
             base = json.loads(json.dumps(self.recipe))
             st["r1"] = json.loads(json.dumps(base))   # independent per-dataset
             st["r2"] = json.loads(json.dumps(base))   # copies of the model

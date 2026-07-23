@@ -46,7 +46,32 @@ def test_manual_renders_to_html(stem, _title):
     text = help_path(stem).read_text(encoding="utf-8")
     html = render_help_html(text)                  # must not raise
     assert "MDMATH" not in html, "an equation token was left unreplaced"
+    assert "$$" not in html, "a display equation was left as raw LaTeX"
     assert "<p" in html or "<img" in html          # produced real HTML
+
+
+# Every model + reference manual, not just the parametrized user manuals.
+ALL_HELP = [s for s, _ in MANUALS] + ["lineshapes"]
+
+
+@pytest.mark.parametrize("stem", ALL_HELP)
+def test_every_equation_typesets(stem):
+    """Each $…$ / $$…$$ must render — an unsupported LaTeX construct (\\tfrac,
+    \\big, \\le, …) would silently pass through as raw text otherwise."""
+    import re
+
+    from larmor.desktop.help_dialog import help_path
+    from larmor.desktop.mdrender import _math_png, _protect_code
+
+    md, _ = _protect_code(help_path(stem).read_text(encoding="utf-8"))
+    tex = [m.group(1).strip()
+           for m in re.finditer(r"\$\$(.+?)\$\$", md, flags=re.DOTALL)]
+    inline_src = re.sub(r"\$\$(.+?)\$\$", " ", md, flags=re.DOTALL)
+    tex += [m.group(1).strip() for m in
+            re.finditer(r"(?<!\$)\$(?!\$)(.+?)(?<!\$)\$(?!\$)", inline_src,
+                        flags=re.DOTALL)]
+    broken = [t for t in tex if not _math_png(t)[0]]
+    assert not broken, f"{stem}.md has un-typesettable equations: {broken}"
 
 
 def test_all_manuals_in_help_menu():

@@ -540,6 +540,7 @@ def _cofit_setup(win, r):
     d2 = twod.Data2D(f2_ppm=k.f2_ppm, f1_ppm=k.f1_ppm, z=Z / Z.max(),
                      nucleus="27Al", larmor_MHz=130.3)
     win._cofit = {"d1": (x, amp, "MAS"), "d2": (d2, "2rr"),
+                  "home": win._cofit_home(),
                   "r1": json.loads(json.dumps(r)), "r2": json.loads(json.dumps(r)),
                   "tie": set(win._default_tie(r))}
     win.central_stack.setCurrentWidget(win.cofit_page)
@@ -625,7 +626,31 @@ def test_cofit_pauses_and_resumes_on_view_switch(qapp, win):
     assert win._cofit_last is None                     # deliberate close forgets it
 
 
-def test_fit_progress_bar_ticks(qapp, win):
+def test_cofit_reseeds_on_new_dataset(qapp, win):
+    """A stashed co-fit must NOT be restored over a *different* dataset: opening
+    Co-fit while a new spectrum is loaded seeds fresh from that spectrum, rather
+    than resurrecting the previous (e.g. example) co-fit."""
+    r = _cofit_czjzek_recipe()
+    _cofit_setup(win, r)                               # co-fit on dataset A
+    win.source_path = "sampleA"; win._cofit["home"] = win._cofit_home()
+
+    win.central_stack.setCurrentWidget(win.view)       # switch away -> stashed
+    assert win._cofit is None and win._cofit_last is not None
+
+    # user now opens a different 1D dataset (new "workspace")
+    xb = np.linspace(-50, 120, 350)
+    ampb = np.exp(-0.5 * ((xb - 30) / 9) ** 2) * 5e5
+    win.exp_ppm, win.exp_amp = xb, ampb
+    win.source_path = "sampleB"
+    win.recipe = {**r, "sample": "B"}
+
+    win._cofit_add_dataset = lambda *a, **k: None      # skip the "add 2nd" dialog
+    win.open_cofit()
+    assert win.central_stack.currentWidget() is win.cofit_page
+    d1 = win._cofit["d1"]
+    assert d1 is not None and d1[0].shape == xb.shape       # it's dataset B
+    assert np.allclose(d1[1], ampb)                          # not the stash
+    assert win._cofit["d2"] is None                          # fresh: no old 2D
     """The fit progress bar advances on lmfit iterations (iter_cb wired through
     the fit functions and the worker's progress signal)."""
     from larmor.desktop.app import FitWorker

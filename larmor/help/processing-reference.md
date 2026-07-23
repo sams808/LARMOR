@@ -18,7 +18,7 @@ A window $w(t)$ trades resolution for sensitivity (Lindon & Ferrige 1980):
 |---|---|---|
 | **EM** (exponential) | $e^{-\pi\,\text{LB}\,t}$ | S/N; matched filter at `LB` = linewidth |
 | **GM** (Gaussian) | $\exp[\pi\,\text{LB}\,t-(\pi\,\text{LB}\,t)^2/(2\,\text{GB}\,T)]$ | resolution enhancement |
-| **SINE / QSINE** | $\sin/\sin^2\!\big[\pi(1{-}\phi)t/T+\phi\big]$ | sine bells, shift `SSB` = $\phi$ |
+| **SINE / QSINE** | $\sin/\sin^2\!\left[\pi(1{-}\phi)t/T+\phi\right]$ | sine bells, shift `SSB` = $\phi$ |
 | **TRAF** | Traficante window | optimal S/N-vs-resolution (Traficante 1987) |
 | **Shifted Gaussian** | Gaussian centred on the echo top | whole-echo data |
 

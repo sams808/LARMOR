@@ -164,8 +164,8 @@ the electric-field-gradient (EFG) tensor $\mathbf{V}$ is
 
 $$H_Q = \frac{eQ}{2I(2I-1)\hbar}\,\hat{I}\cdot\mathbf{V}\cdot\hat{I}, \qquad C_Q = \frac{eQ\,V_{zz}}{h}, \qquad \eta = \frac{V_{xx}-V_{yy}}{V_{zz}}$$
 
-with $|V_{xx}| \le |V_{yy}| \le |V_{zz}|$ the sorted EFG eigenvalues
-($0 \le \eta \le 1$).
+with $|V_{xx}| \leq |V_{yy}| \leq |V_{zz}|$ the sorted EFG eigenvalues
+($0 \leq \eta \leq 1$).
 
 ### Quad CT, 2nd order — `quad_ct`
 

@@ -12,8 +12,8 @@
 
 | Kind | Delay is… | Model | Reads out |
 |---|---|---|---|
-| **Saturation recovery** | recovery time after saturation | $I(\tau)=I_0\big(1-e^{-\tau/T_1}\big)$ | longitudinal $T_1$ |
-| **Inversion recovery** | recovery after a 180° | $I(\tau)=I_0\big(1-A\,e^{-\tau/T_1}\big)$ | longitudinal $T_1$ |
+| **Saturation recovery** | recovery time after saturation | $I(\tau)=I_0\left(1-e^{-\tau/T_1}\right)$ | longitudinal $T_1$ |
+| **Inversion recovery** | recovery after a 180° | $I(\tau)=I_0\left(1-A\,e^{-\tau/T_1}\right)$ | longitudinal $T_1$ |
 | **CPMG / echo** | echo evolution time | $I(t)=I_0\,e^{-t/T_2}$ | transverse $T_2$ |
 | **T₁ρ** | spin-lock time | $I(t)=I_0\,e^{-t/T_{1\rho}}$ | rotating-frame $T_{1\rho}$ |
 
@@ -27,11 +27,11 @@ length; $T_{1\rho}$ probes mid-kHz motion.
 LARMOR uses the robust **3-parameter** build-up that TopSpin's `t1/t2` module
 uses,
 
-$$I(\tau) = I_0\Big(1 - \text{sat}\cdot e^{-(\tau/T_1)^{\beta}}\Big),$$
+$$I(\tau) = I_0\left(1 - \text{sat}\cdot e^{-(\tau/T_1)^{\beta}}\right),$$
 
 where **sat** floats to absorb imperfect saturation/inversion and a baseline
 offset (rather than forcing the curve through zero), and the **stretch**
-$\beta\le 1$ is fixed at 1 (mono-exponential) by default. Tick **stretched β**
+$\beta\leq 1$ is fixed at 1 (mono-exponential) by default. Tick **stretched β**
 for a **distribution** of relaxation times — the Kohlrausch–Williams–Watts form
 (Williams & Watts 1970), appropriate for glasses and other disordered solids
 where a single $T_1$ is a fiction. The fitted formula is shown above the curve.
