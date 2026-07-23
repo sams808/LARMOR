@@ -26,13 +26,13 @@ larmor = "larmor.cli:main"
 [project.optional-dependencies]
 dev = ["pytest"]
 app = ["fastapi", "uvicorn[standard]"]
-desktop = ["PySide6", "pyqtgraph"]
+desktop = ["PySide6", "pyqtgraph", "requests"]  # requests: birdfact easter egg
 
 [tool.setuptools.packages.find]
 include = ["larmor*"]
 
 [tool.setuptools.package-data]
-larmor = ["static/*"]
+larmor = ["static/*", "help/*", "xfact/packs/*/assets/offline/*"]
 
 [tool.pytest.ini_options]
 markers = ["slow: long-running tests (full kernel build + fit)"]
