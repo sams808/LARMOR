@@ -429,6 +429,9 @@ class MainWindow(QMainWindow):
                             ("qcpmg", "QCPMG")):
             self._add(m_man, title,
                       lambda _=False, n=name, t=title: self._open_manual(n, t))
+        self._add(m_help, "&Lineshapes — models && physics…",
+                  lambda: self._open_manual(
+                      "lineshapes", "Lineshapes — models & physics"))
         self._add(m_help, "About LARMOR", self._about)
         self._add(m_help, "More…", self._show_more)
 
