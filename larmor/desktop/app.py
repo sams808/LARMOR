@@ -25,7 +25,8 @@ from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QDockWidget, QFileDialog, QLabel, QMainWindow,
     QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QSplitter,
-    QTableWidget, QTableWidgetItem, QToolBar, QVBoxLayout, QWidget, QHBoxLayout,
+    QStackedWidget, QTableWidget, QTableWidgetItem, QToolBar, QVBoxLayout,
+    QWidget, QHBoxLayout,
 )
 
 from larmor import models as model_registry
@@ -755,7 +756,11 @@ class MainWindow(QMainWindow):
         self.lines_table.structure.connect(self.on_site_structure)
         self.lines_table.compute.connect(self.request_simulation)
         self.lines_table.fit.connect(self.run_fit)
-        self.lines_dock.setWidget(self.lines_table)
+        # a stack so co-fit can swap in its split 1D|2D tables in the same dock
+        self.lines_stack = QStackedWidget()
+        self.lines_stack.addWidget(self.lines_table)     # index 0: normal fit
+        self.lines_stack.addWidget(self.cofit_tables)    # index 1: co-fit (built earlier)
+        self.lines_dock.setWidget(self.lines_stack)
         self.addDockWidget(Qt.BottomDockWidgetArea, self.lines_dock)
 
         self.results_dock = QDockWidget("Report", self)
@@ -2319,38 +2324,44 @@ class MainWindow(QMainWindow):
         self._cofit_tie = {}                         # param -> QCheckBox
         v.addWidget(self.cofit_tie_bar)
 
-        # -- two columns: plot over its own parameter table --
+        # -- two plot columns (1D | 2D); the per-dataset parameter tables live in
+        #    the bottom "Fit parameters" dock, split the same way (below) --
         self.cofit_view1d = SpectrumView()
         self.cofit_view2d = Contour2DView()
         self.cofit_table1d = LinesTable()
         self.cofit_table2d = LinesTable()
-        self.cofit_table1d.setMaximumHeight(180)
-        self.cofit_table2d.setMaximumHeight(180)
-        self.cofit_table1d.edited.connect(lambda: self._cofit_on_edit(1))
-        self.cofit_table2d.edited.connect(lambda: self._cofit_on_edit(2))
-        self.cofit_table1d.constraint_edited.connect(lambda: self._cofit_on_edit(1))
-        self.cofit_table2d.constraint_edited.connect(lambda: self._cofit_on_edit(2))
-        self.cofit_table1d.structure.connect(lambda r, a: self._cofit_struct(1, r, a))
-        self.cofit_table2d.structure.connect(lambda r, a: self._cofit_struct(2, r, a))
+        for tbl, which in ((self.cofit_table1d, 1), (self.cofit_table2d, 2)):
+            tbl.edited.connect(lambda w=which: self._cofit_on_edit(w))
+            tbl.constraint_edited.connect(lambda w=which: self._cofit_on_edit(w))
+            tbl.structure.connect(lambda r, a, w=which: self._cofit_struct(w, r, a))
+            tbl.compute.connect(lambda: self._cofit_simulate())   # footer Compute
+            tbl.fit.connect(self.run_cofit_fit)                   # footer Fit
 
-        def _col(view, table, header):
-            w = QWidget(); cv = QVBoxLayout(w); cv.setContentsMargins(0, 0, 0, 0)
-            cv.setSpacing(2)
-            cv.addWidget(view, 1)
-            cv.addWidget(QLabel(header))
-            cv.addWidget(table)
-            w.setMinimumWidth(300)
-            return w
-
-        split = QSplitter(Qt.Horizontal)            # 1D | 2D, side by side
-        split.addWidget(_col(self.cofit_view1d, self.cofit_table1d,
-                             "<b>1D parameters</b>"))
-        split.addWidget(_col(self.cofit_view2d, self.cofit_table2d,
-                             "<b>2D parameters</b>"))
+        for vw in (self.cofit_view1d, self.cofit_view2d):
+            vw.setMinimumWidth(300)
+        split = QSplitter(Qt.Horizontal)            # 1D | 2D plots, side by side
+        split.addWidget(self.cofit_view1d)
+        split.addWidget(self.cofit_view2d)
         split.setChildrenCollapsible(False)
         split.setStretchFactor(0, 1); split.setStretchFactor(1, 1)
         self.cofit_split = split
         v.addWidget(split, 1)
+
+        # the parameter tables, split 1D | 2D to mirror the plots; swapped into
+        # the bottom dock while co-fitting (see _build_bottom_docks / _set_cofit_dock)
+        def _tblcol(table, header):
+            w = QWidget(); cv = QVBoxLayout(w); cv.setContentsMargins(0, 0, 0, 0)
+            cv.setSpacing(2)
+            lab = QLabel(header); lab.setStyleSheet("font-weight:600;")
+            cv.addWidget(lab); cv.addWidget(table, 1)
+            w.setMinimumWidth(280)
+            return w
+        self.cofit_tables = QSplitter(Qt.Horizontal)
+        self.cofit_tables.addWidget(_tblcol(self.cofit_table1d, "1D parameters"))
+        self.cofit_tables.addWidget(_tblcol(self.cofit_table2d, "2D parameters"))
+        self.cofit_tables.setChildrenCollapsible(False)
+        self.cofit_tables.setStretchFactor(0, 1)
+        self.cofit_tables.setStretchFactor(1, 1)
         self.cofit_page = page
         self.central_stack.addWidget(page)           # index 2
         self._cofit = None
@@ -2495,6 +2506,7 @@ class MainWindow(QMainWindow):
                             self.recipe.get("sample") or "current")
         self._cofit = st
         self.central_stack.setCurrentWidget(self.cofit_page)
+        self._set_cofit_dock(True)
         self._cofit_tie_rebuild()
         self._cofit_rebuild_tables()
         self._cofit_split_even()
@@ -2524,6 +2536,7 @@ class MainWindow(QMainWindow):
             return
         if self.central_stack.currentWidget() is self.cofit_page:
             return
+        self._set_cofit_dock(False)
         self._cofit_last = self._cofit
         self._cofit = None
         self.statusBar().showMessage(
@@ -2538,6 +2551,24 @@ class MainWindow(QMainWindow):
             self.cofit_split.setSizes([w // 2, w - w // 2])
         apply()
         QTimer.singleShot(0, apply)
+
+    def _set_cofit_dock(self, on: bool):
+        """While co-fitting, the bottom "Fit parameters" dock shows the split
+        1D | 2D parameter tables (mirroring the plot split); otherwise it shows
+        the normal single Fit-Parameters table."""
+        self.lines_stack.setCurrentWidget(
+            self.cofit_tables if on else self.lines_table)
+        self.lines_dock.setWindowTitle(
+            "Co-fit parameters" if on else "Fit parameters")
+        if on:
+            self.lines_dock.show()
+            self.lines_dock.raise_()
+
+            def even():
+                w = self.cofit_tables.width() or self.lines_dock.width() or 1000
+                self.cofit_tables.setSizes([w // 2, w - w // 2])
+            even()
+            QTimer.singleShot(0, even)
 
     def _cofit_rebuild_tables(self):
         st = self._cofit or {}
@@ -2731,6 +2762,7 @@ class MainWindow(QMainWindow):
 
     def close_cofit(self):
         self._cofit_apply_to_main()
+        self._set_cofit_dock(False)
         self._cofit = None
         self._cofit_last = None                # deliberate close: do not resume
         back = self.view2d if (self._data2d is not None
