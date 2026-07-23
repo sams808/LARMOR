@@ -18,5 +18,6 @@ dependencies:
       - uvicorn[standard]
       - PySide6
       - pyqtgraph
+      - requests            # the ? ▸ More… easter egg (degrades gracefully if absent)
       # install LARMOR itself (editable, from this repo)
       - -e .
