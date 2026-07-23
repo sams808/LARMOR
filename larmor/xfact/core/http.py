@@ -10,7 +10,9 @@ import time
 
 import requests
 
-TIMEOUT = 4  # seconds; short on purpose -- a hung request shouldn't stall a card for long
+TIMEOUT = 6  # seconds; short on purpose -- a hung request shouldn't stall a card
+             # for long, but generous enough that a slightly slow link still
+             # reaches iNaturalist rather than dropping to the offline pool
 
 session = requests.Session()
 session.headers.update({"User-Agent": "XFact/1.0 (+github.com/sams808/XFact)"})

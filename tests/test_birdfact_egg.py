@@ -22,6 +22,16 @@ def test_offline_card_needs_no_network():
     assert card["name"] and card["headline"] and card["grid"]
 
 
+def test_offline_pool_is_varied():
+    """The offline fallback must have real variety — it used to be only three
+    birds (so a network-blocked user saw the same one or two over and over)."""
+    from larmor.xfact.packs.birds import offline
+    names = {c["name"] for c in offline.OFFLINE_CARDS}
+    assert len(names) >= 10
+    for c in offline.OFFLINE_CARDS:                 # every sample's jpg is present
+        assert (offline.ASSETS_DIR / c["image_file"]).exists()
+
+
 def test_more_menu_item_opens_birdfact(monkeypatch):
     from PySide6.QtWidgets import QApplication, QMenu
 
