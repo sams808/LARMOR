@@ -26,14 +26,21 @@ def show_help(parent, name: str, title: str = "Help") -> None:
             else f"# {name}\n\nManual not found.")
     dlg = QDialog(parent)
     dlg.setWindowTitle(title)
-    dlg.resize(860, 680)
+    dlg.resize(880, 720)
     v = QVBoxLayout(dlg)
     tb = QTextBrowser()
     tb.setOpenExternalLinks(True)
+    tb.setStyleSheet("QTextBrowser { background: #ffffff; padding: 6px 10px; }")
     try:
-        tb.setMarkdown(text)
+        from larmor.desktop.mdrender import HELP_CSS, render_math
+
+        tb.document().setDefaultStyleSheet(HELP_CSS)
+        tb.setMarkdown(render_math(text))            # typeset the equations
     except Exception:
-        tb.setPlainText(text)
+        try:
+            tb.setMarkdown(text)
+        except Exception:
+            tb.setPlainText(text)
     v.addWidget(tb)
     btn = QPushButton("Close")
     btn.clicked.connect(dlg.accept)

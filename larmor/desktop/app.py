@@ -590,8 +590,8 @@ class MainWindow(QMainWindow):
         dmfit — solid-state NMR lineshape fitting for disordered solids.</i></p>
 
         <p>Developed by <b>Sam Soudani</b>, in the <b>McCloy</b> group at
-        Washington State University. Made possible in part by the funding behind
-        that oxide- and nuclear-glass NMR research.</p>
+        Washington State University, with support from the
+        U.S.&nbsp;Department&nbsp;of&nbsp;Energy&nbsp;(DOE).</p>
         <p><a href="https://github.com/sams808/LARMOR">github.com/sams808/LARMOR</a>
         &nbsp;·&nbsp; MIT&nbsp;License</p>
 
