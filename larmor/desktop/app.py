@@ -579,11 +579,63 @@ class MainWindow(QMainWindow):
         show_help(self, name, title)
 
     def _about(self):
-        QMessageBox.information(
-            self, "LARMOR",
-            "LARMOR — open successor to dmfit\n"
-            "mrsimulator + lmfit + pyqtgraph\n"
-            "github.com/sams808/LARMOR")
+        from PySide6.QtWidgets import QDialog, QTextBrowser
+
+        html = """
+        <h2 style="margin-bottom:2px;">LARMOR</h2>
+        <p style="color:#4a4f58; margin-top:0;"><i>An open desktop successor to
+        dmfit — solid-state NMR lineshape fitting for disordered solids.</i></p>
+
+        <p>Developed by <b>Sam Soudani</b>, in the <b>McCloy</b> group at
+        Washington State University. Made possible in part by the funding behind
+        that oxide- and nuclear-glass NMR research.</p>
+        <p><a href="https://github.com/sams808/LARMOR">github.com/sams808/LARMOR</a>
+        &nbsp;·&nbsp; MIT&nbsp;License</p>
+
+        <h3 style="margin-bottom:2px;">Built on</h3>
+        <ul style="margin-top:2px;">
+          <li><b>mrsimulator</b> — solid-state NMR spectrum simulation
+              (D.&nbsp;J.&nbsp;Srivastava, P.&nbsp;J.&nbsp;Grandinetti, et&nbsp;al.),
+              <a href="https://github.com/deepanshs/mrsimulator">deepanshs/mrsimulator</a></li>
+          <li><b>lmfit</b> — non-linear least-squares fitting (M.&nbsp;Newville
+              et&nbsp;al., doi:10.5281/zenodo.11813)</li>
+          <li><b>NumPy</b> — Harris et&nbsp;al., <i>Nature</i> <b>585</b>, 357 (2020)</li>
+          <li><b>SciPy</b> — Virtanen et&nbsp;al., <i>Nature Methods</i> <b>17</b>, 261 (2020)</li>
+          <li><b>nmrglue</b> — Helmus &amp; Jaroniec, <i>J.&nbsp;Biomol.&nbsp;NMR</i>
+              <b>55</b>, 355 (2013)</li>
+          <li><b>csdmpy / CSDM</b> — Srivastava et&nbsp;al., <i>PLOS&nbsp;ONE</i>
+              <b>15</b>, e0225953 (2020)</li>
+          <li><b>Matplotlib</b> — Hunter, <i>Comput.&nbsp;Sci.&nbsp;Eng.</i>
+              <b>9</b>, 90 (2007)</li>
+          <li><b>PySide6 / Qt&nbsp;for&nbsp;Python</b> (The Qt Company) and
+              <b>pyqtgraph</b> (L.&nbsp;Campagnola) — the interface</li>
+        </ul>
+
+        <h3 style="margin-bottom:2px;">Inspired by</h3>
+        <ul style="margin-top:2px;">
+          <li><b>dmfit</b> — D.&nbsp;Massiot et&nbsp;al., <i>Magn.&nbsp;Reson.&nbsp;Chem.</i>
+              <b>40</b>, 70 (2002)</li>
+          <li><b>ssNake</b> — S.&nbsp;G.&nbsp;J.&nbsp;van&nbsp;Meerten et&nbsp;al.,
+              <i>J.&nbsp;Magn.&nbsp;Reson.</i> <b>301</b>, 56 (2019)</li>
+          <li><b>Bruker TopSpin</b> — processing &amp; display conventions</li>
+        </ul>
+        """
+        dlg = QDialog(self)
+        dlg.setWindowTitle("About LARMOR")
+        dlg.resize(560, 560)
+        v = QVBoxLayout(dlg)
+        v.setContentsMargins(6, 6, 6, 6)
+        tb = QTextBrowser()
+        tb.setOpenExternalLinks(True)
+        tb.setHtml(html)
+        v.addWidget(tb)
+        row = QHBoxLayout()
+        row.addStretch(1)
+        ok = QPushButton("Close")
+        ok.clicked.connect(dlg.accept)
+        row.addWidget(ok)
+        v.addLayout(row)
+        dlg.exec()
 
     def _show_more(self):
         """Open the 'More…' card."""
