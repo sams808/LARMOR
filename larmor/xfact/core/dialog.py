@@ -6,7 +6,8 @@ like a specimen card. Pack-agnostic -- takes any zero-argument
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
-    QDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget,
+    QDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea,
+    QVBoxLayout, QWidget,
 )
 
 from .worker import FactWorker
@@ -45,10 +46,16 @@ class FactDialog(QDialog):
         super().__init__(parent)
         self._get_card = get_card
         self.setWindowTitle("Fact")
-        self.setFixedWidth(IMG_W + 40)
         self.setStyleSheet(f"QDialog {{ background:{BG_PAGE}; }}")
         self._worker = None
         self._build_skeleton()
+        # A fixed, screen-friendly size: the card content (a long Wikipedia
+        # blurb, say) scrolls INSIDE rather than growing the window off-screen —
+        # which otherwise resizes the shown dialog and the WM clamps it.
+        screen = self.screen().availableGeometry() if self.screen() else None
+        max_h = int(screen.height() * 0.9) if screen else 760
+        self.setFixedWidth(IMG_W + 56)
+        self.setFixedHeight(min(720, max_h))
         self.refresh()
 
     # ---- layout skeleton, populated by _apply_card -------------------
@@ -123,7 +130,15 @@ class FactDialog(QDialog):
         self.foot_lab.setWordWrap(True)
         card.addWidget(self.foot_lab)
 
-        outer.addWidget(self.card_frame)
+        # the card scrolls inside the fixed-size dialog (the "Another one" button
+        # below stays put); no horizontal scrollbar — width is fixed to the image
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+        scroll.setWidget(self.card_frame)
+        outer.addWidget(scroll, 1)
 
         controls = QHBoxLayout()
         self.shuffle_btn = QPushButton("\U0001F3B2 Another one")
