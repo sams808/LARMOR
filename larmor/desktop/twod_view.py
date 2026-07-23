@@ -340,6 +340,7 @@ class Contour2DView(QWidget):
             "orig": self._orig, "committed": self._committed, "data": self.data,
             "hmqc": dict(self._hmqc), "hmqc_scale": dict(self._hmqc_scale),
             "hmqc_color": dict(self._hmqc_color), "model": self._model,
+            "model_sites": self._model_sites, "model_ops": list(self._model_ops),
             "sign": self.sign.currentText(),
             "nlevels": self.nlevels.value(), "floor": self.floor.value(),
             "title": self.title.text(),
@@ -350,6 +351,8 @@ class Contour2DView(QWidget):
         self.data = s["data"]
         self._hmqc = dict(s["hmqc"]); self._hmqc_scale = dict(s["hmqc_scale"])
         self._hmqc_color = dict(s["hmqc_color"]); self._model = s["model"]
+        self._model_sites = s.get("model_sites")     # keep per-site colours
+        self._model_ops = list(s.get("model_ops", []))  # keep reverse/transpose
         self.title.setText(s["title"])
         for w, val in ((self.nlevels, s["nlevels"]), (self.floor, s["floor"])):
             w.blockSignals(True); w.setValue(val); w.blockSignals(False)
@@ -595,6 +598,11 @@ class Contour2DView(QWidget):
         self._orig = sh(self._orig)
         self._committed = sh(self._committed)
         self.data = sh(self.data)
+        # re-referencing relabels the axes; move the fitted model overlay too so
+        # it stays on the peaks (matches the 1D calibrate behaviour)
+        if self._model is not None:
+            z, f2, f1 = self._model
+            self._model = (z, f2 + d2, f1 + d1)
         self._redraw()
 
     def _toggle_measure(self, on: bool):

@@ -844,6 +844,11 @@ class MainWindow(QMainWindow):
                     self._proc_base = (self._proc_base[0] + d_ppm,
                                        self._proc_base[1])
                 self.view.set_experiment(self.exp_ppm, self.exp_amp)
+                # move the fitted sites with the re-referenced axis (see calibrate)
+                self._shift_recipe_positions(self.recipe, d_ppm)
+                if self.recipe.get("sites"):
+                    self.lines_table.rebuild(self.recipe, self.hidden)
+                    self.request_simulation()
             self._update_exp_label()
             self.statusBar().showMessage(
                 "experiment updated — re-simulating (a new spin rate builds "
@@ -2101,6 +2106,18 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             "calibrate: click the peak whose shift you want to set")
 
+    @staticmethod
+    def _shift_recipe_positions(recipe, delta: float):
+        """Shift every site's absolute ppm position by delta. Used when the axis
+        is re-referenced (calibrate / SR) so the fitted model tracks the peaks
+        instead of being left behind. Widths/η/σ/amplitude are unaffected."""
+        for s in recipe.get("sites", []):
+            params = s.get("params", {})
+            for pname in ("isotropic_chemical_shift_ppm", "shift_ppm"):
+                p = params.get(pname)
+                if isinstance(p, dict) and "value" in p:
+                    p["value"] = float(p["value"]) + delta
+
     def on_calibrate_picked(self, peak_ppm: float):
         from PySide6.QtWidgets import QInputDialog
 
@@ -2119,8 +2136,13 @@ class MainWindow(QMainWindow):
         self.view.set_experiment(self.exp_ppm, self.exp_amp)
         larmor = self.recipe.get("larmor_frequency_MHz", 0.0) if self.recipe else 0.0
         if self.recipe is not None:
+            # re-referencing relabels the axis; move the fitted sites the same way
+            # so the model stays on the peaks (was: only exp_ppm shifted -> desync)
             self.recipe["calibration_ppm"] = \
                 self.recipe.get("calibration_ppm", 0.0) + delta
+            self._shift_recipe_positions(self.recipe, delta)
+            if self.recipe.get("sites"):
+                self.lines_table.rebuild(self.recipe, self.hidden)
         self.request_simulation()
         hz = delta * larmor
         self.statusBar().showMessage(

@@ -681,6 +681,55 @@ def test_2d_reverse_tracks_model_overlay(qapp):
     v.close()
 
 
+def test_shift_recipe_positions_moves_only_positions():
+    """The re-reference helper shifts absolute ppm positions, not widths."""
+    from larmor.desktop.app import MainWindow
+    r = {"sites": [
+        {"params": {"isotropic_chemical_shift_ppm": {"value": 10.0},
+                    "sigma_Cq_MHz": {"value": 2.0}}},
+        {"params": {"shift_ppm": {"value": -5.0}}}]}
+    MainWindow._shift_recipe_positions(r, 3.0)
+    assert r["sites"][0]["params"]["isotropic_chemical_shift_ppm"]["value"] == 13.0
+    assert r["sites"][0]["params"]["sigma_Cq_MHz"]["value"] == 2.0        # width kept
+    assert r["sites"][1]["params"]["shift_ppm"]["value"] == -2.0
+
+
+def test_calibrate_moves_model_with_axis(qapp, win, monkeypatch):
+    """1D calibrate re-references the axis AND moves the fitted sites the same
+    way, so the model stays on the peaks (was: only the axis shifted)."""
+    from PySide6.QtWidgets import QInputDialog
+    POS = "isotropic_chemical_shift_ppm"
+    x = np.linspace(-40, 120, 400)
+    win.exp_ppm = x; win.exp_amp = np.exp(-0.5 * ((x - 60) / 8) ** 2)
+    win.recipe = {"nucleus": "27Al", "larmor_frequency_MHz": 130.3, "sites": [
+        {"model": "gauss_lor", "label": "A", "params": {
+            POS: {"value": 60.0, "vary": True},
+            "fwhm_ppm": {"value": 8.0, "vary": True},
+            "gl": {"value": 0.0, "vary": True},
+            "amplitude": {"value": 1.0, "vary": True}}}]}
+    win.view.set_experiment(x, win.exp_amp)
+    monkeypatch.setattr(QInputDialog, "getDouble",
+                        staticmethod(lambda *a, **k: (70.0, True)))
+    win.on_calibrate_picked(60.0)                    # "this 60-peak is really 70"
+    assert abs(win.recipe["sites"][0]["params"][POS]["value"] - 70.0) < 1e-6
+
+
+def test_2d_calibrate_moves_model_overlay(qapp):
+    """2D re-referencing (_shift_axes) moves the fitted model overlay with the
+    axes, like 1D calibrate."""
+    from larmor import twod
+    from larmor.desktop.twod_view import Contour2DView
+    f2 = np.linspace(-20, 80, 40); f1 = np.linspace(-10, 60, 30)
+    d = twod.Data2D(f2_ppm=f2, f1_ppm=f1, z=np.random.RandomState(0).rand(30, 40),
+                    nucleus="27Al", larmor_MHz=130.3)
+    v = Contour2DView(); v.set_data(d, "exp")
+    v.set_model(np.outer(np.hanning(30), np.hanning(40)), f2, f1)
+    v._shift_axes(5.0, -3.0)
+    assert np.allclose(v._model[1], f2 + 5.0)        # model F2 followed
+    assert np.allclose(v._model[2], f1 - 3.0)        # model F1 followed
+    v.close()
+
+
 def test_fit_progress_bar_ticks(qapp, win):
     """The fit progress bar advances on lmfit iterations (iter_cb wired through
     the fit functions and the worker's progress signal)."""
