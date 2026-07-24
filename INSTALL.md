@@ -12,6 +12,31 @@ It takes about 10 minutes. If something goes wrong, jump to
 
 ---
 
+## Easiest — Windows one-click
+
+If you're on Windows, you don't need to type any commands:
+
+1. Get the code — `git clone https://github.com/sams808/LARMOR.git`, or download
+   the ZIP from GitHub and unzip it.
+2. Open the `LARMOR` folder and **double-click `install.bat`**.
+3. A console window walks through the install (a few minutes). When it says
+   *Done*, there's a **`LARMOR.bat` on your Desktop** — **double-click it to
+   launch the app**.
+
+`install.bat` uses your Conda if you have it (recommended), otherwise a Python
+3.11 virtual environment. To update later, **double-click `update.bat`** (pulls
+the latest code and refreshes everything). Both are safe to re-run.
+
+> If `install.bat` closes instantly or Windows SmartScreen warns you: it's an
+> unsigned local script. Click *More info → Run anyway*, or right-click
+> `install.ps1 → Run with PowerShell`. If Conda isn't found and you have no
+> Python 3.11, it will tell you to install Miniconda first (below).
+
+The manual routes below do exactly the same thing by hand, and are what
+macOS/Linux users follow.
+
+---
+
 ## What you need first
 
 - **~2 GB free disk** and an internet connection.

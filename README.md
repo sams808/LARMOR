@@ -12,19 +12,20 @@ reproducible fits.
 **Full step-by-step instructions — Windows, macOS, Linux — are in
 [INSTALL.md](INSTALL.md)**, including troubleshooting for the usual snags.
 
-The short version, from inside the repository folder:
+- **Windows, one-click:** double-click **`install.bat`** in this folder. It sets
+  everything up and puts a **`LARMOR.bat` on your Desktop** to launch the app.
+  Update later by double-clicking **`update.bat`**.
 
-```
-# Recommended (Conda — handles the compiled packages for you):
-conda env create -f environment.yml
-conda activate larmor
+- **Manual (any platform),** from inside the repository folder:
+  ```
+  # Recommended (Conda — handles the compiled packages for you):
+  conda env create -f environment.yml
+  conda activate larmor
 
-# …or with pip, into a Python 3.11 virtual environment:
-pip install -r requirements.txt
-```
-
-**Launch:** `larmor desktop` (any platform), or on Windows double-click
-`LARMOR.bat`.
+  # …or with pip, into a Python 3.11 virtual environment:
+  pip install -r requirements.txt
+  ```
+  **Launch:** `larmor desktop`.
 
 > Use **Python 3.11** (3.10–3.12 fine, **not 3.13** yet). If `larmor desktop`
 > says a package is missing or `mrsimulator` won't install, see
