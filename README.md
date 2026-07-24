@@ -7,7 +7,28 @@ the [mrsimulator](https://mrsimulator.readthedocs.io) / [lmfit](https://lmfit.gi
 one thing none of those tools give you: **an uncertainty on every fitted number**, and fully
 reproducible fits.
 
-**Launch:** double-click `LARMOR.bat` (or `larmor desktop`). See "Installation & launching" below.
+## Install (quick start)
+
+**Full step-by-step instructions — Windows, macOS, Linux — are in
+[INSTALL.md](INSTALL.md)**, including troubleshooting for the usual snags.
+
+The short version, from inside the repository folder:
+
+```
+# Recommended (Conda — handles the compiled packages for you):
+conda env create -f environment.yml
+conda activate larmor
+
+# …or with pip, into a Python 3.11 virtual environment:
+pip install -r requirements.txt
+```
+
+**Launch:** `larmor desktop` (any platform), or on Windows double-click
+`LARMOR.bat`.
+
+> Use **Python 3.11** (3.10–3.12 fine, **not 3.13** yet). If `larmor desktop`
+> says a package is missing or `mrsimulator` won't install, see
+> [INSTALL.md → Troubleshooting](INSTALL.md#troubleshooting).
 
 ## Capabilities
 
@@ -167,23 +188,22 @@ Raw instrument data (TopSpin EXPNO folders) and legacy `.fxmla` files are **neve
 
 ## Installation & launching
 
-One-time setup (Anaconda/Miniconda prompt, from this folder):
+**See [INSTALL.md](INSTALL.md) for the complete, cross-platform guide with
+troubleshooting.** In brief, from inside this folder:
 
 ```
-conda env create -f environment.yml
+conda env create -f environment.yml     # recommended (or: pip install -r requirements.txt)
+conda activate larmor
+larmor desktop                           # …or double-click LARMOR.bat on Windows
 ```
 
-This installs everything **including LARMOR itself** (editable). Then:
+- The **native desktop app** (PySide6 + pyqtgraph — instant zoom/pan/drag, no
+  browser) is the primary interface.
+- A browser variant exists (`larmor app --open`, for a shared lab server), but is
+  secondary.
+- CLI without any GUI: `larmor info <path>`, `larmor import <fxmla>`,
+  `larmor fit <recipe>`.
+- If an existing env predates a feature, refresh it with
+  `conda env update -f environment.yml`.
 
-- **Easiest — double-click `LARMOR.bat`.** It launches the **native desktop
-  application** (PySide6 + pyqtgraph: instant zoom/pan/drag, no browser, no
-  server). Or from a terminal: `larmor desktop`.
-- The browser variant still exists (`larmor app --open`, for a shared lab
-  server later), but the desktop app is the primary interface.
-- CLI without any GUI: `larmor info <path>`, `larmor import <fxmla>`, `larmor fit <recipe>`.
-
-If the env was created before the app existed, refresh it with
-`conda env update -f environment.yml` (adds fastapi/uvicorn and the editable
-install).
-
-A true standalone installer (no conda needed at all) is on the roadmap (Phase 4).
+A true standalone installer (no Conda needed at all) is on the roadmap (Phase 5).

@@ -137,8 +137,20 @@ def cmd_app(args: argparse.Namespace) -> int:
 
 
 def cmd_desktop(args: argparse.Namespace) -> int:
-    from larmor.desktop.app import main as desktop_main
-
+    try:
+        from larmor.desktop.app import main as desktop_main
+    except ImportError as exc:
+        missing = getattr(exc, "name", "") or str(exc)
+        print(
+            f"\nLARMOR's desktop application needs an extra package that isn't "
+            f"installed ({missing}).\n\n"
+            "Install the desktop dependencies with:\n\n"
+            "    pip install -e \".[desktop]\"\n\n"
+            "or recreate the conda environment:\n\n"
+            "    conda env update -f environment.yml\n\n"
+            "See INSTALL.md for full instructions.\n",
+            file=sys.stderr)
+        return 1
     return desktop_main()
 
 

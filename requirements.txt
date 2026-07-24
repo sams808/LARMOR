@@ -1,0 +1,16 @@
+# LARMOR — pip installation into a Python 3.11 virtual environment.
+#
+#   Windows:        python -m venv .venv && .venv\Scripts\activate
+#   macOS / Linux:  python3 -m venv .venv && source .venv/bin/activate
+#   then (from this folder):
+#                   pip install -r requirements.txt
+#
+# This installs LARMOR itself (editable) together with every runtime and
+# desktop-GUI dependency. Conda users should instead run:
+#   conda env create -f environment.yml
+#
+# NOTE: use Python 3.10-3.12 (3.11 recommended). mrsimulator does not yet ship
+# wheels for the very newest Python, and would try (and usually fail) to compile
+# from source. See INSTALL.md for details and troubleshooting.
+
+-e .[desktop]
