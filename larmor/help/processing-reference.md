@@ -55,6 +55,9 @@ $$S_\text{corr}(\nu) = S(\nu)\,e^{i(\phi_0+\phi_1(\nu-\nu_\text{pivot})/\text{SW
 
 - **p0 / p1** — zero- and first-order phase; sliders, exact entry, **±90 / 180°**
   quick steps, adjustable step size.
+- **Pivot** ($\nu_\text{pivot}$) — a draggable line (default: the tallest peak,
+  shown while the Processing panel is open) about which p1 rotates, TopSpin-style,
+  so the peak under it stays in phase.
 - **Autophase (ACME)** — minimises the entropy of the real spectrum to find p0 and
   p1 automatically (Chen *et al.* 2002); a negative-area criterion is used for
   all-positive powder patterns (QCPMG).
@@ -66,8 +69,9 @@ $$S_\text{corr}(\nu) = S(\nu)\,e^{i(\phi_0+\phi_1(\nu-\nu_\text{pivot})/\text{SW
 - **Automatic baseline (arPLS)** — asymmetrically reweighted penalized
   least-squares (Baek *et al.* 2015, $\lambda\approx10^7$): a smooth curve that
   follows the baseline but not the peaks.
-- **Manual baseline (PCHIP)** — shape-preserving monotone cubic through
-  drag-placed anchors.
+- **Manual baseline (PCHIP, dmfit-style anchors)** — click **Pick anchors**, drop
+  as many points as needed (drag to shape); a shape-preserving monotone cubic
+  previews live and is **subtracted automatically when you exit anchor mode**.
 - **SR / calibrate** — reference the axis: type an SR (Hz), or click a peak and set
   its ppm. A rigid ppm shift; the raw data is untouched.
 - **scale SW / car-ref** — stretch the ppm axis about its centre (correct a

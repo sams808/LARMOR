@@ -94,7 +94,43 @@ spacing; do not fit it directly.
 
 ---
 
-## 4 · Background
+## 4 · Infinite-field δiso from two (or more) fields
+
+For a half-integer quadrupolar nucleus the **central-transition centre of
+gravity** carries a second-order quadrupolar shift that scales as $1/\nu_0^2$.
+Measuring δcg at several fields and extrapolating to $1/\nu_0^2 \to 0$ removes it,
+giving the true isotropic chemical shift **δiso** and the quadrupolar coupling
+$C_Q$ (Sandland *et al.* 2004, Eq. 1; Baasner *et al.* 2014, Fig. 6):
+
+$$\delta_\text{cg} = \delta_\text{iso} - \frac{10^6}{40}\,\frac{C_Q^2(3+\eta^2)}{\nu_0^2\,I^2(2I-1)^2}\left(I(I+1)-\frac{3}{4}\right)$$
+
+so a plot of δcg (ppm) vs $1/\nu_0^2$ is a straight line: the **intercept is
+δiso**, and the **slope gives $C_Q$** (with an assumed η, conventionally 0.7 —
+two centres of gravity cannot determine η).
+
+**Tools ▸ QCPMG: infinite-field δiso** opens the extrapolation. Enter each
+field's Larmor frequency and its δcg (type it, or **grab it from the open
+spectrum's visible range** — zoom to the CT band first), tick whether that field
+was CT-selective, set η, and **Compute**. It plots δcg vs $1/\nu_0^2$ with the
+fit line and reports δiso, $C_Q$, and $P_Q$ with propagated uncertainties.
+
+> **Selective vs non-selective pulses.** Equation (1) is the shift of the
+> *central-transition* centre of gravity. In the **large-$C_Q$ limit**
+> ($C_Q \gtrsim 1.5$ MHz) only the ½ ↔ −½ transition is excited even by a
+> non-selective (hard) pulse — the satellites are too broad — so the measured
+> centroid is the CT centroid at **both** fields regardless of pulse
+> selectivity, and a non-selective field can be combined with a CT-selective one
+> (Baasner *et al.* 2014). Take the centroid over the **CT band only** at each
+> field. The CT-selective flag is recorded for provenance; it does not change
+> Eq. (1) in this limit.
+
+A companion **two-field width separation** (Sandland Eq. 2) splits the linewidth
+into a quadrupolar part $W_q \propto 1/B_0^2$ and a chemical-shift-distribution
+part $W_\text{csd} \propto B_0$; ask if you want that wired in too.
+
+---
+
+## 5 · Background
 
 The echo train trades acquisition time for S/N; you recover the **true**
 lineshape by coadding the echoes (sum echo), while the spikelet view is a
@@ -111,5 +147,16 @@ convenient, high-S/N but lineshape-sparse alternative.
   *Rev. Sci. Instrum.* **29**, 688 (1958). *(the CPMG echo train)*
 - S. G. J. van Meerten *et al.*, ssNake, *J. Magn. Reson.* **301**, 56 (2019), and
   its QCPMG tutorial — on which this workflow is modelled.
+- T. O. Sandland, L.-S. Du, J. F. Stebbins, J. D. Webster, "Structure of Cl-
+  containing silicate and aluminosilicate glasses: A ³⁵Cl MAS-NMR study",
+  *Geochim. Cosmochim. Acta* **68**, 5059 (2004). *(infinite-field δiso, Eq. 1–2)*
+- J. F. Stebbins, L.-S. Du, "Chloride ion sites in silicate and aluminosilicate
+  glasses: A preliminary study by ³⁵Cl solid-state NMR", *Am. Mineral.* **87**,
+  359 (2002).
+- A. Baasner *et al.*, "The behavior of chlorine in aluminosilicate glasses",
+  *Geochim. Cosmochim. Acta* (2014); δcg vs $1/\nu_0^2$ extrapolation, Fig. 6.
+- H. Schmidt *et al.* (2000) and D. Freude, J. Haase, "Quadrupole effects in
+  solid-state NMR", *NMR Basic Principles and Progress* **29** (1993). *(the CT
+  second-order shift and width formulas)*
 
 *LARMOR — Sam Soudani, McCloy group, Washington State University.*

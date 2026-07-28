@@ -278,7 +278,9 @@ contributors for the CLT to hold).
 
 - **pos** — isotropic chemical shift δ_iso (ppm);
 - **σ (sigma)** — the Czjzek width (LARMOR's `sigma_Cq_MHz`). Relation to dmfit:
-  dmfit's *sCZ_CQ* ≈ 2σ; the mode of |C_Q| ≈ 2σ;
+  dmfit's *sCZ_CQ* ≈ 2σ; the mode of |C_Q| ≈ 2σ. The fit table shows, next to σ,
+  the derived **C_Q (= 2σ)** and **νQ = 3C_Q/[2I(2I−1)]** so you read the
+  quadrupolar coupling directly, not just its width;
 - **dCS** — an *independent* Gaussian width of the isotropic-**chemical-shift**
   distribution (dmfit's *FWHM CS*). Glasses disorder the shift as well as the EFG,
   and the two are separate physical effects — so LARMOR fits them separately. In a

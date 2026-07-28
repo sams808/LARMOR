@@ -49,6 +49,18 @@ where it lands:
 - a raw **FID** → a magnitude-FT preview so you can see it before you phase;
 - a raw **`ser`** → a 2D preview (or the guided relaxation tool if it's a series).
 
+**Several processed datasets.** If you open a bare EXPNO that has more than one
+`pdata/N` (several TopSpin processings), LARMOR asks **which one** (labelled
+1D/2D + title). Re-open the sample to work with a different processing — it opens
+in its own workspace, so you can keep two processings of one experiment side by
+side.
+
+**MAS-rate check.** LARMOR takes the MAS rate from `acqus`/title (the highest if
+they disagree) and, if none is found, falls back to 35714 Hz. Whenever the rate
+had to be guessed a **red "⚠ MAS … — check!"** badge appears bottom-right;
+confirm the rate in the experiment parameters (double-click the strip on the
+left) to clear it.
+
 ## 2 · The Explorer
 
 The Explorer browses a sample folder and **auto-identifies** each experiment —

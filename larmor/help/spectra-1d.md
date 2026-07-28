@@ -66,12 +66,15 @@ points first (drop a noisy tail).
 ### Phasing (p0 / p1)
 
 A complex spectrum is rotated to pure absorption by
-$S_\text{corr}(\nu) = S(\nu)\,e^{i(\phi_0 + \phi_1\,\nu/\text{SW})}$: a
-frequency-independent **p0** and a linear **p1** (pivoted). The panel gives
-sliders, an exact type-in, and **−90 / +90 / 180°** quick steps (two +90 equals
-one 180). **Autophase** minimises the spectral entropy of the real part (the
-**ACME** criterion of Chen *et al.* 2002), which finds p0 **and** p1 robustly
-even on crowded spectra.
+$S_\text{corr}(\nu) = S(\nu)\,e^{i(\phi_0 + \phi_1(\nu-\nu_\text{pivot})/\text{SW})}$:
+a frequency-independent **p0** and a linear **p1**. The panel gives sliders, an
+exact type-in, and **−90 / +90 / 180°** quick steps (two +90 equals one 180).
+**TopSpin-style pivot:** while the Processing panel is open a **draggable purple
+pivot line** appears (default: the tallest peak); p1 rotates *about* the pivot,
+so the peak under it stays in phase and only the wings twist — drag the pivot
+onto whichever peak you want to hold. **Autophase** minimises the spectral
+entropy of the real part (the **ACME** criterion of Chen *et al.* 2002), finding
+p0 **and** p1 robustly even on crowded spectra.
 
 ### Baseline
 
@@ -79,8 +82,10 @@ even on crowded spectra.
   (**arPLS**, Baek *et al.* 2015): it iteratively fits a smooth curve
   ($\lambda \approx 10^7$) that follows the baseline but not the peaks. Robust
   for rolling baselines under broad lines.
-- **Manual (PCHIP)** — drop anchor points and LARMOR interpolates a
-  shape-preserving monotone cubic through them; drag anchors live.
+- **Manual anchors (dmfit-style)** — click **Pick anchors**, then click the
+  spectrum to drop as many baseline points as you like (drag to shape); a live
+  PCHIP curve previews the baseline, and it is **subtracted automatically when
+  you turn Pick anchors back off** — no separate Subtract click.
 
 ### Referencing (SR / Calibrate)
 
