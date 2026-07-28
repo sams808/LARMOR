@@ -817,6 +817,8 @@ class MainWindow(QMainWindow):
         self.proc_dock.setWidget(self.proc_panel)
         self.addDockWidget(Qt.RightDockWidgetArea, self.proc_dock)
         self.proc_dock.hide()
+        # show the TopSpin-style phase pivot line whenever the panel is open
+        self.proc_dock.visibilityChanged.connect(self.view.show_phase_pivot)
 
     def _fit_to_screen(self, want_w: int, want_h: int):
         """Size the window to at most the available screen (minus a margin) and
@@ -917,8 +919,12 @@ class MainWindow(QMainWindow):
         self._set_add_mode(None)
         if on:
             self.statusBar().showMessage(
-                "manual baseline: click to place anchors, drag to shape; "
-                "then 'Subtract'")
+                "manual baseline (dmfit-style): click to add anchor points, "
+                "drag to shape — it is subtracted automatically when you turn "
+                "'Pick anchors' back off")
+        elif len(self.view.baseline_anchors()) >= 2:
+            # dmfit behaviour: exiting anchor mode auto-applies the correction
+            self.apply_manual_baseline()
 
     def apply_manual_baseline(self):
         base = self.view.baseline_curve(self.exp_ppm)
@@ -2177,6 +2183,11 @@ class MainWindow(QMainWindow):
                 base_ppm, base_amp = self._proc_base
                 sfo1 = self.recipe.get("larmor_frequency_MHz", 0.0) if self.recipe else 0.0
                 s = proc.from_processed(base_ppm, base_amp, sfo1)
+            # TopSpin-style p1 pivot: rotate first-order phase about the pivot
+            # line (default: the tallest peak), not the fixed spectrum centre
+            piv = self.view.phase_pivot_frac()
+            ops = [dict(o, pivot_frac=piv) if o.get("op") == "phase" else o
+                   for o in ops]
             s = proc.apply(s, ops)
             if s.domain != "freq":
                 raise ValueError("pipeline must end in the frequency domain")

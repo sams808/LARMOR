@@ -92,6 +92,8 @@ class SpectrumView(pg.PlotWidget):
         self._measure_lines: list[pg.InfiniteLine] = []
         # comparison overlays (other datasets drawn behind the active one)
         self._overlay_items: list[pg.PlotDataItem] = []
+        # phase pivot (TopSpin-style): p1 rotates about this reference point
+        self._pivot: pg.InfiniteLine | None = None
 
     # ---------- drag & drop ----------
     def dragEnterEvent(self, ev):
@@ -187,6 +189,37 @@ class SpectrumView(pg.PlotWidget):
         if len(self._measure_lines) == 2:
             self.measure_changed.emit(float(self._measure_lines[0].value()),
                                       float(self._measure_lines[1].value()))
+
+    # ---------- phase pivot (TopSpin-style first-order phasing) ----------
+    def show_phase_pivot(self, on: bool):
+        """Show/hide the draggable p1 pivot. Defaults to the tallest peak so
+        first-order phasing leaves that peak in phase (as TopSpin does)."""
+        if not on:
+            if self._pivot is not None:
+                self.removeItem(self._pivot)
+                self._pivot = None
+            return
+        if self._pivot is not None:
+            return
+        x, y = self._exp.xData, self._exp.yData
+        if x is None or not len(x):
+            return
+        px = (float(x[int(np.argmax(y))]) if y is not None and len(y)
+              else float(np.median(x)))
+        self._pivot = pg.InfiniteLine(
+            pos=px, angle=90, movable=True,
+            pen=pg.mkPen("#8e44ad", width=1.4, style=Qt.DashLine),
+            hoverPen=pg.mkPen("#8e44ad", width=2.4),
+            label="pivot", labelOpts={"color": "#8e44ad", "position": 0.06})
+        self.addItem(self._pivot)
+
+    def phase_pivot_frac(self) -> float:
+        """The pivot as a 0..1 fraction along the data (op_phase convention)."""
+        x = self._exp.xData
+        if self._pivot is None or x is None or not len(x):
+            return 0.5
+        idx = int(np.argmin(np.abs(np.asarray(x) - float(self._pivot.value()))))
+        return idx / max(len(x) - 1, 1)
 
     # ---------- manual baseline ----------
     def set_baseline_mode(self, on: bool):
