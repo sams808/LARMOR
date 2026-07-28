@@ -1707,6 +1707,30 @@ class MainWindow(QMainWindow):
             self._set_add_mode(None)
         super().keyPressEvent(ev)
 
+    #: sensible starting quadrupolar parameters by nucleus (glasses/materials);
+    #: only a starting point — always refined by the fit (idea #17)
+    _NUCLEUS_START = {
+        "27Al": {"sigma_Cq_MHz": 1.5, "Cq_MHz": 3.0, "eta": 0.6, "shift_fwhm_ppm": 12.0},
+        "11B":  {"sigma_Cq_MHz": 1.0, "Cq_MHz": 2.6, "eta": 0.2, "shift_fwhm_ppm": 3.0},
+        "23Na": {"sigma_Cq_MHz": 1.0, "Cq_MHz": 2.0, "eta": 0.6, "shift_fwhm_ppm": 8.0},
+        "17O":  {"sigma_Cq_MHz": 0.9, "Cq_MHz": 3.5, "eta": 0.3, "shift_fwhm_ppm": 15.0},
+        "35Cl": {"sigma_Cq_MHz": 1.6, "Cq_MHz": 3.0, "eta": 0.7, "shift_fwhm_ppm": 30.0},
+        "71Ga": {"sigma_Cq_MHz": 2.0, "Cq_MHz": 5.0, "eta": 0.5, "shift_fwhm_ppm": 15.0},
+        "93Nb": {"sigma_Cq_MHz": 2.0, "Cq_MHz": 4.0, "eta": 0.5, "shift_fwhm_ppm": 20.0},
+    }
+
+    def _seed_nucleus_defaults(self, name: str, params: dict):
+        """Pre-fill quadrupolar starting values from the nucleus (idea #17)."""
+        if name not in ("czjzek", "ext_czjzek", "quad_ct", "quad_first",
+                        "quad_csa", "csa_czjzek"):
+            return
+        d = self._NUCLEUS_START.get((self.recipe or {}).get("nucleus", ""))
+        if not d:
+            return
+        for k, val in d.items():
+            if k in params:
+                params[k]["value"] = val
+
     def add_site_at(self, ppm: float, amp: float):
         name = next((n for n, a in self._model_actions.items()
                      if a.isChecked()), None)
@@ -1719,6 +1743,7 @@ class MainWindow(QMainWindow):
             params[p.name] = {"value": p.default, "stderr": None,
                               "vary": p.vary, "min": p.min, "max": p.max,
                               "expr": None}
+        self._seed_nucleus_defaults(name, params)
         params["isotropic_chemical_shift_ppm"]["value"] = ppm
         params["amplitude"]["value"] = amp or 1.0
         n = len(self.recipe["sites"])
@@ -2087,6 +2112,28 @@ class MainWindow(QMainWindow):
         QMessageBox.warning(self, "Fit failed", msg)
         self.statusBar().showMessage("fit failed")
 
+    @staticmethod
+    def _residual_noise_ratio(result):
+        """RMS of the residual in the signal region ÷ the baseline noise (RMS of
+        the quiet edges). ≈1 means the model captures the data down to the noise;
+        ≫1 means there is unmodelled structure left in the residual."""
+        try:
+            y = np.asarray(result.y_exp, float)
+            f = np.asarray(result.y_fit, float)
+            r = y - f
+            n = r.size
+            if n < 40:
+                return None
+            edge = max(5, n // 12)
+            noise = float(np.std(np.concatenate([r[:edge], r[-edge:]])))
+            if noise <= 0:
+                return None
+            sig = np.abs(f) > 0.05 * (np.abs(f).max() or 1.0)
+            r_sig = r[sig] if sig.any() else r
+            return float(np.sqrt(np.mean(r_sig ** 2)) / noise)
+        except Exception:
+            return None
+
     def _fit_done(self, result):
         self.lines_table.btnFit.setEnabled(True)
         self._progress_end(True)
@@ -2097,8 +2144,19 @@ class MainWindow(QMainWindow):
         self._last_model = (np.asarray(result.x_ppm), np.asarray(result.y_fit))
         self.view.set_model(result.x_ppm, result.y_fit, result.per_site,
                             labels, self.hidden, self.exp_ppm, self.exp_amp)
-        self.lines_table.set_chi2(f"RMSD {result.rmsd:.4f}")
-        bits = [f"RMSD {result.rmsd:.4f}"]
+        rl = getattr(result, "lmfit_result", None)
+        redchi = getattr(rl, "redchi", None)
+        chi_txt = f"RMSD {result.rmsd:.4f}"
+        if redchi is not None and np.isfinite(redchi):
+            chi_txt += f" · χ²ᵣ {redchi:.2f}"
+        self.lines_table.set_chi2(chi_txt)
+        bits = [chi_txt]
+        # residual diagnostics: is the model within the noise, or is there
+        # unmodelled structure? (residual RMS in the signal region ÷ edge noise)
+        ratio = self._residual_noise_ratio(result)
+        if ratio is not None:
+            bits.append("residual within noise" if ratio < 1.5
+                        else f"⚠ residual {ratio:.1f}× noise (structure left)")
         if result.frozen_sites:
             bits.append("frozen: " + ", ".join(result.frozen_sites))
         if result.at_bounds:

@@ -124,9 +124,15 @@ fit line and reports δiso, $C_Q$, and $P_Q$ with propagated uncertainties.
 > field. The CT-selective flag is recorded for provenance; it does not change
 > Eq. (1) in this limit.
 
-A companion **two-field width separation** (Sandland Eq. 2) splits the linewidth
-into a quadrupolar part $W_q \propto 1/B_0^2$ and a chemical-shift-distribution
-part $W_\text{csd} \propto B_0$; ask if you want that wired in too.
+**Two-field width split (Sandland Eq. 2).** Fill the **FWHM (ppm)** column at
+both fields and press **Split W_q / W_csd**: it separates the CT linewidth into a
+**quadrupolar** part $W_q \propto 1/\nu_0^2$ (broader at low field) and a
+**chemical-shift-distribution** part $W_\text{csd}$ (field-independent in ppm),
+
+$$\text{FWHM}_1^2 = W_q^2 + W_\text{csd}^2, \qquad \text{FWHM}_2^2 = W_q^2\left(\frac{\nu_1}{\nu_2}\right)^4 + W_\text{csd}^2$$
+
+so $W_\text{csd}$ reports the intrinsic shift disorder of the site independent of
+the quadrupolar broadening.
 
 ---
 
