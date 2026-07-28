@@ -419,6 +419,8 @@ class MainWindow(QMainWindow):
         self._add(m_tools, "Per-site relaxation…  (uses the current fit)",
                   self.open_per_site_relaxation)
         self._add(m_tools, "QCPMG (echo train → spectrum)…", self.open_qcpmg)
+        self._add(m_tools, "QCPMG: infinite-field δiso (2 fields)…",
+                  self.open_qcpmg_fields)
         self._add(m_tools, "Variable temperature (Arrhenius / VFT)…", self.open_vt)
         self._add(m_tools, "REDOR (dipolar coupling)…", self.open_redor)
         self._add(m_tools, "Import DFT tensors (.magres)…", self.open_magres)
@@ -2955,6 +2957,16 @@ class MainWindow(QMainWindow):
         from larmor.desktop.vt_dialog import VtDialog
 
         VtDialog(self).exec()
+
+    def open_qcpmg_fields(self):
+        from larmor.desktop.qcpmg_fields_dialog import QcpmgFieldsDialog
+
+        cur = None
+        if self.recipe and self.exp_ppm is not None and self.exp_ppm.size:
+            cur = (self.recipe.get("larmor_frequency_MHz", 0.0),
+                   np.asarray(self.exp_ppm), np.asarray(self.exp_amp))
+        nuc = self.recipe.get("nucleus", "") if self.recipe else ""
+        QcpmgFieldsDialog(self, nuc, cur).exec()
 
     def open_qcpmg(self):
         from larmor.desktop.qcpmg_dialog import QcpmgDialog
