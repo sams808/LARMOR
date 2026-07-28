@@ -318,6 +318,10 @@ class MainWindow(QMainWindow):
         self._add(m_file, "Open &FID…  (process before FT)", self.open_fid,
                   "Ctrl+F")
         m_file.addSeparator()
+        self._add(m_file, "Open pro&ject…  (all spectra + fits)", self.open_project)
+        self._add(m_file, "Save projec&t…  (all open spectra + fits)",
+                  self.save_project)
+        m_file.addSeparator()
         self.actSave = self._add(m_file, "&Save recipe", self.save_recipe, "Ctrl+S")
         self._add(m_file, "Save fit &as…  (txt / csv / json / dmfit)",
                   self.save_fit_as, "Ctrl+Shift+E")
@@ -1114,6 +1118,78 @@ class MainWindow(QMainWindow):
             return (self.recipe.get("sample")
                     or (Path(self.source_path).name if self.source_path else "spectrum"))
         return "empty"
+
+    # ---------- project (all open 1D spectra + fits) ----------
+    def save_project(self):
+        """Save every open 1D workspace (spectrum + processing + fit) as one
+        reopenable project file (idea #8)."""
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save project", self._last_dir(),
+            "LARMOR project (*.larproj.json)")
+        if not path:
+            return
+        self._sync_active()
+        out = {"larmor_project_version": 1, "active": self.active_ws,
+               "workspaces": []}
+        n2d = 0
+        for ws in self.workspaces:
+            snap = ws.get("snap") or {}
+            if snap.get("kind") != "1d" or snap.get("exp_ppm") is None:
+                n2d += 1
+                continue
+            out["workspaces"].append({
+                "title": ws.get("title", ""),
+                "source_path": snap.get("source_path"),
+                "recipe": snap.get("recipe"),
+                "hidden": sorted(snap.get("hidden", set())),
+                "exp_ppm": np.asarray(snap["exp_ppm"], float).tolist(),
+                "exp_amp": np.asarray(snap["exp_amp"], float).tolist(),
+            })
+        Path(path).write_text(json.dumps(out), encoding="utf-8")
+        msg = f"project saved — {len(out['workspaces'])} spectra"
+        if n2d:
+            msg += f"  ({n2d} 2D/other workspace(s) not included — reopen the source)"
+        self.statusBar().showMessage(msg)
+
+    def open_project(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Open project", self._last_dir(),
+            "LARMOR project (*.larproj.json *.json)")
+        if not path:
+            return
+        try:
+            data = json.loads(Path(path).read_text(encoding="utf-8"))
+        except Exception as exc:
+            QMessageBox.warning(self, "Open project", f"cannot read: {exc}")
+            return
+        wss = data.get("workspaces", [])
+        if not wss:
+            self.statusBar().showMessage("no spectra in this project")
+            return
+        self.workspaces = []
+        self.active_ws = None
+        for w in wss:
+            self.exp_ppm = np.asarray(w.get("exp_ppm", []), float)
+            self.exp_amp = np.asarray(w.get("exp_amp", []), float)
+            self.recipe = w.get("recipe")
+            self.hidden = set(w.get("hidden", []))
+            self.source_path = w.get("source_path")
+            self._proc_base = None
+            self._overlays = []
+            self.central_stack.setCurrentWidget(self.view)
+            self.view.set_experiment(self.exp_ppm, self.exp_amp)
+            self.view.set_title(w.get("title") or (
+                self.recipe.get("sample") if self.recipe else ""))
+            self.lines_table.rebuild(self.recipe, self.hidden)
+            if self.recipe and self.recipe.get("sites"):
+                self.request_simulation()
+            self._ws_mode = "new"
+            self._register_ws("1d")
+            self._update_paddles(); self._update_exp_label(); self._update_enabled()
+        act = data.get("active")
+        if act is not None and 0 <= act < len(self.workspaces):
+            self.switch_workspace(act)
+        self.statusBar().showMessage(f"project opened — {len(wss)} spectra")
 
     def _snapshot_doc(self) -> dict:
         is2d = self.central_stack.currentWidget() is self.view2d
