@@ -28,6 +28,26 @@ def _param_unit(model: str, key: str) -> str:
         pass
     return ""
 
+
+def _spin_of(nucleus: str | None) -> float:
+    """Nuclear spin I of a nucleus string like '27Al' (defaults to 5/2)."""
+    try:
+        from mrsimulator.spin_system.isotope import ISOTOPE_DATA
+        d = ISOTOPE_DATA.get(nucleus or "")
+        if d:
+            return (d["spin_multiplicity"] - 1) / 2.0
+    except Exception:
+        pass
+    return 2.5
+
+
+def _czjzek_derived(sigma_MHz: float, spin: float) -> tuple[float, float]:
+    """For a Czjzek σ(Cq): the representative Cq (= 2σ, dmfit's sCZ_CQ, the mode
+    of the |Cq| distribution) and the first-order νQ derived from it."""
+    from larmor.convert import nu_q
+    cq = 2.0 * sigma_MHz
+    return cq, nu_q(cq, spin)
+
 #: column order and short headers, dmfit-style
 PARAM_COLUMNS = [
     ("amplitude", "Amplitude"),
@@ -51,11 +71,14 @@ class _Cell(QWidget):
     edited = Signal()
     pinned = Signal()
     error = Signal(str)
+    menu_requested = Signal(object)     # global QPoint -> open the param menu
 
     def __init__(self, p: dict, param_name: str, param_unit: str,
-                 this_index: int, n_sites: int, larmor_MHz: float):
+                 this_index: int, n_sites: int, larmor_MHz: float,
+                 spin: float = 2.5):
         super().__init__()
         self.p = p
+        self.spin = spin
         self.ctx = dict(param_name=param_name, param_unit=param_unit,
                         this_index=this_index, n_sites=n_sites,
                         larmor_MHz=larmor_MHz)
@@ -65,15 +88,38 @@ class _Cell(QWidget):
         self.edit = QLineEdit()
         self.edit.setFrame(False)
         self.edit.setText(self._display_text())
+        # a Czjzek σ(Cq) cell also shows the derived Cq (= 2σ) and νQ
+        self.derived = QLabel()
+        self.derived.setStyleSheet("color:#6a4fb0; font-size:9px;")
         self.pin = QCheckBox()
         self.pin.setToolTip("pin: hold this parameter fixed during the fit")
         self.pin.setChecked(not p.get("vary", True) and not p.get("expr"))
         self.pin.setEnabled(not p.get("expr"))
         self._style()
+        self._update_derived()
         lay.addWidget(self.edit, 1)
+        lay.addWidget(self.derived)
         lay.addWidget(self.pin)
         self.edit.editingFinished.connect(self._on_edit)
         self.pin.toggled.connect(self._on_pin)
+        # route right-clicks to the parameter menu instead of the line-edit's
+        # own copy/paste menu (which used to swallow them)
+        self.edit.setContextMenuPolicy(Qt.NoContextMenu)
+        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(
+            lambda pos: self.menu_requested.emit(self.mapToGlobal(pos)))
+
+    def _update_derived(self):
+        """Show Cq / νQ next to a Czjzek σ(Cq) value (read-only, derived)."""
+        if self.ctx["param_name"] != "sigma_Cq_MHz" or self.p.get("expr"):
+            self.derived.clear()
+            return
+        cq, nuq = _czjzek_derived(float(self.p["value"]), self.spin)
+        self.derived.setText(f"Cq {cq:.3g}·νQ {nuq:.3g}")
+        self.derived.setToolTip(
+            f"σ(Cq) = {self.p['value']:.4g} MHz  (fitted)\n"
+            f"Cq ≈ 2σ = {cq:.4g} MHz  (dmfit sCZ_CQ; mode of |Cq|)\n"
+            f"νQ = 3·Cq / [2I(2I−1)] = {nuq:.4g} MHz   (I = {self.spin:g})")
 
     # ---- display ----
     def _display_text(self) -> str:
@@ -128,6 +174,7 @@ class _Cell(QWidget):
         self.pin.setEnabled(not self.p.get("expr"))
         self.edit.setText(self._display_text())
         self._style()
+        self._update_derived()
         self.edited.emit()
 
     def _on_pin(self, checked):
@@ -146,6 +193,7 @@ class _Cell(QWidget):
         if hi is not None:
             self.p["value"] = min(self.p["value"], hi)
         self.edit.setText(self._display_text())
+        self._update_derived()
         self.edited.emit()
 
 
@@ -217,6 +265,7 @@ class LinesTable(QWidget):
         t.setHorizontalHeaderLabels(["line", "model"] + [h for _, h in used])
         t.setRowCount(len(sites))
         larmor = (recipe or {}).get("larmor_frequency_MHz", 0.0)
+        spin = _spin_of((recipe or {}).get("nucleus"))
         n = len(sites)
         # vertical header shows the component LETTER (A, B, C…), dmfit-style
         t.setVerticalHeaderLabels([cellparse.index_to_letter(i)
@@ -237,10 +286,13 @@ class LinesTable(QWidget):
             for c, key in enumerate(self._used_keys, start=2):
                 if key in site["params"]:
                     cell = _Cell(site["params"][key], key,
-                                 _param_unit(site["model"], key), i, n, larmor)
+                                 _param_unit(site["model"], key), i, n, larmor,
+                                 spin)
                     cell.edited.connect(self.edited)
                     cell.pinned.connect(self.edited)
                     cell.error.connect(self._cell_error)
+                    cell.menu_requested.connect(
+                        lambda gp, r=i, k=key: self._param_menu(r, k, gp))
                     t.setCellWidget(i, c, cell)
                 else:
                     blank = QTableWidgetItem("")
@@ -253,6 +305,8 @@ class LinesTable(QWidget):
         hh.setSectionResizeMode(0, QHeaderView.ResizeToContents)
         hh.setSectionResizeMode(1, QHeaderView.ResizeToContents)
         hh.setStretchLastSection(True)
+        if "sigma_Cq_MHz" in self._used_keys:      # room for the Cq/νQ read-out
+            t.setColumnWidth(2 + self._used_keys.index("sigma_Cq_MHz"), 200)
         t.blockSignals(False)
         t.itemChanged.connect(self._renamed)
 
@@ -280,55 +334,66 @@ class LinesTable(QWidget):
 
     # ------------------------------------------------------------------
     def _context_menu(self, pos):
+        """Right-click on the table body (row header / blank cells)."""
         if not self._recipe:
             return
         row = self.table.rowAt(pos.y())
-        col = self.table.columnAt(pos.x())
-        if row < 0:
+        if row < 0 or row >= len(self._recipe["sites"]):
             return
+        col = self.table.columnAt(pos.x())
+        key = (self._used_keys[col - 2]
+               if col >= 2 and col - 2 < len(self._used_keys) else None)
+        self._build_menu(row, key).exec(
+            self.table.viewport().mapToGlobal(pos))
+
+    def _param_menu(self, row: int, key: str, global_pos):
+        """Right-click routed from a value cell (reliable: no pos guessing)."""
+        if not self._recipe or row >= len(self._recipe["sites"]):
+            return
+        self._build_menu(row, key).exec(global_pos)
+
+    def _build_menu(self, row: int, key: str | None) -> QMenu:
         site = self._recipe["sites"][row]
         menu = QMenu(self)
-        if col >= 2 and col - 2 < len(self._used_keys):
-            key = self._used_keys[col - 2]
-            if key in site["params"]:
-                p = site["params"][key]
-                others = len(self._recipe["sites"]) > 1
-                # dmfit-style presets, no expression writing needed
-                if key == "isotropic_chemical_shift_ppm" and others:
-                    a = QAction("Position: offset from another line… (ppm/Hz)", menu)
-                    a.triggered.connect(lambda: self._preset_position(row, p))
-                    menu.addAction(a)
-                if key == "amplitude" and others:
-                    a = QAction("Amplitude: ratio of another line…", menu)
-                    a.triggered.connect(lambda: self._preset_ratio(
-                        row, p, "amplitude", "Amplitude ratio", 0.5))
-                    menu.addAction(a)
-                if key == "shift_fwhm_ppm" and others:
-                    a = QAction("Width: same as another line…", menu)
-                    a.triggered.connect(lambda: self._preset_ratio(
-                        row, p, "shift_fwhm_ppm", "Shared width", 1.0))
-                    menu.addAction(a)
-                a_link = QAction("Custom link expression…", menu)
-                a_link.triggered.connect(lambda: self._edit_link(p))
-                menu.addAction(a_link)
-                if p.get("expr"):
-                    a_un = QAction(f"Unlink  (now: {p['expr']})", menu)
-                    a_un.triggered.connect(lambda: self._unlink(p))
-                    menu.addAction(a_un)
-                bounded = (p.get("min") is not None
-                           or p.get("max") is not None)
-                label = ("Constrain min / max…  ✓" if bounded
-                         else "Constrain min / max…")
-                a_bounds = QAction(label, menu)
-                a_bounds.triggered.connect(
-                    lambda _=False, key=key: self._edit_bounds(site, key))
-                menu.addAction(a_bounds)
-                if bounded:
-                    a_free = QAction("Remove constraints", menu)
-                    a_free.triggered.connect(
-                        lambda _=False, pp=p: self._clear_bounds(pp))
-                    menu.addAction(a_free)
-                menu.addSeparator()
+        if key and key in site["params"]:
+            p = site["params"][key]
+            others = len(self._recipe["sites"]) > 1
+            # dmfit-style presets, no expression writing needed
+            if key == "isotropic_chemical_shift_ppm" and others:
+                a = QAction("Position: offset from another line… (ppm/Hz)", menu)
+                a.triggered.connect(lambda: self._preset_position(row, p))
+                menu.addAction(a)
+            if key == "amplitude" and others:
+                a = QAction("Amplitude: ratio of another line…", menu)
+                a.triggered.connect(lambda: self._preset_ratio(
+                    row, p, "amplitude", "Amplitude ratio", 0.5))
+                menu.addAction(a)
+            if key == "shift_fwhm_ppm" and others:
+                a = QAction("Width: same as another line…", menu)
+                a.triggered.connect(lambda: self._preset_ratio(
+                    row, p, "shift_fwhm_ppm", "Shared width", 1.0))
+                menu.addAction(a)
+            a_link = QAction("Custom link expression…", menu)
+            a_link.triggered.connect(lambda: self._edit_link(p))
+            menu.addAction(a_link)
+            if p.get("expr"):
+                a_un = QAction(f"Unlink  (now: {p['expr']})", menu)
+                a_un.triggered.connect(lambda: self._unlink(p))
+                menu.addAction(a_un)
+            bounded = (p.get("min") is not None
+                       or p.get("max") is not None)
+            label = ("Constrain min / max…  ✓" if bounded
+                     else "Constrain min / max…")
+            a_bounds = QAction(label, menu)
+            a_bounds.triggered.connect(
+                lambda _=False, key=key: self._edit_bounds(site, key))
+            menu.addAction(a_bounds)
+            if bounded:
+                a_free = QAction("Remove constraints", menu)
+                a_free.triggered.connect(
+                    lambda _=False, pp=p: self._clear_bounds(pp))
+                menu.addAction(a_free)
+            menu.addSeparator()
         a_vis = QAction("Show / hide on plot", menu)
         a_vis.triggered.connect(lambda: self.structure.emit(row, "visibility"))
         a_dup = QAction("Duplicate line", menu)
@@ -337,7 +402,7 @@ class LinesTable(QWidget):
         a_del.triggered.connect(lambda: self.structure.emit(row, "remove"))
         for a in (a_vis, a_dup, a_del):
             menu.addAction(a)
-        menu.exec(self.table.viewport().mapToGlobal(pos))
+        return menu
 
     def _preset_position(self, row: int, p: dict):
         from larmor.desktop.dialogs import LinkPositionDialog

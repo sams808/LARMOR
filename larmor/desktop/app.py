@@ -201,7 +201,9 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("LARMOR")
-        self.resize(1440, 900)
+        # Fit the initial window to the screen — a fixed 1440×900 overflows small
+        # laptops, pushing corners (and the resize grips) off-screen.
+        self._fit_to_screen(1440, 900)
 
         self.source_path: str | None = None
         self.recipe: dict | None = None
@@ -255,6 +257,7 @@ class MainWindow(QMainWindow):
         self._build_workspaces_dock()
         self._build_bottom_docks()
         self._build_right_dock()
+        self._build_panels_menu()
 
         self.exp_label = ClickableLabel("")
         self.exp_label.setStyleSheet("color: #0a5a62; font-weight: 600;")
@@ -374,6 +377,7 @@ class MainWindow(QMainWindow):
         self.actQuant = self._add(m_dec, "&Report (quantify)", self.run_quantify, "F6")
 
         m_view = mb.addMenu("&View")
+        self.m_view = m_view                 # panels submenu filled once docks exist
         self.actResid = self._add(m_view, "Residual", self._toggle_resid,
                                   checkable=True, checked=True)
         self.actComp = self._add(m_view, "Components", self._toggle_comp,
@@ -749,7 +753,8 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------- docks
     def _build_bottom_docks(self):
         self.lines_dock = QDockWidget("Fit parameters", self)
-        self.lines_dock.setFeatures(QDockWidget.DockWidgetMovable)
+        self.lines_dock.setFeatures(QDockWidget.DockWidgetMovable |
+                                    QDockWidget.DockWidgetClosable)
         self.lines_table = LinesTable()
         self.lines_table.edited.connect(self.on_params_changed)
         self.lines_table.constraint_edited.connect(self.on_structure_changed)
@@ -804,6 +809,29 @@ class MainWindow(QMainWindow):
         self.proc_dock.setWidget(self.proc_panel)
         self.addDockWidget(Qt.RightDockWidgetArea, self.proc_dock)
         self.proc_dock.hide()
+
+    def _fit_to_screen(self, want_w: int, want_h: int):
+        """Size the window to at most the available screen (minus a margin) and
+        centre it, so it never opens partly off-screen on a small display."""
+        from PySide6.QtWidgets import QApplication
+        scr = (self.screen() or QApplication.primaryScreen())
+        if scr is None:
+            self.resize(want_w, want_h)
+            return
+        g = scr.availableGeometry()
+        w = min(want_w, g.width() - 40)
+        h = min(want_h, g.height() - 60)
+        self.resize(w, h)
+        self.move(g.left() + (g.width() - w) // 2,
+                  g.top() + (g.height() - h) // 2)
+
+    def _build_panels_menu(self):
+        """View ▸ Panels: show / hide (and reopen) every dock. Each dock also has
+        its own close ✕ now, so a panel can be dismissed and brought back."""
+        m = self.m_view.addMenu("&Panels")
+        for dock in (self.explorer_dock, self.datasets_dock, self.ws_dock,
+                     self.lines_dock, self.results_dock, self.proc_dock):
+            m.addAction(dock.toggleViewAction())
 
     def _update_enabled(self):
         loaded = self.recipe is not None

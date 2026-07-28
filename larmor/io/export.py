@@ -83,9 +83,17 @@ def export_fxmla(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
     block on an ascending-Hz grid.
     """
     freq = recipe.larmor_frequency_MHz or 1.0
+    # Amplitude convention. dmfit's CzSimple <amp> is the *seed* (pre-Czjzek-
+    # broadening) Gauss/Lor amplitude, whereas LARMOR peak-normalises the fully
+    # broadened component (rendered peak = amplitude). Writing LARMOR's peak
+    # amplitude straight out therefore makes dmfit render Czjzek lines far too
+    # short, by a width-dependent factor. Convert peak -> seed amplitude via the
+    # area-preserving Czjzek relation: seed_amp = area / (Gauss-Lor area/peak at
+    # dCS). Gauss/Lorentz lines need no conversion (no quadrupolar broadening).
+    amp_scale = _czjzek_amp_scales(recipe, exp_ppm)
     lines_xml = []
     for i, site in enumerate(recipe.sites):
-        lines_xml.append(_line_xml(site, i, freq))
+        lines_xml.append(_line_xml(site, i, freq, amp_scale.get(i, 1.0)))
     n_lines = len(lines_xml)
 
     header = (
@@ -113,10 +121,37 @@ def export_fxmla(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
     return text
 
 
-def _line_xml(site, i: int, freq_MHz: float) -> str:
+def _czjzek_amp_scales(recipe, exp_ppm) -> dict:
+    """Per-site multiplier converting LARMOR's peak amplitude to dmfit's seed
+    amplitude for Czjzek lines (see export_fxmla). Empty/1.0 if it can't run."""
+    scales: dict[int, float] = {}
+    try:
+        from larmor import engine
+
+        x, _total, per = engine.simulate(recipe, exp_ppm=np.asarray(exp_ppm,
+                                                                     float))
+        dppm = abs(float(np.mean(np.diff(x)))) or 1.0
+        for i, (site, comp) in enumerate(zip(recipe.sites, per)):
+            if site.model not in ("czjzek", "ext_czjzek"):
+                continue
+            comp = np.abs(np.asarray(comp, float))
+            peak = float(comp.max())
+            if peak <= 0:
+                continue
+            rho_cz = float(comp.sum()) * dppm / peak      # area/peak, broadened
+            dcs = site.params.get("shift_fwhm_ppm")
+            dcs = dcs.value if dcs is not None else 10.0
+            rho_seed = 1.5708 * max(abs(dcs), 1e-6)       # Lorentzian seed area/peak
+            scales[i] = rho_cz / rho_seed
+    except Exception:
+        pass
+    return scales
+
+
+def _line_xml(site, i: int, freq_MHz: float, amp_scale: float = 1.0) -> str:
     p = {k: v.value for k, v in site.params.items()}
     pos = p.get("isotropic_chemical_shift_ppm", 0.0)
-    amp = p.get("amplitude", 1.0)
+    amp = p.get("amplitude", 1.0) * amp_scale
     name = site.label or f"line{i}"
     if site.model == "czjzek":
         sigma = p.get("sigma_Cq_MHz", 1.0)
