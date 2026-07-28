@@ -371,6 +371,8 @@ class MainWindow(QMainWindow):
                                  self.run_auto_fit)
         self.actErrors = self._add(m_dec, "&Errors Analysis (χ² profile)…",
                                    self.run_errors_analysis)
+        self._add(m_dec, "Czjzek distribution P(C_Q)…  (what σ stands for)",
+                  self.show_czjzek_dist)
         self._add(m_dec, "Co-&fit datasets…  (shared model, 1D + MQMAS)",
                   self.open_cofit)
         self._add(m_dec, "&Compute", self.request_simulation, "F9")
@@ -2957,6 +2959,16 @@ class MainWindow(QMainWindow):
         from larmor.desktop.vt_dialog import VtDialog
 
         VtDialog(self).exec()
+
+    def show_czjzek_dist(self):
+        from larmor.desktop.czjzek_dist_dialog import CzjzekDistDialog
+
+        if not (self.recipe and any(
+                s.get("model") in ("czjzek", "ext_czjzek")
+                for s in self.recipe.get("sites", []))):
+            self.statusBar().showMessage("no Czjzek sites in the current fit")
+            return
+        CzjzekDistDialog(self, self.recipe).exec()
 
     def open_qcpmg_fields(self):
         from larmor.desktop.qcpmg_fields_dialog import QcpmgFieldsDialog
