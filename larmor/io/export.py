@@ -121,31 +121,22 @@ def export_fxmla(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
     return text
 
 
-def _czjzek_amp_scales(recipe, exp_ppm) -> dict:
-    """Per-site multiplier converting LARMOR's peak amplitude to dmfit's seed
-    amplitude for Czjzek lines (see export_fxmla). Empty/1.0 if it can't run."""
-    scales: dict[int, float] = {}
-    try:
-        from larmor import engine
+#: LARMOR peak-amp → dmfit CzSimple <amp> factor for Czjzek lines. dmfit's amp
+#: is larger than LARMOR's rendered peak by a roughly constant factor (LARMOR's
+#: Czjzek rendering is broader / lower-peaked for the same area). Calibrated to
+#: CaAlGlass.fxmla's dominant, best-determined line (LARMOR peak 1656.7 ↔ dmfit
+#: amp 6492.7 = 3.92). Gauss/Lorentz lines need no conversion (ratio ≈ 1).
+#: NOTE: derived from one ²⁷Al glass at 195 MHz — may want per-nucleus/field
+#: refinement if a different system exports mis-scaled (idea #19).
+_DMFIT_CZJZEK_AMP_FACTOR = 3.92
 
-        x, _total, per = engine.simulate(recipe, exp_ppm=np.asarray(exp_ppm,
-                                                                     float))
-        dppm = abs(float(np.mean(np.diff(x)))) or 1.0
-        for i, (site, comp) in enumerate(zip(recipe.sites, per)):
-            if site.model not in ("czjzek", "ext_czjzek"):
-                continue
-            comp = np.abs(np.asarray(comp, float))
-            peak = float(comp.max())
-            if peak <= 0:
-                continue
-            rho_cz = float(comp.sum()) * dppm / peak      # area/peak, broadened
-            dcs = site.params.get("shift_fwhm_ppm")
-            dcs = dcs.value if dcs is not None else 10.0
-            rho_seed = 1.5708 * max(abs(dcs), 1e-6)       # Lorentzian seed area/peak
-            scales[i] = rho_cz / rho_seed
-    except Exception:
-        pass
-    return scales
+
+def _czjzek_amp_scales(recipe, exp_ppm) -> dict:
+    """Per-site Czjzek amplitude multiplier for dmfit export (see the factor
+    above). exp_ppm is unused now (kept for signature stability)."""
+    return {i: _DMFIT_CZJZEK_AMP_FACTOR
+            for i, s in enumerate(recipe.sites)
+            if s.model in ("czjzek", "ext_czjzek")}
 
 
 def _line_xml(site, i: int, freq_MHz: float, amp_scale: float = 1.0) -> str:
