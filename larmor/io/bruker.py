@@ -338,15 +338,41 @@ def _read_title(pdata: Path) -> str:
     return tp.read_text(encoding="utf-8", errors="replace") if tp.exists() else ""
 
 
+#: default MAS rate when none can be found anywhere (flagged uncertain so the
+#: user is warned in the app). 35714 Hz is a common 27Al fast-MAS rate here.
+MAS_FALLBACK_HZ = 35714.0
+
+
+def _resolve_mas(acqus: dict, title: str) -> tuple[float, bool]:
+    """Resolve the MAS rate from all available sources. If several disagree,
+    take the highest; if none are found, fall back to MAS_FALLBACK_HZ. Returns
+    (rate_Hz, uncertain) where uncertain flags a guess or a disagreement so the
+    app can warn (red indicator)."""
+    cands = []
+    masr = acqus.get("MASR")
+    if masr is not None and float(masr) > 0:
+        cands.append(float(masr))
+    m = re.search(r"MASR?\s*[=:]?\s*([\d.]+)\s*kHz", title or "", re.IGNORECASE)
+    if m:
+        cands.append(float(m.group(1)) * 1000.0)
+    if not cands:
+        return MAS_FALLBACK_HZ, True
+    rate = max(cands)
+    # ambiguous if two sources disagree by more than 2 %
+    uncertain = (max(cands) - min(cands)) > 0.02 * max(cands)
+    return rate, uncertain
+
+
 def _meta_1d(acqus: dict, title: str, expno: Path) -> dict:
+    mas_hz, mas_uncertain = _resolve_mas(acqus, title)
     return {
         "nucleus": str(acqus.get("NUC1", "")).strip(),
         "larmor_MHz": float(acqus.get("SFO1", 0.0)),
         "sw_Hz": float(acqus.get("SW_h", 0.0)),
         "td": int(acqus.get("TD", 0)),
         "pulse_program": str(acqus.get("PULPROG", "")).strip(),
-        "masr_Hz": (float(acqus["MASR"]) if acqus.get("MASR") is not None
-                    else None),
+        "masr_Hz": mas_hz,
+        "mas_uncertain": mas_uncertain,
         "o1_Hz": float(acqus.get("O1", 0.0)),
         "bf1_MHz": float(acqus.get("BF1", 0.0)),
         "title": title,

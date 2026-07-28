@@ -69,6 +69,9 @@ class Recipe:
     nucleus: str = ""
     larmor_frequency_MHz: float = 0.0
     spin_rate_Hz: float = 0.0
+    #: True when the MAS rate had to be guessed (missing) or the sources
+    #: disagreed — the app shows a red MAS indicator so the user checks it.
+    mas_uncertain: bool = False
     #: spectral reference SR = SF − BF1 (Hz); shifts the ppm axis by SR/SFO1
     sr_hz: float = 0.0
     engine: str = "czjzek-kernel+lmfit"

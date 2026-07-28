@@ -268,6 +268,14 @@ class MainWindow(QMainWindow):
         self.statusBar().addPermanentWidget(self.exp_label)
         self.pos_label = QLabel("")
         self.statusBar().addPermanentWidget(self.pos_label)
+        # a red MAS-rate warning at the bottom-right when the spin rate had to
+        # be guessed or the sources disagreed (see _update_mas_label)
+        self.mas_label = QLabel("")
+        self.mas_label.setStyleSheet(
+            "background:#c0392b; color:white; font-weight:600; "
+            "padding:1px 8px; border-radius:3px;")
+        self.mas_label.setVisible(False)
+        self.statusBar().addPermanentWidget(self.mas_label)
         self.statusBar().showMessage(
             "File > Open… (dmfit .fxmla / LARMOR recipe) or Open EXPNO…")
 
@@ -852,6 +860,22 @@ class MainWindow(QMainWindow):
         self.exp_label.setText(
             f"{self.recipe.get('nucleus', '?')} · "
             f"{self.recipe.get('larmor_frequency_MHz', 0):.3f} MHz · {mas}{sr_txt}")
+        self._update_mas_label()
+
+    def _update_mas_label(self):
+        """Red bottom-right MAS indicator when the spin rate was guessed or the
+        sources disagreed. Cleared once the user confirms it (Experiment dialog)."""
+        rate = (self.recipe or {}).get("spin_rate_Hz", 0.0) or 0.0
+        if self.recipe and self.recipe.get("mas_uncertain"):
+            self.mas_label.setText(f"⚠ MAS {rate:.0f} Hz — check!")
+            self.mas_label.setToolTip(
+                "The MAS rate was missing or the acqus/title sources disagreed, "
+                "so LARMOR guessed (highest found, or 35714 Hz). Set it in "
+                "Experiment parameters (double-click the strip on the left) to "
+                "clear this warning.")
+            self.mas_label.setVisible(True)
+        else:
+            self.mas_label.setVisible(False)
 
     def edit_experiment(self):
         if self.recipe is None:
@@ -862,6 +886,7 @@ class MainWindow(QMainWindow):
         old_sr = self.recipe.get("sr_hz", 0.0) or 0.0
         dlg = ExperimentDialog(self, self.recipe)
         if dlg.exec():
+            self.recipe["mas_uncertain"] = False     # user confirmed the params
             # a changed SR re-references the ppm axis by ΔSR / SFO1
             new_sr = self.recipe.get("sr_hz", 0.0) or 0.0
             larmor = self.recipe.get("larmor_frequency_MHz", 0.0) or 0.0
@@ -1044,7 +1069,8 @@ class MainWindow(QMainWindow):
             source_kind="bruker", source_path=meta.get("expno", ""),
             nucleus=meta.get("nucleus", ""),
             larmor_frequency_MHz=meta.get("larmor_MHz", 0.0),
-            spin_rate_Hz=meta.get("masr_Hz") or 0.0).to_dict()
+            spin_rate_Hz=meta.get("masr_Hz") or 0.0,
+            mas_uncertain=bool(meta.get("mas_uncertain", False))).to_dict()
         self.hidden.clear(); self.undo_stack.clear(); self.redo_stack.clear()
         self.view.set_experiment(self.exp_ppm, self.exp_amp)
         self.view.set_title(self.recipe.get("sample") or "processed FID")
@@ -1190,10 +1216,57 @@ class MainWindow(QMainWindow):
         else:
             self.save_spectrum()
 
+    def _resolve_open_path(self, path: str):
+        """If `path` is a bare EXPNO with several processed datasets (pdata/N),
+        ask the user which one. Returns the chosen pdata/N path, the original
+        path, or None if the user cancelled."""
+        from larmor.io import bruker
+
+        p = Path(path)
+        try:
+            if not bruker.is_expno(p):
+                return path
+        except Exception:
+            return path
+        pdata = p / "pdata"
+        if not pdata.is_dir():
+            return path
+        procs = sorted((d for d in pdata.iterdir()
+                        if d.is_dir() and d.name.isdigit()
+                        and ((d / "1r").exists() or (d / "2rr").exists())),
+                       key=lambda d: int(d.name))
+        if len(procs) <= 1:
+            return path
+
+        def _label(d: Path) -> str:
+            kind = "2D" if (d / "2rr").exists() else "1D"
+            title = ""
+            t = d / "title"
+            if t.exists():
+                try:
+                    title = t.read_text(errors="replace").splitlines()[0].strip()
+                except Exception:
+                    pass
+            return f"proc {d.name}  ({kind})" + (f"  ·  {title}" if title else "")
+
+        from PySide6.QtWidgets import QInputDialog
+        items = [_label(d) for d in procs]
+        choice, ok = QInputDialog.getItem(
+            self, "Choose processed data",
+            f"'{p.name}' has {len(procs)} processed datasets — which one?",
+            items, 0, False)
+        if not ok:
+            return None
+        return str(procs[items.index(choice)])
+
     def load_source(self, path: str, keep_fit: bool | None = None):
         """Open ANY dataset with a basic display, then let the user choose a
         process. 1D spectra go to the fit workbench; 2D datasets show a contour
         map; raw fid/ser get a quick preview. Nothing is ever rejected."""
+        path = self._resolve_open_path(path)
+        if path is None:                      # user cancelled the proc chooser
+            self.statusBar().showMessage("open cancelled")
+            return
         self.statusBar().showMessage("loading…")
         QApplication.processEvents()
         self._sync_active()               # persist the outgoing document
