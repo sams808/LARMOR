@@ -64,10 +64,11 @@ class QcpmgFieldsDialog(QDialog):
         top.addStretch(1)
         v.addLayout(top)
 
-        # per-field table: Larmor (MHz), δcg (ppm), ±err, CT-selective
-        self.table = QTableWidget(0, 4)
+        # per-field table: Larmor (MHz), δcg (ppm), ±err, FWHM (ppm), CT-selective
+        self.table = QTableWidget(0, 5)
         self.table.setHorizontalHeaderLabels(
-            ["Larmor ν₀ (MHz)", "δcg (ppm)", "± err (ppm)", "CT-selective"])
+            ["Larmor ν₀ (MHz)", "δcg (ppm)", "± err (ppm)",
+             "FWHM (ppm)", "CT-selective"])
         self.table.horizontalHeader().setStretchLastSection(True)
         v.addWidget(self.table, 1)
 
@@ -97,9 +98,19 @@ class QcpmgFieldsDialog(QDialog):
         self.result.setWordWrap(True)
         v.addWidget(self.result)
 
+        self.wresult = QLabel(
+            "Two-field linewidth split (Sandland Eq. 2): also fill FWHM (ppm) "
+            "at both fields, then 'Split W_q / W_csd'.")
+        self.wresult.setStyleSheet("color:#4a5560;")
+        self.wresult.setWordWrap(True)
+        self.wresult.setTextFormat(Qt.RichText)
+        v.addWidget(self.wresult)
+
         bb = QDialogButtonBox()
         b_comp = bb.addButton("Compute δiso", QDialogButtonBox.ApplyRole)
         b_comp.clicked.connect(self._compute)
+        b_w = bb.addButton("Split W_q / W_csd", QDialogButtonBox.ApplyRole)
+        b_w.clicked.connect(self._compute_widths)
         bb.addButton(QDialogButtonBox.Close).clicked.connect(self.accept)
         v.addWidget(bb)
 
@@ -113,10 +124,11 @@ class QcpmgFieldsDialog(QDialog):
         self.table.setItem(r, 0, QTableWidgetItem(f"{larmor:g}" if larmor else ""))
         self.table.setItem(r, 1, QTableWidgetItem(""))
         self.table.setItem(r, 2, QTableWidgetItem("5"))
+        self.table.setItem(r, 3, QTableWidgetItem(""))          # FWHM (ppm)
         chk = QCheckBox(); chk.setChecked(True)
         w = QWidget(); lay = QHBoxLayout(w); lay.setContentsMargins(0, 0, 0, 0)
         lay.setAlignment(Qt.AlignCenter); lay.addWidget(chk)
-        self.table.setCellWidget(r, 3, w)
+        self.table.setCellWidget(r, 4, w)
 
     def _del_row(self):
         r = self.table.currentRow()
@@ -152,10 +164,39 @@ class QcpmgFieldsDialog(QDialog):
                 err = float(self.table.item(r, 2).text())
             except (AttributeError, ValueError):
                 err = 5.0
-            w = self.table.cellWidget(r, 3)
+            w = self.table.cellWidget(r, 4)
             sel = w.findChild(QCheckBox).isChecked() if w else True
             pts.append(FieldPoint(nu, dcg, err, sel))
         return pts
+
+    def _fields_fwhm(self):
+        """(larmor, fwhm_ppm) for rows that have both filled — for Eq. 2."""
+        out = []
+        for r in range(self.table.rowCount()):
+            try:
+                nu = float(self.table.item(r, 0).text())
+                fw = float(self.table.item(r, 3).text())
+                out.append((nu, fw))
+            except (AttributeError, ValueError):
+                continue
+        return out
+
+    def _compute_widths(self):
+        from larmor.qcpmg_fields import two_field_widths
+        fw = self._fields_fwhm()
+        if len(fw) < 2:
+            self.wresult.setText("enter the FWHM (ppm) at two fields")
+            return
+        (n1, f1), (n2, f2) = fw[0], fw[1]
+        ws = two_field_widths(n1, f1, n2, f2)
+        if not ws.ok:
+            self.wresult.setText("⚠ " + ws.note)
+            return
+        self.wresult.setText(
+            f"quadrupolar width W_q = {ws.wq_lo_ppm:.1f} ppm (at {min(n1,n2):.0f} "
+            f"MHz) / {ws.wq_hi_ppm:.1f} ppm (at {max(n1,n2):.0f} MHz)  ·  "
+            f"chemical-shift-distribution width W_csd = <b>{ws.wcsd_ppm:.1f} "
+            f"ppm</b> (field-independent)")
 
     def _compute(self):
         pts = self._points()

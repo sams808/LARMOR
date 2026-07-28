@@ -55,6 +55,20 @@ def test_centre_of_gravity_window():
     assert centre_of_gravity(x, y2, -160, -80) == pytest.approx(-120, abs=1.0)
 
 
+def test_two_field_width_split_roundtrip():
+    from larmor.qcpmg_fields import two_field_widths
+    n1, n2, wq1, wcsd = 58.726, 81.599, 60.0, 20.0
+    wq2 = wq1 * (n1 / n2) ** 2
+    f1 = np.hypot(wq1, wcsd); f2 = np.hypot(wq2, wcsd)
+    ws = two_field_widths(n1, f1, n2, f2)
+    assert ws.ok
+    assert ws.wq_lo_ppm == pytest.approx(wq1)
+    assert ws.wcsd_ppm == pytest.approx(wcsd)
+    # order does not matter, and an unphysical case is flagged
+    assert two_field_widths(n2, f2, n1, f1).wcsd_ppm == pytest.approx(wcsd)
+    assert not two_field_widths(n1, 20.0, n2, 60.0).ok
+
+
 def test_dialog_computes(qapp=None):
     import os
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -65,9 +79,13 @@ def test_dialog_computes(qapp=None):
     dlg = QcpmgFieldsDialog(None, "35Cl", None)
     dlg.table.setItem(0, 0, QTableWidgetItem("58.726"))
     dlg.table.setItem(0, 1, QTableWidgetItem("-125.9"))
+    dlg.table.setItem(0, 3, QTableWidgetItem("63.2"))     # FWHM (ppm)
     dlg.table.setItem(1, 0, QTableWidgetItem("81.599"))
     dlg.table.setItem(1, 1, QTableWidgetItem("-89.31"))
+    dlg.table.setItem(1, 3, QTableWidgetItem("37.0"))
     dlg._compute()
+    dlg._compute_widths()
     assert "iso" in dlg.result.text()
+    assert "csd" in dlg.wresult.text().lower()
     assert dlg.spin.value() == 1.5                  # 35Cl
     dlg.close()

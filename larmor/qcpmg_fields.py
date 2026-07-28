@@ -118,6 +118,45 @@ def infinite_field_diso(points: list[FieldPoint], spin: float,
         slope=b, intercept=a, points=list(points))
 
 
+@dataclass
+class WidthSplit:
+    wq_lo_ppm: float          # quadrupolar width at the LOWER field (ppm)
+    wq_hi_ppm: float          # quadrupolar width at the higher field (ppm)
+    wcsd_ppm: float           # chemical-shift-distribution width (field-independent)
+    ok: bool                  # False when the split is unphysical (see note)
+    note: str = ""
+
+
+def two_field_widths(nu1_MHz: float, fwhm1_ppm: float,
+                     nu2_MHz: float, fwhm2_ppm: float) -> WidthSplit:
+    """Separate the CT linewidth into a quadrupolar part W_q (∝ 1/ν0², broader at
+    low field) and a chemical-shift-distribution part W_csd (field-independent in
+    ppm) from the FWHM measured at two fields (Sandland et al. 2004, Eq. 2).
+
+    In ppm, W_q ∝ 1/ν0² and W_csd is constant, so with the lower field = 1:
+        FWHM1² = W_q1² + W_csd²
+        FWHM2² = W_q1²·(ν1/ν2)⁴ + W_csd²
+    → W_q1² = (FWHM1² − FWHM2²)/(1 − (ν1/ν2)⁴),  W_csd² = FWHM1² − W_q1².
+    (Sandland writes it in Hz; the ppm form here is equivalent.)
+    """
+    # order so field 1 is the lower field
+    if nu1_MHz > nu2_MHz:
+        nu1_MHz, fwhm1_ppm, nu2_MHz, fwhm2_ppm = nu2_MHz, fwhm2_ppm, nu1_MHz, fwhm1_ppm
+    r = (nu1_MHz / nu2_MHz) ** 4
+    if abs(1.0 - r) < 1e-9:
+        return WidthSplit(0, 0, 0, False, "the two fields are too close")
+    wq1_sq = (fwhm1_ppm ** 2 - fwhm2_ppm ** 2) / (1.0 - r)
+    wcsd_sq = fwhm1_ppm ** 2 - wq1_sq
+    ok = wq1_sq >= 0 and wcsd_sq >= 0
+    note = ("" if ok else
+            "widths do not separate: the higher-field line is broader than the "
+            "quadrupolar model allows — check the FWHM values or the CT band.")
+    wq1 = float(np.sqrt(max(wq1_sq, 0.0)))
+    wcsd = float(np.sqrt(max(wcsd_sq, 0.0)))
+    wq2 = wq1 * (nu1_MHz / nu2_MHz) ** 2         # W_q at the higher field
+    return WidthSplit(wq1, wq2, wcsd, ok, note)
+
+
 def centre_of_gravity(ppm: np.ndarray, amp: np.ndarray,
                       lo_ppm: float | None = None,
                       hi_ppm: float | None = None) -> float:
