@@ -373,6 +373,8 @@ class MainWindow(QMainWindow):
                                    self.run_errors_analysis)
         self._add(m_dec, "Czjzek distribution P(C_Q)…  (what σ stands for)",
                   self.show_czjzek_dist)
+        self._add(m_dec, "Parameter correlations…  (from the last fit)",
+                  self.show_correlations)
         self._add(m_dec, "Co-&fit datasets…  (shared model, 1D + MQMAS)",
                   self.open_cofit)
         self._add(m_dec, "&Compute", self.request_simulation, "F9")
@@ -2136,6 +2138,7 @@ class MainWindow(QMainWindow):
 
     def _fit_done(self, result):
         self.lines_table.btnFit.setEnabled(True)
+        self._last_lmfit = getattr(result, "lmfit_result", None)   # for correlations
         self._progress_end(True)
         self.recipe = result.recipe.to_dict()
         self.lines_table.rebuild(self.recipe, self.hidden)
@@ -3017,6 +3020,15 @@ class MainWindow(QMainWindow):
         from larmor.desktop.vt_dialog import VtDialog
 
         VtDialog(self).exec()
+
+    def show_correlations(self):
+        from larmor.desktop.correlation_dialog import CorrelationDialog
+
+        lm = getattr(self, "_last_lmfit", None)
+        if lm is None:
+            self.statusBar().showMessage("run a fit first to see correlations")
+            return
+        CorrelationDialog(self, lm).exec()
 
     def show_czjzek_dist(self):
         from larmor.desktop.czjzek_dist_dialog import CzjzekDistDialog
