@@ -120,7 +120,8 @@ def load_any(path: str | Path, replay: bool = True):
             sample=title.splitlines()[0] if title else "",
             source_kind="bruker", source_path=str(ref.expno),
             nucleus=data.nucleus, larmor_frequency_MHz=data.meta["larmor_MHz"],
-            spin_rate_Hz=data.meta.get("masr_Hz") or 0.0,
+            spin_rate_Hz=(data.meta.get("spin_rate_Hz")
+                          or data.meta.get("masr_Hz") or 0.0),
             mas_uncertain=bool(data.meta.get("mas_uncertain", False)),
             sr_hz=data.meta.get("sr_hz", 0.0),
         )

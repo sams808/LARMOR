@@ -1075,7 +1075,7 @@ class MainWindow(QMainWindow):
             source_kind="bruker", source_path=meta.get("expno", ""),
             nucleus=meta.get("nucleus", ""),
             larmor_frequency_MHz=meta.get("larmor_MHz", 0.0),
-            spin_rate_Hz=meta.get("masr_Hz") or 0.0,
+            spin_rate_Hz=(meta.get("spin_rate_Hz") or meta.get("masr_Hz") or 0.0),
             mas_uncertain=bool(meta.get("mas_uncertain", False))).to_dict()
         self.hidden.clear(); self.undo_stack.clear(); self.redo_stack.clear()
         self.view.set_experiment(self.exp_ppm, self.exp_amp)
@@ -1405,7 +1405,9 @@ class MainWindow(QMainWindow):
             spec = np.abs(spec)              # magnitude preview (phase-free)
             self._display_1d(ppm[order], spec[order],
                              data.meta.get("nucleus", ""),
-                             data.meta["larmor_MHz"], data.meta.get("masr_Hz"),
+                             data.meta["larmor_MHz"],
+                             data.meta.get("spin_rate_Hz")
+                             or data.meta.get("masr_Hz"),
                              Path(path).name + " (FID preview)", str(ref.expno))
             self.statusBar().showMessage(
                 "raw FID preview (magnitude) — Process ▸ Open FID to apodize, "

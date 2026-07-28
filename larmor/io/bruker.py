@@ -364,14 +364,19 @@ def _resolve_mas(acqus: dict, title: str) -> tuple[float, bool]:
 
 
 def _meta_1d(acqus: dict, title: str, expno: Path) -> dict:
-    mas_hz, mas_uncertain = _resolve_mas(acqus, title)
+    # masr_Hz stays the raw acqus reading (so conflict detection and the
+    # backward-compat API are unchanged); spin_rate_Hz is the resolved rate the
+    # recipe should use (highest of the sources, or a flagged fallback).
+    spin_hz, mas_uncertain = _resolve_mas(acqus, title)
     return {
         "nucleus": str(acqus.get("NUC1", "")).strip(),
         "larmor_MHz": float(acqus.get("SFO1", 0.0)),
         "sw_Hz": float(acqus.get("SW_h", 0.0)),
         "td": int(acqus.get("TD", 0)),
         "pulse_program": str(acqus.get("PULPROG", "")).strip(),
-        "masr_Hz": mas_hz,
+        "masr_Hz": (float(acqus["MASR"]) if acqus.get("MASR") is not None
+                    else None),
+        "spin_rate_Hz": spin_hz,
         "mas_uncertain": mas_uncertain,
         "o1_Hz": float(acqus.get("O1", 0.0)),
         "bf1_MHz": float(acqus.get("BF1", 0.0)),
