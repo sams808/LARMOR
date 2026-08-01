@@ -86,6 +86,10 @@ p0 **and** p1 robustly even on crowded spectra.
   spectrum to drop as many baseline points as you like (drag to shape); a live
   PCHIP curve previews the baseline, and it is **subtracted automatically when
   you turn Pick anchors back off** — no separate Subtract click.
+- **Iterative (dead-time; Yon et al. 2020)** — for the rolling baseline from
+  receiver **dead time** in pulse-acquire MAS, where the above fail. Iterative,
+  histogram-thresholded smoothing baseline, optionally restricted to broad
+  (dead-time) components. See the **Processing reference** manual.
 
 ### Referencing (SR / Calibrate)
 
@@ -137,6 +141,7 @@ confidence interval, beyond the linear covariance estimate.
 | **Voigt (true)** | separable Gaussian ⊗ Lorentzian broadening |
 | **J-multiplet** | scalar J splitting to *n* equivalent spins |
 | **Czjzek / ext. Czjzek** | amorphous quadrupolar sites (glasses) |
+| **Amorphous** | BO₃ in ¹¹B; a well-defined C_Q with modest Gaussian disorder |
 | **Quad CT / 1st / +CSA** | crystalline quadrupolar sites |
 | **CSA powder** | spin-½ shielding anisotropy (+ sidebands) |
 | **Spectrum (background)** | fit a measured impurity/phase's amplitude & shift |

@@ -108,20 +108,31 @@ def read(path: str | Path) -> DmfitFile:
                 model_nb=int(model_nb_txt) if model_nb_txt else None,
                 name=line_el.findtext("Name", default="") or "",
             )
-            # every leaf element with a float-parsable text is a parameter
+            # every leaf element with a float-parsable text is a parameter.
+            # dmfit .fxmla nests params one level under groups; the flatter
+            # .fxml (fit-parameters-only export) lists them directly under
+            # <line> -- handle both by treating any leaf (childless) element as
+            # a parameter and descending into any element that has children.
+            def _collect(el):
+                if el.tag in ("ModelName", "ModelNb", "Name"):
+                    return
+                kids = list(el)
+                if kids:
+                    for kid in kids:
+                        _collect(kid)
+                    return
+                try:
+                    value = float((el.text or "").strip())
+                except (ValueError, TypeError):
+                    return
+                # .fxmla marks fitted params Fix="*"; the flat .fxml uses Fit="*"
+                line.params[el.tag] = DmfitParam(
+                    value=value, unit=el.get("Unit"),
+                    fix_flag=el.get("Fix") == "*" or el.get("Fit") == "*",
+                )
+
             for group in line_el:
-                if group.tag in ("ModelName", "ModelNb", "Name"):
-                    continue
-                for p in group:
-                    try:
-                        value = float((p.text or "").strip())
-                    except ValueError:
-                        continue
-                    line.params[p.tag] = DmfitParam(
-                        value=value,
-                        unit=p.get("Unit"),
-                        fix_flag=p.get("Fix") == "*",
-                    )
+                _collect(group)
             dim.lines.append(line)
         dimensions.append(dim)
 
@@ -231,6 +242,39 @@ def to_recipe(dm: DmfitFile, dimension: int = 0) -> tuple[Recipe, list[str]]:
                 },
             )
             recipe.sites.append(site)
+        elif line.model_name == "Amorphous":
+            p = line.params
+            lb = p.get("lb", DmfitParam(0.0))
+            site = SiteModel(
+                model="amorphous",
+                label=line.name or f"Amorphous-{i}",
+                params={
+                    "isotropic_chemical_shift_ppm": Param(p["pos"].value),
+                    # dmfit stores CQ and FWHM_CQ in kHz; LARMOR uses MHz
+                    "Cq_MHz": Param(min(p["CQ"].value / 1000.0, 6.0),
+                                    min=0.05, max=6.0),
+                    "eta": Param(p.get("etaQ", DmfitParam(0.0)).value,
+                                 min=0.0, max=1.0),
+                    "Cq_fwhm_MHz": Param(
+                        p.get("FWHM_CQ", DmfitParam(0.0)).value / 1000.0,
+                        min=0.0, max=3.0),
+                    "eta_fwhm": Param(p.get("FWHM_etaQ", DmfitParam(0.0)).value,
+                                      min=0.0, max=1.0),
+                    "shift_fwhm_ppm": Param(
+                        abs(p.get("dCS", DmfitParam(0.0)).value), min=0.0),
+                    "line_fwhm_ppm": Param(abs(lb.value), min=0.0),
+                    "gl": Param(p.get("gl", DmfitParam(0.0)).value,
+                                vary=False, min=0.0, max=1.0),
+                    "amplitude": Param(abs(p["amp"].value), min=0.0),
+                },
+            )
+            recipe.sites.append(site)
+            warnings.append(
+                f"line {i} 'Amorphous' at {p['pos'].value:.1f} ppm: dmfit's "
+                "Amorphous amp scales AREA (not peak) and lb can be negative "
+                "(resolution enhancement) -- the imported amplitude/lb are "
+                "starting values; refit to your data."
+            )
         elif line.model_name == "ss band":
             warnings.append(
                 f"line {i} ('ss band' at {line.params.get('pos', DmfitParam(0)).value:.1f} ppm) "

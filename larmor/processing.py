@@ -233,6 +233,29 @@ def op_baseline(s: Spectrum1D, order: int = 3, k_clip: float = 1.5,
     return s
 
 
+def op_iterbaseline(s: Spectrum1D, dead_time_pts: int = 0,
+                    smoothness: float = 1.0, threshold_factor: float = 1.0,
+                    max_iter: int = 60) -> Spectrum1D:
+    """Iterative baseline correction for dead-time-truncated spectra.
+
+    Adaptation of Yon, Fayon, Massiot & Sarou-Kanian, Solid State Nucl. Magn.
+    Reson. 110, 101699 (2020) (github.com/maximeYon/Baseline_Corrector): an
+    iterative histogram-thresholded smoothing baseline, optionally restricted to
+    broad (dead-time) components in the time domain. Use it when a polynomial
+    baseline fails on a rolling baseline from receiver dead time. Set
+    `dead_time_pts` ~ 2*DE/DW to enable the time-domain restriction.
+    """
+    if s.domain != "freq":
+        raise ValueError("baseline correction needs frequency-domain data")
+    from larmor.baseline import iterative_baseline
+
+    res = iterative_baseline(
+        s.y.real, dead_time_pts=int(dead_time_pts), smoothness=float(smoothness),
+        threshold_factor=float(threshold_factor), max_iter=int(max_iter))
+    s.y = res.corrected + 1j * s.y.imag
+    return s
+
+
 def op_lp(s: Spectrum1D, n_predict: int = 0, n_coeff: int = 16,
           mode: str = "forward", n_replace: int = 0) -> Spectrum1D:
     """Linear prediction (Burg-style autoregression on the analytic fid).
@@ -541,6 +564,7 @@ OPS = {
     "phase": op_phase,
     "autophase": op_autophase,
     "baseline": op_baseline,
+    "iterbaseline": op_iterbaseline,
     "sr": op_sr,
     "magnitude": op_magnitude,
     "hilbert": op_hilbert,

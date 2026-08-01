@@ -72,6 +72,18 @@ $$S_\text{corr}(\nu) = S(\nu)\,e^{i(\phi_0+\phi_1(\nu-\nu_\text{pivot})/\text{SW
 - **Manual baseline (PCHIP, dmfit-style anchors)** — click **Pick anchors**, drop
   as many points as needed (drag to shape); a shape-preserving monotone cubic
   previews live and is **subtracted automatically when you exit anchor mode**.
+- **Iterative baseline (dead-time; Yon et al. 2020)** — *Process ▸ Baseline
+  iterative*. For the **rolling baseline caused by receiver dead time** in
+  pulse-acquire (single-pulse) MAS, where a polynomial or arPLS fails. It builds
+  the baseline **iteratively**: at each pass a **histogram filter** picks the
+  noise/baseline points automatically (the noise band around the histogram mode —
+  positive peaks *and* negative spikes excluded), a smoothing spline is fit to
+  them, and the result is subtracted; repeat until the correction falls below the
+  noise. Optionally the estimate is restricted to **broad** components by keeping
+  only the first time-domain points (the **dead-time window**, ≈ 2·DE/DW) — this
+  is what separates a genuine dead-time roll from real (narrow) peaks. Enter that
+  point count when prompted, or 0 for the plain iterative histogram baseline. It
+  leaves an already-flat spectrum essentially untouched, so it is safe to try.
 - **SR / calibrate** — reference the axis: type an SR (Hz), or click a peak and set
   its ppm. A rigid ppm shift; the raw data is untouched.
 - **scale SW / car-ref** — stretch the ppm axis about its centre (correct a
@@ -118,6 +130,11 @@ dmfit `.fxmla` or CSV export carries the result out.
   (LPSVD), *J. Magn. Reson.* **61**, 465 (1985).
 - L. Chen, Z. Weng, L. Goh, M. Garland, *J. Magn. Reson.* **158**, 164 (2002).
   *(ACME autophase)*
+- M. Yon, F. Fayon, D. Massiot, V. Sarou-Kanian, "Iterative baseline correction
+  algorithm for dead time truncated one-dimensional solid-state MAS NMR spectra",
+  *Solid State Nucl. Magn. Reson.* **110**, 101699 (2020),
+  doi:10.1016/j.ssnmr.2020.101699; github.com/maximeYon/Baseline_Corrector.
+  *(iterative dead-time baseline)*
 - S.-J. Baek, A. Park, Y.-J. Ahn, J. Choo, *Analyst* **140**, 250 (2015). *(arPLS
   baseline)*
 - R. R. Ernst, G. Bodenhausen, A. Wokaun, *Principles of NMR in One and Two

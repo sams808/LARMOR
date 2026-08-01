@@ -110,16 +110,30 @@ class _Cell(QWidget):
             lambda pos: self.menu_requested.emit(self.mapToGlobal(pos)))
 
     def _update_derived(self):
-        """Show Cq / νQ next to a Czjzek σ(Cq) value (read-only, derived)."""
-        if self.ctx["param_name"] != "sigma_Cq_MHz" or self.p.get("expr"):
+        """Show the first-order νQ next to a fitted Cq (or Czjzek σ), read-only."""
+        name = self.ctx["param_name"]
+        if self.p.get("expr"):
             self.derived.clear()
             return
-        cq, nuq = _czjzek_derived(float(self.p["value"]), self.spin)
-        self.derived.setText(f"Cq {cq:.3g}·νQ {nuq:.3g}")
-        self.derived.setToolTip(
-            f"σ(Cq) = {self.p['value']:.4g} MHz  (fitted)\n"
-            f"Cq ≈ 2σ = {cq:.4g} MHz  (dmfit sCZ_CQ; mode of |Cq|)\n"
-            f"νQ = 3·Cq / [2I(2I−1)] = {nuq:.4g} MHz   (I = {self.spin:g})")
+        from larmor.convert import nu_q
+        if name == "sigma_Cq_MHz":
+            cq, nuq = _czjzek_derived(float(self.p["value"]), self.spin)
+            self.derived.setText(f"Cq {cq:.3g}·νQ {nuq:.3g}")
+            self.derived.setToolTip(
+                f"σ(Cq) = {self.p['value']:.4g} MHz  (fitted)\n"
+                f"Cq ≈ 2σ = {cq:.4g} MHz  (dmfit sCZ_CQ; mode of |Cq|)\n"
+                f"νQ = 3·Cq / [2I(2I−1)] = {nuq:.4g} MHz   (I = {self.spin:g})")
+        elif name == "Cq_MHz":
+            # Amorphous / quad_ct etc.: Cq is the mean directly. BO3 users read νQ.
+            cq = float(self.p["value"])
+            nuq = nu_q(cq, self.spin)
+            self.derived.setText(f"νQ {nuq:.3g}")
+            self.derived.setToolTip(
+                f"Cq = {cq:.4g} MHz  (fitted)\n"
+                f"νQ = 3·Cq / [2I(2I−1)] = {nuq:.4g} MHz   (I = {self.spin:g})\n"
+                f"(dmfit reports νQ = Cq/2 for I = 3/2)")
+        else:
+            self.derived.clear()
 
     # ---- display ----
     def _display_text(self) -> str:
@@ -305,8 +319,9 @@ class LinesTable(QWidget):
         hh.setSectionResizeMode(0, QHeaderView.ResizeToContents)
         hh.setSectionResizeMode(1, QHeaderView.ResizeToContents)
         hh.setStretchLastSection(True)
-        if "sigma_Cq_MHz" in self._used_keys:      # room for the Cq/νQ read-out
-            t.setColumnWidth(2 + self._used_keys.index("sigma_Cq_MHz"), 200)
+        for _dk in ("sigma_Cq_MHz", "Cq_MHz"):     # room for the Cq/νQ read-out
+            if _dk in self._used_keys:
+                t.setColumnWidth(2 + self._used_keys.index(_dk), 200)
         t.blockSignals(False)
         t.itemChanged.connect(self._renamed)
 

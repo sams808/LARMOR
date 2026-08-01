@@ -347,6 +347,8 @@ class MainWindow(QMainWindow):
                   lambda: self.apply_processing([{"op": "autophase"}], False))
         self._add(m_proc, "Baseline auto (order 3)",
                   lambda: self.apply_processing([{"op": "baseline", "order": 3}], False))
+        self._add(m_proc, "Baseline iterative (dead-time; Yon 2020)…",
+                  self.apply_iterbaseline)
         self._add(m_proc, "Subtract &averages  (offset from the edges)",
                   lambda: self.apply_processing([{"op": "subtract_avg"}], False))
         self._add(m_proc, "Reset to original", self.reset_processing)
@@ -948,6 +950,25 @@ class MainWindow(QMainWindow):
         self.request_simulation()
         self.statusBar().showMessage(
             "manual baseline subtracted ('Reset to original' undoes)")
+
+    def apply_iterbaseline(self):
+        """Iterative dead-time baseline correction (Yon et al. 2020)."""
+        from PySide6.QtWidgets import QInputDialog
+
+        dt, ok = QInputDialog.getInt(
+            self, "Iterative baseline — Yon et al. 2020",
+            "For a rolling baseline from receiver dead time (where a polynomial "
+            "fails).\n\nDead-time restriction: time-domain points to keep "
+            "(≈ 2·DE/DW).\n0 = plain iterative histogram baseline "
+            "(no dead-time restriction):",
+            0, 0, 8192, 2)
+        if not ok:
+            return
+        self.apply_processing(
+            [{"op": "iterbaseline", "dead_time_pts": int(dt)}], False)
+        self.statusBar().showMessage(
+            "iterative baseline (Yon et al. 2020) applied — "
+            "'Reset to original' undoes")
 
     # ------------------------------------------------------------- zones
     def add_zone(self):

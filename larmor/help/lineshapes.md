@@ -36,6 +36,7 @@ follows directly from the Czjzek analysis (§ Czjzek).
 | Quad CT + CSA | quadrupolar | physical | site with both interactions | pos, C_Q, η_Q, ζ, η_CS |
 | **Czjzek** | disordered quad | physical | **glasses / amorphous quad sites** | pos, σ, dCS, line |
 | ext. Czjzek | disordered quad | physical | partially ordered / defective sites | pos, C_Q, η, ε, dCS |
+| **Amorphous** | disordered quad | physical | **BO₃ in ¹¹B; well-defined C_Q with modest disorder** | pos, C_Q, η, ΔC_Q, Δη, dCS, lb |
 | CSA powder (MAS/static) | shielding | physical | spin-½ chemical-shift anisotropy | pos, ζ, η, fwhm |
 | CSA distribution (disordered) | shielding | physical | amorphous spin-½ (distributed ζ) | pos, ζ, σ_ζ, η |
 | Function fit | utility | empirical | arbitrary y = f(x; a,b,c,d) | a, b, c, d |
@@ -328,6 +329,72 @@ pos, dominant C_Q and η, the perturbation fraction **ε**, plus dCS and line as
 Czjzek. **Limitations:** more parameters than Czjzek; ε and the dominant tensor can
 trade off unless the data are good. If ε is large the fit is just Czjzek — prefer
 the simpler model then.
+
+### Amorphous — `amorphous`  ★ the BO₃ model
+
+**What it is.** A second-order quadrupolar **central-transition** lineshape carrying
+**two independent Gaussian distributions** — one on the quadrupolar coupling C_Q and
+one on the asymmetry η — plus a Gaussian chemical-shift distribution (dCS) and a
+pseudo-Voigt line broadening (lb). It is dmfit's **"Amorphous"** model. Each
+$(C_Q,\eta)$ pair in the grid contributes its exact CT powder pattern
+(via mrsimulator), weighted by
+
+$$w(C_Q,\eta) = \exp\left[-\frac{1}{2}\left(\frac{C_Q-\bar C_Q}{\sigma_{C_Q}}\right)^{2}\right]\,\exp\left[-\frac{1}{2}\left(\frac{\eta-\bar\eta}{\sigma_\eta}\right)^{2}\right]$$
+
+with $\sigma = \mathrm{FWHM}/(2\sqrt{2\ln 2})$. The sum is then convolved with a
+Gaussian of width dCS (shift disorder) and a Lorentzian (or pseudo-Voigt) of width
+lb (residual line broadening).
+
+**Why it is not Czjzek — and when to prefer it.** Czjzek is a *coupled* $d=5$
+distribution: its C_Q marginal peaks at $2\sigma$, is skewed, and **always includes
+$C_Q \to 0$**. That is right for a truly random glassy site (four-coordinate ²⁷Al).
+It is **wrong for trigonal BO₃ boron**, which has a *well-defined* C_Q
+(≈ 2.4–2.8 MHz) with only **modest** disorder — a narrow Gaussian around a **non-zero
+mean**, exactly what Amorphous provides. Fitting BO₃ with Czjzek smears intensity
+toward $C_Q = 0$ and misplaces the horn; fitting it with a plain Gauss/Lor throws
+away the second-order quadrupolar shift and asymmetry. Amorphous is the standard
+choice for ¹¹B borate/borosilicate speciation.
+
+> **Typical ¹¹B parameters (borate/borosilicate glasses).**
+> **BO₃** (trigonal): C_Q ≈ 2.4–2.8 MHz, η ≈ 0.1–0.2, δ_iso ≈ 15–19 ppm — usually
+> **two** Amorphous lines (ring vs non-ring, or BØ₃ vs BØ₂O⁻).
+> **BO₄** (tetrahedral): C_Q ≈ 0 (near-symmetric), δ_iso ≈ −4…+2 ppm — fit with
+> **Gauss/Lor**, *not* Amorphous (no significant quadrupolar broadening).
+
+**Parameters.** `pos` (δ_iso), `C_Q` (mean), `η` (mean), **`ΔC_Q`** (Gaussian FWHM
+of C_Q, LARMOR `Cq_fwhm_MHz`), **`Δη`** (Gaussian FWHM of η, `eta_fwhm`; 0 = fixed
+η), `dCS` (shift-distribution FWHM), `lb` (line broadening), `gl` (its Gaus/Lor mix,
+0 = Lorentzian), `amp`. dmfit stores C_Q and ΔC_Q in **kHz** (and reports νQ = C_Q/2
+for I = 3/2); LARMOR uses MHz and converts on import.
+
+**Validation.** LARMOR's Amorphous reproduces a real ¹¹B BO₃ spectrum: with the
+dmfit shape parameters fixed and only amplitudes fitted, the two-BO₃ + two-BO₄
+model matches the experiment to **R² = 0.9997** (flat residual). In the
+narrow-distribution limit the CT centre of gravity equals the exact analytic
+second-order shift δ_iso + δ₂ to < 0.03 ppm, so the fitted C_Q and δ_iso are
+physically trustworthy.
+
+**Literature.** dmfit implementation: D. Massiot *et al.*, *Magn. Reson. Chem.*
+**40**, 70 (2002). ¹¹B borate speciation and environments: **M. Edén, "²⁷Al and ¹¹B
+NMR of borate/aluminoborate glasses" (1996 and reviews therein)**; **J. F. Stevenson
+*et al.* (2006)**; and **Stevenson *et al.*, "Identifying and Quantifying Borate
+Environments in Borosilicate Glasses", ¹¹B DQ–SQ NMR (2024)** — the latter uses a
+**2D double-quantum/single-quantum** correlation to resolve B–O–B connectivity and
+is a *complement* to 1D lineshape fitting, **not** part of this 1D model. The
+second-order shift/lineshape follow Samoson, Kundla & Lippmaa, *J. Magn. Reson.*
+**49**, 350 (1982).
+
+**dmfit interop.** dmfit's Amorphous `amp` scales the **integrated area** (not the
+peak, unlike its Gaus/Lor), and its `lb` may be **negative** (resolution
+enhancement). On `.fxml` import LARMOR maps every shape parameter exactly and brings
+the amplitude/lb across as **starting values** (a warning is logged) — refit to your
+data. LARMOR's own populations integrate the actual lineshape, so this convention
+does not affect quantification.
+
+**Limitations.** The C_Q grid is finite (default 0.05–6 MHz); raise it in *Computing
+parameters* for very large C_Q. The independent-Gaussian statistics assume the C_Q
+and η disorder are separable — appropriate for a well-defined site, not for a fully
+random glass (use Czjzek there).
 
 ---
 
