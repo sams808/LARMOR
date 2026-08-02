@@ -204,3 +204,132 @@ def error_profile(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
     return ErrorProfile(site=site, param=param, values=values, chi2=chi2,
                         best_value=best, chi2_min=chi2_min,
                         ci68=ci68, ci95=ci95, notes=notes)
+
+
+# --------------------------------------------------------------------------
+# Monte-Carlo errors (dmfit "Errors ▸ Monte Carlo"; pydmfit errorsMonteCarlo.py)
+#
+# A parametric bootstrap: take the best fit, add synthetic Gaussian noise at the
+# residual level to the *model*, re-fit, and repeat N times. The spread of each
+# parameter across the trials is its uncertainty. Unlike the covariance matrix
+# this captures non-linearity and parameter correlations; unlike the χ² profile
+# it does every parameter at once and yields a full distribution (histogram).
+# dmfit/pydmfit report each parameter as mean ± σ with σ = sqrt(var) and a
+# percentage σ/mean·100 — reproduced here.
+
+@dataclass
+class MCParam:
+    site: int
+    param: str
+    label: str                      # e.g. "s0.Cq_MHz"
+    best: float                     # best-fit value
+    mean: float                     # mean over the MC trials
+    std: float                      # sqrt(var) over the trials (the MC error)
+    values: np.ndarray = field(default_factory=lambda: np.empty(0))
+
+    @property
+    def pct(self) -> float:
+        return abs(self.std / self.mean) * 100.0 if self.mean else float("nan")
+
+
+@dataclass
+class MonteCarloResult:
+    trials: int
+    n_ok: int
+    noise: float                    # σ of the synthetic noise (data units)
+    seed: int
+    params: list[MCParam] = field(default_factory=list)
+
+    @property
+    def summary(self) -> str:
+        return (f"Monte-Carlo errors from {self.n_ok}/{self.trials} synthetic "
+                f"refits · noise σ = {self.noise:.4g}")
+
+    def report(self) -> str:
+        lines = [self.summary, ""]
+        w = max((len(p.label) for p in self.params), default=8)
+        for p in self.params:
+            pc = f"{p.pct:.2f}%" if np.isfinite(p.pct) else "—"
+            lines.append(f"{p.label:<{w}}  {p.mean:12.6g} ± {p.std:.4g}   ({pc})")
+        return "\n".join(lines)
+
+
+def monte_carlo_errors(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
+                       window_ppm: tuple[float, float] | None = None,
+                       n_trials: int = 200, seed: int = 0,
+                       noise: float | None = None, progress=None,
+                       should_stop=None) -> MonteCarloResult:
+    """Estimate parameter errors by Monte-Carlo (synthetic-noise refits).
+
+    The recipe is fitted once to fix the best fit and estimate the noise level
+    (residual std over the window, unless `noise` is given). Then `n_trials`
+    synthetic spectra = best-fit model + Gaussian(0, noise) are each re-fitted
+    from the best fit; the std of each free parameter over the trials is its
+    error. `progress(k, n_trials)` is called per trial; `should_stop()` truthy
+    aborts early (returns what was collected).
+    """
+    from larmor import engine
+
+    rng = np.random.default_rng(seed)
+    exp_ppm = np.asarray(exp_ppm, float)
+    exp_amp = np.asarray(exp_amp, float)
+
+    # 1. lock the best fit + its model on the experimental axis
+    best = Recipe.from_dict(json.loads(json.dumps(recipe.to_dict())))
+    fitmod.fit(best, exp_ppm, exp_amp, window_ppm=window_ppm)
+    _, model, _ = engine.simulate(best, exp_ppm=exp_ppm)
+    model = np.asarray(model, float)
+
+    # 2. noise level: residual std inside the fit window
+    if window_ppm:
+        lo, hi = min(window_ppm), max(window_ppm)
+        m = (exp_ppm >= lo) & (exp_ppm <= hi)
+    else:
+        m = np.ones(exp_ppm.shape, bool)
+    resid = exp_amp[m] - model[m]
+    sigma = float(noise) if noise else float(np.std(resid))
+    if not np.isfinite(sigma) or sigma <= 0:
+        sigma = float(np.std(exp_amp)) * 1e-3 or 1.0
+
+    # 3. free parameters to track
+    tracked = [(i, pn, f"s{i}.{pn}")
+               for i, s in enumerate(best.sites)
+               for pn, p in s.params.items() if p.vary and not p.expr]
+    best_vals = {(i, pn): float(best.sites[i].params[pn].value)
+                 for i, pn, _ in tracked}
+    collected: dict = {(i, pn): [] for i, pn, _ in tracked}
+
+    # 4. MC trials — refit model + synthetic noise, starting from the best fit
+    base_best = json.dumps(best.to_dict())
+    n_ok = 0
+    for k in range(n_trials):
+        if should_stop is not None and should_stop():
+            break
+        synth = model + rng.normal(0.0, sigma, size=model.shape)
+        trial = Recipe.from_dict(json.loads(base_best))
+        try:
+            fitmod.fit(trial, exp_ppm, synth, window_ppm=window_ppm)
+        except Exception:
+            if progress:
+                progress(k + 1, n_trials)
+            continue
+        for i, pn, _ in tracked:
+            collected[(i, pn)].append(float(trial.sites[i].params[pn].value))
+        n_ok += 1
+        if progress:
+            progress(k + 1, n_trials)
+
+    # 5. per-parameter statistics (mean ± sqrt(var), matching dmfit/pydmfit)
+    params = []
+    for i, pn, label in tracked:
+        vals = np.asarray(collected[(i, pn)], float)
+        if vals.size:
+            mean = float(np.mean(vals))
+            std = float(np.sqrt(np.var(vals)))
+        else:
+            mean, std = best_vals[(i, pn)], float("nan")
+        params.append(MCParam(site=i, param=pn, label=label,
+                              best=best_vals[(i, pn)], mean=mean, std=std,
+                              values=vals))
+    return MonteCarloResult(trials=n_trials, n_ok=n_ok, noise=sigma, seed=seed,
+                            params=params)

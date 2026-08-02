@@ -304,38 +304,58 @@ class MainWindow(QMainWindow):
                   self.open_subtract)
 
         m_dec = mb.addMenu("&Decomposition")
+        # --- build the model ---
         self._add(m_dec, "&New fit (clear lines)", self.new_fit)
-        self._add(m_dec, "Add background &spectrum…  (fit another spectrum)",
-                  self.add_background_spectrum)
+        m_models = m_dec.addMenu("Add &line  (pick a model)")
+        self._model_actions = {}
+        for m in model_registry.describe_all():
+            if m["name"] == "spectrum":
+                continue          # added via "Add background spectrum" below
+            a = QAction(m["label"], self)
+            a.setCheckable(True)
+            a.setToolTip(m["description"])
+            a.triggered.connect(
+                lambda checked, name=m["name"]: self._set_add_mode(
+                    name if checked else None))
+            m_models.addAction(a)
+            self._model_actions[m["name"]] = a
         self._add(m_dec, "Add a line at every &peak…  (auto peak-pick)",
                   self.autopick_lines)
-        self._add(m_dec, "Predict at another &field…  (what at X T?)",
-                  self.predict_at_field)
         self._add(m_dec, "Add f&unction line…  (y = f(x; a,b,c,d))",
                   self.add_function_line)
-        m_dec.addSeparator()
-        self.actFit = self._add(m_dec, "&Fit", self.run_fit, "F5")
-        self.actAuto = self._add(m_dec, "&Auto Fit (multi-start)…",
-                                 self.run_auto_fit)
-        self.actErrors = self._add(m_dec, "&Errors Analysis (χ² profile)…",
-                                   self.run_errors_analysis)
-        self._add(m_dec, "Czjzek distribution P(C_Q)…  (what σ stands for)",
-                  self.show_czjzek_dist)
-        self._add(m_dec, "Parameter correlations…  (from the last fit)",
-                  self.show_correlations)
-        self._add(m_dec, "Co-&fit datasets…  (shared model, 1D + MQMAS)",
-                  self.open_cofit)
-        self._add(m_dec, "&Simulate  (recompute the model)",
-                  self.request_simulation, "F9")
-        self._add(m_dec, "Computing &parameters…  (kernel resolution)",
-                  self.edit_computing_params)
-        self._add(m_dec, "MQMAS F1 &reference…  (isotropic-axis align)",
-                  self.edit_mqmas_f1_ref)
-        m_dec.addSeparator()
+        self._add(m_dec, "Add background &spectrum…  (fit another spectrum)",
+                  self.add_background_spectrum)
         self._add(m_dec, "Add fit &zone", self.add_zone)
         self._add(m_dec, "Clear zones", self.clear_zones)
         m_dec.addSeparator()
+        # --- run ---
+        self._add(m_dec, "&Simulate  (recompute the model)",
+                  self.request_simulation, "F9")
+        self.actFit = self._add(m_dec, "&Fit", self.run_fit, "F5")
+        self.actAuto = self._add(m_dec, "&Auto Fit (multi-start)…",
+                                 self.run_auto_fit)
+        m_dec.addSeparator()
+        # --- analyze ---
         self.actQuant = self._add(m_dec, "&Report (quantify)", self.run_quantify, "F6")
+        self.actErrors = self._add(m_dec, "&Errors Analysis (χ² profile)…",
+                                   self.run_errors_analysis)
+        self._add(m_dec, "Monte-&Carlo errors…  (synthetic-noise refits)",
+                  self.run_monte_carlo)
+        self._add(m_dec, "Parameter correlations…  (from the last fit)",
+                  self.show_correlations)
+        self._add(m_dec, "Czjzek distribution P(C_Q)…  (what σ stands for)",
+                  self.show_czjzek_dist)
+        m_dec.addSeparator()
+        # --- advanced / configuration (rarely touched) ---
+        m_adv = m_dec.addMenu("Ad&vanced")
+        self._add(m_adv, "Co-&fit datasets…  (shared model, 1D + MQMAS)",
+                  self.open_cofit)
+        self._add(m_adv, "Computing &parameters…  (kernel resolution)",
+                  self.edit_computing_params)
+        self._add(m_adv, "MQMAS F1 &reference…  (isotropic-axis align)",
+                  self.edit_mqmas_f1_ref)
+        self._add(m_adv, "Predict at another &field…  (what at X T?)",
+                  self.predict_at_field)
 
         m_view = mb.addMenu("&View")
         self.m_view = m_view                 # panels submenu filled once docks exist
@@ -353,64 +373,44 @@ class MainWindow(QMainWindow):
         self._add(m_view, "Zoom to sites", self.zoom_sites)
         self._add(m_view, "Full spectrum", self.zoom_full)
 
-        # models live under Decomposition (they were a redundant top-level menu;
-        # the toolbar's "Add line" buttons trigger the same actions)
-        m_models = m_dec.addMenu("Add &line  (pick a model)")
-        self._model_actions = {}
-        for m in model_registry.describe_all():
-            if m["name"] == "spectrum":
-                continue          # added via Decomposition ▸ Add background…
-            a = QAction(m["label"], self)
-            a.setCheckable(True)
-            a.setToolTip(m["description"])
-            a.triggered.connect(
-                lambda checked, name=m["name"]: self._set_add_mode(
-                    name if checked else None))
-            m_models.addAction(a)
-            self._model_actions[m["name"]] = a
-
         m_tools = mb.addMenu("&Tools")
+        m_tools.addSection("Analysis")
         self._add(m_tools, "&Integrals && measurements…  (integral, %, FWHM, CoM)",
                   self.open_integrals)
-        m_tools.addSeparator()
         self._add(m_tools, "Relaxation / series (T1, T2)…", self.open_satrec)
         self._add(m_tools, "Per-site relaxation…  (uses the current fit)",
                   self.open_per_site_relaxation)
+        m_tools.addSection("Advanced experiments")
         self._add(m_tools, "QCPMG (echo train → spectrum)…", self.open_qcpmg)
         self._add(m_tools, "QCPMG: infinite-field δiso (2 fields)…",
                   self.open_qcpmg_fields)
         self._add(m_tools, "Variable temperature (Arrhenius / VFT)…", self.open_vt)
         self._add(m_tools, "REDOR (dipolar coupling)…", self.open_redor)
+        m_tools.addSection("Import & 2D")
         self._add(m_tools, "Import DFT tensors (.magres)…", self.open_magres)
-        m_tools.addSeparator()
         self._add(m_tools, "2D MQMAS viewer/fit…", self.open_twod)
-        m_tools.addSeparator()
         self._add(m_tools, "Multi-dataset fit (CLI): larmor multifit a.json b.json",
                   lambda: None).setEnabled(False)
-
-        # utilities folded into Tools (was a two-item top-level menu)
-        m_tools.addSeparator()
+        m_tools.addSection("Reference")
         self._add(m_tools, "&NMR table…  (Larmor frequencies)", self.open_nmr_table)
         self._add(m_tools, "&Conversion tools…  (shift / Cq / dipolar)",
                   self.open_convert)
 
-        m_help = mb.addMenu("&?")
+        m_help = mb.addMenu("&Help")
         m_man = m_help.addMenu("User &manuals")
         for name, title in (
                 ("getting-started", "Getting started"),
                 ("spectra-1d", "1D spectra — processing & fitting"),
+                ("lineshapes", "Lineshapes — models & physics"),
+                ("processing-reference", "Processing reference"),
                 ("2d-processing", "2D processing"),
                 ("mqmas", "MQMAS (2D)"),
                 ("correlation-hmqc", "HMQC & correlation"),
                 ("relaxation", "Relaxation (T1/T2)"),
                 ("qcpmg", "QCPMG"),
-                ("multi-dataset", "Multi-dataset & co-fitting"),
-                ("processing-reference", "Processing reference")):
+                ("multi-dataset", "Multi-dataset & co-fitting")):
             self._add(m_man, title,
                       lambda _=False, n=name, t=title: self._open_manual(n, t))
-        self._add(m_help, "&Lineshapes — models && physics…",
-                  lambda: self._open_manual(
-                      "lineshapes", "Lineshapes — models & physics"))
         self._add(m_help, "About LARMOR", self._about)
         self._add(m_help, "More…", self._show_more)
 
@@ -3304,6 +3304,18 @@ class MainWindow(QMainWindow):
 
         ErrorsDialog(self, self.recipe, self.exp_ppm, self.exp_amp,
                      self.view.current_xrange()).exec()
+
+    def run_monte_carlo(self):
+        if not self.recipe or not self.recipe["sites"]:
+            self.statusBar().showMessage("fit a model first")
+            return
+        if self.exp_ppm is None:
+            self.statusBar().showMessage("open a spectrum first")
+            return
+        from larmor.desktop.montecarlo_dialog import MonteCarloDialog
+
+        MonteCarloDialog(self, self.recipe, self.exp_ppm, self.exp_amp,
+                         self.view.current_xrange()).exec()
 
     # ------------------------------------------------------------- session
     def _persist_session(self):

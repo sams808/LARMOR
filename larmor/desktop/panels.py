@@ -221,6 +221,20 @@ class ProcessingPanel(QWidget):
         v.addWidget(self.rb_pdata)
         v.addWidget(self.rb_raw)
 
+        # raw-FID window functions are advanced: collapsed by default so pdata
+        # users are not faced with them; auto-expands when 'raw fid' is picked
+        self.adv_toggle = QToolButton()
+        self.adv_toggle.setText("▸ Raw-FID window functions (advanced)")
+        self.adv_toggle.setCheckable(True)
+        self.adv_toggle.setStyleSheet(
+            "QToolButton { border: none; font-weight: 600; }")
+        v.addWidget(self.adv_toggle)
+        self._adv = QWidget()
+        self._adv.setVisible(False)
+        adv = QVBoxLayout(self._adv)
+        adv.setContentsMargins(8, 0, 0, 0)
+        v.addWidget(self._adv)
+
         # TopSpin-style window function block
         wdw = QHBoxLayout()
         wdw.addWidget(QLabel("WDW"))
@@ -240,7 +254,7 @@ class ProcessingPanel(QWidget):
         self.ssb = QDoubleSpinBox(); self.ssb.setRange(0, 64); self.ssb.setValue(2)
         self.ssb.setToolTip("SINE/QSINE: 2 = cosine bell, 0 = pure sine")
         wdw.addWidget(self.ssb)
-        v.addLayout(wdw)
+        adv.addLayout(wdw)
 
         raw = QHBoxLayout()
         raw.addWidget(QLabel("TDeff"))
@@ -257,7 +271,7 @@ class ProcessingPanel(QWidget):
         raw.addWidget(QLabel("offset (ppm)"))
         self.off = QDoubleSpinBox(); self.off.setRange(-1e5, 1e5)
         raw.addWidget(self.off)
-        v.addLayout(raw)
+        adv.addLayout(raw)
 
         srrow = QHBoxLayout()
         srrow.addWidget(QLabel("<b>SR</b> (Hz)"))
@@ -365,6 +379,15 @@ class ProcessingPanel(QWidget):
         self.wdw.currentTextChanged.connect(self._schedule_live)
         for w in (self.chkMag, self.chkHilbert, self.rb_raw, self.rb_pdata):
             w.toggled.connect(self._schedule_live)
+        self.adv_toggle.toggled.connect(self._toggle_adv)
+        # picking raw-FID mode reveals the window-function controls it needs
+        self.rb_raw.toggled.connect(
+            lambda on: self.adv_toggle.setChecked(True) if on else None)
+
+    def _toggle_adv(self, on: bool):
+        self._adv.setVisible(on)
+        self.adv_toggle.setText(("▾ " if on else "▸ ")
+                                + "Raw-FID window functions (advanced)")
 
     def _schedule_live(self, *_):
         if self.chkLive.isChecked():

@@ -128,9 +128,24 @@ shift of the axis; the raw data is untouched.
 
 **Zones** restrict the fit to chosen spectral regions (union of intervals) — fit
 only where the model is valid and let peaks outside float frozen. **Auto Fit**
-does a multi-start search to escape local minima. **Errors Analysis** profiles
-$\chi^2$ around a chosen parameter to show its true (possibly asymmetric)
-confidence interval, beyond the linear covariance estimate.
+does a multi-start search to escape local minima.
+
+**Three ways to get errors** (Decomposition ▸ Analyze), in increasing rigour and
+cost:
+
+- **Covariance** — the standard error printed next to every fitted value after a
+  **Fit**. Instant, but assumes a locally quadratic, well-conditioned $\chi^2$ —
+  it under-reports for strongly correlated or non-linear parameters.
+- **Errors Analysis (χ² profile)** — fixes one parameter, re-fits everything else
+  at each scan point, and reads the true (possibly asymmetric) confidence interval
+  off the real $\chi^2$ curve. One parameter at a time.
+- **Monte-Carlo** — a parametric bootstrap (dmfit ▸ Errors ▸ Monte Carlo): adds
+  synthetic Gaussian noise at the residual level to the best-fit model and re-fits
+  $N$ times (default 200); every free parameter's error is the spread of its
+  fitted values, reported as **mean ± σ** with a percentage and a distribution
+  **histogram**. It captures correlations *and* non-linearity for all parameters
+  at once. Press **Use as fit errors** to write the σ's into the table. It is the
+  most honest error bar for a glass/overlapping fit — and the slowest (N refits).
 
 ### Which lineshape?
 
