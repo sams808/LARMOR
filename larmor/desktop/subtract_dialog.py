@@ -65,7 +65,7 @@ class SubtractDialog(QDialog):
         v.addWidget(self.plot, 1)
 
         bot = QHBoxLayout()
-        self.info = QLabel(""); self.info.setStyleSheet("color: #5a6871;")
+        self.info = QLabel(""); self.info.setStyleSheet(f"color: {theme.active().text_dim};")
         bot.addWidget(self.info, 1)
         self.btnApply = QPushButton("Apply → workbench"); self.btnApply.setDefault(True)
         self.btnApply.setEnabled(False); self.btnApply.clicked.connect(self._apply)

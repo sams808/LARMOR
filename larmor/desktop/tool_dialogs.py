@@ -56,7 +56,7 @@ class RedorDialog(QDialog):
         v.addWidget(self.plot, 1)
 
         self.res = QLabel("")
-        self.res.setStyleSheet("font-weight: 700; color: #0a5a62; font-size: 14px;")
+        self.res.setStyleSheet(f"font-weight: 700; color: {theme.active().accent}; font-size: 14px;")
         self.res.setWordWrap(True)
         v.addWidget(self.res)
 
@@ -129,7 +129,7 @@ class MagresDialog(QDialog):
 
         row = QHBoxLayout()
         self.note = QLabel("")
-        self.note.setStyleSheet("color: #93a0a8;")
+        self.note.setStyleSheet(f"color: {theme.active().text_dim};")
         row.addWidget(self.note, 1)
         add = QPushButton("Add these sites to the fit")
         add.setDefault(True)
@@ -223,7 +223,7 @@ class ErrorsDialog(QDialog):
         self.plot.showGrid(x=True, y=True, alpha=0.2)
         v.addWidget(self.plot, 1)
         self.res = QLabel("")
-        self.res.setStyleSheet("font-weight: 700; color: #0a5a62;")
+        self.res.setStyleSheet(f"font-weight: 700; color: {theme.active().accent};")
         v.addWidget(self.res)
 
     def _fill_params(self):

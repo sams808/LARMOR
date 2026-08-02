@@ -20,6 +20,9 @@ def _spin_color(spin: float) -> str:
     return SPIN_COLOR.get(spin, "#4a5568")
 
 
+from larmor.desktop import theme
+
+
 class NmrTableDialog(QDialog):
     """Interactive periodic table of Larmor frequencies. Set B0 (T) or your
     magnet's ¹H frequency; double-click an element for its isotopes."""
@@ -85,7 +88,7 @@ class NmrTableDialog(QDialog):
             iso = N.primary_isotope(sym)
             if iso is None:
                 btn.setText(sym); btn.setEnabled(False)
-                btn.setStyleSheet("color:#a0aec0;")
+                btn.setStyleSheet(f"color:{theme.active().disabled_text};")
                 continue
             btn.setText(f"{sym}\n{iso.larmor_MHz(b0):.1f}")
             col = _spin_color(iso.spin)

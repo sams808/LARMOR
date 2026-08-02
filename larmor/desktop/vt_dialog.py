@@ -42,7 +42,7 @@ class VtDialog(QDialog):
         v.addLayout(body)
 
         self.res = QLabel(""); self.res.setStyleSheet(
-            "font-weight: 700; color: #0a5a62;")
+            f"font-weight: 700; color: {theme.active().accent};")
         v.addWidget(self.res)
         for _ in range(3):
             self._add_row()

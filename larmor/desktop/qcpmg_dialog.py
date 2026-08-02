@@ -106,7 +106,7 @@ class QcpmgDialog(QDialog):
         self.p_t2.setLabel("bottom", "time", units="s")
         lv.addWidget(self.p_t2)
         self.t2lbl = QLabel(""); self.t2lbl.setStyleSheet(
-            "font-weight: 700; color: #6a4fb0;")
+            f"font-weight: 700; color: {theme.active().pivot};")
         lv.addWidget(self.t2lbl)
         split.addWidget(left)
         # right: spectrum
@@ -122,7 +122,7 @@ class QcpmgDialog(QDialog):
 
         bot = QHBoxLayout()
         self.info = QLabel(""); self.info.setStyleSheet(
-            "color: #0a5a62; font-weight: 600;")
+            f"color: {theme.active().accent}; font-weight: 600;")
         bot.addWidget(self.info, 1)
         self.btnSend = QPushButton("Send to fit →"); self.btnSend.setDefault(True)
         self.btnSend.clicked.connect(self._send)

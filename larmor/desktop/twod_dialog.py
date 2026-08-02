@@ -12,6 +12,9 @@ from PySide6.QtWidgets import (
 )
 
 
+from larmor.desktop import theme
+
+
 class TwoDDialog(QDialog):
     def __init__(self, parent, expno: str | None):
         super().__init__(parent)
@@ -72,7 +75,7 @@ class TwoDDialog(QDialog):
         v.addWidget(self.glw, 1)
 
         self.res = QLabel("open a processed 2D dataset (2rr)")
-        self.res.setStyleSheet("color: #37424a;")
+        self.res.setStyleSheet(f"color: {theme.active().text};")
         v.addWidget(self.res)
 
         if expno:

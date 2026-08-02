@@ -46,7 +46,7 @@ class QcpmgFieldsDialog(QDialog):
             "spectrum. In the large-C_Q limit CT-selective and non-selective "
             "fields can be combined (see the Lineshapes/QCPMG manual).")
         intro.setWordWrap(True)
-        intro.setStyleSheet("color:#4a5560;")
+        intro.setStyleSheet(f"color:{theme.active().text_dim};")
         v.addWidget(intro)
 
         top = QHBoxLayout()
@@ -95,14 +95,14 @@ class QcpmgFieldsDialog(QDialog):
         v.addWidget(self.plot)
 
         self.result = QLabel("add at least two fields, then Compute")
-        self.result.setStyleSheet("font-weight:600; color:#1f3a5f;")
+        self.result.setStyleSheet(f"font-weight:600; color:{theme.active().accent};")
         self.result.setWordWrap(True)
         v.addWidget(self.result)
 
         self.wresult = QLabel(
             "Two-field linewidth split (Sandland Eq. 2): also fill FWHM (ppm) "
             "at both fields, then 'Split W_q / W_csd'.")
-        self.wresult.setStyleSheet("color:#4a5560;")
+        self.wresult.setStyleSheet(f"color:{theme.active().text_dim};")
         self.wresult.setWordWrap(True)
         self.wresult.setTextFormat(Qt.RichText)
         v.addWidget(self.wresult)
@@ -113,11 +113,16 @@ class QcpmgFieldsDialog(QDialog):
         b_w = bb.addButton("Split W_q / W_csd", QDialogButtonBox.ApplyRole)
         b_w.clicked.connect(self._compute_widths)
         bb.addButton(QDialogButtonBox.Close).clicked.connect(self.accept)
+        bb.addButton(QDialogButtonBox.Help).clicked.connect(self._help)
         v.addWidget(bb)
 
         # seed two rows; prefill the first from the open spectrum's field
         self._add_row(self._current[0] if self._current else 0.0)
         self._add_row()
+
+    def _help(self):
+        from larmor.desktop.help_dialog import show_help
+        show_help(self, "qcpmg", "QCPMG")
 
     def _add_row(self, larmor=0.0):
         r = self.table.rowCount()

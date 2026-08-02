@@ -138,7 +138,7 @@ class SatrecDialog(QDialog):
         v.addWidget(split, 1)
 
         self.res = QLabel("")
-        self.res.setStyleSheet("font-weight: 700; color: #0a5a62; font-size: 13px;")
+        self.res.setStyleSheet(f"font-weight: 700; color: {theme.active().accent}; font-size: 13px;")
         self.res.setWordWrap(True)
         v.addWidget(self.res)
 

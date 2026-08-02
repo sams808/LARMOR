@@ -6,6 +6,8 @@ from PySide6.QtWidgets import (
     QFormLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout,
 )
 
+from larmor.desktop import theme
+
 
 class BoundsDialog(QDialog):
     """Constrain a fitted parameter between a min and a max.
@@ -47,7 +49,7 @@ class BoundsDialog(QDialog):
                       "A value that ends the fit exactly on a bound is flagged "
                       "in the report.")
         note.setWordWrap(True)
-        note.setStyleSheet("color: #93a0a8;")
+        note.setStyleSheet(f"color: {theme.active().text_dim};")
         v.addWidget(note)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -59,7 +61,7 @@ class BoundsDialog(QDialog):
         lo = self.min.value() if self.use_min.isChecked() else None
         hi = self.max.value() if self.use_max.isChecked() else None
         if lo is not None and hi is not None and lo >= hi:
-            self.min.setStyleSheet("background: #fbe7e2;")
+            self.min.setStyleSheet("background: rgba(200,70,60,0.28);")
             return
         self.result_min, self.result_max = lo, hi
         self.accept()
@@ -110,7 +112,7 @@ class ExperimentDialog(QDialog):
         note = QLabel("Changing nucleus / field / νrot re-simulates every line; "
                       "changing SR re-references the ppm axis.")
         note.setWordWrap(True)
-        note.setStyleSheet("color: #93a0a8;")
+        note.setStyleSheet(f"color: {theme.active().text_dim};")
         form.addRow(note)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -234,7 +236,7 @@ class ComputingParamsDialog(QDialog):
 
         note = QLabel("More steps/points = more accurate but slower; a change "
                       "rebuilds the kernels on the next fit.")
-        note.setWordWrap(True); note.setStyleSheet("color: #93a0a8;")
+        note.setWordWrap(True); note.setStyleSheet(f"color: {theme.active().text_dim};")
         form.addRow(note)
         bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         bb.accepted.connect(self._accept); bb.rejected.connect(self.reject)
@@ -287,7 +289,7 @@ class LinkPositionDialog(QDialog):
                       "frequency. The position follows the reference during "
                       "the fit, with error propagation.")
         note.setWordWrap(True)
-        note.setStyleSheet("color: #93a0a8;")
+        note.setStyleSheet(f"color: {theme.active().text_dim};")
         v.addWidget(note)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)

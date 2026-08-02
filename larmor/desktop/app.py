@@ -218,6 +218,13 @@ class MainWindow(QMainWindow):
         self._sim_timer.setSingleShot(True)
         self._sim_timer.setInterval(120)
         self._sim_timer.timeout.connect(self._simulate_now)
+        # a busy cue if a simulation runs long (the first Czjzek/Amorphous fit
+        # builds a kernel — seconds; without this the app looks frozen)
+        self._busy = False
+        self._busy_timer = QTimer(self)
+        self._busy_timer.setSingleShot(True)
+        self._busy_timer.setInterval(450)
+        self._busy_timer.timeout.connect(self._sim_busy_on)
         self._data2d = None            # the 2D dataset currently on the map
         self._fit2d_worker = None
         self.view2d.add_requested.connect(self.add_site_2d)
@@ -318,7 +325,8 @@ class MainWindow(QMainWindow):
                   self.show_correlations)
         self._add(m_dec, "Co-&fit datasets…  (shared model, 1D + MQMAS)",
                   self.open_cofit)
-        self._add(m_dec, "&Compute", self.request_simulation, "F9")
+        self._add(m_dec, "&Simulate  (recompute the model)",
+                  self.request_simulation, "F9")
         self._add(m_dec, "Computing &parameters…  (kernel resolution)",
                   self.edit_computing_params)
         self._add(m_dec, "MQMAS F1 &reference…  (isotropic-axis align)",
@@ -339,12 +347,15 @@ class MainWindow(QMainWindow):
                                     checkable=True, checked=True)
         m_view.addSeparator()
         self._build_theme_menu(m_view)
+        self._build_textsize_menu(m_view)
         m_view.addSeparator()
         self._add(m_view, "&Back to 2D map", self.back_to_2d, "Ctrl+2")
         self._add(m_view, "Zoom to sites", self.zoom_sites)
         self._add(m_view, "Full spectrum", self.zoom_full)
 
-        m_models = mb.addMenu("&Models")
+        # models live under Decomposition (they were a redundant top-level menu;
+        # the toolbar's "Add line" buttons trigger the same actions)
+        m_models = m_dec.addMenu("Add &line  (pick a model)")
         self._model_actions = {}
         for m in model_registry.describe_all():
             if m["name"] == "spectrum":
@@ -377,9 +388,10 @@ class MainWindow(QMainWindow):
         self._add(m_tools, "Multi-dataset fit (CLI): larmor multifit a.json b.json",
                   lambda: None).setEnabled(False)
 
-        m_util = mb.addMenu("&Utilities")
-        self._add(m_util, "&NMR table…  (Larmor frequencies)", self.open_nmr_table)
-        self._add(m_util, "&Conversion tools…  (shift / Cq / dipolar)",
+        # utilities folded into Tools (was a two-item top-level menu)
+        m_tools.addSeparator()
+        self._add(m_tools, "&NMR table…  (Larmor frequencies)", self.open_nmr_table)
+        self._add(m_tools, "&Conversion tools…  (shift / Cq / dipolar)",
                   self.open_convert)
 
         m_help = mb.addMenu("&?")
@@ -704,6 +716,9 @@ class MainWindow(QMainWindow):
         self.datasets_panel.offset_changed.connect(lambda _: self._refresh_overlays())
         self.datasets_dock.setWidget(self.datasets_panel)
         self.addDockWidget(Qt.LeftDockWidgetArea, self.datasets_dock)
+        # stack the left docks as tabs so they share one footprint (kinder on
+        # laptop screens); Explorer is the default front tab. Workspaces joins
+        # the group when it is built (next).
         self.tabifyDockWidget(self.explorer_dock, self.datasets_dock)
         self.explorer_dock.raise_()
 
@@ -999,6 +1014,33 @@ class MainWindow(QMainWindow):
             act.triggered.connect(lambda _=False, n=name: self._set_theme(n))
             self._theme_group.addAction(act)
 
+    def _build_textsize_menu(self, parent):
+        from PySide6.QtGui import QActionGroup
+
+        m = parent.addMenu("Text &size")
+        cur = int(QSettings("LARMOR", "app").value("fontPt", 9) or 9)
+        self._textsize_group = QActionGroup(self)
+        self._textsize_group.setExclusive(True)
+        for label, pt in (("Small", 8), ("Normal", 9), ("Large", 11),
+                          ("Larger", 13)):
+            act = m.addAction(f"{label}  ({pt} pt)")
+            act.setCheckable(True)
+            act.setChecked(pt == cur)
+            act.triggered.connect(lambda _=False, p=pt: self._set_text_size(p))
+            self._textsize_group.addAction(act)
+
+    def _set_text_size(self, pt: int):
+        """Set the application font size (persists; applies to most widgets at
+        once, fully on next launch)."""
+        from PySide6.QtWidgets import QApplication
+
+        app = QApplication.instance()
+        f = app.font()
+        f.setPointSize(int(pt))
+        app.setFont(f)
+        QSettings("LARMOR", "app").setValue("fontPt", int(pt))
+        self.statusBar().showMessage(f"text size: {pt} pt")
+
     def _set_theme(self, name: str):
         """Switch the colour theme live and remember it."""
         from PySide6.QtWidgets import QApplication
@@ -1021,6 +1063,19 @@ class MainWindow(QMainWindow):
             self.request_simulation()
             self._update_paddles()
         self.statusBar().showMessage(f"theme: {name}")
+
+    def _maybe_show_welcome(self):
+        """First-run only: guide a brand-new user on the empty canvas. Anyone who
+        has opened data before (a non-empty 'recent' list) never sees it — so it
+        does not bother returning users."""
+        recent = QSettings("LARMOR", "app").value("recent", []) or []
+        if recent or self.exp_ppm is not None:
+            return
+        self.view.set_placeholder(
+            "Open a spectrum to begin\n\n"
+            "File ▸ Open  (Ctrl+O)   ·   or drag a Bruker folder / file onto "
+            "the plot\n\n"
+            "New to LARMOR?   ? ▸ User manuals ▸ Getting started")
 
     # ------------------------------------------------------------- loading
     def open_file(self):
@@ -2085,11 +2140,38 @@ class MainWindow(QMainWindow):
         self._sim_worker = SimWorker(json.loads(json.dumps(self.recipe)),
                                      self.exp_ppm)
         self._sim_worker.done.connect(self._sim_done)
-        self._sim_worker.failed.connect(
-            lambda msg: self.statusBar().showMessage("simulate: " + msg))
+        self._sim_worker.failed.connect(self._on_sim_failed)
+        self._busy_timer.start()          # arm the busy cue for a slow sim
         self._sim_worker.start()
 
+    def _sim_busy_on(self):
+        """Fired only if a sim outlives the busy-timer: show a wait cursor and
+        say why (usually a first-time kernel build)."""
+        from PySide6.QtGui import QCursor
+        from PySide6.QtWidgets import QApplication
+
+        self._busy = True
+        QApplication.setOverrideCursor(QCursor(Qt.WaitCursor))
+        sites = (self.recipe.get("sites") if self.recipe else None) or []
+        needs_kernel = any(s.get("model") in ("czjzek", "ext_czjzek", "amorphous")
+                           for s in sites)
+        self.statusBar().showMessage(
+            "building the lineshape kernel (first Czjzek/Amorphous fit is slow, "
+            "then instant)…" if needs_kernel else "computing…")
+
+    def _sim_busy_off(self):
+        self._busy_timer.stop()
+        if self._busy:
+            from PySide6.QtWidgets import QApplication
+            QApplication.restoreOverrideCursor()
+            self._busy = False
+
+    def _on_sim_failed(self, msg):
+        self._sim_busy_off()
+        self.statusBar().showMessage("simulate: " + msg)
+
     def _sim_done(self, x, total, per_site):
+        self._sim_busy_off()
         labels = [s.get("label") or s["model"] for s in self.recipe["sites"]]
         self._last_model = (np.asarray(x), np.asarray(total))
         self.view.set_model(x, total, per_site, labels, self.hidden,
@@ -3300,8 +3382,9 @@ def main() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName("LARMOR")
     app.setStyle("Fusion")            # deterministic rendering on any OS theme
+    pt = int(QSettings("LARMOR", "app").value("fontPt", 9) or 9)
     for family in ("Segoe UI", "Inter", "Roboto", "Helvetica Neue", "Arial"):
-        f = QFont(family, 9)
+        f = QFont(family, pt)
         if f.exactMatch() or family == "Arial":
             app.setFont(f)
             break
@@ -3327,6 +3410,7 @@ def main() -> int:
     if icon:
         win.setWindowIcon(QIcon(icon))
     win.show()
+    win._maybe_show_welcome()          # first-run canvas hint (returning users: no-op)
     if splash is not None:
         while time.time() - shown_at < 2.0:      # keep the logo up briefly
             app.processEvents()

@@ -61,6 +61,34 @@ def test_set_active_and_get_roundtrip():
     assert T.get("does-not-exist").name == T.DEFAULT   # falls back, never raises
 
 
+def test_no_hardcoded_light_surfaces_in_desktop():
+    """Guard the theme rollout: no hardcoded LIGHT background stays in the
+    desktop layer, or it would be an unreadable white block on the dark themes.
+    (The help viewer renders manuals as a deliberate light 'document' — allowed.)"""
+    import pathlib
+
+    root = pathlib.Path(__file__).resolve().parents[1] / "larmor" / "desktop"
+    allow = {"theme.py", "help_dialog.py", "mdrender.py"}
+    bad_literals = [
+        # light surfaces (an unreadable white block on dark themes)
+        "#fcfdfc", "#f3f5f3", "#f6f8f6", "#eef1ee", "#e2f0f0",
+        "background: #ff", "background:#ff", 'background="w"', "background='w'",
+        # old fixed 'dim/secondary/accent' ink that goes low-contrast on dark —
+        # these must come from theme roles (text_dim / accent), not literals
+        "#93a0a8", "#5a6871", "#4a5560", "#a0aec0", "#0a5a62",
+    ]
+    offenders = []
+    for f in sorted(root.glob("*.py")):
+        if f.name in allow:
+            continue
+        text = f.read_text(encoding="utf-8")
+        for lit in bad_literals:
+            if lit in text:
+                offenders.append(f"{f.name}: {lit}")
+    assert not offenders, "hardcoded light surfaces (break dark themes): " + \
+        "; ".join(offenders)
+
+
 def test_palette_builds_for_every_theme():
     from PySide6.QtWidgets import QApplication
     app = QApplication.instance() or QApplication([])   # noqa: F841

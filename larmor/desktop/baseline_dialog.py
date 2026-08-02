@@ -112,9 +112,11 @@ class BaselineDialog(QDialog):
         cite.setStyleSheet("color:#666; font-size:11px")
         v.addWidget(cite)
 
-        bb = QDialogButtonBox(QDialogButtonBox.Apply | QDialogButtonBox.Cancel)
+        bb = QDialogButtonBox(QDialogButtonBox.Apply | QDialogButtonBox.Cancel
+                              | QDialogButtonBox.Help)
         bb.button(QDialogButtonBox.Apply).clicked.connect(self.accept)
         bb.rejected.connect(self.reject)
+        bb.helpRequested.connect(lambda: self._help())
         row = QHBoxLayout()
         row.addWidget(bb)
         v.addLayout(row)
@@ -129,6 +131,10 @@ class BaselineDialog(QDialog):
         self._preview()
 
     # ------------------------------------------------------------------
+    def _help(self):
+        from larmor.desktop.help_dialog import show_help
+        show_help(self, "processing-reference", "Processing reference")
+
     def params(self) -> dict:
         return {"dead_time_pts": int(self.sp_dead.value()),
                 "smoothness": float(self.sp_smooth.value()),

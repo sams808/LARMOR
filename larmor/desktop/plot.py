@@ -120,6 +120,10 @@ class SpectrumView(pg.PlotWidget):
                 self._legend.setPen(pg.mkPen(t.border_soft))
             except Exception:
                 pass
+        ph = getattr(self, "_placeholder", None)
+        if ph is not None and ph.isVisible():
+            ph.setStyleSheet(f"color: {t.text_dim}; font-size: 13px; "
+                             "background: transparent;")
 
     # ---------- drag & drop ----------
     def dragEnterEvent(self, ev):
@@ -323,8 +327,45 @@ class SpectrumView(pg.PlotWidget):
             vals.append([max(a, b), min(a, b)])
         return vals
 
+    # ---------- onboarding placeholder (empty canvas) ----------
+    def set_placeholder(self, text: str | None):
+        """Show faint centred guidance on an empty canvas, or clear it (None).
+        Mouse-transparent, so drag-and-drop and clicks pass straight through."""
+        if not text:
+            if getattr(self, "_placeholder", None) is not None:
+                self._placeholder.hide()
+            return
+        if getattr(self, "_placeholder", None) is None:
+            from PySide6.QtWidgets import QLabel
+            lbl = QLabel(self)
+            lbl.setAlignment(Qt.AlignCenter)
+            lbl.setWordWrap(True)
+            lbl.setAttribute(Qt.WA_TransparentForMouseEvents)
+            self._placeholder = lbl
+        self._placeholder.setText(text)
+        self._placeholder.setStyleSheet(
+            f"color: {theme.active().text_dim}; font-size: 13px; "
+            "background: transparent;")
+        self._position_placeholder()
+        self._placeholder.show()
+        self._placeholder.raise_()
+
+    def _position_placeholder(self):
+        lbl = getattr(self, "_placeholder", None)
+        if lbl is None:
+            return
+        w = min(max(self.width() - 40, 200), 480)
+        h = 130
+        lbl.setGeometry((self.width() - w) // 2, (self.height() - h) // 2, w, h)
+
+    def resizeEvent(self, ev):
+        super().resizeEvent(ev)
+        self._position_placeholder()
+
     # ---------- data ----------
     def set_experiment(self, x: np.ndarray, y: np.ndarray):
+        if x is not None and len(x):
+            self.set_placeholder(None)          # real data arrived — hide the hint
         self._exp.setData(x, y)
 
     def set_title(self, text: str):

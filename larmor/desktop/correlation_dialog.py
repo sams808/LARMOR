@@ -19,6 +19,9 @@ def _corr_color(c: float) -> QColor:
     return QColor(int(255 * (1 - a)), int(255 * (1 - a)), int(255))
 
 
+from larmor.desktop import theme
+
+
 class CorrelationDialog(QDialog):
     def __init__(self, parent, lmfit_result):
         super().__init__(parent)
@@ -75,7 +78,7 @@ class CorrelationDialog(QDialog):
         note = QLabel("Strongest: " + ("  ·  ".join(strong) if strong
                                        else "none above 0.8 — parameters are "
                                        "well separated"))
-        note.setWordWrap(True); note.setStyleSheet("color:#4a5560;")
+        note.setWordWrap(True); note.setStyleSheet(f"color:{theme.active().text_dim};")
         v.addWidget(note)
 
         bb = QDialogButtonBox(QDialogButtonBox.Close)

@@ -38,7 +38,7 @@ class IntegralsDialog(QDialog):
         bar.addWidget(self.btnAdd); bar.addWidget(self.btnClear)
         bar.addWidget(self.btnCsv); bar.addStretch(1)
         self.hint = QLabel("drag the shaded edges; percents are over all regions")
-        self.hint.setStyleSheet("color: #5a6871;")
+        self.hint.setStyleSheet(f"color: {theme.active().text_dim};")
         bar.addWidget(self.hint)
         v.addLayout(bar)
 

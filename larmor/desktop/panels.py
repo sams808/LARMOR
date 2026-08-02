@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QSlider, QSpinBox, QToolButton, QVBoxLayout, QWidget,
 )
 
+from larmor.desktop import theme
 from larmor.desktop.plot import site_color
 
 PARAM_LABELS = {
@@ -64,7 +65,7 @@ class SiteCard(QFrame):
         self.name.setStyleSheet("font-weight: 600;")
         self.name.editingFinished.connect(self._rename)
         tag = QLabel(f"s{index} · {site['model']}")
-        tag.setStyleSheet("color: #5a6871; font-size: 10px;")
+        tag.setStyleSheet(f"color: {theme.active().text_dim}; font-size: 10px;")
         bGear = QToolButton(); bGear.setText("⚙")
         bGear.setToolTip("constraints: link expression / min / max")
         bGear.setCheckable(True)
@@ -87,7 +88,7 @@ class SiteCard(QFrame):
         self._constraint_rows: list[QWidget] = []
         self._build_rows()
         if hidden:
-            self.setStyleSheet("#siteCard { background: #f3f5f3; } * { color: #93a0a8; }")
+            self.setStyleSheet(f"#siteCard {{ background: {theme.active().alt_base}; }} * {{ color: {theme.active().disabled_text}; }}")
 
     def _rename(self):
         self.site["label"] = self.name.text()
@@ -100,7 +101,7 @@ class SiteCard(QFrame):
             lab.setToolTip(pname + ("  — linked: " + p["expr"] if p.get("expr") else ""))
             if p.get("expr"):
                 lab.setText(lab.text() + " ⚭")
-                lab.setStyleSheet("color: #0e7c86; font-weight: 600;")
+                lab.setStyleSheet(f"color: {theme.active().accent}; font-weight: 600;")
             spin = ParamSpin()
             spin.setValue(p["value"])
             spin.setEnabled(not p.get("expr"))
@@ -116,7 +117,7 @@ class SiteCard(QFrame):
                 lambda on, pp=p: (pp.__setitem__("vary", bool(on)),
                                   self.changed.emit()))
             err = QLabel("± %.3g" % p["stderr"] if p.get("stderr") else "")
-            err.setStyleSheet("color: #0a5a62; font-size: 10px;")
+            err.setStyleSheet(f"color: {theme.active().accent}; font-size: 10px;")
             self.grid.addWidget(lab, row, 0)
             self.grid.addWidget(spin, row, 1)
             self.grid.addWidget(vary, row, 2)
@@ -180,7 +181,7 @@ class SitesPanel(QScrollArea):
             "a site.\nDrag the dashed marker to move it. Checkbox = fitted; "
             "⚙ = link / bounds.")
         self._hint.setWordWrap(True)
-        self._hint.setStyleSheet("color: #93a0a8;")
+        self._hint.setStyleSheet(f"color: {theme.active().text_dim};")
         self._layout.addWidget(self._hint)
 
     def rebuild(self, recipe: dict | None, hidden: set[int]):
@@ -192,7 +193,7 @@ class SitesPanel(QScrollArea):
             self._layout.addWidget(self._hint)
             self._hint = QLabel(self._hint.text())
             self._hint.setWordWrap(True)
-            self._hint.setStyleSheet("color: #93a0a8;")
+            self._hint.setStyleSheet(f"color: {theme.active().text_dim};")
             return
         for i, site in enumerate(recipe["sites"]):
             card = SiteCard(i, site, i in hidden)
@@ -339,7 +340,7 @@ class ProcessingPanel(QWidget):
         note = QLabel("Processing never writes to instrument files — the "
                       "pipeline is applied in memory and the fit uses the result.")
         note.setWordWrap(True)
-        note.setStyleSheet("color: #93a0a8;")
+        note.setStyleSheet(f"color: {theme.active().text_dim};")
         v.addWidget(note)
 
         self.btnApply.clicked.connect(lambda: self._emit([]))

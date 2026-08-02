@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
 )
 
 from larmor import cellparse
+from larmor.desktop import theme
 from larmor.desktop.plot import site_color
 
 
@@ -90,7 +91,7 @@ class _Cell(QWidget):
         self.edit.setText(self._display_text())
         # a Czjzek σ(Cq) cell also shows the derived Cq (= 2σ) and νQ
         self.derived = QLabel()
-        self.derived.setStyleSheet("color:#6a4fb0; font-size:9px;")
+        self.derived.setStyleSheet(f"color:{theme.active().pivot}; font-size:9px;")
         self.pin = QCheckBox()
         self.pin.setToolTip("pin: hold this parameter fixed during the fit")
         self.pin.setChecked(not p.get("vary", True) and not p.get("expr"))
@@ -151,10 +152,10 @@ class _Cell(QWidget):
             lo = "−∞" if p.get("min") is None else f"{p['min']:g}"
             hi = "+∞" if p.get("max") is None else f"{p['max']:g}"
             tips.append(f"constrained to [{lo}, {hi}]  ·  edit inline as [{lo}..{hi}]")
-            css += "QLineEdit { border-left: 3px solid #0e7c86; }"
+            css += f"QLineEdit {{ border-left: 3px solid {theme.active().accent}; }}"
         if p.get("expr"):
             tips.append("linked: " + p["expr"] + "  ·  type a number to unlink")
-            css += "QLineEdit { background: #e2f0f0; }"
+            css += f"QLineEdit {{ background: {theme.active().hover}; }}"
         else:
             tips.append("type a value, a link (A+20, A+20kHz, 0.5B), "
                         "or bounds [0..100]")
@@ -241,9 +242,9 @@ class LinesTable(QWidget):
         self.btnFit.setStyleSheet("font-weight: 600;")
         self.btnFit.clicked.connect(self.fit)
         self.chi2 = QLabel("")
-        self.chi2.setStyleSheet("font-weight: 600; color: #0a5a62;")
+        self.chi2.setStyleSheet(f"font-weight: 600; color: {theme.active().accent};")
         self.sn = QLabel("")
-        self.sn.setStyleSheet("font-weight: 600; color: #6a4fb0;")
+        self.sn.setStyleSheet(f"font-weight: 600; color: {theme.active().pivot};")
         self.sn.setToolTip("signal-to-noise: peak signal ÷ RMS of a "
                            "signal-free region")
         foot.addWidget(self.btnCompute)
@@ -260,7 +261,7 @@ class LinesTable(QWidget):
             "another line by its letter:  A  ·  A+20  ·  A+20kHz (→ppm)  ·  "
             "0.5B  ·  A+20 [50..80].   pin ☑ = fixed   ·   scroll = nudge   ·   "
             "right-click for menus")
-        self.hint.setStyleSheet("color: #5a6871; font-size: 10px; padding: 2px 4px;")
+        self.hint.setStyleSheet(f"color: {theme.active().text_dim}; font-size: 10px; padding: 2px 4px;")
         self.hint.setWordWrap(True)
         v.addWidget(self.hint)
         self._recipe: dict | None = None
@@ -289,13 +290,13 @@ class LinesTable(QWidget):
             head = QTableWidgetItem(f"■ {letter} · {site.get('label') or ''}".rstrip(" ·"))
             head.setForeground(QColor(site_color(i)))
             if i in hidden:
-                head.setForeground(QColor("#b9c1bc"))
+                head.setForeground(QColor(theme.active().text_dim))
             head.setToolTip("double-click to rename; right-click for actions. "
                             f"Reference this line in a link as “{letter}”.")
             t.setItem(i, 0, head)
             model_item = QTableWidgetItem(site["model"])
             model_item.setFlags(Qt.ItemIsEnabled)
-            model_item.setForeground(QColor("#5a6871"))
+            model_item.setForeground(QColor(theme.active().text_dim))
             t.setItem(i, 1, model_item)
             for c, key in enumerate(self._used_keys, start=2):
                 if key in site["params"]:
@@ -311,7 +312,7 @@ class LinesTable(QWidget):
                 else:
                     blank = QTableWidgetItem("")
                     blank.setFlags(Qt.NoItemFlags)
-                    blank.setBackground(QColor("#f3f5f3"))
+                    blank.setBackground(QColor(theme.active().alt_base))
                     t.setItem(i, c, blank)
         hh = t.horizontalHeader()
         hh.setSectionResizeMode(QHeaderView.Interactive)

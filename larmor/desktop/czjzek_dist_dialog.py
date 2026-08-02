@@ -60,7 +60,12 @@ class CzjzekDistDialog(QDialog):
         summary.setTextFormat(Qt.RichText)
         v.addWidget(summary)
 
-        bb = QDialogButtonBox(QDialogButtonBox.Close)
+        bb = QDialogButtonBox(QDialogButtonBox.Close | QDialogButtonBox.Help)
         bb.rejected.connect(self.reject); bb.accepted.connect(self.accept)
         bb.button(QDialogButtonBox.Close).clicked.connect(self.accept)
+        bb.helpRequested.connect(self._help)
         v.addWidget(bb)
+
+    def _help(self):
+        from larmor.desktop.help_dialog import show_help
+        show_help(self, "lineshapes", "Lineshapes — models & physics")
