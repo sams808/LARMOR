@@ -952,20 +952,18 @@ class MainWindow(QMainWindow):
             "manual baseline subtracted ('Reset to original' undoes)")
 
     def apply_iterbaseline(self):
-        """Iterative dead-time baseline correction (Yon et al. 2020)."""
-        from PySide6.QtWidgets import QInputDialog
+        """Iterative dead-time baseline correction (Yon et al. 2020) — interactive
+        dialog with a live preview, then apply as a recorded processing step."""
+        if self.exp_ppm is None or self.exp_amp is None:
+            self.statusBar().showMessage("open a spectrum first")
+            return
+        from larmor.desktop.baseline_dialog import BaselineDialog
 
-        dt, ok = QInputDialog.getInt(
-            self, "Iterative baseline — Yon et al. 2020",
-            "For a rolling baseline from receiver dead time (where a polynomial "
-            "fails).\n\nDead-time restriction: time-domain points to keep "
-            "(≈ 2·DE/DW).\n0 = plain iterative histogram baseline "
-            "(no dead-time restriction):",
-            0, 0, 8192, 2)
-        if not ok:
+        dlg = BaselineDialog(self, self.exp_ppm, self.exp_amp)
+        if dlg.exec() != dlg.Accepted:
             return
         self.apply_processing(
-            [{"op": "iterbaseline", "dead_time_pts": int(dt)}], False)
+            [{"op": "iterbaseline", **dlg.params()}], False)
         self.statusBar().showMessage(
             "iterative baseline (Yon et al. 2020) applied — "
             "'Reset to original' undoes")

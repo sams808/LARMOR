@@ -96,4 +96,8 @@ def test_fxml_import_maps_amorphous(tmp_path):
     assert s.params["Cq_fwhm_MHz"].value == pytest.approx(0.350, abs=1e-4)
     assert s.params["eta"].value == pytest.approx(0.2)
     assert s.params["shift_fwhm_ppm"].value == pytest.approx(3.23)
-    assert any("Amorphous" in w and "area" in w.lower() for w in warnings)
+    # dmfit's Amorphous amp (area) is converted to a peak amp on import, so it is
+    # no longer the raw 353.65, and a note records the conversion.
+    assert s.params["amplitude"].value != pytest.approx(353.65, abs=1.0)
+    assert s.params["amplitude"].value > 0
+    assert any("area" in n.lower() and "peak" in n.lower() for n in recipe.notes)

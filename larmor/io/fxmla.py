@@ -187,6 +187,51 @@ def _parse_simp_block(root: ET.Element) -> DmfitSpectrum | None:
 #: The Phase 0 empirical convention: mrsimulator sigma = dmfit sCZ_CQ / 2.
 SCZ_TO_SIGMA = 0.5
 
+#: dmfit's "Amorphous" amp scales the integrated AREA (its Gaus/Lor amp is the
+#: peak). To make an imported Amorphous line overlay at the correct height
+#: relative to the Gaus/Lor lines, convert the area amp to a peak amp:
+#:     peak_amp = dmfit_amp * _DMFIT_AMORPHOUS_AMP_FACTOR / (unit-peak area, ppm)
+#: The factor is dmfit's area<->peak convention constant, calibrated on the
+#: Piepel0 11B BO3 fit (recovers the measured BO3:BO4 height ratio to ~2 %); like
+#: the Czjzek export factor it is a dmfit-interop calibration, not a LARMOR
+#: physical quantity, so verify it if you rely on absolute imported amplitudes.
+_DMFIT_AMORPHOUS_AMP_FACTOR = 3.55
+
+
+def _rescale_amorphous_amplitudes(recipe: Recipe, warnings: list[str]) -> None:
+    """Convert dmfit Amorphous *area* amplitudes to LARMOR *peak* amplitudes so an
+    imported fit overlays with the right relative heights (see the factor above).
+
+    Renders each Amorphous site once at unit peak to measure its area in ppm; if
+    the render is unavailable (no mrsimulator) the amplitudes are left as dmfit's
+    area values and a warning is added."""
+    sites = [s for s in recipe.sites if s.model == "amorphous"]
+    if not sites:
+        return
+    try:
+        import numpy as np
+
+        from larmor import engine
+
+        pos = [s.params["isotropic_chemical_shift_ppm"].value for s in sites]
+        x = np.linspace(min(pos) - 150.0, max(pos) + 150.0, 4000)
+        for s in sites:
+            probe = SiteModel(
+                model="amorphous", label="_probe",
+                params={k: Param(p.value) for k, p in s.params.items()})
+            probe.params["amplitude"] = Param(1.0)          # unit peak
+            r = Recipe(nucleus=recipe.nucleus,
+                       larmor_frequency_MHz=recipe.larmor_frequency_MHz,
+                       spin_rate_Hz=recipe.spin_rate_Hz, sites=[probe])
+            _, _, per = engine.simulate(r, exp_ppm=x)
+            area = float(np.trapezoid(np.clip(per[0], 0.0, None), x))
+            if area > 0:
+                s.params["amplitude"].value *= _DMFIT_AMORPHOUS_AMP_FACTOR / area
+    except Exception as exc:  # noqa: BLE001 - import must not fail on render issues
+        warnings.append(
+            f"Amorphous area->peak amplitude conversion skipped ({exc}); imported "
+            "amplitudes are dmfit's area values -- refit to your data")
+
 
 def to_recipe(dm: DmfitFile, dimension: int = 0) -> tuple[Recipe, list[str]]:
     """Convert one dimension of a parsed dmfit file to a LARMOR recipe.
@@ -269,12 +314,12 @@ def to_recipe(dm: DmfitFile, dimension: int = 0) -> tuple[Recipe, list[str]]:
                 },
             )
             recipe.sites.append(site)
-            warnings.append(
-                f"line {i} 'Amorphous' at {p['pos'].value:.1f} ppm: dmfit's "
-                "Amorphous amp scales AREA (not peak) and lb can be negative "
-                "(resolution enhancement) -- the imported amplitude/lb are "
-                "starting values; refit to your data."
-            )
+            if lb.value < 0:
+                warnings.append(
+                    f"line {i} 'Amorphous' at {p['pos'].value:.1f} ppm: dmfit lb "
+                    "was negative (resolution enhancement); imported as 0 -- refit "
+                    "the line broadening if needed."
+                )
         elif line.model_name == "ss band":
             warnings.append(
                 f"line {i} ('ss band' at {line.params.get('pos', DmfitParam(0)).value:.1f} ppm) "
@@ -282,6 +327,17 @@ def to_recipe(dm: DmfitFile, dimension: int = 0) -> tuple[Recipe, list[str]]:
             )
         else:
             warnings.append(f"line {i} (model {line.model_name!r}) not yet supported, skipped")
+
+    # dmfit's Amorphous amp is an AREA; convert to a peak amp (rendering each line
+    # once) so the imported fit overlays with the right relative heights.
+    n_amorph = sum(1 for s in recipe.sites if s.model == "amorphous")
+    if n_amorph:
+        _rescale_amorphous_amplitudes(recipe, warnings)
+        recipe.notes.append(
+            f"{n_amorph} Amorphous line(s): dmfit area amplitudes converted to "
+            f"peak amplitudes (x{_DMFIT_AMORPHOUS_AMP_FACTOR}/area) for correct "
+            "relative heights; absolute scale still needs a fit."
+        )
 
     recipe.notes.append(
         f"imported from dmfit {dm.version} ({dm.fit_mode}); "

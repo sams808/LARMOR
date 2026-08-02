@@ -81,9 +81,12 @@ $$S_\text{corr}(\nu) = S(\nu)\,e^{i(\phi_0+\phi_1(\nu-\nu_\text{pivot})/\text{SW
   them, and the result is subtracted; repeat until the correction falls below the
   noise. Optionally the estimate is restricted to **broad** components by keeping
   only the first time-domain points (the **dead-time window**, ≈ 2·DE/DW) — this
-  is what separates a genuine dead-time roll from real (narrow) peaks. Enter that
-  point count when prompted, or 0 for the plain iterative histogram baseline. It
-  leaves an already-flat spectrum essentially untouched, so it is safe to try.
+  is what separates a genuine dead-time roll from real (narrow) peaks. It opens an
+  **interactive dialog** with a live preview (spectrum + estimated baseline, and
+  the corrected result below) and three controls — dead-time points (≈ 2·DE/DW; 0 =
+  off), spline **smoothness**, and the histogram **threshold** — so you can tune and
+  see the effect before **Apply**. It leaves an already-flat spectrum essentially
+  untouched, so it is safe to try.
 - **SR / calibrate** — reference the axis: type an SR (Hz), or click a peak and set
   its ppm. A rigid ppm shift; the raw data is untouched.
 - **scale SW / car-ref** — stretch the ppm axis about its centre (correct a
