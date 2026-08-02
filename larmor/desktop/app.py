@@ -377,6 +377,8 @@ class MainWindow(QMainWindow):
         m_tools.addSection("Analysis")
         self._add(m_tools, "&Integrals && measurements…  (integral, %, FWHM, CoM)",
                   self.open_integrals)
+        self._add(m_tools, "&Batch fit report…  (publication table + plots)",
+                  self.run_batch_report)
         self._add(m_tools, "Relaxation / series (T1, T2)…", self.open_satrec)
         self._add(m_tools, "Per-site relaxation…  (uses the current fit)",
                   self.open_per_site_relaxation)
@@ -3316,6 +3318,12 @@ class MainWindow(QMainWindow):
 
         MonteCarloDialog(self, self.recipe, self.exp_ppm, self.exp_amp,
                          self.view.current_xrange()).exec()
+
+    def run_batch_report(self):
+        from larmor.desktop.batch_dialog import BatchReportDialog
+
+        start = str(QSettings("LARMOR", "app").value("lastDir", "") or "")
+        BatchReportDialog(self, start).exec()
 
     # ------------------------------------------------------------- session
     def _persist_session(self):

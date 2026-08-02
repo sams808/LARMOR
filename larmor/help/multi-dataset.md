@@ -92,6 +92,35 @@ you change $B_0$ (the quadrupolar shift moving as $1/\nu_0^2$).
 
 ---
 
+## 5 · Batch fit report (publication table + plots)
+
+Once you have a **set of finished fits** — a whole glass series fitted the same
+way — **Tools ▸ Batch fit report** turns them into a paper-ready package in one
+pass, so you never hand-copy numbers.
+
+1. **Add fits.** Point it at the saved fits: LARMOR `.recipe.json`, dmfit
+   `.fxmla`, or `.larproj`. Each carries its own data, so nothing else is
+   needed. Ideally they share a **nucleus and acquisition** — the tool flags
+   mixed nuclei or fields, because a table is only comparable within them.
+2. **Choose the errors.** *Covariance* (fast — the lmfit standard errors) or
+   *Monte-Carlo* (the parametric bootstrap of the Errors tools, slower but
+   honest for correlated/glassy fits). LARMOR **re-fits every dataset** so the
+   errors are fresh, not whatever was saved.
+3. **Pick a folder and Generate.** It writes:
+   - **`table.csv`** — every site's δ_iso, C_Q (or σ, with the derived
+     `C_Q = 2σ` and `√⟨P_Q²⟩`), η, width and **population % — each with its
+     error** — one row per site, machine-readable.
+   - **`table.tex`** — the same table as a LaTeX `tabular` for direct inclusion.
+   - **`report.md`** — a Markdown report: the table, the nucleus/field summary,
+     the error method, and a **per-fit overlay** (experiment + model +
+     components + residual).
+   - **`figures/*.png`** — the individual overlays.
+
+The columns are model-aware (Czjzek sites report σ and the field-independent
+`√⟨P_Q²⟩`; discrete/Amorphous sites report C_Q and η) and populations come from
+the same integral-over-the-window quantification as **Report** (F6). It is the
+fastest route from "a folder of fits" to a table you can paste into a manuscript.
+
 ## References
 
 - D. Massiot *et al.*, "Modelling one- and two-dimensional solid-state NMR
