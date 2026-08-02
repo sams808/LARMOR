@@ -20,6 +20,7 @@ import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import Qt, Signal
 
+from larmor.desktop import theme
 from larmor.desktop.plot import site_color
 from PySide6.QtWidgets import (
     QComboBox, QDoubleSpinBox, QHBoxLayout, QLabel, QMenu, QPushButton, QSlider,
@@ -63,7 +64,7 @@ class Contour2DView(QWidget):
         # ---- contour / display bar ----
         bar = QHBoxLayout()
         self.title = QLabel("2D dataset")
-        self.title.setStyleSheet("font-weight: 600; color: #16202a;")
+        self.title.setStyleSheet(f"font-weight: 600; color: {theme.active().text};")
         bar.addWidget(self.title, 1)
         bar.addWidget(QLabel("contours"))
         self.sign = QComboBox()
@@ -252,7 +253,7 @@ class Contour2DView(QWidget):
         pb.addWidget(self.btnPhaseApply); pb.addWidget(self.btnRepick)
         pb.addWidget(self.btnPhaseReset)
         self.phasehint = QLabel("")
-        self.phasehint.setStyleSheet("color: #0e7c86;")
+        self.phasehint.setStyleSheet(f"color: {theme.active().accent};")
         pb.addWidget(self.phasehint); pb.addStretch(1)
         self.phasebar.setVisible(False)
         v.addWidget(self.phasebar)
@@ -261,7 +262,7 @@ class Contour2DView(QWidget):
         self.stack = QStackedWidget()
         # contour with top (F2) and left (F1) projections
         self.glw = pg.GraphicsLayoutWidget()
-        self.glw.setBackground("#fcfdfc")
+        self.glw.setBackground(theme.active().plot_bg)
         self.p_top = self.glw.addPlot(row=0, col=1)
         self.p_top.setMaximumHeight(80); self.p_top.hideAxis("bottom")
         self.p_main = self.glw.addPlot(row=1, col=1)
@@ -282,7 +283,7 @@ class Contour2DView(QWidget):
         self.stack.addWidget(self.glw)
         # phasing traces
         self.phase_glw = pg.GraphicsLayoutWidget()
-        self.phase_glw.setBackground("#fcfdfc")
+        self.phase_glw.setBackground(theme.active().plot_bg)
         self.stack.addWidget(self.phase_glw)
         v.addWidget(self.stack, 1)
         self._slice_line = None
@@ -303,14 +304,30 @@ class Contour2DView(QWidget):
         pick.addWidget(self.btnRow)
         pick.addStretch(1)
         self.cursor = QLabel("")
-        self.cursor.setStyleSheet("color: #5a6871; font-family: Consolas, monospace;")
+        self.cursor.setStyleSheet(f"color: {theme.active().text_dim}; font-family: Consolas, monospace;")
         pick.addWidget(self.cursor)
         self.hint = QLabel("")
-        self.hint.setStyleSheet("color: #5a6871;")
+        self.hint.setStyleSheet(f"color: {theme.active().text_dim};")
         pick.addWidget(self.hint)
         v.addLayout(pick)
 
     # ------------------------------------------------------------------
+    def apply_theme(self):
+        """Re-apply the active colour theme to the 2D chrome and redraw."""
+        t = theme.active()
+        self.glw.setBackground(t.plot_bg)
+        self.phase_glw.setBackground(t.plot_bg)
+        self.title.setStyleSheet(f"font-weight: 600; color: {t.text};")
+        self.cursor.setStyleSheet(
+            f"color: {t.text_dim}; font-family: Consolas, monospace;")
+        self.hint.setStyleSheet(f"color: {t.text_dim};")
+        self.phasehint.setStyleSheet(f"color: {t.accent};")
+        if self.data is not None:
+            try:
+                self._redraw()
+            except Exception:
+                pass
+
     def set_data(self, data, title: str = ""):
         d = data.normalized() if hasattr(data, "normalized") else data
         self._orig = d
@@ -899,7 +916,7 @@ class Contour2DView(QWidget):
 
         lo = max(min(f2), min(f1)); hi = min(max(f2), max(f1))
         self.p_main.plot([lo, hi], [lo, hi],
-                         pen=pg.mkPen("#b9c1bc", style=Qt.DashLine))
+                         pen=pg.mkPen(theme.active().axis_minor, style=Qt.DashLine))
         if self.btnAxes.isChecked():
             self._draw_mqmas_axes(f2, f1)
         # projections — or, in HMQC mode, the scaled sum-projection (correlated)
@@ -938,7 +955,7 @@ class Contour2DView(QWidget):
 
         self._slice_line = pg.InfiniteLine(
             pos=float(f1[len(f1) // 2]), angle=0, movable=True,
-            pen=pg.mkPen("#8a97a0", width=1.1, style=Qt.DashLine))
+            pen=pg.mkPen(theme.active().axis_minor, width=1.1, style=Qt.DashLine))
         self.p_main.addItem(self._slice_line)
 
     # ------------------------------------------------------------------

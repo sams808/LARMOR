@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 from larmor.baseline import iterative_baseline
+from larmor.desktop import theme
 
 
 class BaselineDialog(QDialog):
@@ -45,8 +46,9 @@ class BaselineDialog(QDialog):
         v.addWidget(intro)
 
         # ---- plots: spectrum + baseline (top), corrected (bottom) ----
+        t = theme.active()
         glw = pg.GraphicsLayoutWidget()
-        glw.setBackground("#fcfdfc")
+        glw.setBackground(t.plot_bg)
         self.p_top = glw.addPlot(row=0, col=0)
         self.p_top.showGrid(x=True, y=True, alpha=0.12)
         self.p_top.setLabel("left", "intensity")
@@ -60,11 +62,11 @@ class BaselineDialog(QDialog):
         glw.ci.layout.setRowStretchFactor(1, 2)
         v.addWidget(glw, 1)
 
-        self.c_raw = self.p_top.plot(pen=pg.mkPen("#3a3a3a", width=1),
+        self.c_raw = self.p_top.plot(pen=pg.mkPen(t.experiment, width=1),
                                      name="spectrum")
-        self.c_base = self.p_top.plot(pen=pg.mkPen("#D55E00", width=1.6),
+        self.c_base = self.p_top.plot(pen=pg.mkPen(t.baseline, width=1.6),
                                       name="baseline")
-        self.c_corr = self.p_bot.plot(pen=pg.mkPen("#0072B2", width=1),
+        self.c_corr = self.p_bot.plot(pen=pg.mkPen(t.measure, width=1),
                                       name="corrected")
         for p in (self.p_top, self.p_bot):
             p.setXRange(self.ppm.max(), self.ppm.min())   # NMR: decreasing ppm

@@ -85,6 +85,12 @@ then fit, then measure/export — but the details depend on the experiment. The
 table at the bottom is a dmfit-style spreadsheet with paddles on the plot; the
 **Tools** and **Decomposition** menus hold the experiment-specific machinery.
 
+**Appearance.** **View ▸ Theme** offers ten colour presets (five light, five dark
+— Light, Sepia, Solarized, Nord, Slate, Ocean, High-Contrast, …). The choice is
+remembered between sessions and re-colours everything — widgets, plot, curves,
+site markers — while keeping text, buttons and markers readable (every preset is
+contrast-checked). Pick whichever is easiest on your eyes.
+
 Each experiment has its own manual with worked steps and the science behind it:
 
 | If you have… | Read |

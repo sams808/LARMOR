@@ -5,6 +5,7 @@ from pathlib import Path
 
 import numpy as np
 import pyqtgraph as pg
+from larmor.desktop import theme
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QDialog, QDoubleSpinBox, QFileDialog,
@@ -48,7 +49,7 @@ class RedorDialog(QDialog):
         opts.addStretch(1)
         v.addLayout(opts)
 
-        self.plot = pg.PlotWidget(background="w")
+        self.plot = pg.PlotWidget(background=theme.active().plot_bg)
         self.plot.setLabel("bottom", "recoupling time / s")
         self.plot.setLabel("left", "ΔS/S₀")
         self.plot.showGrid(x=True, y=True, alpha=0.2)
@@ -216,7 +217,7 @@ class ErrorsDialog(QDialog):
         self.site.currentIndexChanged.connect(self._fill_params)
         self._fill_params()
 
-        self.plot = pg.PlotWidget(background="w")
+        self.plot = pg.PlotWidget(background=theme.active().plot_bg)
         self.plot.setLabel("bottom", "parameter value")
         self.plot.setLabel("left", "χ²")
         self.plot.showGrid(x=True, y=True, alpha=0.2)

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import numpy as np
 import pyqtgraph as pg
+from larmor.desktop import theme
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QApplication, QDialog, QHBoxLayout, QLabel, QPushButton, QTableWidget,
@@ -41,7 +42,7 @@ class IntegralsDialog(QDialog):
         bar.addWidget(self.hint)
         v.addLayout(bar)
 
-        self.plot = pg.PlotWidget(background="#fcfdfc")
+        self.plot = pg.PlotWidget(background=theme.active().plot_bg)
         self.plot.getPlotItem().invertX(True)
         self.plot.setLabel("bottom", "shift", units="ppm")
         self.plot.plot(self.ppm, self.amp, pen=pg.mkPen("#1a2831", width=1.2))

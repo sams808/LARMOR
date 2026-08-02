@@ -8,12 +8,16 @@ import pyqtgraph as pg
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
 
-SITE_COLORS = ["#1f77b4", "#2ca02c", "#d62728", "#9467bd", "#8c564b",
-               "#e377c2", "#17becf", "#bcbd22", "#7f7f7f", "#ff7f0e"]
+from larmor.desktop import theme
+
+#: fallback categorical palette (used before a theme is applied / in headless code)
+SITE_COLORS = theme.LIGHT_SERIES
 
 
 def site_color(i: int) -> str:
-    return SITE_COLORS[i % len(SITE_COLORS)]
+    """Categorical colour for site i, from the active theme's series palette."""
+    series = theme.active().series or SITE_COLORS
+    return series[i % len(series)]
 
 
 class SpectrumView(pg.PlotWidget):
@@ -29,43 +33,31 @@ class SpectrumView(pg.PlotWidget):
     measure_changed = Signal(float, float)    # two ppm cursors (ruler)
 
     def __init__(self, parent=None):
-        super().__init__(parent, background="#fcfdfc")
+        t = theme.active()
+        super().__init__(parent, background=t.plot_bg)
         pi = self.getPlotItem()
         pi.invertX(True)                              # ppm convention
-        # professional axis styling: dark ink axes, tick labels, light grid
-        axis_pen = pg.mkPen("#37424a", width=1.2)
         tick_font = QFont()
         tick_font.setPointSize(9)
         for name in ("bottom", "left"):
-            ax = pi.getAxis(name)
-            ax.setPen(axis_pen)
-            ax.setTextPen(pg.mkPen("#37424a"))
-            ax.setStyle(tickFont=tick_font, tickLength=-5)
-        pi.getAxis("top").setPen(pg.mkPen("#c5ccc6"))
-        pi.getAxis("right").setPen(pg.mkPen("#c5ccc6"))
+            pi.getAxis(name).setStyle(tickFont=tick_font, tickLength=-5)
         pi.showAxis("top"); pi.getAxis("top").setStyle(showValues=False)
         pi.showAxis("right"); pi.getAxis("right").setStyle(showValues=False)
-        label_style = {"color": "#37424a", "font-size": "10pt"}
-        self.setLabel("bottom", "chemical shift", units="ppm", **label_style)
-        self.setLabel("left", "intensity", **label_style)
-        self.showGrid(x=True, y=True, alpha=0.08)
         pi.getViewBox().setMouseMode(pg.ViewBox.PanMode)
         pi.setContentsMargins(6, 10, 6, 6)
 
-        leg = self.addLegend(offset=(12, 10), labelTextSize="9pt",
-                             brush=pg.mkBrush(255, 255, 255, 235),
-                             pen=pg.mkPen("#d7dcd9"), labelTextColor="#16202a")
+        leg = self.addLegend(offset=(12, 10), labelTextSize="9pt")
         self._legend = leg
 
-        self._exp = self.plot([], [], pen=pg.mkPen("#1a2831", width=1.4),
+        self._exp = self.plot([], [], pen=pg.mkPen(t.experiment, width=1.4),
                               name="experiment", antialias=True)
-        self._model = self.plot([], [], pen=pg.mkPen("#c0392b", width=1.8),
+        self._model = self.plot([], [], pen=pg.mkPen(t.model, width=1.8),
                                 name="model", antialias=True)
-        self._resid = self.plot([], [], pen=pg.mkPen("#9aa5ab", width=1.0),
+        self._resid = self.plot([], [], pen=pg.mkPen(t.resid, width=1.0),
                                 name="residual", antialias=True)
         # faint zero line for the offset residual strip
         self._resid_zero = pg.InfiniteLine(
-            angle=0, pen=pg.mkPen("#d0d6d1", width=1, style=Qt.DotLine))
+            angle=0, pen=pg.mkPen(t.resid_zero, width=1, style=Qt.DotLine))
         self._resid_zero.setVisible(False)
         self.addItem(self._resid_zero)
         pi.getAxis("left").setStyle(tickTextWidth=48, autoExpandTextSpace=False)
@@ -83,7 +75,7 @@ class SpectrumView(pg.PlotWidget):
         # manual baseline: draggable anchors + live PCHIP preview
         self._bl_mode = False
         self._bl_anchors: list[pg.TargetItem] = []
-        self._bl_curve = self.plot([], [], pen=pg.mkPen("#c88a1e", width=1.4,
+        self._bl_curve = self.plot([], [], pen=pg.mkPen(t.baseline, width=1.4,
                                                         style=Qt.DashLine))
         # dmfit-style fit zones
         self._zones: list[pg.LinearRegionItem] = []
@@ -94,6 +86,40 @@ class SpectrumView(pg.PlotWidget):
         self._overlay_items: list[pg.PlotDataItem] = []
         # phase pivot (TopSpin-style): p1 rotates about this reference point
         self._pivot: pg.InfiniteLine | None = None
+
+        self.apply_theme()          # axis pens, labels, grid, legend from theme
+
+    def apply_theme(self):
+        """(Re)apply the active colour theme to the plot's persistent items.
+        Dynamic items (site markers, components, paddles) pick up the new series
+        colours on the next redraw."""
+        t = theme.active()
+        self.setBackground(t.plot_bg)
+        pi = self.getPlotItem()
+        axis_pen = pg.mkPen(t.axis, width=1.2)
+        for name in ("bottom", "left"):
+            ax = pi.getAxis(name)
+            ax.setPen(axis_pen)
+            ax.setTextPen(pg.mkPen(t.axis))
+        pi.getAxis("top").setPen(pg.mkPen(t.axis_minor))
+        pi.getAxis("right").setPen(pg.mkPen(t.axis_minor))
+        label_style = {"color": t.axis, "font-size": "10pt"}
+        self.setLabel("bottom", "chemical shift", units="ppm", **label_style)
+        self.setLabel("left", "intensity", **label_style)
+        self.showGrid(x=True, y=True, alpha=t.grid_alpha)
+        self._exp.setPen(pg.mkPen(t.experiment, width=1.4))
+        self._model.setPen(pg.mkPen(t.model, width=1.8))
+        self._resid.setPen(pg.mkPen(t.resid, width=1.0))
+        self._resid_zero.setPen(pg.mkPen(t.resid_zero, width=1, style=Qt.DotLine))
+        self._bl_curve.setPen(pg.mkPen(t.baseline, width=1.4, style=Qt.DashLine))
+        if self._legend is not None:
+            self._legend.setLabelTextColor(t.text)
+            try:
+                r, g, b = theme._rgb(t.legend_bg)
+                self._legend.setBrush(pg.mkBrush(r, g, b, 235))
+                self._legend.setPen(pg.mkPen(t.border_soft))
+            except Exception:
+                pass
 
     # ---------- drag & drop ----------
     def dragEnterEvent(self, ev):
@@ -172,14 +198,14 @@ class SpectrumView(pg.PlotWidget):
             return
         (x0, x1), _ = self.getPlotItem().getViewBox().viewRange()
         lo, hi = min(x0, x1), max(x0, x1)
+        mc = theme.active().measure
         for frac in (0.35, 0.65):
             ln = pg.InfiniteLine(pos=lo + frac * (hi - lo), angle=90,
                                  movable=True,
-                                 pen=pg.mkPen("#0e7c86", width=1.4),
-                                 hoverPen=pg.mkPen("#0e7c86", width=2.4),
+                                 pen=pg.mkPen(mc, width=1.4),
+                                 hoverPen=pg.mkPen(mc, width=2.4),
                                  label="{value:.1f}",
-                                 labelOpts={"color": "#0e7c86",
-                                            "position": 0.92})
+                                 labelOpts={"color": mc, "position": 0.92})
             ln.sigPositionChanged.connect(self._emit_measure)
             self.addItem(ln)
             self._measure_lines.append(ln)
@@ -206,11 +232,12 @@ class SpectrumView(pg.PlotWidget):
             return
         px = (float(x[int(np.argmax(y))]) if y is not None and len(y)
               else float(np.median(x)))
+        pv = theme.active().pivot
         self._pivot = pg.InfiniteLine(
             pos=px, angle=90, movable=True,
-            pen=pg.mkPen("#8e44ad", width=1.4, style=Qt.DashLine),
-            hoverPen=pg.mkPen("#8e44ad", width=2.4),
-            label="pivot", labelOpts={"color": "#8e44ad", "position": 0.06})
+            pen=pg.mkPen(pv, width=1.4, style=Qt.DashLine),
+            hoverPen=pg.mkPen(pv, width=2.4),
+            label="pivot", labelOpts={"color": pv, "position": 0.06})
         self.addItem(self._pivot)
 
     def phase_pivot_frac(self) -> float:
@@ -228,7 +255,7 @@ class SpectrumView(pg.PlotWidget):
 
     def _add_baseline_anchor(self, x: float, y: float):
         t = pg.TargetItem(pos=(x, y), size=11, movable=True,
-                          pen=pg.mkPen("#c88a1e", width=1.5),
+                          pen=pg.mkPen(theme.active().baseline, width=1.5),
                           brush=pg.mkBrush(255, 255, 255, 220))
         t.sigPositionChanged.connect(lambda *_: self._update_baseline_curve())
         self.addItem(t)
@@ -276,11 +303,12 @@ class SpectrumView(pg.PlotWidget):
         for r in self._zones:
             self.removeItem(r)
         self._zones.clear()
+        zr, zg, zb = theme._rgb(theme.active().measure)
         for z in zones or []:
             region = pg.LinearRegionItem(values=(min(z), max(z)),
-                                         brush=pg.mkBrush(14, 124, 134, 26),
-                                         hoverBrush=pg.mkBrush(14, 124, 134, 45),
-                                         pen=pg.mkPen("#0e7c86", width=1))
+                                         brush=pg.mkBrush(zr, zg, zb, 26),
+                                         hoverBrush=pg.mkBrush(zr, zg, zb, 45),
+                                         pen=pg.mkPen(theme.active().measure, width=1))
             region.setZValue(-5)
             if on_change:
                 region.sigRegionChangeFinished.connect(
@@ -301,7 +329,7 @@ class SpectrumView(pg.PlotWidget):
 
     def set_title(self, text: str):
         self.getPlotItem().setTitle(
-            f"<span style='color:#37424a; font-size:11pt'>{text}</span>"
+            f"<span style='color:{theme.active().text}; font-size:11pt'>{text}</span>"
             if text else None)
 
     def set_model(self, x, total, per_site, labels, hidden: set[int],

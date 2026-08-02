@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
 )
 
 from larmor.czjzek_dist import marginal_cq, rms_pq, suggested_cq_axis
+from larmor.desktop import theme
 from larmor.desktop.plot import site_color
 
 
@@ -30,7 +31,7 @@ class CzjzekDistDialog(QDialog):
             "C_Q = 2σ. √⟨P_Q²⟩ = √5·σ is the invariant to report for a glass."))
         v.itemAt(0).widget().setWordWrap(True)
 
-        plot = pg.PlotWidget(background="#fcfdfc")
+        plot = pg.PlotWidget(background=theme.active().plot_bg)
         plot.setLabel("bottom", "C_Q", units="MHz")
         plot.setLabel("left", "P(C_Q)")
         plot.showGrid(x=True, y=True, alpha=0.15)

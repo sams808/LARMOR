@@ -31,79 +31,13 @@ from PySide6.QtWidgets import (
 
 from larmor import models as model_registry
 from larmor.desktop.panels import ProcessingPanel
+from larmor.desktop import theme
 from larmor.desktop.plot import SpectrumView
 from larmor.desktop.table import LinesTable
 from larmor.recipe import Recipe
 
-APP_STYLE = """
-QMainWindow { background: #f0f2f0; }
-QMenuBar { background: #fbfcfb; color: #16202a; border-bottom: 1px solid #cfd6d1; }
-QMenuBar::item { padding: 4px 10px; background: transparent; }
-QMenuBar::item:selected { background: #dcebe9; border-radius: 4px; }
-QMenu { background: #ffffff; color: #16202a; border: 1px solid #b9c1bc; }
-QMenu::item { padding: 4px 26px 4px 18px; }
-QMenu::item:selected { background: #dcebe9; }
-QMenu::separator { height: 1px; background: #e0e5e1; margin: 4px 8px; }
-QToolBar { background: #fbfcfb; border-bottom: 1px solid #cfd6d1; spacing: 3px; padding: 3px; }
-QToolBar#sidebar { border-right: 1px solid #cfd6d1; border-bottom: none; padding: 3px 2px; }
-QToolButton { padding: 4px 9px; border-radius: 4px; color: #16202a; border: 1px solid transparent; }
-QToolButton:hover { background: #dcebe9; border-color: #b7cfcb; }
-QToolButton:checked { background: #0e7c86; color: #ffffff; }
-QDockWidget { color: #16202a; }
-QDockWidget::title { background: #e7ebe8; padding: 4px 8px; border-top: 1px solid #cfd6d1; }
-QTableWidget { background: #ffffff; color: #16202a; gridline-color: #e0e5e1;
-               alternate-background-color: #f6f8f6; selection-background-color: #dcebe9;
-               selection-color: #16202a; }
-QHeaderView::section { background: #eef1ee; color: #37424a; font-weight: 600;
-                       border: none; border-right: 1px solid #d3d9d4;
-                       border-bottom: 1px solid #c5ccc6; padding: 3px 6px; }
-QTableCornerButton::section { background: #eef1ee; border: none; }
-QDoubleSpinBox, QSpinBox, QLineEdit { color: #16202a; background: transparent;
-                                      selection-background-color: #bcdcd9; }
-QPushButton { color: #16202a; background: #ffffff; border: 1px solid #aab4ad;
-              border-radius: 4px; padding: 4px 14px; }
-QPushButton:hover { background: #dcebe9; }
-QPushButton:default { background: #0e7c86; color: #ffffff; border-color: #0e7c86; }
-QCheckBox { color: #16202a; }
-QLabel { color: #16202a; }
-QTabBar::tab { background: #e7ebe8; color: #37424a; padding: 4px 14px;
-               border: 1px solid #cfd6d1; border-bottom: none;
-               border-top-left-radius: 4px; border-top-right-radius: 4px; }
-QTabBar::tab:selected { background: #ffffff; color: #0a5a62; font-weight: 600; }
-QStatusBar { background: #fbfcfb; color: #37424a; border-top: 1px solid #cfd6d1; }
-QPlainTextEdit { background: #ffffff; color: #16202a; }
-QScrollBar:vertical { background: #eef1ee; width: 12px; }
-QScrollBar::handle:vertical { background: #c5ccc6; border-radius: 5px; min-height: 30px; }
-QScrollBar:horizontal { background: #eef1ee; height: 12px; }
-QScrollBar::handle:horizontal { background: #c5ccc6; border-radius: 5px; min-width: 30px; }
-"""
 
 
-def _light_palette():
-    """A complete light palette so the app renders identically whatever the
-    OS theme (Windows dark mode was bleeding white-on-white text through)."""
-    from PySide6.QtGui import QColor, QPalette
-
-    p = QPalette()
-    c = QColor
-    p.setColor(QPalette.Window, c("#f0f2f0"))
-    p.setColor(QPalette.WindowText, c("#16202a"))
-    p.setColor(QPalette.Base, c("#ffffff"))
-    p.setColor(QPalette.AlternateBase, c("#f6f8f6"))
-    p.setColor(QPalette.Text, c("#16202a"))
-    p.setColor(QPalette.PlaceholderText, c("#93a0a8"))
-    p.setColor(QPalette.Button, c("#fbfcfb"))
-    p.setColor(QPalette.ButtonText, c("#16202a"))
-    p.setColor(QPalette.ToolTipBase, c("#ffffff"))
-    p.setColor(QPalette.ToolTipText, c("#16202a"))
-    p.setColor(QPalette.Highlight, c("#0e7c86"))
-    p.setColor(QPalette.HighlightedText, c("#ffffff"))
-    p.setColor(QPalette.Link, c("#0a5a62"))
-    for group in (QPalette.Disabled,):
-        p.setColor(group, QPalette.WindowText, c("#9aa5ab"))
-        p.setColor(group, QPalette.Text, c("#9aa5ab"))
-        p.setColor(group, QPalette.ButtonText, c("#9aa5ab"))
-    return p
 
 
 def _emit_progress(sig):
@@ -260,7 +194,8 @@ class MainWindow(QMainWindow):
         self._build_panels_menu()
 
         self.exp_label = ClickableLabel("")
-        self.exp_label.setStyleSheet("color: #0a5a62; font-weight: 600;")
+        self.exp_label.setStyleSheet(
+            f"color: {theme.active().accent}; font-weight: 600;")
         self.exp_label.setToolTip("double-click to edit the experiment "
                                   "parameters (nucleus, Larmor, νrot)")
         self.exp_label.setCursor(Qt.PointingHandCursor)
@@ -402,6 +337,8 @@ class MainWindow(QMainWindow):
                                  checkable=True, checked=True)
         self.actPaddles = self._add(m_view, "Show paddles", self._toggle_paddles,
                                     checkable=True, checked=True)
+        m_view.addSeparator()
+        self._build_theme_menu(m_view)
         m_view.addSeparator()
         self._add(m_view, "&Back to 2D map", self.back_to_2d, "Ctrl+2")
         self._add(m_view, "Zoom to sites", self.zoom_sites)
@@ -697,7 +634,7 @@ class MainWindow(QMainWindow):
         tb.addAction(self.actRedo)
         tb.addSeparator()
         lab = QLabel("  Add line ")
-        lab.setStyleSheet("color:#5a6871; font-weight:600;")
+        lab.setStyleSheet("font-weight:600;")     # colour from the theme palette
         tb.addWidget(lab)
         for name, act in self._model_actions.items():
             tb.addAction(act)
@@ -1046,6 +983,44 @@ class MainWindow(QMainWindow):
 
     def _toggle_paddles(self, on):
         self.view.show_paddles(on)
+
+    # ------------------------------------------------------------- theme
+    def _build_theme_menu(self, parent):
+        from PySide6.QtGui import QActionGroup
+
+        m = parent.addMenu("&Theme")
+        self._theme_group = QActionGroup(self)
+        self._theme_group.setExclusive(True)
+        current = theme.active().name
+        for name in theme.names():
+            act = m.addAction(name)
+            act.setCheckable(True)
+            act.setChecked(name == current)
+            act.triggered.connect(lambda _=False, n=name: self._set_theme(n))
+            self._theme_group.addAction(act)
+
+    def _set_theme(self, name: str):
+        """Switch the colour theme live and remember it."""
+        from PySide6.QtWidgets import QApplication
+
+        theme.apply(QApplication.instance(), name)
+        QSettings("LARMOR", "app").setValue("theme", name)
+        # persistent hand-coloured label
+        self.exp_label.setStyleSheet(
+            f"color: {theme.active().accent}; font-weight: 600;")
+        # re-theme both plot canvases
+        self.view.apply_theme()
+        if hasattr(self.view2d, "apply_theme"):
+            self.view2d.apply_theme()
+        # rebuild the dynamic, series-coloured surfaces
+        if self.recipe:
+            try:
+                self.lines_table.rebuild(self.recipe, self.hidden)
+            except Exception:
+                pass
+            self.request_simulation()
+            self._update_paddles()
+        self.statusBar().showMessage(f"theme: {name}")
 
     # ------------------------------------------------------------- loading
     def open_file(self):
@@ -2610,7 +2585,7 @@ class MainWindow(QMainWindow):
             ctl.addWidget(b)
         ctl.addStretch(1)
         self.cofit_rmsd = QLabel("")
-        self.cofit_rmsd.setStyleSheet("color:#5a6871;")
+        self.cofit_rmsd.setStyleSheet("font-weight:600;")   # theme palette colour
         ctl.addWidget(self.cofit_rmsd)
         v.addLayout(ctl)
         # -- tie bar (rebuilt from the model's actual parameters) --
@@ -3321,17 +3296,18 @@ def main() -> int:
     from PySide6.QtGui import QFont, QIcon, QPixmap
     from PySide6.QtWidgets import QSplashScreen
 
-    pg.setConfigOptions(antialias=True, background="#fcfdfc", foreground="#37424a")
+    pg.setConfigOptions(antialias=True)
     app = QApplication(sys.argv)
     app.setApplicationName("LARMOR")
     app.setStyle("Fusion")            # deterministic rendering on any OS theme
-    app.setPalette(_light_palette())
     for family in ("Segoe UI", "Inter", "Roboto", "Helvetica Neue", "Arial"):
         f = QFont(family, 9)
         if f.exactMatch() or family == "Arial":
             app.setFont(f)
             break
-    app.setStyleSheet(APP_STYLE)
+    # apply the saved colour theme (palette + stylesheet + pyqtgraph config)
+    saved = QSettings("LARMOR", "app").value("theme", theme.DEFAULT)
+    theme.apply(app, saved if saved in theme.THEMES else theme.DEFAULT)
 
     icon = asset_path("larmor_logo.png")
     if icon:

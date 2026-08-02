@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import numpy as np
 import pyqtgraph as pg
+from larmor.desktop import theme
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QDialog, QHBoxLayout, QLabel, QPushButton,
     QTableWidget, QTableWidgetItem, QVBoxLayout,
@@ -34,7 +35,7 @@ class VtDialog(QDialog):
         self.table.setHorizontalHeaderLabels(["T (K)", "rate"])
         self.table.setMaximumWidth(220)
         body.addWidget(self.table)
-        self.plot = pg.PlotWidget(background="#fcfdfc")
+        self.plot = pg.PlotWidget(background=theme.active().plot_bg)
         self.plot.setLabel("bottom", "1000/T", units="1/K")
         self.plot.setLabel("left", "ln(rate)")
         body.addWidget(self.plot, 1)

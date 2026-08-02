@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import numpy as np
 import pyqtgraph as pg
+from larmor.desktop import theme
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QHBoxLayout, QLabel,
@@ -86,7 +87,7 @@ class QcpmgFieldsDialog(QDialog):
         row.addStretch(1)
         v.addLayout(row)
 
-        self.plot = pg.PlotWidget(background="#fcfdfc")
+        self.plot = pg.PlotWidget(background=theme.active().plot_bg)
         self.plot.setLabel("bottom", "1 / ν₀²", units="MHz⁻²")
         self.plot.setLabel("left", "δcg", units="ppm")
         self.plot.showGrid(x=True, y=True, alpha=0.15)

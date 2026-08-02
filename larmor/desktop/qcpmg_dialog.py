@@ -14,6 +14,7 @@ from pathlib import Path
 
 import numpy as np
 import pyqtgraph as pg
+from larmor.desktop import theme
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFileDialog, QHBoxLayout,
@@ -97,11 +98,11 @@ class QcpmgDialog(QDialog):
         # left: echo train + T2 decay
         left = QWidget(); lv = QVBoxLayout(left); lv.setContentsMargins(0, 0, 0, 0)
         lv.addWidget(QLabel("echo train (magnitude); red lines = period"))
-        self.p_fid = pg.PlotWidget(background="#fcfdfc")
+        self.p_fid = pg.PlotWidget(background=theme.active().plot_bg)
         self.p_fid.setLabel("bottom", "point"); self.p_fid.setMaximumHeight(180)
         lv.addWidget(self.p_fid)
         lv.addWidget(QLabel("echo-top decay → T2 (the evolution time)"))
-        self.p_t2 = pg.PlotWidget(background="#fcfdfc")
+        self.p_t2 = pg.PlotWidget(background=theme.active().plot_bg)
         self.p_t2.setLabel("bottom", "time", units="s")
         lv.addWidget(self.p_t2)
         self.t2lbl = QLabel(""); self.t2lbl.setStyleSheet(
@@ -111,7 +112,7 @@ class QcpmgDialog(QDialog):
         # right: spectrum
         right = QWidget(); rv = QVBoxLayout(right); rv.setContentsMargins(0, 0, 0, 0)
         rv.addWidget(QLabel("processed spectrum"))
-        self.p_spec = pg.PlotWidget(background="#fcfdfc")
+        self.p_spec = pg.PlotWidget(background=theme.active().plot_bg)
         self.p_spec.getPlotItem().invertX(True)
         self.p_spec.setLabel("bottom", "shift", units="ppm")
         rv.addWidget(self.p_spec)

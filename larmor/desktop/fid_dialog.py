@@ -11,6 +11,7 @@ from pathlib import Path
 
 import numpy as np
 import pyqtgraph as pg
+from larmor.desktop import theme
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QDialog, QDoubleSpinBox, QFileDialog, QHBoxLayout,
@@ -83,7 +84,7 @@ class FidDialog(QDialog):
         w2.addStretch(1)
         v.addLayout(w2)
 
-        self.plot = pg.PlotWidget(background="#fcfdfc")
+        self.plot = pg.PlotWidget(background=theme.active().plot_bg)
         self.plot.getPlotItem().invertX(True)
         self.plot.setLabel("bottom", "shift", units="ppm")
         self.plot.showGrid(x=True, y=True, alpha=0.1)
