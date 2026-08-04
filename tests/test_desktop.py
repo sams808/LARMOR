@@ -751,7 +751,12 @@ def test_fit_progress_bar_ticks(qapp, win):
     fw.progress.connect(lambda it, rms: ticks.append((it, rms)))
     fw.run()                                          # synchronous
     assert ticks and ticks[-1][0] >= 1
-    win._progress_start("t"); win._progress_tick(20, 0.01)
-    assert 0 < win.progress.value() < 100
+    # the bar runs as a busy/indeterminate marquee while fitting (no fixed % that
+    # can stick near the end); the iteration count shows in its text
+    win._progress_start("t")
+    assert (win.progress.minimum(), win.progress.maximum()) == (0, 0)
+    win._progress_tick(20, 0.01)
+    assert "iter 20" in win.progress.format()
     win._progress_end(True)
+    assert (win.progress.minimum(), win.progress.maximum()) == (0, 100)
     assert win.progress.value() == 100

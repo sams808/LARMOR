@@ -24,6 +24,7 @@ class SpectrumView(pg.PlotWidget):
     """Experiment + model + components + residual, with dmfit-style paddles."""
 
     add_requested = Signal(float, float)      # (ppm, amplitude) from a click
+    exit_add_mode = Signal()                  # right-click while placing lines
     marker_moved = Signal(int, float)         # legacy: (site index, new ppm)
     paddle_moved = Signal(int, float, float, float)   # index, pos, amp, fwhm
     paddle_released = Signal(int)
@@ -156,8 +157,16 @@ class SpectrumView(pg.PlotWidget):
     def set_add_mode(self, model_name: str | None):
         self._add_mode = model_name
         self.setCursor(Qt.CrossCursor if model_name else Qt.ArrowCursor)
+        # while placing lines, right-click exits the mode instead of opening the
+        # viewbox menu — so suppress that menu until the mode ends
+        self.getPlotItem().getViewBox().setMenuEnabled(model_name is None)
 
     def _on_click(self, ev):
+        if ev.button() == Qt.RightButton:
+            if self._add_mode is not None:      # right-click once to stop adding
+                ev.accept()
+                self.exit_add_mode.emit()
+            return
         if ev.button() != Qt.LeftButton:
             return
         vb = self.getPlotItem().getViewBox()

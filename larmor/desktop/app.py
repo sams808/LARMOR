@@ -40,8 +40,10 @@ from larmor.recipe import Recipe
 
 
 
-def _emit_progress(sig):
-    """An lmfit iter_cb that reports (iteration, residual RMS) to a Qt signal."""
+def _emit_progress(sig, should_stop=None):
+    """An lmfit iter_cb that reports (iteration, residual RMS) to a Qt signal.
+    Returning True aborts the minimisation — so if `should_stop()` is truthy the
+    fit halts at the current iteration (lmfit keeps the latest parameters)."""
     state = {"n": 0}
 
     def cb(params, it, resid, *args, **kws):
@@ -51,12 +53,24 @@ def _emit_progress(sig):
         except Exception:
             rms = float("nan")
         sig.emit(state["n"], rms)
-        return None                              # never abort the fit
+        return True if (should_stop is not None and should_stop()) else None
     return cb
 
 
-class FitWorker(QThread):
-    done = Signal(object)
+class _StoppableFit:
+    """Mixin: a stop flag + mode ('stop' keep / 'cancel' revert) for a fit thread."""
+
+    def _init_stop(self):
+        self._stop = False
+        self._stop_mode = ""
+
+    def request_stop(self, mode: str):
+        self._stop_mode = mode          # "stop" (keep) | "cancel" (revert)
+        self._stop = True
+
+
+class FitWorker(QThread, _StoppableFit):
+    done = Signal(object, str)          # (result, stop_mode)
     failed = Signal(str)
     progress = Signal(int, float)                # (iteration, residual rms)
 
@@ -64,6 +78,7 @@ class FitWorker(QThread):
         super().__init__()
         self.recipe_dict, self.ppm, self.amp, self.window = \
             recipe_dict, ppm, amp, window
+        self._init_stop()
 
     def run(self):
         try:
@@ -72,14 +87,15 @@ class FitWorker(QThread):
             recipe = Recipe.from_dict(self.recipe_dict)
             result = fitmod.fit(recipe, self.ppm, self.amp,
                                 window_ppm=self.window,
-                                iter_cb=_emit_progress(self.progress))
-            self.done.emit(result)
+                                iter_cb=_emit_progress(self.progress,
+                                                       lambda: self._stop))
+            self.done.emit(result, self._stop_mode)
         except Exception as exc:
             self.failed.emit(str(exc))
 
 
-class Fit2DWorker(QThread):
-    done = Signal(object)
+class Fit2DWorker(QThread, _StoppableFit):
+    done = Signal(object, str)
     failed = Signal(str)
     progress = Signal(int, float)
 
@@ -87,6 +103,7 @@ class Fit2DWorker(QThread):
         super().__init__()
         self.recipe_dict, self.data2d, self.method = \
             recipe_dict, data2d, method
+        self._init_stop()
 
     def run(self):
         try:
@@ -94,8 +111,9 @@ class Fit2DWorker(QThread):
 
             recipe = Recipe.from_dict(self.recipe_dict)
             result = twod.fit_2d(recipe, self.data2d, method=self.method,
-                                 iter_cb=_emit_progress(self.progress))
-            self.done.emit(result)
+                                 iter_cb=_emit_progress(self.progress,
+                                                        lambda: self._stop))
+            self.done.emit(result, self._stop_mode)
         except Exception as exc:
             self.failed.emit(str(exc))
 
@@ -174,6 +192,7 @@ class MainWindow(QMainWindow):
         self._build_progress()
 
         self.view.add_requested.connect(self.add_site_at)
+        self.view.exit_add_mode.connect(lambda: self._set_add_mode(None))
         self.view.paddle_moved.connect(self.on_paddle_moved)
         self.view.paddle_released.connect(self.on_paddle_released)
         self.view.file_dropped.connect(self.load_source)
@@ -319,8 +338,12 @@ class MainWindow(QMainWindow):
                     name if checked else None))
             m_models.addAction(a)
             self._model_actions[m["name"]] = a
+        self.m_apply = m_dec.addMenu("&Apply recipe  (a recent fit → this data)")
+        self._rebuild_apply_recipe()
         self._add(m_dec, "Add a line at every &peak…  (auto peak-pick)",
                   self.autopick_lines)
+        self._add(m_dec, "Add spinning &sidebands…  (of a fitted line)",
+                  self.add_sidebands)
         self._add(m_dec, "Add f&unction line…  (y = f(x; a,b,c,d))",
                   self.add_function_line)
         self._add(m_dec, "Add background &spectrum…  (fit another spectrum)",
@@ -365,6 +388,15 @@ class MainWindow(QMainWindow):
                                  checkable=True, checked=True)
         self.actPaddles = self._add(m_view, "Show paddles", self._toggle_paddles,
                                     checkable=True, checked=True)
+        self.actScrollNudge = QAction("Scroll &nudges fit values", self)
+        self.actScrollNudge.setCheckable(True)
+        self.actScrollNudge.setToolTip("when on, scrolling over a parameter cell "
+                                       "nudges its value (off by default so a "
+                                       "stray scroll never changes a fit)")
+        self.actScrollNudge.setChecked(bool(QSettings("LARMOR", "app").value(
+            "scrollNudge", False, type=bool)))
+        self.actScrollNudge.toggled.connect(self._toggle_scroll_nudge)
+        m_view.addAction(self.actScrollNudge)
         m_view.addSeparator()
         self._build_theme_menu(m_view)
         self._build_textsize_menu(m_view)
@@ -446,6 +478,132 @@ class MainWindow(QMainWindow):
         paths.insert(0, path)
         s.setValue("recent", paths[:12])
         self._rebuild_recent()
+
+    # -------- Apply recipe: re-use a recent fit's model on the open data ------
+    def _add_recent_recipe(self, path: str):
+        s = QSettings("LARMOR", "app")
+        paths = s.value("recentRecipes", []) or []
+        if isinstance(paths, str):
+            paths = [paths]
+        paths = [p for p in paths if p != path]
+        paths.insert(0, path)
+        s.setValue("recentRecipes", paths[:10])
+        self._rebuild_apply_recipe()
+
+    def _rebuild_apply_recipe(self):
+        if not hasattr(self, "m_apply"):
+            return
+        self.m_apply.clear()
+        paths = QSettings("LARMOR", "app").value("recentRecipes", []) or []
+        if isinstance(paths, str):
+            paths = [paths]
+        paths = [p for p in paths if Path(p).exists()][:10]
+        if not paths:
+            a = self.m_apply.addAction("(no recent recipes)")
+            a.setEnabled(False)
+            return
+        for p in paths:
+            a = self.m_apply.addAction(Path(p).name)
+            a.setToolTip(p)
+            a.triggered.connect(lambda _=False, path=p: self.apply_recipe(path))
+
+    def apply_recipe(self, path: str):
+        """Load a saved recipe and drop ITS lines onto the currently open data —
+        a starting model reused from a similar sample (the fit then refines)."""
+        if self.exp_ppm is None or not self.recipe:
+            self.statusBar().showMessage("open a spectrum first")
+            return
+        try:
+            d = Recipe.load(path).to_dict()
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.warning(self, "Apply recipe", f"could not load: {exc}")
+            return
+        if not d.get("sites"):
+            self.statusBar().showMessage("that recipe has no lines")
+            return
+        cur = self.recipe.get("nucleus", "")
+        if d.get("nucleus") and cur and d["nucleus"] != cur:
+            if QMessageBox.question(
+                    self, "Different nucleus",
+                    f"That recipe is {d['nucleus']} but the open spectrum is "
+                    f"{cur}. Apply its lines anyway?") != QMessageBox.Yes:
+                return
+        self.snapshot()
+        self.recipe["sites"] = d["sites"]
+        self.on_structure_changed()
+        self._add_recent_recipe(path)
+        self.statusBar().showMessage(
+            f"applied {len(d['sites'])} line(s) from {Path(path).name} — now Fit")
+
+    # -------- spinning sidebands: clone a line at pos ± n·νrot ---------------
+    def add_sidebands(self):
+        """Add lines at ± n·νrot of a fitted line (same parameters, shifted),
+        for models that do not already generate their own sideband manifold."""
+        import copy
+
+        from PySide6.QtWidgets import (
+            QComboBox, QDialog, QDialogButtonBox, QFormLayout, QSpinBox)
+
+        if not self.recipe or not self.recipe.get("sites"):
+            self.statusBar().showMessage("add or fit a line first")
+            return
+        nu_r = float(self.recipe.get("spin_rate_Hz", 0) or 0)
+        lar = float(self.recipe.get("larmor_frequency_MHz", 0) or 0)
+        if nu_r <= 0 or lar <= 0:
+            QMessageBox.warning(
+                self, "Spinning sidebands",
+                "A MAS spin rate and Larmor frequency are needed to place "
+                "sidebands — set them in the experiment parameters (double-click "
+                "the header).")
+            return
+        nur_ppm = nu_r / lar
+        skip = {"sidebands", "csa_mas", "csa_czjzek", "quad_first"}
+        eligible = [(i, s) for i, s in enumerate(self.recipe["sites"])
+                    if s.get("model") not in skip]
+        if not eligible:
+            QMessageBox.information(
+                self, "Spinning sidebands",
+                "No eligible lines — the present models already include their own "
+                "sidebands (use those, or add a Gauss/Lor, Czjzek, … line).")
+            return
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Add spinning sidebands")
+        form = QFormLayout(dlg)
+        combo = QComboBox()
+        for i, s in eligible:
+            combo.addItem(f"s{i} — {s.get('label') or s['model']}", i)
+        form.addRow("line", combo)
+        fwd = QSpinBox(); fwd.setRange(0, 20); fwd.setValue(1)
+        form.addRow("sidebands forward (+νrot)", fwd)
+        bwd = QSpinBox(); bwd.setRange(0, 20); bwd.setValue(1)
+        form.addRow("sidebands backward (−νrot)", bwd)
+        form.addRow(QLabel(f"spacing νrot = {nur_ppm:.3g} ppm  "
+                           f"({nu_r / 1000:.1f} kHz)"))
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.accepted.connect(dlg.accept); bb.rejected.connect(dlg.reject)
+        form.addRow(bb)
+        if dlg.exec() != QDialog.Accepted:
+            return
+
+        base = self.recipe["sites"][combo.currentData()]
+        bname = base.get("label") or base["model"]
+        self.snapshot()
+        added = []
+        for sign, cnt in ((1, fwd.value()), (-1, bwd.value())):
+            for k in range(1, cnt + 1):
+                s = copy.deepcopy(base)
+                s["label"] = f"{bname}{sign * k:+d}sb"
+                pos = s["params"]["isotropic_chemical_shift_ppm"]
+                pos["value"] = float(pos["value"] + sign * k * nur_ppm)
+                pos["stderr"] = None
+                added.append(s)
+        if not added:
+            return
+        self.recipe["sites"].extend(added)
+        self.on_structure_changed()
+        self.statusBar().showMessage(
+            f"added {len(added)} sideband line(s) of {bname} at ±νrot")
 
     def _active_plot_widget(self):
         return (self.view2d.glw if self.central_stack.currentWidget() is self.view2d
@@ -674,6 +832,27 @@ class MainWindow(QMainWindow):
             a.setToolTip(tip)
             a.triggered.connect(slot)
             sb.addAction(a)
+        sb.addSeparator()
+        # a short-labelled sidebar mirror of View ▸ Scroll nudges fit values
+        self.sbScroll = QAction("Scroll✎", self)
+        self.sbScroll.setCheckable(True)
+        self.sbScroll.setChecked(self.actScrollNudge.isChecked())
+        self.sbScroll.setToolTip(self.actScrollNudge.toolTip())
+        self.sbScroll.toggled.connect(self.actScrollNudge.setChecked)
+        sb.addAction(self.sbScroll)
+
+    def _toggle_scroll_nudge(self, on: bool):
+        from larmor.desktop import table as _table
+
+        _table.set_scroll_nudge(on)
+        QSettings("LARMOR", "app").setValue("scrollNudge", bool(on))
+        if getattr(self, "sbScroll", None) is not None:
+            self.sbScroll.setChecked(on)            # keep the sidebar in sync
+        if getattr(self, "lines_table", None) and self.recipe:
+            self.lines_table.rebuild(self.recipe, self.hidden)   # refresh the hint
+        self.statusBar().showMessage(
+            "scroll over a fit value to nudge it: "
+            + ("ON" if on else "off (default)"))
 
     def _build_explorer_dock(self):
         from larmor.desktop.explorer import ExplorerPanel
@@ -1049,9 +1228,11 @@ class MainWindow(QMainWindow):
 
         theme.apply(QApplication.instance(), name)
         QSettings("LARMOR", "app").setValue("theme", name)
-        # persistent hand-coloured label
+        # persistent hand-coloured label + the status-bar progress bar
         self.exp_label.setStyleSheet(
             f"color: {theme.active().accent}; font-weight: 600;")
+        if hasattr(self, "progress"):
+            self._style_progress()
         # re-theme both plot canvases
         self.view.apply_theme()
         if hasattr(self.view2d, "apply_theme"):
@@ -2209,6 +2390,8 @@ class MainWindow(QMainWindow):
         self._fit_worker.progress.connect(self._progress_tick)
         self._fit_worker.done.connect(self._fit_done)
         self._fit_worker.failed.connect(self._fit_failed)
+        self._active_fit_worker = self._fit_worker
+        self._show_fit_buttons(True)
         self._fit_worker.start()
 
     # ------------------------------------------------------------- 2D fit
@@ -2239,10 +2422,17 @@ class MainWindow(QMainWindow):
         self._fit2d_worker.progress.connect(self._progress_tick)
         self._fit2d_worker.done.connect(self._fit2d_done)
         self._fit2d_worker.failed.connect(self._fit_failed)
+        self._active_fit_worker = self._fit2d_worker
+        self._show_fit_buttons(True)
         self._fit2d_worker.start()
 
-    def _fit2d_done(self, result):
+    def _fit2d_done(self, result, stop_mode: str = ""):
+        self._active_fit_worker = None
         self.lines_table.btnFit.setEnabled(True)
+        if stop_mode == "cancel":
+            self._progress_end(False)
+            self.statusBar().showMessage("2D fit cancelled — parameters unchanged")
+            return
         self._progress_end(True)
         self.recipe = result.recipe.to_dict()
         self.lines_table.rebuild(self.recipe, self.hidden)
@@ -2263,6 +2453,7 @@ class MainWindow(QMainWindow):
         self._persist_session()
 
     def _fit_failed(self, msg: str):
+        self._active_fit_worker = None
         self.lines_table.btnFit.setEnabled(True)
         self._progress_end(False)
         QMessageBox.warning(self, "Fit failed", msg)
@@ -2290,8 +2481,14 @@ class MainWindow(QMainWindow):
         except Exception:
             return None
 
-    def _fit_done(self, result):
+    def _fit_done(self, result, stop_mode: str = ""):
+        self._active_fit_worker = None
         self.lines_table.btnFit.setEnabled(True)
+        if stop_mode == "cancel":
+            # the worker fitted a COPY, so self.recipe is still the pre-fit state
+            self._progress_end(False)
+            self.statusBar().showMessage("fit cancelled — parameters unchanged")
+            return
         self._last_lmfit = getattr(result, "lmfit_result", None)   # for correlations
         self._progress_end(True)
         self.recipe = result.recipe.to_dict()
@@ -2321,8 +2518,10 @@ class MainWindow(QMainWindow):
         self.results_summary.setText("   ·   ".join(bits))
         self.report.setPlainText(result.report)
         self.statusBar().showMessage(
-            "fit done" + ("  ⚠ parameters at bounds — check constraints"
-                          if result.at_bounds else ""))
+            ("fit stopped — kept the latest iteration values"
+             if stop_mode == "stop" else "fit done")
+            + ("  ⚠ parameters at bounds — check constraints"
+               if result.at_bounds else ""))
         self.run_quantify(show=False)
         self._persist_session()
 
@@ -2529,6 +2728,8 @@ class MainWindow(QMainWindow):
                     "location. LARMOR never writes next to raw data.")
                 return
         Recipe.from_dict(self.recipe).save(target)
+        self._add_recent_recipe(str(target))
+        self.statusBar().showMessage(f"recipe saved — {target.name}")
         self.statusBar().showMessage(f"recipe saved: {target}")
 
     def _guard_write(self, target: Path) -> bool:
@@ -2734,40 +2935,73 @@ class MainWindow(QMainWindow):
         self.progress.setRange(0, 100)
         self.progress.setFixedWidth(340)
         self.progress.setTextVisible(True)
-        self.progress.setStyleSheet("""
-            QProgressBar {
-                border: 1px solid #b9c4bd; border-radius: 7px;
-                background: #eef2ef; height: 16px;
-                color: #16202a; font-size: 11px; text-align: center;
-            }
-            QProgressBar::chunk {
-                border-radius: 6px;
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #16a3a3, stop:0.55 #2fbf8f, stop:1 #7fd66a);
-            }
-        """)
+        self._style_progress()
         self.progress.setVisible(False)
         self.statusBar().addPermanentWidget(self.progress)
         self._prog_label = "fitting"
+        # interrupt a running fit: keep the latest iteration, or revert entirely
+        self._active_fit_worker = None
+        self.btnStopFit = QPushButton("⏹ Stop (keep)")
+        self.btnStopFit.setToolTip("stop the optimiser now and keep the latest "
+                                   "iteration's parameter values")
+        self.btnStopFit.clicked.connect(lambda: self._interrupt_fit("stop"))
+        self.btnCancelFit = QPushButton("✖ Cancel (revert)")
+        self.btnCancelFit.setToolTip("abort the fit and restore the parameters "
+                                     "to what they were before it started")
+        self.btnCancelFit.clicked.connect(lambda: self._interrupt_fit("cancel"))
+        for b in (self.btnStopFit, self.btnCancelFit):
+            b.setVisible(False)
+            self.statusBar().addPermanentWidget(b)
+
+    def _show_fit_buttons(self, on: bool):
+        self.btnStopFit.setVisible(on)
+        self.btnCancelFit.setVisible(on)
+
+    def _interrupt_fit(self, mode: str):
+        w = self._active_fit_worker
+        if w is not None and w.isRunning():
+            w.request_stop(mode)
+            self.btnStopFit.setEnabled(False)
+            self.btnCancelFit.setEnabled(False)
+            self.statusBar().showMessage(
+                "stopping the fit — keeping the latest values…" if mode == "stop"
+                else "cancelling the fit — reverting…")
+
+    def _style_progress(self):
+        t = theme.active()
+        self.progress.setStyleSheet(f"""
+            QProgressBar {{
+                border: 1px solid {t.border}; border-radius: 7px;
+                background: {t.base}; height: 16px;
+                color: {t.text}; font-size: 11px; text-align: center;
+            }}
+            QProgressBar::chunk {{
+                border-radius: 6px;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #16a3a3, stop:0.55 #2fbf8f, stop:1 #7fd66a);
+            }}
+        """)
 
     def _progress_start(self, label: str):
         self._prog_label = label
-        self.progress.setValue(0)
-        self.progress.setFormat(f"{label} — starting…  %p%")
+        # a fit's iteration count has no known total, so run the bar as a busy
+        # (indeterminate) marquee — it never sticks near the end. The iteration
+        # count and residual in the text give the real feedback.
+        self.progress.setRange(0, 0)
+        self.progress.setFormat(f"{label} — starting…")
         self.progress.setVisible(True)
         QApplication.processEvents()
 
     def _progress_tick(self, it: int, rms: float):
-        """Iterations have no known total, so approach 100 % asymptotically —
-        the bar always advances but never claims to be finished early."""
-        pct = int(min(97.0, 100.0 * (1.0 - np.exp(-max(it, 0) / 35.0))))
-        self.progress.setValue(pct)
-        self.progress.setFormat(
-            f"{self._prog_label} — iter {it} · rms {rms:.3g}   %p%")
+        self.progress.setFormat(f"{self._prog_label} — iter {it} · rms {rms:.3g}")
 
     def _progress_end(self, ok: bool = True):
+        self.progress.setRange(0, 100)
         self.progress.setValue(100)
         self.progress.setFormat(("done" if ok else "stopped") + "  %p%")
+        self._show_fit_buttons(False)
+        self.btnStopFit.setEnabled(True)
+        self.btnCancelFit.setEnabled(True)
         QTimer.singleShot(1200, lambda: self.progress.setVisible(False))
 
     # short, model-aware labels for the tie bar

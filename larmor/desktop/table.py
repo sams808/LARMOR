@@ -16,6 +16,20 @@ from larmor import cellparse
 from larmor.desktop import theme
 from larmor.desktop.plot import site_color
 
+#: whether scrolling over a parameter cell nudges its value. Off by default so a
+#: stray scroll never silently changes a fit; toggled from the app (View menu /
+#: sidebar), persisted in QSettings.
+_SCROLL_NUDGE = False
+
+
+def set_scroll_nudge(on: bool) -> None:
+    global _SCROLL_NUDGE
+    _SCROLL_NUDGE = bool(on)
+
+
+def scroll_nudge_enabled() -> bool:
+    return _SCROLL_NUDGE
+
 
 def _param_unit(model: str, key: str) -> str:
     """The declared unit of a parameter (from the model registry)."""
@@ -196,8 +210,9 @@ class _Cell(QWidget):
         self.p["vary"] = not checked
         self.pinned.emit()
 
-    def wheelEvent(self, ev):  # scroll on the cell nudges the value
-        if self.p.get("expr"):
+    def wheelEvent(self, ev):  # scroll on the cell nudges the value (opt-in)
+        if not scroll_nudge_enabled() or self.p.get("expr"):
+            ev.ignore()                      # let the table scroll instead
             return
         step = (abs(self.p["value"]) or 1.0) * (
             0.1 if ev.modifiers() & Qt.ShiftModifier else 0.02)
@@ -259,8 +274,10 @@ class LinesTable(QWidget):
         self.hint = QLabel(
             "Type in a cell:  a value  ·  a bound  [0..100]  ·  a link to "
             "another line by its letter:  A  ·  A+20  ·  A+20kHz (→ppm)  ·  "
-            "0.5B  ·  A+20 [50..80].   pin ☑ = fixed   ·   scroll = nudge   ·   "
-            "right-click for menus")
+            "0.5B  ·  A+20 [50..80].   pin ☑ = fixed   ·   "
+            + ("scroll = nudge" if scroll_nudge_enabled()
+               else "scroll-nudge off (View ▸ Scroll edits values)")
+            + "   ·   right-click for menus")
         self.hint.setStyleSheet(f"color: {theme.active().text_dim}; font-size: 10px; padding: 2px 4px;")
         self.hint.setWordWrap(True)
         v.addWidget(self.hint)
