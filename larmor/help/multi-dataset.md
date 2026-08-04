@@ -121,6 +121,34 @@ The columns are model-aware (Czjzek sites report σ and the field-independent
 the same integral-over-the-window quantification as **Report** (F6). It is the
 fastest route from "a folder of fits" to a table you can paste into a manuscript.
 
+## 6 · Batch fit — one shared model, many spectra (1D)
+
+For a **series measured the same way** (a composition series, a time course),
+you often want *one* set of lineshape/position parameters describing every
+spectrum, with only the **amplitudes** free — the sites are the same, their
+populations change. **Ctrl/Shift-click** the spectra in the Explorer and press
+**Batch fit selected…** (or *Tools ▸ Batch fit spectra*).
+
+1. **One shared model.** The batch uses a single model for all spectra — your
+   current fit, or a recipe you load in the dialog. Every parameter **except
+   amplitude** is tied across the spectra, so they are constrained by all the
+   data together (far more robust than fitting each alone). Amplitudes stay free
+   per spectrum.
+2. **See them all.** The spectra show in a **3×3 grid** with tabs (page through
+   10–15 at a time); each cell overlays its model and reports its RMSD, updating
+   live after the fit. **Fit (shared)** runs it — interrupt with **Stop** if
+   needed.
+3. **Release, slightly.** Optionally tick parameters to **release**: they come
+   off the shared tie and may drift by **±X %** around the shared value,
+   independently per spectrum (a relaxation — e.g. let δ_iso wander ±5 % while
+   widths stay locked). **Release fit** runs this second stage.
+4. **Save.** **Save fits & table…** writes one `.recipe.json` per spectrum plus a
+   `batch_table.csv` of the shared and per-spectrum values. (For a fuller
+   publication table across independent fits, see the **Batch fit report** tool.)
+
+It builds on the same co-fit engine (§3), so the shared parameters carry full
+uncertainties.
+
 ## References
 
 - D. Massiot *et al.*, "Modelling one- and two-dimensional solid-state NMR

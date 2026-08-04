@@ -411,6 +411,8 @@ class MainWindow(QMainWindow):
                   self.open_integrals)
         self._add(m_tools, "&Batch fit report…  (publication table + plots)",
                   self.run_batch_report)
+        self._add(m_tools, "Batch &fit spectra…  (one shared model, 1D)",
+                  lambda: self.explorer._batch_clicked())
         self._add(m_tools, "Relaxation / series (T1, T2)…", self.open_satrec)
         self._add(m_tools, "Per-site relaxation…  (uses the current fit)",
                   self.open_per_site_relaxation)
@@ -863,6 +865,7 @@ class MainWindow(QMainWindow):
         self.explorer = ExplorerPanel()
         self._proj_pick_axis = None      # HMQC: awaiting an Explorer pick
         self.explorer.open_requested.connect(self._explorer_open)
+        self.explorer.batch_requested.connect(self.run_batch_fit)
         self.explorer_dock.setWidget(self.explorer)
         self.explorer_dock.setMinimumWidth(230)
         self.addDockWidget(Qt.LeftDockWidgetArea, self.explorer_dock)
@@ -3558,6 +3561,18 @@ class MainWindow(QMainWindow):
 
         start = str(QSettings("LARMOR", "app").value("lastDir", "") or "")
         BatchReportDialog(self, start).exec()
+
+    def run_batch_fit(self, paths):
+        """Batch-fit several spectra (from the Explorer) with one shared model."""
+        paths = [p for p in (paths or []) if p]
+        if len(paths) < 2:
+            self.statusBar().showMessage(
+                "Ctrl/Shift-select at least two spectra in the Explorer first")
+            return
+        from larmor.desktop.batchfit_dialog import BatchFitDialog
+
+        model = self.recipe if (self.recipe and self.recipe.get("sites")) else None
+        BatchFitDialog(self, paths, model).exec()
 
     # ------------------------------------------------------------- session
     def _persist_session(self):

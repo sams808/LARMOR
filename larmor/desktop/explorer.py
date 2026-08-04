@@ -48,6 +48,7 @@ _NUC_COLOR = {
 
 class ExplorerPanel(QWidget):
     open_requested = Signal(str)        # openable data path
+    batch_requested = Signal(list)      # openable paths for a batch fit
 
     def __init__(self):
         super().__init__()
@@ -74,9 +75,17 @@ class ExplorerPanel(QWidget):
         self.tree = QTreeWidget()
         self.tree.setHeaderHidden(True)
         self.tree.setIndentation(14)
+        self.tree.setSelectionMode(QTreeWidget.ExtendedSelection)   # Ctrl/Shift
         self.tree.itemActivated.connect(self._activated)
         self.tree.itemExpanded.connect(self._expanded)
         v.addWidget(self.tree, 1)
+
+        self.btnBatch = QPushButton("Batch fit selected…")
+        self.btnBatch.setToolTip("Ctrl/Shift-click several spectra above, then "
+                                 "batch-fit them with one shared model "
+                                 "(amplitudes free per spectrum)")
+        self.btnBatch.clicked.connect(self._batch_clicked)
+        v.addWidget(self.btnBatch)
 
         # a toggle at the bottom: reveal each experiment's pdata proc folders and,
         # under a proc, the fits saved in it (pick the proc you fit on)
@@ -281,6 +290,21 @@ class ExplorerPanel(QWidget):
         openable = item.data(0, _ROLE_OPEN)
         if openable:
             self.open_requested.emit(openable)
+
+    def _batch_clicked(self):
+        # gather the openable spectra from the selected rows (skip fit files and
+        # plain folders); de-duplicate, keep tree order
+        paths, seen = [], set()
+        for it in self.tree.selectedItems():
+            op = it.data(0, _ROLE_OPEN)
+            if not op or op in seen:
+                continue
+            low = op.lower()
+            if low.endswith((".recipe.json", ".fxml", ".fxmla")):
+                continue                       # a fit, not a spectrum
+            paths.append(op)
+            seen.add(op)
+        self.batch_requested.emit(paths)
 
     def _apply_filter(self, text: str):
         text = text.strip().lower()

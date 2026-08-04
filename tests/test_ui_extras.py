@@ -102,6 +102,44 @@ class _FakeSig:
         pass
 
 
+def test_batch_fit_dialog_loads_grid_and_fits(qapp, tmp_path):
+    from larmor.recipe import Recipe, SiteModel, Param
+    from larmor import engine
+    from larmor.desktop.batchfit_dialog import BatchFitDialog, _BatchWorker
+
+    x = np.linspace(-20, 60, 600)
+    paths = []
+    for k, (sh, amp) in enumerate(((0.0, 100), (0.3, 70))):
+        tr = Recipe(nucleus="11B", larmor_frequency_MHz=160.0, spin_rate_Hz=0.0,
+                    sites=[SiteModel(model="gauss_lor", label="A", params={
+                        "isotropic_chemical_shift_ppm": Param(15.0 + sh),
+                        "shift_fwhm_ppm": Param(6.0), "amplitude": Param(amp),
+                        "gl": Param(1.0, vary=False)})])
+        _, m, _ = engine.simulate(tr, exp_ppm=x)
+        d = m + np.random.default_rng(k).normal(0, 1.5, x.size)
+        p = tmp_path / f"s{k}.csv"
+        with open(p, "w", encoding="utf-8") as f:
+            f.write("# nucleus = 11B\n# larmor_MHz = 160\n")
+            for xi, yi in zip(x, d):
+                f.write(f"{xi:.4f} {yi:.4f}\n")
+        paths.append(str(p))
+    model = {"nucleus": "11B", "larmor_frequency_MHz": 160.0, "spin_rate_Hz": 0.0,
+             "sites": [{"model": "gauss_lor", "label": "A", "params": {
+                 "isotropic_chemical_shift_ppm": {"value": 14.0, "min": 0, "max": 30},
+                 "shift_fwhm_ppm": {"value": 5.0, "min": 0.1},
+                 "amplitude": {"value": 80.0, "min": 0},
+                 "gl": {"value": 1.0, "vary": False}}}]}
+    dlg = BatchFitDialog(None, paths, model)
+    assert len(dlg._data) == 2 and dlg.tabs.count() == 1
+    assert "isotropic_chemical_shift_ppm" in dlg._rel_checks
+    w = _BatchWorker(dlg._entries(), (), 0.1)
+    w.done.connect(dlg._done)
+    w.run()                                   # synchronous
+    assert dlg._result is not None
+    assert dlg.btnSave.isEnabled()
+    assert dlg._cells[0]["model"].xData is not None
+
+
 def test_show_fits_toggle_adds_and_removes_proc_layer(qapp, tmp_path):
     from larmor.desktop import explorer
     panel = explorer.ExplorerPanel()
