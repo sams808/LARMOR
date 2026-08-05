@@ -1199,7 +1199,7 @@ class MainWindow(QMainWindow):
             return
         from larmor.desktop.dialogs import ExperimentDialog
 
-        self.snapshot()
+        self.snapshot(with_axis=True)         # an SR change re-references the axis
         old_sr = self.recipe.get("sr_hz", 0.0) or 0.0
         dlg = ExperimentDialog(self, self.recipe)
         if dlg.exec():
@@ -2208,10 +2208,32 @@ class MainWindow(QMainWindow):
         self.on_structure_changed()
 
     # ------------------------------------------------------------- undo
-    def snapshot(self):
+    def _capture_state(self, with_axis=False) -> dict:
+        snap = {"recipe": json.dumps(self.recipe)}
+        if with_axis and self.exp_ppm is not None and len(self.exp_ppm):
+            snap["ppm"] = np.array(self.exp_ppm, float)
+            snap["amp"] = np.array(self.exp_amp, float)
+            snap["base"] = self._proc_base
+        return snap
+
+    def _restore_state(self, snap):
+        if isinstance(snap, str):                 # legacy recipe-only snapshot
+            self.recipe = json.loads(snap)
+            return
+        self.recipe = json.loads(snap["recipe"])
+        if "ppm" in snap:                         # calibrate/SR changed the axis
+            self.exp_ppm = snap["ppm"]
+            self.exp_amp = snap["amp"]
+            self._proc_base = snap["base"]
+            self.view.set_experiment(self.exp_ppm, self.exp_amp)
+            self._update_exp_label()
+
+    def snapshot(self, with_axis=False):
+        """Push an undo state. ``with_axis=True`` also captures the experiment
+        axis so an axis-changing op (calibrate / SR) is fully reversible."""
         if self.recipe is None:
             return
-        self.undo_stack.append(json.dumps(self.recipe))
+        self.undo_stack.append(self._capture_state(with_axis))
         if len(self.undo_stack) > 60:
             self.undo_stack.pop(0)
         self.redo_stack.clear()
@@ -2221,15 +2243,19 @@ class MainWindow(QMainWindow):
     def undo(self):
         if not self.undo_stack:
             return
-        self.redo_stack.append(json.dumps(self.recipe))
-        self.recipe = json.loads(self.undo_stack.pop())
+        tgt = self.undo_stack.pop()
+        self.redo_stack.append(
+            self._capture_state(with_axis=isinstance(tgt, dict) and "ppm" in tgt))
+        self._restore_state(tgt)
         self.on_structure_changed()
 
     def redo(self):
         if not self.redo_stack:
             return
-        self.undo_stack.append(json.dumps(self.recipe))
-        self.recipe = json.loads(self.redo_stack.pop())
+        tgt = self.redo_stack.pop()
+        self.undo_stack.append(
+            self._capture_state(with_axis=isinstance(tgt, dict) and "ppm" in tgt))
+        self._restore_state(tgt)
         self.on_structure_changed()
 
     # ------------------------------------------------------------- sites
@@ -3022,6 +3048,7 @@ class MainWindow(QMainWindow):
         delta = float(target) - float(peak_ppm)
         if abs(delta) < 1e-12:
             return
+        self.snapshot(with_axis=True)         # calibration is now undoable
         self.exp_ppm = self.exp_ppm + delta
         if self._proc_base is not None:
             self._proc_base = (self._proc_base[0] + delta, self._proc_base[1])
