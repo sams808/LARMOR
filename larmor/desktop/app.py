@@ -2570,6 +2570,15 @@ class MainWindow(QMainWindow):
             self.snapshot()
             self.recipe["sites"].pop(idx)
             self.hidden.discard(idx)
+            # remap the hidden set and every constraint (expr) that referenced a
+            # site by index, so a link like "E = D+5.3" never silently becomes a
+            # self-reference "E = E+5.3" (which recurses forever at fit time)
+            self.hidden = {i - 1 if i > idx else i for i in self.hidden}
+            dropped = self._remap_exprs_after_delete(idx)
+            if dropped:
+                self.statusBar().showMessage(
+                    "removed a line — dropped now-invalid constraint(s): "
+                    + ", ".join(dropped))
         elif action == "duplicate":
             self.snapshot()
             copy = json.loads(json.dumps(self.recipe["sites"][idx]))
@@ -2577,10 +2586,37 @@ class MainWindow(QMainWindow):
             for p in copy["params"].values():
                 p["stderr"] = None
             self.recipe["sites"].append(copy)
+        elif action in ("move_up", "move_down"):
+            self._move_site(idx, -1 if action == "move_up" else +1)
+            return
         elif action == "visibility":
             (self.hidden.discard(idx) if idx in self.hidden
              else self.hidden.add(idx))
         self.on_structure_changed()
+
+    def _move_site(self, idx: int, delta: int):
+        """Reorder a line in the table (user comfort), remapping every constraint
+        reference and the hidden set so links keep pointing at the right lines."""
+        from larmor.constraints_util import remap_exprs_after_move
+        sites = self.recipe["sites"]
+        j = idx + delta
+        if not (0 <= idx < len(sites) and 0 <= j < len(sites)):
+            return
+        self.snapshot()
+        sites[idx], sites[j] = sites[j], sites[idx]
+        old_to_new = {i: i for i in range(len(sites))}
+        old_to_new[idx], old_to_new[j] = j, idx
+        remap_exprs_after_move(sites, old_to_new)
+        self.hidden = {old_to_new[i] for i in self.hidden}
+        self.on_structure_changed()
+
+    def _remap_exprs_after_delete(self, deleted_idx: int) -> list:
+        """After removing site ``deleted_idx``, fix every remaining constraint's
+        ``s<k>.param`` references: drop any that pointed at the deleted site or
+        would become a self-reference, and shift ``k>deleted_idx`` down by one.
+        Returns the labels of dropped constraints."""
+        from larmor.constraints_util import remap_exprs_after_delete
+        return remap_exprs_after_delete(self.recipe.get("sites", []), deleted_idx)
 
     def on_structure_changed(self):
         self.lines_table.rebuild(self.recipe, self.hidden)

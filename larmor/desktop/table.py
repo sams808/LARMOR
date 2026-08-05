@@ -429,11 +429,18 @@ class LinesTable(QWidget):
             menu.addSeparator()
         a_vis = QAction("Show / hide on plot", menu)
         a_vis.triggered.connect(lambda: self.structure.emit(row, "visibility"))
+        n_rows = self.table.rowCount()
+        a_up = QAction("Move line up", menu)
+        a_up.setEnabled(row > 0)
+        a_up.triggered.connect(lambda: self.structure.emit(row, "move_up"))
+        a_down = QAction("Move line down", menu)
+        a_down.setEnabled(row < n_rows - 1)
+        a_down.triggered.connect(lambda: self.structure.emit(row, "move_down"))
         a_dup = QAction("Duplicate line", menu)
         a_dup.triggered.connect(lambda: self.structure.emit(row, "duplicate"))
         a_del = QAction("Remove line", menu)
         a_del.triggered.connect(lambda: self.structure.emit(row, "remove"))
-        for a in (a_vis, a_dup, a_del):
+        for a in (a_vis, a_up, a_down, a_dup, a_del):
             menu.addAction(a)
         return menu
 
