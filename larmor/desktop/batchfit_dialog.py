@@ -185,7 +185,7 @@ class BatchFitDialog(QDialog):
 
         # ---- release panel (per-parameter) ----
         rel = QHBoxLayout()
-        rel.addWidget(QLabel("Release per spectrum:"))
+        rel.addWidget(QLabel("Release per spectrum (else held fixed):"))
         self._relbox = QScrollArea()
         self._relbox.setWidgetResizable(True)
         self._relbox.setMaximumHeight(56)
@@ -325,7 +325,10 @@ class BatchFitDialog(QDialog):
             {"sites": self._model_sites, "nucleus": "", "larmor_frequency_MHz": 0})])
         for pn in names:                             # ALL lineshape params (incl gl)
             c = QCheckBox(PARAM_LABELS.get(pn, pn))
-            c.setToolTip(f"let {pn} drift ±{self.frac.value():.0f}% per spectrum")
+            c.setToolTip(f"off: {pn} is held fixed at the recipe value. "
+                         f"on: {pn} is fit per spectrum, ±{self.frac.value():.0f}% "
+                         "around the recipe value")
+            c.toggled.connect(lambda _=False: self.status.setText(self._model_status()))
             self._rel_checks[pn] = c
             self._rellay.addWidget(c)
         self._rellay.addStretch(1)
@@ -344,17 +347,21 @@ class BatchFitDialog(QDialog):
     # ------------------------------------------------------------------ status
     def _model_status(self) -> str:
         if not self._model_sites:
-            return ("no shared model yet — load a recipe (or fit one spectrum "
-                    "first, then reopen from a fit)")
+            return ("no model yet — load a recipe (or fit one spectrum first, "
+                    "then reopen from a fit)")
         nuclei = {d["nucleus"] for d in self._data if d["nucleus"]}
         warn = ("  ⚠ mixed nuclei" if len(nuclei) > 1 else "")
+        rel = [pn for pn, c in getattr(self, "_rel_checks", {}).items()
+               if c.isChecked()]
+        rtxt = (" · releasing " + ", ".join(rel)) if rel else ""
         return (f"{len(self._data)} spectra · model: {len(self._model_sites)} "
-                f"line(s) · sharing all but amplitude" + warn)
+                f"line(s) · everything fixed at the recipe except amplitude"
+                + rtxt + warn)
 
     def _model_label(self) -> str:
         return ("model: none — load a recipe" if not self._model_sites
-                else f"model: {len(self._model_sites)} line(s), sharing all "
-                     "parameters except amplitude")
+                else f"model: {len(self._model_sites)} line(s) · held fixed except "
+                     "amplitude (tick Release to let a parameter move)")
 
     def _update_fit_enabled(self):
         ok = bool(self._model_sites) and len(self._data) >= 2

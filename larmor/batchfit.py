@@ -90,61 +90,56 @@ def _relax_bounds(value: float, frac: float, cur_min, cur_max):
 def batch_fit(entries: list[tuple], *, share: tuple[str, ...] | None = None,
               release: tuple[str, ...] = (), release_frac: float = 0.1,
               iter_cb=None, tol=None) -> BatchFitResult:
-    """Fit one shared model to several 1D spectra (amplitudes free per spectrum).
+    """Apply one recipe to several 1D spectra, fitting **only the amplitudes**
+    (per spectrum), unless parameters are explicitly released.
 
-    `entries` is a list of ``(recipe, ppm, amp, window)`` — every recipe must
-    have the same sites/models (apply one model to all). `share` defaults to
-    *all but amplitude*. If `release` is given, those parameters are then let
-    loose by ±`release_frac` around their shared value, per spectrum.
+    ``entries`` is a list of ``(recipe, ppm, amp, window)`` — every recipe carries
+    the same model. The loaded recipe is treated as the answer for lineshape: every
+    parameter is **held fixed at its recipe value except the amplitude**, which is
+    always free per spectrum (and may reach zero). Parameters named in ``release``
+    are additionally freed and fit **per spectrum**, allowed to drift by
+    ±``release_frac`` around their recipe value. (``share`` is accepted for
+    backward compatibility and ignored.)
     """
     if len(entries) < 2:
         raise ValueError("batch fit needs at least two spectra")
     recipes = [e[0] for e in entries]
     windows = [e[3] for e in entries]
-    # a batch fit's whole point is per-spectrum amplitudes that may reach ZERO
-    # (a line can be absent in some spectra) — so free every amplitude and allow
-    # zero, OVERRIDING any lock or positive lower bound carried by the recipe
+    released = tuple(release)
+
+    # amplitudes: always free per spectrum, allowed to reach zero (a line can be
+    # absent in some spectra) — overriding any recipe lock/positive lower bound
     free_amplitudes(recipes)
-    if share is None:
-        share = all_but_amplitude(recipes)
+    # every OTHER parameter is FIXED at the recipe value, except those the user
+    # released (which are fit per spectrum within ±release_frac of the recipe value)
+    for r in recipes:
+        for s in r.sites:
+            for pn, p in s.params.items():
+                if pn == "amplitude" or getattr(p, "expr", None):
+                    continue                     # amplitude free; links follow master
+                if pn in released:
+                    p.vary = True
+                    p.min, p.max = _relax_bounds(float(p.value), release_frac,
+                                                 p.min, p.max)
+                else:
+                    p.vary = False               # held at the recipe value
 
     def _conv(recs):
         return [(recs[k], (np.asarray(entries[k][1], float),
                            np.asarray(entries[k][2], float)))
                 for k in range(len(entries))]
 
-    # ---- stage 1: shared shape, free amplitudes ----
-    res = fit_cofit(_conv(recipes), share=share, windows=windows,
+    # nothing is tied across spectra: amplitudes (and any released params) are
+    # optimised independently per spectrum; the fixed shape is the recipe's
+    res = fit_cofit(_conv(recipes), share=(), windows=windows,
                     iter_cb=iter_cb, tol=tol)
-    final_share, released = share, ()
 
-    # ---- stage 2 (optional): release chosen parameters, slightly, per spectrum
-    released = tuple(p for p in release if p in share)
-    if released:
-        share2 = tuple(p for p in share if p not in released)
-        master = res.recipes[0]
-        for i, site in enumerate(master.sites):
-            for p in released:
-                mp = site.params.get(p)
-                if mp is None or mp.expr:
-                    continue
-                v = float(mp.value)
-                for rec in res.recipes:
-                    pp = rec.sites[i].params.get(p)
-                    if pp is None or pp.expr:
-                        continue
-                    pp.value = v
-                    pp.min, pp.max = _relax_bounds(v, release_frac, pp.min, pp.max)
-                    pp.vary = True
-        res = fit_cofit(_conv(res.recipes), share=share2, windows=windows,
-                        iter_cb=iter_cb, tol=tol)
-        final_share = share2
-
+    fixed = tuple(p for p in all_but_amplitude(recipes) if p not in released)
     labels = [(r.sample or f"spectrum {k + 1}")
               for k, r in enumerate(res.recipes)]
     return BatchFitResult(
         recipes=res.recipes, labels=labels, rmsd=res.rmsd,
-        per_dataset=res.per_dataset, shared=final_share, released=released,
+        per_dataset=res.per_dataset, shared=fixed, released=released,
         release_frac=release_frac if released else 0.0,
         lmfit_result=res.lmfit_result)
 

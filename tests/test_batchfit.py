@@ -55,30 +55,31 @@ def test_all_but_amplitude_excludes_amplitude():
     assert "shift_fwhm_ppm" in names
 
 
-def test_shared_stage_ties_shape_frees_amplitude():
+def test_unreleased_shape_stays_fixed_at_recipe_value():
+    # nothing released → δiso and width are HELD at the recipe values (14.0 / 5.0)
+    # for every spectrum; only the amplitudes are fitted (and differ)
     res = batchfit.batch_fit(_entries())
     posA = [r.sites[0].params["isotropic_chemical_shift_ppm"].value
             for r in res.recipes]
+    fwhm = [r.sites[0].params["shift_fwhm_ppm"].value for r in res.recipes]
     ampA = [r.sites[0].params["amplitude"].value for r in res.recipes]
-    # positions identical across spectra (shared), ~15
-    assert max(posA) - min(posA) < 1e-3
-    assert posA[0] == pytest.approx(15.0, abs=0.3)
-    # amplitudes free and distinct (100 / 80 / 120)
-    assert ampA[0] > ampA[1] and ampA[2] > ampA[0]
+    assert all(p == pytest.approx(14.0) for p in posA)   # NOT fitted — held
+    assert all(w == pytest.approx(5.0) for w in fwhm)     # NOT fitted — held
+    assert ampA[0] > ampA[1] and ampA[2] > ampA[0]        # amplitudes free/distinct
 
 
-def test_release_lets_selected_param_drift_per_spectrum():
+def test_release_lets_selected_param_move_per_spectrum():
     res = batchfit.batch_fit(
-        _entries(), release=("isotropic_chemical_shift_ppm",), release_frac=0.1)
+        _entries(), release=("isotropic_chemical_shift_ppm",), release_frac=0.2)
     posA = [r.sites[0].params["isotropic_chemical_shift_ppm"].value
             for r in res.recipes]
+    fwhm = [r.sites[0].params["shift_fwhm_ppm"].value for r in res.recipes]
     assert res.released == ("isotropic_chemical_shift_ppm",)
-    # now distinct, tracking the injected ±0.3 ppm shifts
+    # released → moves per spectrum, tracking the injected ±0.3 ppm shifts
     assert max(posA) - min(posA) > 0.3
     assert posA[1] > posA[0] > posA[2]
-    # widths stayed shared
-    fwhm = [r.sites[0].params["shift_fwhm_ppm"].value for r in res.recipes]
-    assert max(fwhm) - min(fwhm) < 1e-3
+    # width was NOT released → still fixed at the recipe value everywhere
+    assert all(w == pytest.approx(5.0) for w in fwhm)
 
 
 def test_needs_at_least_two_spectra():
@@ -128,9 +129,11 @@ def test_completion_threshold_maps_pct_to_ftol():
     assert _tol_kws(5)["ftol"] == pytest.approx(0.1)
 
 
-def test_batch_fit_accepts_tol_and_still_converges():
-    # a loose threshold must still return a sensible shared position
-    res = batchfit.batch_fit(_entries(), tol=1.0)
+def test_batch_fit_accepts_tol_and_still_runs():
+    # a loose threshold still returns a result; released position tracks the data
+    res = batchfit.batch_fit(_entries(), tol=1.0,
+                             release=("isotropic_chemical_shift_ppm",),
+                             release_frac=0.2)
     posA = [r.sites[0].params["isotropic_chemical_shift_ppm"].value
             for r in res.recipes]
-    assert posA[0] == pytest.approx(15.0, abs=0.6)
+    assert posA[0] == pytest.approx(15.0, abs=0.8)

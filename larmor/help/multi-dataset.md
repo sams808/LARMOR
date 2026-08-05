@@ -129,11 +129,13 @@ spectrum, with only the **amplitudes** free — the sites are the same, their
 populations change. **Ctrl/Shift-click** the spectra in the Explorer and press
 **Batch fit selected…** (or *Tools ▸ Batch fit spectra*).
 
-1. **One shared model.** The batch uses a single model for all spectra — your
-   current fit, or a recipe you load in the dialog. Every parameter **except
-   amplitude** is tied across the spectra, so they are constrained by all the
-   data together (far more robust than fitting each alone). Amplitudes stay free
-   per spectrum.
+1. **One model, applied.** The batch uses a single model for all spectra — your
+   current fit, or a recipe you load in the dialog. The recipe is treated as the
+   **answer for lineshape**: every parameter is **held fixed at its recipe value
+   except the amplitude**, which is always free per spectrum (and may fall to
+   **zero** where a line is absent). This holds regardless of the recipe's own
+   pin/vary flags. To let a parameter adapt across the series, tick it under
+   **Release per spectrum** (see step 4) — nothing else moves.
 2. **See them all — as spectra.** The spectra show in a **3×3 grid** with tabs
    (page through 10–15 at a time). Each cell is a real NMR plot: **sample name**
    top-left, ppm running **high→low**, and you can **drag to zoom** (right-click ▸
@@ -145,15 +147,16 @@ populations change. **Ctrl/Shift-click** the spectra in the Explorer and press
    baseline from every spectrum *independently* before fitting — **Polynomial**
    (robust asymmetric, choose the order), **Iterative** (Yon 2020), or a flat
    edge-median level. **Reset** restores the raw spectra.
-4. **One Fit button, choose what to release.** **Fit** ties everything but
-   amplitude; whichever parameters you tick in **Release per spectrum** then come
-   off the tie and may drift by **±X %** around the shared value, independently
-   per spectrum (a relaxation — e.g. let δ_iso wander ±5 % while widths stay
-   locked). You choose **parameter by parameter** — release some, keep others
-   shared. A **completion threshold** (Δσ %) stops the fit once the residual
-   stdev stops improving. Interrupt any time with **Cancel** (discard, revert to
-   before the fit) or **Stop** (keep the latest iteration) — the same two modes as
-   the main fitter.
+4. **One Fit button; choose what may move.** **Fit** refines **only the
+   amplitudes** per spectrum — everything else is held at the recipe. Whichever
+   parameters you tick under **Release per spectrum** are additionally fit,
+   **independently per spectrum**, allowed to drift by **±X %** around their
+   recipe value (a relaxation — e.g. let δ_iso wander ±5 % across the series while
+   widths stay pinned). You choose **parameter by parameter**; anything unticked
+   does not move. A **completion threshold** (Δσ %) stops the fit once the
+   residual stdev stops improving. Interrupt any time with **Cancel** (discard,
+   revert) or **Stop** (keep the latest iteration) — the same two modes as the
+   main fitter.
 5. **Save.** **Save individual fits…** writes one LARMOR `.recipe.json` per
    spectrum, named **automatically**
    (`sample_nucleus_recipe_batch_YYYYMMDD_HHMM`) or with a **name you type for
