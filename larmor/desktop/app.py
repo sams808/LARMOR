@@ -4225,8 +4225,25 @@ def asset_path(name: str) -> str:
     return ""
 
 
+def _crash_log_path() -> str:
+    try:
+        return os.path.join(os.path.expanduser("~"), "larmor_crash.log")
+    except Exception:
+        return "larmor_crash.log"
+
+
 def main() -> int:
     import time
+    import faulthandler
+
+    # a C-level crash (segfault) otherwise exits silently ("LARMOR stopped" with no
+    # traceback) — this prints where it happened so it can actually be diagnosed
+    faulthandler.enable()
+    _log = _crash_log_path()
+    try:
+        faulthandler.enable(open(_log, "w"))       # also persist it to a file
+    except Exception:
+        pass
 
     import pyqtgraph as pg
     from PySide6.QtGui import QFont, QIcon, QPixmap
@@ -4260,17 +4277,26 @@ def main() -> int:
         shown_at = time.time()
         app.processEvents()
 
-    win = MainWindow()
-    if icon:
-        win.setWindowIcon(QIcon(icon))
-    win.show()
-    win._maybe_show_welcome()          # first-run canvas hint (returning users: no-op)
-    if splash is not None:
-        while time.time() - shown_at < 2.0:      # keep the logo up briefly
-            app.processEvents()
-            time.sleep(0.02)
-        splash.finish(win)
-    return app.exec()
+    try:
+        win = MainWindow()
+        if icon:
+            win.setWindowIcon(QIcon(icon))
+        win.show()
+        win._maybe_show_welcome()      # first-run canvas hint (returning users: no-op)
+        if splash is not None:
+            while time.time() - shown_at < 2.0:      # keep the logo up briefly
+                app.processEvents()
+                time.sleep(0.02)
+            splash.finish(win)
+        return app.exec()
+    except Exception:
+        import traceback
+        traceback.print_exc()
+        print(f"\nLARMOR hit an error during start-up. If it was a hard crash, "
+              f"a diagnostic was written to:\n  {_log}\n"
+              "Please send that file (or this text) to the developer.\n",
+              file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":
