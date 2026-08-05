@@ -410,6 +410,8 @@ class MainWindow(QMainWindow):
                   self.run_monte_carlo)
         self._add(m_dec, "Parameter correlations…  (from the last fit)",
                   self.show_correlations)
+        self._add(m_dec, "Compare with a saved fit…  (parameter diff)",
+                  self.compare_with_saved_fit)
         self._add(m_dec, "Czjzek distribution P(C_Q)…  (what σ stands for)",
                   self.show_czjzek_dist)
         m_dec.addSeparator()
@@ -603,6 +605,23 @@ class MainWindow(QMainWindow):
         except Exception as exc:  # noqa: BLE001
             QMessageBox.warning(self, "Apply recipe", f"could not load: {exc}")
             return None
+
+    def compare_with_saved_fit(self):
+        """Load a reference fit (recipe/dmfit) and show a parameter diff table."""
+        if not self.recipe or not self.recipe.get("sites"):
+            self.statusBar().showMessage("fit a spectrum first")
+            return
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Reference fit to compare against", self._last_dir(),
+            "Fits (*.json *.fxmla *.fxml);;All (*)")
+        if not path:
+            return
+        ref = self._recipe_model_from(path)
+        if ref is None or not ref.get("sites"):
+            self.statusBar().showMessage("that file has no fitted lines")
+            return
+        from larmor.desktop.diff_dialog import RecipeDiffDialog
+        RecipeDiffDialog(self, self.recipe, ref, Path(path).name).exec()
 
     def apply_recipe(self, path: str):
         """Load a saved recipe and drop ITS lines onto the currently open data —
