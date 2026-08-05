@@ -188,6 +188,13 @@ class _Cell(QWidget):
         if res.set_value:
             self.p["value"] = res.value
         if res.set_expr:
+            from larmor.constraints_util import references_self
+            if references_self(res.expr, self.ctx["this_index"],
+                               self.ctx["param_name"]):
+                self.error.emit("a line cannot link to itself — "
+                                "reference another line’s value")
+                self.edit.setText(self._display_text())     # revert
+                return
             self.p["expr"] = res.expr
             if res.expr:
                 self.p["vary"] = True

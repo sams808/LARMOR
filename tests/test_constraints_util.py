@@ -60,6 +60,14 @@ def test_move_remaps_references_to_follow_lines():
     assert _iso(sites[0]) is None
 
 
+def test_references_self_only_same_site_and_param():
+    from larmor.constraints_util import references_self
+    assert references_self(f"s4.{ISO} + 5.3", 4, ISO) is True      # self
+    assert references_self(f"s3.{ISO} + 5.3", 4, ISO) is False     # other line
+    # same site, DIFFERENT parameter is legitimate (no cycle)
+    assert references_self("s4.amplitude * 0.5", 4, ISO) is False
+
+
 def test_site_refs():
     assert site_refs("0.5 * s0.amplitude + s2.eta") == {0, 2}
     assert site_refs("") == set()

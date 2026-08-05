@@ -21,6 +21,12 @@ def site_refs(expr: str) -> set[int]:
     return {int(m.group(1)) for m in _SITE_REF.finditer(expr or "")}
 
 
+def references_self(expr: str, site_idx: int, param: str) -> bool:
+    """True if a constraint references its OWN (site, parameter) — a direct
+    self-reference that would recurse forever at fit time."""
+    return bool(re.search(rf"\bs{site_idx}\.{re.escape(param)}\b", expr or ""))
+
+
 def remap_exprs_after_delete(sites: list, deleted_idx: int) -> list[str]:
     """Fix constraints in ``sites`` (mutated in place) after site ``deleted_idx``
     was removed. Drops any expr that referenced the deleted site or that would
