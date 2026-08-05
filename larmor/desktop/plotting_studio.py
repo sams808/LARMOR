@@ -297,7 +297,12 @@ class PlottingStudio(QDialog):
             self.path2d.setText(path); self._refresh(); return
         if k == 2:                                  # series
             self.pathSer.setText(path); self._refresh(); return
-        label = _P(path).stem
+        # name the trace by the SAMPLE (from the recipe, else the sample folder),
+        # not the bare file name ("1r")
+        from larmor.desktop.batchfit_dialog import sample_label
+        label = sample_label(path, {})
+        if label.lower().endswith((".fxml", ".fxmla", ".json")):
+            label = _P(label).stem                  # a fit file → its own name
         if low.endswith((".recipe.json", ".json")):
             self._push_trace({"recipe": path, "part": "total", "label": label})
         else:                                        # spectrum / dmfit fit / EXPNO

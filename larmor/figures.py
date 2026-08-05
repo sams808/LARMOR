@@ -145,15 +145,46 @@ def load_trace(t: dict) -> tuple[np.ndarray, np.ndarray, dict]:
 
         dm = fxmla.read(path)
         meta["nucleus"] = dm.dimensions[0].nucleus
-        x, y = dm.spectrum.ppm, dm.spectrum.amplitude
+        if dm.spectrum is not None:
+            x, y = dm.spectrum.ppm, dm.spectrum.amplitude
+        else:                                    # a data-less dmfit fit → its model
+            recipe, _ = fxmla.to_recipe(dm)
+            x, y = _simulate_model_curve(recipe)
     else:
-        from larmor.io import bruker
+        # any Bruker path (1r/2rr file, pdata folder, EXPNO), CSV or Varian
+        from larmor.loader import load_any
 
-        exp = bruker.read_expno(path, procno=int(t.get("procno", 1)))
-        meta["nucleus"] = exp.nucleus
-        x, y = exp.processed_ppm, exp.processed.astype(float)
+        x, y, rec, _meta, _warns = load_any(str(path))
+        meta["nucleus"] = rec.get("nucleus", "")
     order = np.argsort(x)
     return np.asarray(x)[order], np.asarray(y)[order], meta
+
+
+def _simulate_model_curve(recipe, n: int = 3000):
+    """A model curve for a fit that carries no spectrum: simulate over a grid
+    spanning the sites (± a margin from their widths, or the fit window)."""
+    from larmor import engine
+    win = getattr(recipe, "fit_window_ppm", None)
+    if win and len(win) == 2:
+        lo, hi = min(win), max(win)
+    else:
+        centers, spans = [], [10.0]
+        for s in recipe.sites:
+            c = s.params.get("isotropic_chemical_shift_ppm")
+            if c is not None:
+                centers.append(float(c.value))
+            for wn in ("shift_fwhm_ppm", "line_fwhm_ppm", "lorentz_fwhm_ppm",
+                       "gauss_fwhm_ppm", "fwhm"):
+                if wn in s.params:
+                    spans.append(abs(float(s.params[wn].value)))
+        if centers:
+            m = max(spans) * 6.0
+            lo, hi = min(centers) - m, max(centers) + m
+        else:
+            lo, hi = -100.0, 100.0
+    x = np.linspace(lo, hi, n)
+    _, total, _ = engine.simulate(recipe, exp_ppm=x)
+    return x, total
 
 
 # ---------------------------------------------------------------------------

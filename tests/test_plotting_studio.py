@@ -83,6 +83,31 @@ def test_difference_subtracts_reference(qapp):
     assert spec["difference"] is True and spec["norm"] == "max"
 
 
+def test_simulate_model_curve_for_dataless_fit():
+    # a fit with no embedded spectrum → a model curve peaking at the site
+    from larmor.recipe import Recipe, SiteModel, Param
+    from larmor import figures
+    rec = Recipe(nucleus="11B", larmor_frequency_MHz=160.0, sites=[
+        SiteModel(model="gauss_lor", label="A", params={
+            "isotropic_chemical_shift_ppm": Param(15.0),
+            "shift_fwhm_ppm": Param(6.0), "amplitude": Param(100.0),
+            "gl": Param(1.0, vary=False)})])
+    x, y = figures._simulate_model_curve(rec)
+    assert len(x) > 100 and np.isfinite(y).all()
+    assert abs(float(x[np.argmax(y)]) - 15.0) < 3.0        # peaks at the site
+
+
+def test_studio_names_explorer_traces_by_sample(qapp):
+    from larmor.desktop.plotting_studio import PlottingStudio
+    st = PlottingStudio(None)
+    # a Bruker 1r path → the sample folder, NOT "1r"
+    st._add_from_explorer("C:/data/03232026_P1-Bi0_SS_ALP/3102/pdata/1/1r")
+    assert st._traces[-1]["label"] == "03232026_P1-Bi0_SS_ALP"
+    # a dmfit fit file → its own (stemmed) name
+    st._add_from_explorer("C:/data/sample/3102/pdata/1/P1-Bi0_31P.fxml")
+    assert st._traces[-1]["label"] == "P1-Bi0_31P"
+
+
 def test_studio_has_file_explorer_and_adds_traces(qapp):
     from larmor.desktop.plotting_studio import PlottingStudio
     st = PlottingStudio(None)
