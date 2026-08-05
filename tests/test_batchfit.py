@@ -92,3 +92,20 @@ def test_shared_table_has_shared_and_per_spectrum_rows():
     assert any(r["scope"] == "shared" and r["param"] == "shift_fwhm_ppm"
                for r in rows)
     assert any(r["param"] == "amplitude" and r["scope"] != "shared" for r in rows)
+
+
+def test_completion_threshold_maps_pct_to_ftol():
+    from larmor.fit import ftol_from_pct, _tol_kws
+    assert ftol_from_pct(0) is None            # 0 / off -> solver default
+    assert ftol_from_pct(None) is None
+    assert ftol_from_pct(5) == pytest.approx(0.1)     # 2 * 5/100
+    assert _tol_kws(0) == {}
+    assert _tol_kws(5)["ftol"] == pytest.approx(0.1)
+
+
+def test_batch_fit_accepts_tol_and_still_converges():
+    # a loose threshold must still return a sensible shared position
+    res = batchfit.batch_fit(_entries(), tol=1.0)
+    posA = [r.sites[0].params["isotropic_chemical_shift_ppm"].value
+            for r in res.recipes]
+    assert posA[0] == pytest.approx(15.0, abs=0.6)

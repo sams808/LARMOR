@@ -27,6 +27,28 @@ class ConstraintError(ValueError):
     """A constraint expression referenced an unknown site or parameter."""
 
 
+def ftol_from_pct(pct) -> float | None:
+    """Map a user 'completion threshold' — the % change in the residual stdev
+    below which the fit is considered converged — to a scipy least_squares
+    ``ftol``. Since stdev ∝ √cost, a relative change ``δ`` in stdev is ~½ the
+    relative change in the cost, so ``ftol ≈ 2·pct/100``. ``None``/0 → solver
+    default (fit to machine tolerance)."""
+    try:
+        p = float(pct)
+    except (TypeError, ValueError):
+        return None
+    if p <= 0:
+        return None
+    return max(1e-15, 2.0 * p / 100.0)
+
+
+def _tol_kws(tol) -> dict:
+    """least_squares stop tolerances from a completion threshold (``ftol`` on the
+    cost, matched ``xtol``); empty when no threshold is set."""
+    ft = ftol_from_pct(tol)
+    return {} if ft is None else {"ftol": ft, "xtol": ft}
+
+
 def _key(site, pname: str) -> str:
     return model_registry.get(site.model).key_of(pname)
 
@@ -124,11 +146,12 @@ def _model(recipe: Recipe, params: lmfit.Parameters, ctx,
 
 def fit(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
         window_ppm: tuple[float, float] | None = None,
-        kernel=None, iter_cb=None) -> FitResult:
+        kernel=None, iter_cb=None, tol=None) -> FitResult:
     """Refine `recipe` against (exp_ppm, exp_amp). Modifies recipe in place.
 
     `kernel` is accepted for backward compatibility and ignored; kernels are
-    cached process-wide and resolved automatically.
+    cached process-wide and resolved automatically. `tol` is the completion
+    threshold (% change in the residual stdev, see ``ftol_from_pct``).
     """
     ctx = make_context(recipe, exp_ppm=exp_ppm)
     zones = [z for z in (recipe.fit_zones or []) if z and len(z) == 2]
@@ -182,7 +205,7 @@ def fit(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
         return np.interp(xw, ctx.x_ppm, y) - yw
 
     result = lmfit.minimize(residual, params, method="least_squares",
-                            iter_cb=iter_cb)
+                            iter_cb=iter_cb, **_tol_kws(tol))
 
     def _at_bounds(res) -> list[str]:
         names = []

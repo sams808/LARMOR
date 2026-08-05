@@ -134,20 +134,39 @@ populations change. **Ctrl/Shift-click** the spectra in the Explorer and press
    amplitude** is tied across the spectra, so they are constrained by all the
    data together (far more robust than fitting each alone). Amplitudes stay free
    per spectrum.
-2. **See them all.** The spectra show in a **3×3 grid** with tabs (page through
-   10–15 at a time); each cell overlays its model and reports its RMSD, updating
-   live after the fit. **Fit (shared)** runs it — interrupt with **Stop** if
-   needed.
-3. **Release, slightly.** Optionally tick parameters to **release**: they come
-   off the shared tie and may drift by **±X %** around the shared value,
-   independently per spectrum (a relaxation — e.g. let δ_iso wander ±5 % while
-   widths stay locked). **Release fit** runs this second stage.
-4. **Save.** **Save fits & table…** writes one `.recipe.json` per spectrum plus a
-   `batch_table.csv` of the shared and per-spectrum values. (For a fuller
-   publication table across independent fits, see the **Batch fit report** tool.)
+2. **See them all — as spectra.** The spectra show in a **3×3 grid** with tabs
+   (page through 10–15 at a time). Each cell is a real NMR plot: **sample name**
+   top-left, ppm running **high→low**, and you can **drag to zoom** (right-click ▸
+   *View All* to reset) exactly like the main window. Toggles above the buttons:
+   **components** overlays each site's curve on every fit; **shared scale** puts
+   all the plots on one common x/y range for honest comparison (off = each
+   auto-scales). Each cell reports its RMSD, updating live after the fit.
+3. **Baseline, per spectrum.** **Fit baseline…** estimates and subtracts a
+   baseline from every spectrum *independently* before fitting — **Polynomial**
+   (robust asymmetric, choose the order), **Iterative** (Yon 2020), or a flat
+   edge-median level. **Reset** restores the raw spectra.
+4. **One Fit button, choose what to release.** **Fit** ties everything but
+   amplitude; whichever parameters you tick in **Release per spectrum** then come
+   off the tie and may drift by **±X %** around the shared value, independently
+   per spectrum (a relaxation — e.g. let δ_iso wander ±5 % while widths stay
+   locked). You choose **parameter by parameter** — release some, keep others
+   shared. A **completion threshold** (Δσ %) stops the fit once the residual
+   stdev stops improving. Interrupt any time with **Cancel** (discard, revert to
+   before the fit) or **Stop** (keep the latest iteration) — the same two modes as
+   the main fitter.
+5. **Save.** **Save individual fits…** writes one LARMOR `.recipe.json` per
+   spectrum, named **automatically**
+   (`sample_nucleus_recipe_batch_YYYYMMDD`) or with a **name you type for each**
+   (it prompts in turn, showing the sample and proc number). **Save table…**
+   writes a `batch_table.csv` of the shared and per-spectrum values. **Series
+   plot…** charts how any parameter (δ_iso, width, C_Q, η, or population %)
+   evolves along the series, with export of the numbers and the figure. (For a
+   fuller publication table across independent fits, see the **Batch fit report**
+   tool.)
 
 It builds on the same co-fit engine (§3), so the shared parameters carry full
-uncertainties.
+uncertainties. The completion threshold is global (set it under **Decomposition ▸
+Advanced ▸ Fit completion threshold**) and honoured by every fit in LARMOR.
 
 ## References
 

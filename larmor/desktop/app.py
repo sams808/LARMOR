@@ -57,6 +57,17 @@ def _emit_progress(sig, should_stop=None):
     return cb
 
 
+def _fit_tol():
+    """The user's global completion threshold (% change in the residual stdev at
+    which a fit is considered done); 0/unset → full-precision solver default.
+    Honoured by every fit button in the app."""
+    from PySide6.QtCore import QSettings
+    try:
+        return float(QSettings("LARMOR", "app").value("fitStdevPct", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 class _StoppableFit:
     """Mixin: a stop flag + mode ('stop' keep / 'cancel' revert) for a fit thread."""
 
@@ -86,7 +97,7 @@ class FitWorker(QThread, _StoppableFit):
 
             recipe = Recipe.from_dict(self.recipe_dict)
             result = fitmod.fit(recipe, self.ppm, self.amp,
-                                window_ppm=self.window,
+                                window_ppm=self.window, tol=_fit_tol(),
                                 iter_cb=_emit_progress(self.progress,
                                                        lambda: self._stop))
             self.done.emit(result, self._stop_mode)
@@ -111,6 +122,7 @@ class Fit2DWorker(QThread, _StoppableFit):
 
             recipe = Recipe.from_dict(self.recipe_dict)
             result = twod.fit_2d(recipe, self.data2d, method=self.method,
+                                 tol=_fit_tol(),
                                  iter_cb=_emit_progress(self.progress,
                                                         lambda: self._stop))
             self.done.emit(result, self._stop_mode)
@@ -223,12 +235,15 @@ class MainWindow(QMainWindow):
         self.pos_label = QLabel("")
         self.statusBar().addPermanentWidget(self.pos_label)
         # a red MAS-rate warning at the bottom-right when the spin rate had to
-        # be guessed or the sources disagreed (see _update_mas_label)
-        self.mas_label = QLabel("")
+        # be guessed or the sources disagreed (see _update_mas_label); double-
+        # clicking it opens the experiment parameters, same as the exp label
+        self.mas_label = ClickableLabel("")
         self.mas_label.setStyleSheet(
             "background:#c0392b; color:white; font-weight:600; "
             "padding:1px 8px; border-radius:3px;")
         self.mas_label.setVisible(False)
+        self.mas_label.setCursor(Qt.PointingHandCursor)
+        self.mas_label.doubleClicked.connect(self.edit_experiment)
         self.statusBar().addPermanentWidget(self.mas_label)
         self.statusBar().showMessage(
             "File > Open… (dmfit .fxmla / LARMOR recipe) or Open EXPNO…")
@@ -375,6 +390,8 @@ class MainWindow(QMainWindow):
                   self.open_cofit)
         self._add(m_adv, "Computing &parameters…  (kernel resolution)",
                   self.edit_computing_params)
+        self._add(m_adv, "Fit completion &threshold…  (Δσ % to stop)",
+                  self.edit_fit_tol)
         self._add(m_adv, "MQMAS F1 &reference…  (isotropic-axis align)",
                   self.edit_mqmas_f1_ref)
         self._add(m_adv, "Predict at another &field…  (what at X T?)",
@@ -431,6 +448,13 @@ class MainWindow(QMainWindow):
         self._add(m_tools, "&NMR table…  (Larmor frequencies)", self.open_nmr_table)
         self._add(m_tools, "&Conversion tools…  (shift / Cq / dipolar)",
                   self.open_convert)
+
+        m_plot = mb.addMenu("&Plotting")
+        self._add(m_plot, "Plotting &studio…  (build any figure)",
+                  self.open_plotting_studio)
+        self._add(m_plot, "Plot &current spectrum…", self.plot_current_spectrum)
+        self._add(m_plot, "New &2D contour plot…",
+                  lambda: self.open_plotting_studio({"kind": "2d", "path": ""}))
 
         m_help = mb.addMenu("&Help")
         m_man = m_help.addMenu("User &manuals")
@@ -836,7 +860,7 @@ class MainWindow(QMainWindow):
             sb.addAction(a)
         sb.addSeparator()
         # a short-labelled sidebar mirror of View ▸ Scroll nudges fit values
-        self.sbScroll = QAction("Scroll✎", self)
+        self.sbScroll = QAction("Scroll", self)
         self.sbScroll.setCheckable(True)
         self.sbScroll.setChecked(self.actScrollNudge.isChecked())
         self.sbScroll.setToolTip(self.actScrollNudge.toolTip())
@@ -1020,12 +1044,29 @@ class MainWindow(QMainWindow):
             self.mas_label.setText(f"⚠ MAS {rate:.0f} Hz — check!")
             self.mas_label.setToolTip(
                 "The MAS rate was missing or the acqus/title sources disagreed, "
-                "so LARMOR guessed (highest found, or 35714 Hz). Set it in "
-                "Experiment parameters (double-click the strip on the left) to "
-                "clear this warning.")
+                "so LARMOR guessed (highest found, or 35714 Hz). Double-click "
+                "here (or the experiment strip) to open Experiment parameters "
+                "and clear this warning.")
             self.mas_label.setVisible(True)
         else:
             self.mas_label.setVisible(False)
+
+    def edit_fit_tol(self):
+        """Set the global fit completion threshold — the % change in the residual
+        stdev below which every fit (1D, 2D, co-fit, batch) stops. 0 = full
+        precision (the solver's own tolerance)."""
+        from PySide6.QtWidgets import QInputDialog
+
+        cur = _fit_tol()
+        val, ok = QInputDialog.getDouble(
+            self, "Fit completion threshold",
+            "Stop a fit once the residual stdev changes by less than (%):\n"
+            "0 = fit to full precision.", cur, 0.0, 50.0, 3)
+        if ok:
+            QSettings("LARMOR", "app").setValue("fitStdevPct", float(val))
+            self.statusBar().showMessage(
+                "fit completion threshold: "
+                + ("full precision" if val <= 0 else f"Δσ < {val:g}%"))
 
     def edit_experiment(self):
         if self.recipe is None:
@@ -3327,7 +3368,7 @@ class MainWindow(QMainWindow):
             self._progress_tick(it if isinstance(it, int) else 0, rms)
             QApplication.processEvents()
         try:
-            result = fit_cofit(entries, share=share, iter_cb=_cb)
+            result = fit_cofit(entries, share=share, iter_cb=_cb, tol=_fit_tol())
         except Exception as exc:
             self._progress_end(False)
             self.btnCofitRun.setEnabled(True)
@@ -3573,6 +3614,22 @@ class MainWindow(QMainWindow):
 
         model = self.recipe if (self.recipe and self.recipe.get("sites")) else None
         BatchFitDialog(self, paths, model).exec()
+
+    def open_plotting_studio(self, spec=None):
+        """Open the Plotting studio, optionally seeded with a figure spec."""
+        from larmor.desktop.plotting_studio import PlottingStudio
+        PlottingStudio(self, spec if isinstance(spec, dict) else None).exec()
+
+    def plot_current_spectrum(self):
+        """Seed the Plotting studio with the current spectrum (+ model if fitted)."""
+        from larmor.desktop.plotting_studio import PlottingStudio
+        traces = []
+        if self.exp_ppm is not None and len(self.exp_ppm):
+            traces.append({"data": {"x": list(map(float, self.exp_ppm)),
+                                    "y": list(map(float, self.exp_amp))},
+                           "label": "experiment"})
+        spec = {"kind": "1d", "traces": traces}
+        PlottingStudio(self, spec).exec()
 
     # ------------------------------------------------------------- session
     def _persist_session(self):

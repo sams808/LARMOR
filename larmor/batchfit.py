@@ -71,7 +71,7 @@ def _relax_bounds(value: float, frac: float, cur_min, cur_max):
 
 def batch_fit(entries: list[tuple], *, share: tuple[str, ...] | None = None,
               release: tuple[str, ...] = (), release_frac: float = 0.1,
-              iter_cb=None) -> BatchFitResult:
+              iter_cb=None, tol=None) -> BatchFitResult:
     """Fit one shared model to several 1D spectra (amplitudes free per spectrum).
 
     `entries` is a list of ``(recipe, ppm, amp, window)`` — every recipe must
@@ -92,7 +92,8 @@ def batch_fit(entries: list[tuple], *, share: tuple[str, ...] | None = None,
                 for k in range(len(entries))]
 
     # ---- stage 1: shared shape, free amplitudes ----
-    res = fit_cofit(_conv(recipes), share=share, windows=windows, iter_cb=iter_cb)
+    res = fit_cofit(_conv(recipes), share=share, windows=windows,
+                    iter_cb=iter_cb, tol=tol)
     final_share, released = share, ()
 
     # ---- stage 2 (optional): release chosen parameters, slightly, per spectrum
@@ -114,7 +115,7 @@ def batch_fit(entries: list[tuple], *, share: tuple[str, ...] | None = None,
                     pp.min, pp.max = _relax_bounds(v, release_frac, pp.min, pp.max)
                     pp.vary = True
         res = fit_cofit(_conv(res.recipes), share=share2, windows=windows,
-                        iter_cb=iter_cb)
+                        iter_cb=iter_cb, tol=tol)
         final_share = share2
 
     labels = [(r.sample or f"spectrum {k + 1}")

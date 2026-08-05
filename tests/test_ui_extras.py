@@ -140,14 +140,54 @@ def test_batch_fit_dialog_loads_grid_and_fits(qapp, tmp_path):
     assert dlg._cells[0]["model"].xData is not None
 
 
-def test_show_fits_toggle_adds_and_removes_proc_layer(qapp, tmp_path):
+def _expno(tmp_path, procs):
+    """Build an EXPNO with the given ``{proc: [fit filenames]}`` pdata layout."""
+    expno = tmp_path / "10"
+    for proc, fits in procs.items():
+        d = expno / "pdata" / proc
+        d.mkdir(parents=True)
+        (d / "1r").write_bytes(b"\0")
+        for fn in fits:
+            (d / fn).write_text("{}")
+    return expno
+
+
+def test_procs_toggle_adds_layer_only_when_multiple(qapp, tmp_path):
     from larmor.desktop import explorer
+    expno = _expno(tmp_path, {"1": [], "15": ["x.recipe.json"]})
     panel = explorer.ExplorerPanel()
-    exp = QTreeWidgetItem(["1118"])
+    exp = QTreeWidgetItem(["10"])
     exp.setData(0, explorer._ROLE_KIND, "exp")
-    exp.setData(0, explorer._ROLE_PATH, str(tmp_path))
+    exp.setData(0, explorer._ROLE_PATH, str(expno))
     panel.tree.addTopLevelItem(exp)
-    panel.chkFits.setChecked(True)
-    assert exp.childCount() == 1                        # lazy proc placeholder
-    panel.chkFits.setChecked(False)
-    assert exp.childCount() == 0                        # removed when hidden
+    panel.chkProcs.setChecked(False)
+    assert exp.childCount() == 0
+    panel.chkProcs.setChecked(True)
+    assert exp.childCount() == 1                        # >1 proc → expandable
+
+
+def test_single_proc_not_expandable(qapp, tmp_path):
+    from larmor.desktop import explorer
+    expno = _expno(tmp_path, {"1": ["x.recipe.json"]})
+    panel = explorer.ExplorerPanel()
+    exp = QTreeWidgetItem(["10"])
+    exp.setData(0, explorer._ROLE_KIND, "exp")
+    exp.setData(0, explorer._ROLE_PATH, str(expno))
+    panel.tree.addTopLevelItem(exp)
+    panel.chkProcs.setChecked(False); panel.chkProcs.setChecked(True)
+    assert exp.childCount() == 0                        # one proc → open directly
+
+
+def test_proc_without_fits_not_expandable(qapp, tmp_path):
+    from larmor.desktop import explorer
+    expno = _expno(tmp_path, {"1": [], "2": ["f.recipe.json"]})
+    panel = explorer.ExplorerPanel()
+    exp = QTreeWidgetItem(["10"])
+    exp.setData(0, explorer._ROLE_PATH, str(expno))
+    exp.setData(0, explorer._ROLE_KIND, "exp")
+    panel._populate_procs(exp)
+    kids = [exp.child(i) for i in range(exp.childCount())]
+    proc1 = next(c for c in kids if c.text(0).strip().endswith("proc 1"))
+    proc2 = next(c for c in kids if "proc 2" in c.text(0))
+    assert proc1.childCount() == 0                      # no fits → not expandable
+    assert proc2.childCount() == 1                      # has a fit → expandable

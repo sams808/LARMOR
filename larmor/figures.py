@@ -175,6 +175,8 @@ def render_1d(spec: dict) -> Figure:
         if any(t.get("label") for t in spec.get("traces", [])):
             ax.legend(loc=spec.get("legend_loc", "best"),
                       ncol=spec.get("legend_ncol", 1))
+        if spec.get("title"):
+            ax.set_title(spec["title"])
         fig.tight_layout()
         return fig
 
@@ -231,7 +233,17 @@ def render_2d(spec: dict) -> Figure:
         ax_right = fig.add_subplot(gs[1, 1], sharey=ax) if show_right else None
 
         cmap = spec.get("cmap", "viridis")
-        ax.contour(x, y, Z, levels=levels, cmap=cmap, linewidths=0.7)
+        mode_c = spec.get("contour_mode", "contour")   # contour|density|filled|both
+        cs = None
+        if mode_c in ("density", "filled", "both"):
+            ax.contourf(x, y, Z, levels=levels, cmap=cmap)
+        if mode_c in ("contour", "both"):
+            colors = None if spec.get("contour_colored", True) else "0.2"
+            cs = ax.contour(x, y, Z, levels=levels,
+                            cmap=cmap if colors is None else None,
+                            colors=colors, linewidths=0.7)
+            if spec.get("contour_values"):             # print the level values
+                ax.clabel(cs, fontsize=6, fmt="%.2f")
         if spec.get("negative"):
             ax.contour(x, y, -Z, levels=levels, colors="crimson",
                        linewidths=0.7, linestyles="dashed")
@@ -283,15 +295,20 @@ def render_2d(spec: dict) -> Figure:
             for s in ("right", "top", "bottom"):
                 ax_right.spines[s].set_visible(False)
 
-        for sl in spec.get("slopes", []):
+        # reference lines: CS axis, quadrupolar-induced-shift axis, iso guides
+        for sl in list(spec.get("slopes", [])) + list(spec.get("iso_lines", [])):
             xs = np.array([min(xlim), max(xlim)])
             ax.plot(xs, sl["slope"] * xs + sl.get("intercept", 0.0),
                     color=sl.get("color", "k"), lw=sl.get("linewidth", 0.9),
-                    ls=sl.get("linestyle", "-"))
+                    ls=sl.get("linestyle", "-"), label=sl.get("label"))
+        if any(l.get_label() and not l.get_label().startswith("_") for l in ax.lines):
+            ax.legend(loc=spec.get("legend_loc", "lower left"), fontsize=7)
 
         if spec.get("annotation"):
             ax.text(0.04, 0.94, spec["annotation"], transform=ax.transAxes,
                     fontsize=style["rc"]["font.size"] + 2, va="top")
+        if spec.get("title"):
+            (ax_top or ax).set_title(spec["title"])
         return fig
 
 
@@ -405,6 +422,8 @@ def render_series(spec: dict) -> Figure:
             ax.text(0.05, 0.9, note, transform=ax.transAxes)
         if spec.get("annotation"):
             ax.text(0.05, 0.78, spec["annotation"], transform=ax.transAxes)
+        if spec.get("title"):
+            ax.set_title(spec["title"])
         ax.legend(loc=spec.get("legend_loc", "lower right"))
         fig.tight_layout()
         return fig
