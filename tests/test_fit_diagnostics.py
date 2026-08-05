@@ -30,6 +30,8 @@ def test_residual_noise_ratio():
 
 
 def test_per_nucleus_seed():
+    from PySide6.QtCore import QSettings
+    QSettings("LARMOR", "app").setValue("siteDefaults", "{}")   # literature-default path
     w = _win()
     w.recipe = {"nucleus": "27Al", "sites": []}
     p = {"sigma_Cq_MHz": {"value": 0}, "shift_fwhm_ppm": {"value": 0},

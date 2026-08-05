@@ -2351,6 +2351,8 @@ class MainWindow(QMainWindow):
         """After a fit, remember each site's shape parameters (not position or
         amplitude) per nucleus+model, so the next new site starts from them."""
         import json
+        if os.environ.get("LARMOR_NO_SESSION"):     # don't pollute settings in tests
+            return
         nucleus = (self.recipe or {}).get("nucleus", "")
         if not nucleus or not self.recipe.get("sites"):
             return
