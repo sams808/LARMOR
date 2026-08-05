@@ -75,6 +75,15 @@ def test_estimate_baseline_recovers_a_slope():
     assert np.max(np.abs(base[off] - slope[off])) < 3.0
 
 
+def test_batch_snr_helper():
+    from larmor.desktop.batchfit_dialog import _snr
+    x = np.linspace(-20, 60, 600)
+    clean = 100.0 * np.exp(-0.5 * ((x - 15) / 4) ** 2)
+    noisy = clean + np.random.default_rng(0).normal(0, 20, x.size)
+    assert _snr(clean) > _snr(noisy)               # more noise -> lower S/N
+    assert _snr(clean) > 50
+
+
 def test_export_options_values(qapp):
     from larmor.desktop.export_dialog import ExportOptions, CM_PER_IN
     dlg = ExportOptions(None, ["PNG", "PDF", "SVG"], dpi=600, width_cm=10, height_cm=8)

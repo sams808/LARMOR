@@ -162,6 +162,14 @@ class BatchFitDialog(QDialog):
         opt.addWidget(b_base)
         opt.addWidget(b_baser)
         opt.addWidget(self.lblBaseline, 1)
+        b_tsave = QPushButton("Save setup…")
+        b_tsave.setToolTip("save this batch setup (release set, baseline, "
+                           "threshold) as a reusable template")
+        b_tsave.clicked.connect(self._save_template)
+        b_tload = QPushButton("Load setup…")
+        b_tload.clicked.connect(self._load_template)
+        opt.addWidget(b_tsave)
+        opt.addWidget(b_tload)
         v.addLayout(opt)
 
         # ---- release panel (per-parameter) ----
@@ -250,7 +258,7 @@ class BatchFitDialog(QDialog):
                 "larmor": float(rec.get("larmor_frequency_MHz", 0.0) or 0.0),
                 "spin": float(rec.get("spin_rate_Hz", 0.0) or 0.0),
                 "sample": rec.get("sample") or Path(p).stem, "path": p,
-                "proc": _proc_number(p)})
+                "proc": _proc_number(p), "snr": _snr(amp)})
             if self._model_sites is None and rec.get("sites"):
                 self._model_sites = rec["sites"]
         return data
@@ -505,8 +513,41 @@ class BatchFitDialog(QDialog):
                                                 np.asarray(pd["y_fit"], float))
                 self._cells[k]["rmsd"].setText(f"RMSD {result.rmsd[k]:.4f}")
         self._refresh_components()
+        flagged = self._flag_quality(result)
         note = " (stopped early)" if mode == "stop" else ""
+        if flagged:
+            note += f"  ⚠ {len(flagged)} spectrum/spectra flagged (RMSD outlier " \
+                    "or low S/N) — hover the cells"
         self.status.setText(result.summary + note)
+
+    def _flag_quality(self, result) -> list[int]:
+        """Flag spectra whose RMSD is an outlier or whose S/N is low, colouring
+        their RMSD label red with a reason tooltip (a per-spectrum quality gate)."""
+        r = np.asarray(result.rmsd, float)
+        med = float(np.median(r))
+        mad = float(np.median(np.abs(r - med))) or (0.1 * med + 1e-9)
+        hi = med + 3.0 * 1.4826 * mad
+        flagged = []
+        for k, cell in enumerate(self._cells):
+            if k >= len(result.rmsd):
+                break
+            reasons = []
+            if r[k] > hi:
+                reasons.append(f"RMSD {r[k]:.3g} is an outlier (>{hi:.3g})")
+            snr = self._data[k].get("snr", float("inf"))
+            if snr < 20:
+                reasons.append(f"low S/N ({snr:.0f})")
+            lbl = cell["rmsd"]
+            if reasons:
+                flagged.append(k)
+                lbl.setText(f"⚠ RMSD {r[k]:.4f}")
+                lbl.setStyleSheet("font-size:9px; color:#c0392b; font-weight:600;")
+                lbl.setToolTip("; ".join(reasons))
+            else:
+                lbl.setStyleSheet(
+                    f"font-size:9px; color:{theme.active().text_dim};")
+                lbl.setToolTip(f"S/N ≈ {snr:.0f}" if np.isfinite(snr) else "")
+        return flagged
 
     def _failed(self, msg):
         self.prog.setRange(0, 100); self.prog.setValue(0)
@@ -584,6 +625,46 @@ class BatchFitDialog(QDialog):
                             "" if r["stderr"] is None else f"{r['stderr']:.4g}"])
         self.status.setText(f"saved {path}")
 
+    def _save_template(self):
+        import json
+        from PySide6.QtCore import QSettings
+        from PySide6.QtWidgets import QInputDialog
+        name, ok = QInputDialog.getText(self, "Save batch setup", "Template name:")
+        if not ok or not name.strip():
+            return
+        tpl = {"release": [pn for pn, c in self._rel_checks.items() if c.isChecked()],
+               "frac": self.frac.value(), "tol": self.tol.value(),
+               "baseline": self._baseline_kind,
+               "components": self.chkComp.isChecked(),
+               "shared_scale": self.chkShared.isChecked()}
+        s = QSettings("LARMOR", "app")
+        lib = json.loads(s.value("batchTemplates", "{}") or "{}")
+        lib[name.strip()] = tpl
+        s.setValue("batchTemplates", json.dumps(lib))
+        self.status.setText(f"saved batch setup “{name.strip()}”")
+
+    def _load_template(self):
+        import json
+        from PySide6.QtCore import QSettings
+        from PySide6.QtWidgets import QInputDialog
+        lib = json.loads(QSettings("LARMOR", "app").value(
+            "batchTemplates", "{}") or "{}")
+        if not lib:
+            self.status.setText("no saved batch setups yet"); return
+        names = list(lib.keys())
+        choice, ok = QInputDialog.getItem(self, "Load batch setup", "Template:",
+                                          names, 0, False)
+        if not ok:
+            return
+        tpl = lib[choice]
+        for pn, c in self._rel_checks.items():
+            c.setChecked(pn in tpl.get("release", []))
+        self.frac.setValue(tpl.get("frac", 10))
+        self.tol.setValue(tpl.get("tol", 0.0))
+        self.chkComp.setChecked(tpl.get("components", False))
+        self.chkShared.setChecked(tpl.get("shared_scale", False))
+        self.status.setText(f"loaded setup “{choice}” — Fit to apply")
+
     def _series_plot(self):
         if self._result is None:
             return
@@ -598,6 +679,14 @@ class BatchFitDialog(QDialog):
 # ---------------------------------------------------------------- module helpers
 def _slug(s: str) -> str:
     return "".join(c if c.isalnum() or c in "-_" else "_" for c in (s or ""))[:80]
+
+
+def _snr(amp) -> float:
+    """Crude signal-to-noise: peak ÷ RMS of the quiet spectrum edges."""
+    a = np.asarray(amp, float)
+    n = max(3, a.size // 20)
+    noise = float(np.std(np.concatenate([a[:n], a[-n:]]))) or 1.0
+    return float(np.max(np.abs(a)) / noise)
 
 
 def _proc_number(path: str) -> str:
