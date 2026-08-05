@@ -2652,6 +2652,18 @@ class MainWindow(QMainWindow):
         if ratio is not None:
             bits.append("residual within noise" if ratio < 1.5
                         else f"⚠ residual {ratio:.1f}× noise (structure left)")
+        # runs test / autocorrelation: catch a systematically-wrong model even
+        # when the RMSD looks small (structured residual, not white noise)
+        struct_msg = ""
+        try:
+            from larmor import diagnostics
+            struct = diagnostics.residual_structure(
+                np.asarray(result.y_exp, float) - np.asarray(result.y_fit, float))
+            if struct["structured"]:
+                bits.append("⚠ structured residual")
+                struct_msg = struct["message"]
+        except Exception:
+            pass
         if result.frozen_sites:
             bits.append("frozen: " + ", ".join(result.frozen_sites))
         if result.at_bounds:
@@ -2672,11 +2684,15 @@ class MainWindow(QMainWindow):
             bits.append(f"⚠ {len(uni)} unidentifiable pair"
                         f"{'s' if len(uni) != 1 else ''} (see Correlations)")
         self.results_summary.setText("   ·   ".join(bits))
-        tip = sanity.summarize(warns)
+        tip_lines = []
+        if struct_msg:
+            tip_lines.append(struct_msg)
+        if sanity.summarize(warns):
+            tip_lines.append(sanity.summarize(warns))
         if uni:
-            tip += ("\n" if tip else "") + "unidentifiable: " + ", ".join(
-                f"{a}↔{b} ({r:+.2f})" for a, b, r in uni[:8])
-        self.results_summary.setToolTip(tip)
+            tip_lines.append("unidentifiable: " + ", ".join(
+                f"{a}↔{b} ({r:+.2f})" for a, b, r in uni[:8]))
+        self.results_summary.setToolTip("\n".join(tip_lines))
         self.report.setPlainText(result.report)
         self.statusBar().showMessage(
             ("fit stopped — kept the latest iteration values"
