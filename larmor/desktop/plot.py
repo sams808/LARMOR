@@ -123,6 +123,13 @@ class SpectrumView(pg.PlotWidget):
         self._anim_label: pg.TextItem | None = None
 
         self.apply_theme()          # axis pens, labels, grid, legend from theme
+        # LARMOR export + "send to Plotting studio" (and drop the freeze-prone
+        # native pyqtgraph exporter)
+        try:
+            from larmor.desktop.plot_menu import attach_plot_menu
+            attach_plot_menu(self, title="spectrum")
+        except Exception:
+            pass
 
     # ---------------------------------------------------------------- fit animation
     def start_fit_animation(self):

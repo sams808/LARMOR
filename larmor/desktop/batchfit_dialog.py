@@ -130,6 +130,17 @@ class BatchFitDialog(QDialog):
         top.addWidget(b_model)
         v.addLayout(top)
 
+        # a prominent warning if the selection mixes nuclei (a shared model across
+        # different nuclei is meaningless)
+        self.warnBanner = QLabel("")
+        self.warnBanner.setWordWrap(True)
+        self.warnBanner.setStyleSheet(
+            "background:#c0392b; color:white; font-weight:600; padding:4px 8px; "
+            "border-radius:3px;")
+        self.warnBanner.setVisible(False)
+        v.addWidget(self.warnBanner)
+        self._update_nuclei_warning()
+
         # ---- the grid of spectra ----
         self.tabs = QTabWidget()
         v.addWidget(self.tabs, 1)
@@ -257,7 +268,7 @@ class BatchFitDialog(QDialog):
                 "nucleus": rec.get("nucleus", ""),
                 "larmor": float(rec.get("larmor_frequency_MHz", 0.0) or 0.0),
                 "spin": float(rec.get("spin_rate_Hz", 0.0) or 0.0),
-                "sample": rec.get("sample") or Path(p).stem, "path": p,
+                "sample": sample_label(p, rec), "path": p,
                 "proc": _proc_number(p), "snr": _snr(amp)})
             if self._model_sites is None and rec.get("sites"):
                 self._model_sites = rec["sites"]
@@ -280,15 +291,17 @@ class BatchFitDialog(QDialog):
                                  + (f" · proc {d['proc']}" if d["proc"] else "")
                                  + f" · {d['nucleus']}")
                 plot = pg.PlotWidget(background=theme.active().plot_bg)
-                plot.setMenuEnabled(True)            # right-click ▸ View All etc.
                 plot.hideAxis("left")
+                plot.getPlotItem().invertX(True)     # NMR: ppm runs high → low
                 plot.getPlotItem().getViewBox().setMouseEnabled(True, True)  # zoom
                 plot.setMinimumHeight(120)
                 exp = plot.plot(d["ppm"], d["amp"],
                                 pen=pg.mkPen(theme.active().experiment, width=1))
                 model = plot.plot([], [],
                                   pen=pg.mkPen(theme.active().model, width=1.4))
-                plot.setXRange(d["ppm"].max(), d["ppm"].min())   # NMR: high→low
+                plot.setXRange(d["ppm"].min(), d["ppm"].max())   # inverted → high→low
+                from larmor.desktop.plot_menu import attach_plot_menu
+                attach_plot_menu(plot, title=d["sample"], parent=self)
                 rmsd = QLabel(""); rmsd.setStyleSheet(
                     f"font-size:9px; color:{theme.active().text_dim};")
                 cv.addWidget(title); cv.addWidget(plot, 1); cv.addWidget(rmsd)
@@ -316,6 +329,17 @@ class BatchFitDialog(QDialog):
             self._rel_checks[pn] = c
             self._rellay.addWidget(c)
         self._rellay.addStretch(1)
+
+    def _update_nuclei_warning(self):
+        nuclei = sorted({d["nucleus"] for d in self._data if d["nucleus"]})
+        if len(nuclei) > 1:
+            self.warnBanner.setText(
+                "⚠ Mixed nuclei selected (" + ", ".join(nuclei) + "). A single "
+                "shared model cannot describe different nuclei — select spectra of "
+                "one nucleus for a meaningful batch fit.")
+            self.warnBanner.setVisible(True)
+        else:
+            self.warnBanner.setVisible(False)
 
     # ------------------------------------------------------------------ status
     def _model_status(self) -> str:
@@ -439,14 +463,14 @@ class BatchFitDialog(QDialog):
             ymax = max(float(np.max(d["amp"])) for d in self._data)
             for cell in self._cells:
                 vb = cell["plot"].getViewBox()
-                vb.setXRange(xmax, xmin, padding=0.02)
+                vb.setXRange(xmin, xmax, padding=0.02)   # invertX handles direction
                 vb.setYRange(ymin, ymax, padding=0.05)
         else:
             for k, cell in enumerate(self._cells):
                 d = self._data[k]
                 vb = cell["plot"].getViewBox()
                 vb.enableAutoRange(axis="y")
-                vb.setXRange(float(d["ppm"].max()), float(d["ppm"].min()),
+                vb.setXRange(float(d["ppm"].min()), float(d["ppm"].max()),
                              padding=0.02)
 
     # ------------------------------------------------------------------ fit
@@ -679,6 +703,25 @@ class BatchFitDialog(QDialog):
 # ---------------------------------------------------------------- module helpers
 def _slug(s: str) -> str:
     return "".join(c if c.isalnum() or c in "-_" else "_" for c in (s or ""))[:80]
+
+
+def sample_label(path, rec) -> str:
+    """A meaningful sample name for a spectrum: the recipe's sample if it is not
+    just the nucleus, else the sample **folder** derived from the path (the first
+    ancestor that is not a proc/expno number) — so a title of "31P" becomes the
+    real sample directory name."""
+    nucleus = (rec.get("nucleus") or "").strip()
+    name = (rec.get("sample") or "").strip()
+    if name and name.lower() != nucleus.lower():
+        return name
+    for seg in reversed(Path(path).parts):
+        low = seg.lower()
+        if low.endswith(".fid"):                 # a Varian dataset folder
+            return seg[:-4]
+        if seg == "pdata" or seg.isdigit() or low in ("1r", "2rr", "fid", "ser"):
+            continue
+        return seg
+    return name or Path(path).stem
 
 
 def _snr(amp) -> float:

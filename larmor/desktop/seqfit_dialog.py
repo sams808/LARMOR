@@ -161,7 +161,10 @@ class SeqFitDialog(QDialog):
         self.plot = pg.PlotWidget(background=theme.active().plot_bg)
         self.plot.setMinimumHeight(300)
         self.plot.getPlotItem().getViewBox().setMouseEnabled(True, True)
+        self.plot.getPlotItem().invertX(True)          # NMR: ppm high → low
         self.plot.hideAxis("left")
+        from larmor.desktop.plot_menu import attach_plot_menu
+        attach_plot_menu(self.plot, title="spectrum", parent=self)
         self._curExp = self.plot.plot([], [], pen=pg.mkPen(theme.active().experiment, width=1))
         self._curModel = self.plot.plot([], [], pen=pg.mkPen(theme.active().model, width=1.6))
         self._curComp: list = []
@@ -307,7 +310,7 @@ class SeqFitDialog(QDialog):
         d = self._data[self._cur]
         self._curExp.setData(d["ppm"], d["amp"])
         self.plot.getPlotItem().getViewBox().setXRange(
-            float(d["ppm"].max()), float(d["ppm"].min()), padding=0.02)
+            float(d["ppm"].min()), float(d["ppm"].max()), padding=0.02)
         for it in self._curComp:
             self.plot.removeItem(it)
         self._curComp = []

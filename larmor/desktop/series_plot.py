@@ -83,6 +83,8 @@ class SeriesPlotDialog(QDialog):
         self.plot.showGrid(x=True, y=True, alpha=0.2)
         self.plot.addLegend()
         self.plot.setLabel("bottom", "spectrum")
+        from larmor.desktop.plot_menu import attach_plot_menu
+        attach_plot_menu(self.plot, title="series", parent=self)
         body.addWidget(self.plot, 1)
 
         btns = QHBoxLayout()

@@ -169,6 +169,10 @@ class ClickableLabel(QLabel):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        # kill pyqtgraph's crash-prone native export dialog app-wide (LARMOR has
+        # its own exporter on every plot's right-click menu)
+        from larmor.desktop.plot_menu import disable_native_export_globally
+        disable_native_export_globally()
         self.setWindowTitle("LARMOR")
         # Fit the initial window to the screen — a fixed 1440×900 overflows small
         # laptops, pushing corners (and the resize grips) off-screen.
