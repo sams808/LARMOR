@@ -84,11 +84,13 @@ class FitWorker(QThread, _StoppableFit):
     done = Signal(object, str)          # (result, stop_mode)
     failed = Signal(str)
     progress = Signal(int, float)                # (iteration, residual rms)
+    frame = Signal(object, object, int)          # (x_ppm, y_model, iteration)
 
-    def __init__(self, recipe_dict, ppm, amp, window):
+    def __init__(self, recipe_dict, ppm, amp, window, animate=False):
         super().__init__()
         self.recipe_dict, self.ppm, self.amp, self.window = \
             recipe_dict, ppm, amp, window
+        self.animate = animate
         self._init_stop()
 
     def run(self):
@@ -96,10 +98,13 @@ class FitWorker(QThread, _StoppableFit):
             from larmor import fit as fitmod
 
             recipe = Recipe.from_dict(self.recipe_dict)
+            frame_cb = ((lambda x, y, it: self.frame.emit(x, y, it))
+                        if self.animate else None)
             result = fitmod.fit(recipe, self.ppm, self.amp,
                                 window_ppm=self.window, tol=_fit_tol(),
                                 iter_cb=_emit_progress(self.progress,
-                                                       lambda: self._stop))
+                                                       lambda: self._stop),
+                                frame_cb=frame_cb)
             self.done.emit(result, self._stop_mode)
         except Exception as exc:
             self.failed.emit(str(exc))
@@ -409,6 +414,16 @@ class MainWindow(QMainWindow):
                                  checkable=True, checked=True)
         self.actPaddles = self._add(m_view, "Show paddles", self._toggle_paddles,
                                     checkable=True, checked=True)
+        self.actAnimateFit = QAction("Animate fits", self)
+        self.actAnimateFit.setCheckable(True)
+        self.actAnimateFit.setToolTip("draw the model curve as it converges during "
+                                      "a 1D fit (a fading trail shows the last few "
+                                      "iterations) — watch convergence or divergence")
+        self.actAnimateFit.setChecked(bool(QSettings("LARMOR", "app").value(
+            "animateFit", True, type=bool)))
+        self.actAnimateFit.toggled.connect(
+            lambda on: QSettings("LARMOR", "app").setValue("animateFit", bool(on)))
+        m_view.addAction(self.actAnimateFit)
         self.actScrollNudge = QAction("Scroll &nudges fit values", self)
         self.actScrollNudge.setCheckable(True)
         self.actScrollNudge.setToolTip("when on, scrolling over a parameter cell "
@@ -2476,14 +2491,34 @@ class MainWindow(QMainWindow):
             else f"fitting in {hi:.1f} … {lo:.1f} ppm …")
         self.lines_table.btnFit.setEnabled(False)
         self._progress_start("1D fit")
+        animate = bool(getattr(self, "actAnimateFit", None)
+                       and self.actAnimateFit.isChecked())
         self._fit_worker = FitWorker(json.loads(json.dumps(self.recipe)),
-                                     self.exp_ppm, self.exp_amp, (hi, lo))
+                                     self.exp_ppm, self.exp_amp, (hi, lo),
+                                     animate=animate)
         self._fit_worker.progress.connect(self._progress_tick)
         self._fit_worker.done.connect(self._fit_done)
         self._fit_worker.failed.connect(self._fit_failed)
+        if animate:
+            self._anim_last_ms = 0.0
+            self._anim_last_rms = float("nan")
+            self._fit_worker.progress.connect(
+                lambda it, rms: setattr(self, "_anim_last_rms", rms))
+            self._fit_worker.frame.connect(self._fit_frame)
+            self.view.start_fit_animation()
         self._active_fit_worker = self._fit_worker
         self._show_fit_buttons(True)
         self._fit_worker.start()
+
+    def _fit_frame(self, x, y, iteration: int):
+        """Draw one animation frame (throttled ~30 fps) of the evolving model."""
+        import time
+        now = time.monotonic() * 1000.0
+        if now - getattr(self, "_anim_last_ms", 0.0) < 30 and iteration > 1:
+            return                                  # throttle floods of fast iters
+        self._anim_last_ms = now
+        self.view.set_fit_frame(x, y, iteration,
+                                getattr(self, "_anim_last_rms", float("nan")))
 
     # ------------------------------------------------------------- 2D fit
     _MODELS_2D = {"czjzek", "ext_czjzek", "quad_ct", "quad_csa"}
@@ -2546,6 +2581,7 @@ class MainWindow(QMainWindow):
     def _fit_failed(self, msg: str):
         self._active_fit_worker = None
         self.lines_table.btnFit.setEnabled(True)
+        self.view.stop_fit_animation()
         self._progress_end(False)
         QMessageBox.warning(self, "Fit failed", msg)
         self.statusBar().showMessage("fit failed")
@@ -2575,6 +2611,7 @@ class MainWindow(QMainWindow):
     def _fit_done(self, result, stop_mode: str = ""):
         self._active_fit_worker = None
         self.lines_table.btnFit.setEnabled(True)
+        self.view.stop_fit_animation()          # the final model replaces the trail
         if stop_mode == "cancel":
             # the worker fitted a COPY, so self.recipe is still the pre-fit state
             self._progress_end(False)

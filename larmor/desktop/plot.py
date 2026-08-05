@@ -116,7 +116,79 @@ class SpectrumView(pg.PlotWidget):
         # phase pivot (TopSpin-style): p1 rotates about this reference point
         self._pivot: pg.InfiniteLine | None = None
 
+        # live fit animation: a bright morphing curve + fading ghost trail
+        self._anim_ghosts: list[pg.PlotDataItem] = []
+        self._anim_main: pg.PlotDataItem | None = None
+        self._anim_hist: list = []
+        self._anim_label: pg.TextItem | None = None
+
         self.apply_theme()          # axis pens, labels, grid, legend from theme
+
+    # ---------------------------------------------------------------- fit animation
+    def start_fit_animation(self):
+        """Prepare the animated-fit overlay (call before a fit begins)."""
+        t = theme.active()
+        if self._anim_main is None:
+            self._anim_ghosts = []
+            for _ in range(3):                      # a short fading trail
+                g = self.plot([], [], pen=pg.mkPen(t.accent, width=1))
+                g.setZValue(40)
+                self._anim_ghosts.append(g)
+            self._anim_main = self.plot(
+                [], [], pen=pg.mkPen(t.accent, width=2.2), antialias=True)
+            self._anim_main.setZValue(45)
+            self._anim_label = pg.TextItem(color=t.accent, anchor=(0, 0))
+            self._anim_label.setZValue(46)
+            self.addItem(self._anim_label)
+        self._anim_hist = []
+        self._anim_label.setText("")
+        for it in (*self._anim_ghosts, self._anim_main):
+            it.setData([], [])
+        self._anim_label.setVisible(True)
+
+    def set_fit_frame(self, x, y, iteration: int, rms: float | None = None):
+        """Show the current model curve, pushing the previous ones into a fading
+        trail — so convergence (or divergence) is visible as it happens."""
+        if self._anim_main is None:
+            self.start_fit_animation()
+        from PySide6.QtGui import QColor
+        x = np.asarray(x, float); y = np.asarray(y, float)
+        self._anim_hist.append((x, y))
+        self._anim_hist = self._anim_hist[-4:]      # main + up to 3 ghosts
+        ghosts = self._anim_hist[:-1]
+        base = QColor(theme.active().accent)
+        alphas = [45, 80, 120]
+        n = len(self._anim_ghosts)
+        for gi, g in enumerate(self._anim_ghosts):
+            idx = gi - (n - len(ghosts))            # newest ghost is brightest
+            if 0 <= idx < len(ghosts):
+                gx, gy = ghosts[idx]
+                c = QColor(base); c.setAlpha(alphas[min(gi, 2)])
+                g.setPen(pg.mkPen(c, width=1))
+                g.setData(gx, gy)
+            else:
+                g.setData([], [])
+        self._anim_main.setData(x, y)
+        # a small live read-out anchored to the top-left of the (inverted-x) view
+        try:
+            vb = self.getPlotItem().getViewBox()
+            xr, yr = vb.viewRange()
+            self._anim_label.setPos(max(xr), max(yr))
+        except Exception:
+            pass
+        txt = f"● fitting — iter {iteration}"
+        if rms is not None and np.isfinite(rms):
+            txt += f" · rms {rms:.3g}"
+        self._anim_label.setText(txt)
+
+    def stop_fit_animation(self):
+        """Clear the animated-fit overlay (the final model takes over)."""
+        for it in (*self._anim_ghosts, self._anim_main):
+            if it is not None:
+                it.setData([], [])
+        if self._anim_label is not None:
+            self._anim_label.setText(""); self._anim_label.setVisible(False)
+        self._anim_hist = []
 
     def apply_theme(self):
         """(Re)apply the active colour theme to the plot's persistent items.

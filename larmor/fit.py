@@ -146,12 +146,14 @@ def _model(recipe: Recipe, params: lmfit.Parameters, ctx,
 
 def fit(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
         window_ppm: tuple[float, float] | None = None,
-        kernel=None, iter_cb=None, tol=None) -> FitResult:
+        kernel=None, iter_cb=None, tol=None, frame_cb=None) -> FitResult:
     """Refine `recipe` against (exp_ppm, exp_amp). Modifies recipe in place.
 
     `kernel` is accepted for backward compatibility and ignored; kernels are
     cached process-wide and resolved automatically. `tol` is the completion
     threshold (% change in the residual stdev, see ``ftol_from_pct``).
+    `frame_cb(x_ppm, y_model, iteration)`, if given, is called each iteration with
+    the current full model curve — for a live fit animation.
     """
     ctx = make_context(recipe, exp_ppm=exp_ppm)
     zones = [z for z in (recipe.fit_zones or []) if z and len(z) == 2]
@@ -204,8 +206,21 @@ def fit(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
         y, _ = _model(recipe, p, ctx)
         return np.interp(xw, ctx.x_ppm, y) - yw
 
+    def _main_cb(p, it, resid, *a, **k):
+        # emit the live model curve, then defer to the caller's iter_cb (which may
+        # ask to stop by returning True)
+        if frame_cb is not None:
+            try:
+                ym, _ = _model(recipe, p, ctx)
+                frame_cb(np.asarray(ctx.x_ppm, float), np.asarray(ym, float),
+                         int(it) if isinstance(it, int) else 0)
+            except Exception:
+                pass
+        return iter_cb(p, it, resid, *a, **k) if iter_cb is not None else None
+
     result = lmfit.minimize(residual, params, method="least_squares",
-                            iter_cb=iter_cb, **_tol_kws(tol))
+                            iter_cb=(_main_cb if (frame_cb or iter_cb) else None),
+                            **_tol_kws(tol))
 
     def _at_bounds(res) -> list[str]:
         names = []
