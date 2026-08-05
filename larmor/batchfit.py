@@ -24,6 +24,24 @@ from larmor.multifit import fit_cofit
 from larmor.recipe import Recipe
 
 
+def free_amplitudes(recipes: list[Recipe]) -> None:
+    """Make every site's amplitude free and allow it to reach zero, in place.
+
+    A batch fit refines amplitudes per spectrum, so a recipe that *locked* an
+    amplitude (``vary=False``) or bounded it above zero (``min>0``) must be
+    overridden — otherwise a component can neither adapt per spectrum nor vanish
+    where it is absent. Linked amplitudes (``expr``) are left alone (they follow
+    their master)."""
+    for r in recipes:
+        for s in r.sites:
+            amp = s.params.get("amplitude")
+            if amp is None or getattr(amp, "expr", None):
+                continue
+            amp.vary = True
+            if amp.min is None or amp.min > 0:
+                amp.min = 0.0
+
+
 def all_but_amplitude(recipes: list[Recipe]) -> tuple[str, ...]:
     """Every parameter name present in the model except amplitude (the default
     shared set: identical shapes/positions, free amplitudes)."""
@@ -83,6 +101,10 @@ def batch_fit(entries: list[tuple], *, share: tuple[str, ...] | None = None,
         raise ValueError("batch fit needs at least two spectra")
     recipes = [e[0] for e in entries]
     windows = [e[3] for e in entries]
+    # a batch fit's whole point is per-spectrum amplitudes that may reach ZERO
+    # (a line can be absent in some spectra) — so free every amplitude and allow
+    # zero, OVERRIDING any lock or positive lower bound carried by the recipe
+    free_amplitudes(recipes)
     if share is None:
         share = all_but_amplitude(recipes)
 

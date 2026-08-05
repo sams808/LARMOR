@@ -94,6 +94,31 @@ def test_shared_table_has_shared_and_per_spectrum_rows():
     assert any(r["param"] == "amplitude" and r["scope"] != "shared" for r in rows)
 
 
+def test_free_amplitudes_overrides_recipe_locks():
+    r = _start("s")
+    r.sites[0].params["amplitude"].vary = False        # locked in the recipe
+    r.sites[0].params["amplitude"].min = 50.0          # and bounded above zero
+    batchfit.free_amplitudes([r])
+    amp = r.sites[0].params["amplitude"]
+    assert amp.vary is True and amp.min == 0.0          # freed, may reach zero
+    # a linked amplitude is left alone
+    r.sites[1].params["amplitude"].expr = "0.5 * s0.amplitude"
+    batchfit.free_amplitudes([r])
+    assert r.sites[1].params["amplitude"].expr == "0.5 * s0.amplitude"
+
+
+def test_batch_fit_fits_a_locked_amplitude_per_spectrum():
+    # the reported bug: a recipe with a LOCKED amplitude must still fit that
+    # amplitude per spectrum (and let it adapt), not freeze it
+    entries = _entries()
+    for rec, *_ in entries:
+        rec.sites[0].params["amplitude"].vary = False  # lock site A everywhere
+    res = batchfit.batch_fit(entries)
+    ampA = [rr.sites[0].params["amplitude"].value for rr in res.recipes]
+    assert max(ampA) - min(ampA) > 1.0                 # it adapted per spectrum
+    assert all(a >= -1e-6 for a in ampA)               # stayed non-negative
+
+
 def test_completion_threshold_maps_pct_to_ftol():
     from larmor.fit import ftol_from_pct, _tol_kws
     assert ftol_from_pct(0) is None            # 0 / off -> solver default
