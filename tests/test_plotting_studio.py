@@ -83,6 +83,20 @@ def test_difference_subtracts_reference(qapp):
     assert spec["difference"] is True and spec["norm"] == "max"
 
 
+def test_studio_has_file_explorer_and_adds_traces(qapp):
+    from larmor.desktop.plotting_studio import PlottingStudio
+    st = PlottingStudio(None)
+    assert st.files is not None and not st.files.btnBatch.isVisible()
+    st._add_from_explorer("C:/data/s/expno/pdata/1/1r")
+    assert st._traces[-1]["path"].endswith("1r")
+    st._add_from_explorer("C:/data/fit.recipe.json")
+    assert st._traces[-1].get("recipe", "").endswith(".recipe.json")
+    # in 2D mode a picked file sets the 2D path instead of adding a trace
+    st.kind.setCurrentIndex(1)
+    st._add_from_explorer("C:/data/expno2d")
+    assert st.path2d.text() == "C:/data/expno2d"
+
+
 def test_studio_export_and_spec_roundtrip(qapp, tmp_path, monkeypatch):
     from larmor.desktop import plotting_studio, export_dialog
     st = plotting_studio.PlottingStudio(None)

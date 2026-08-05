@@ -80,15 +80,26 @@ class PlottingStudio(QDialog):
     def __init__(self, parent=None, spec: dict | None = None):
         super().__init__(parent)
         self.setWindowTitle("Plotting studio")
-        self.resize(1080, 720)
+        self.resize(1240, 720)
         self._traces: list[dict] = []
         self._iso: list[dict] = []
 
+        from PySide6.QtWidgets import QSplitter
         root = QHBoxLayout(self)
+        splitter = QSplitter(Qt.Horizontal)
+        root.addWidget(splitter)
+
+        # ---- built-in file explorer (so you needn't leave LARMOR to find files) ----
+        from larmor.desktop.explorer import ExplorerPanel
+        self.files = ExplorerPanel()
+        self.files.btnBatch.setVisible(False)
+        self.files.open_requested.connect(self._add_from_explorer)
+        self.files.setMinimumWidth(220)
+        splitter.addWidget(self.files)
 
         # ---- controls ----
         ctl = QWidget(); cv = QVBoxLayout(ctl); ctl.setMaximumWidth(390)
-        root.addWidget(ctl)
+        splitter.addWidget(ctl)
 
         krow = QHBoxLayout(); krow.addWidget(QLabel("Plot:"))
         self.kind = QComboBox()
@@ -191,7 +202,8 @@ class PlottingStudio(QDialog):
         cv.addStretch(1)
 
         # ---- preview + actions ----
-        right = QWidget(); rv = QVBoxLayout(right); root.addWidget(right, 1)
+        right = QWidget(); rv = QVBoxLayout(right); splitter.addWidget(right)
+        splitter.setSizes([230, 380, 620])
         self.preview = QLabel("preview")
         self.preview.setAlignment(Qt.AlignCenter)
         self.preview.setMinimumSize(560, 480)
@@ -244,6 +256,22 @@ class PlottingStudio(QDialog):
                 return
             t["site"] = i
         self._push_trace(t)
+
+    def _add_from_explorer(self, path: str):
+        """A file double-clicked in the built-in explorer → add it sensibly for the
+        current plot kind (a 1D trace, a 2D path, or a series path)."""
+        from pathlib import Path as _P
+        low = path.lower()
+        k = self.kind.currentIndex()
+        if k == 1:                                  # 2D contour
+            self.path2d.setText(path); self._refresh(); return
+        if k == 2:                                  # series
+            self.pathSer.setText(path); self._refresh(); return
+        label = _P(path).stem
+        if low.endswith((".recipe.json", ".json")):
+            self._push_trace({"recipe": path, "part": "total", "label": label})
+        else:                                        # spectrum / dmfit fit / EXPNO
+            self._push_trace({"path": path, "label": label})
 
     def _push_trace(self, t):
         self._traces.append(t)
