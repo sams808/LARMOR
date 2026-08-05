@@ -146,7 +146,8 @@ def _model(recipe: Recipe, params: lmfit.Parameters, ctx,
 
 def fit(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
         window_ppm: tuple[float, float] | None = None,
-        kernel=None, iter_cb=None, tol=None, frame_cb=None) -> FitResult:
+        kernel=None, iter_cb=None, tol=None, frame_cb=None,
+        frame_every: int = 10) -> FitResult:
     """Refine `recipe` against (exp_ppm, exp_amp). Modifies recipe in place.
 
     `kernel` is accepted for backward compatibility and ignored; kernels are
@@ -206,14 +207,19 @@ def fit(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
         y, _ = _model(recipe, p, ctx)
         return np.interp(xw, ctx.x_ppm, y) - yw
 
+    _fs = {"n": 0}
+
     def _main_cb(p, it, resid, *a, **k):
-        # emit the live model curve, then defer to the caller's iter_cb (which may
-        # ask to stop by returning True)
-        if frame_cb is not None:
+        # emit the live model curve only every `frame_every` iterations (and the
+        # first couple) — computing/redrawing every iteration would slow the fit;
+        # the FINAL model is always drawn by the caller when the fit finishes
+        _fs["n"] += 1
+        if frame_cb is not None and (_fs["n"] <= 2
+                                     or _fs["n"] % max(1, frame_every) == 0):
             try:
                 ym, _ = _model(recipe, p, ctx)
                 frame_cb(np.asarray(ctx.x_ppm, float), np.asarray(ym, float),
-                         int(it) if isinstance(it, int) else 0)
+                         _fs["n"])
             except Exception:
                 pass
         return iter_cb(p, it, resid, *a, **k) if iter_cb is not None else None

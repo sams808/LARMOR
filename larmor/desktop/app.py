@@ -2625,12 +2625,8 @@ class MainWindow(QMainWindow):
         self._fit_worker.start()
 
     def _fit_frame(self, x, y, iteration: int):
-        """Draw one animation frame (throttled ~30 fps) of the evolving model."""
-        import time
-        now = time.monotonic() * 1000.0
-        if now - getattr(self, "_anim_last_ms", 0.0) < 30 and iteration > 1:
-            return                                  # throttle floods of fast iters
-        self._anim_last_ms = now
+        """Draw one animation frame. Frames are already emitted only every ~10
+        iterations (larmor.fit frame_every), so no per-iteration redraw cost."""
         self.view.set_fit_frame(x, y, iteration,
                                 getattr(self, "_anim_last_rms", float("nan")))
 
