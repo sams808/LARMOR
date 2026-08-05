@@ -28,57 +28,57 @@ from matplotlib.figure import Figure
 
 # ---------------------------------------------------------------------------
 # style presets (rcParams bundles); sizes in inches follow journal conventions
+# A shared, literature-quality base: clean sans-serif, thin dark-grey axes, ticks
+# in, generous label spacing, no chartjunk. Per-style dicts only tweak size/family.
+_BASE_RC = {
+    "font.family": "sans-serif",
+    "font.sans-serif": ["Arial", "Helvetica", "Helvetica Neue", "DejaVu Sans"],
+    "mathtext.fontset": "dejavusans",
+    "axes.edgecolor": "#2b2b2b",
+    "axes.labelcolor": "#1a1a1a",
+    "axes.labelweight": "normal",
+    "axes.titleweight": "bold",
+    "axes.labelpad": 3.5,
+    "axes.linewidth": 0.9,
+    "xtick.direction": "in", "ytick.direction": "in",
+    "xtick.major.size": 4.0, "ytick.major.size": 4.0,
+    "xtick.minor.size": 2.2, "ytick.minor.size": 2.2,
+    "xtick.major.width": 0.9, "ytick.major.width": 0.9,
+    "xtick.color": "#2b2b2b", "ytick.color": "#2b2b2b",
+    "lines.linewidth": 1.3, "lines.solid_capstyle": "round",
+    "legend.frameon": False, "legend.handlelength": 1.5,
+    "legend.labelspacing": 0.3, "legend.borderaxespad": 0.4,
+    "figure.facecolor": "white", "axes.facecolor": "white",
+    "savefig.facecolor": "white", "savefig.dpi": 300,
+    "savefig.bbox": "tight",
+}
+
+
+def _style(figsize, **over):
+    return {"figsize": figsize, "rc": {**_BASE_RC, **over}}
+
+
 STYLES: dict[str, dict] = {
-    "article": {  # single column (~3.5 in wide)
-        "figsize": (3.5, 2.8),
-        "rc": {"font.size": 8, "axes.linewidth": 0.8, "lines.linewidth": 1.0,
-               "xtick.direction": "out", "ytick.direction": "out",
-               "font.family": "sans-serif", "legend.fontsize": 6.5,
-               "legend.frameon": False},
-    },
-    "article-wide": {  # double column (~7 in wide)
-        "figsize": (7.0, 3.2),
-        "rc": {"font.size": 9, "axes.linewidth": 0.8, "lines.linewidth": 1.2,
-               "xtick.direction": "out", "ytick.direction": "out",
-               "font.family": "sans-serif", "legend.fontsize": 7.5,
-               "legend.frameon": False},
-    },
-    "presentation": {
-        "figsize": (9.0, 5.5),
-        "rc": {"font.size": 16, "axes.linewidth": 1.6, "lines.linewidth": 2.2,
-               "xtick.direction": "out", "ytick.direction": "out",
-               "font.family": "sans-serif", "legend.fontsize": 13,
-               "legend.frameon": False},
-    },
-    "thesis": {
-        "figsize": (5.8, 4.0),
-        "rc": {"font.size": 11, "axes.linewidth": 1.0, "lines.linewidth": 1.4,
-               "xtick.direction": "out", "ytick.direction": "out",
-               "font.family": "serif", "legend.fontsize": 9,
-               "legend.frameon": False},
-    },
+    "article": _style((3.5, 2.8), **{"font.size": 8.5, "legend.fontsize": 7,
+                                     "lines.linewidth": 1.2}),
+    "article-wide": _style((7.0, 3.2), **{"font.size": 9, "legend.fontsize": 7.5,
+                                          "lines.linewidth": 1.3}),
+    "presentation": _style((9.0, 5.5), **{"font.size": 16, "axes.linewidth": 1.4,
+                                          "lines.linewidth": 2.4,
+                                          "legend.fontsize": 13,
+                                          "xtick.major.size": 6,
+                                          "ytick.major.size": 6}),
+    "thesis": _style((5.8, 4.0), **{"font.size": 11, "font.family": "serif",
+                                    "mathtext.fontset": "dejavuserif",
+                                    "lines.linewidth": 1.5, "legend.fontsize": 9}),
     # journal presets (single-column widths + each house's typographic minimums)
-    "nature": {  # Nature single column = 89 mm ≈ 3.50 in, sans, ≥7 pt, ticks in
-        "figsize": (3.50, 2.7),
-        "rc": {"font.size": 7, "axes.linewidth": 0.6, "lines.linewidth": 1.0,
-               "xtick.direction": "in", "ytick.direction": "in",
-               "font.family": "sans-serif", "legend.fontsize": 6,
-               "legend.frameon": False, "axes.labelpad": 2.0},
-    },
-    "acs": {  # ACS single column = 3.25 in, sans, 8 pt
-        "figsize": (3.25, 2.6),
-        "rc": {"font.size": 8, "axes.linewidth": 0.8, "lines.linewidth": 1.0,
-               "xtick.direction": "in", "ytick.direction": "in",
-               "font.family": "sans-serif", "legend.fontsize": 7,
-               "legend.frameon": False},
-    },
-    "rsc": {  # RSC single column = 8.3 cm ≈ 3.27 in, sans, 8 pt
-        "figsize": (3.27, 2.6),
-        "rc": {"font.size": 8, "axes.linewidth": 0.8, "lines.linewidth": 1.1,
-               "xtick.direction": "out", "ytick.direction": "out",
-               "font.family": "sans-serif", "legend.fontsize": 7,
-               "legend.frameon": False},
-    },
+    "nature": _style((3.50, 2.7), **{"font.size": 7, "axes.linewidth": 0.6,
+                                     "lines.linewidth": 1.0, "legend.fontsize": 6,
+                                     "axes.labelpad": 2.5}),
+    "acs": _style((3.25, 2.6), **{"font.size": 8, "lines.linewidth": 1.0,
+                                  "legend.fontsize": 7}),
+    "rsc": _style((3.27, 2.6), **{"font.size": 8, "lines.linewidth": 1.1,
+                                  "legend.fontsize": 7}),
 }
 
 #: superscripted isotope label, e.g. "27Al" -> "$^{27}$Al NMR shift (ppm)"
@@ -204,20 +204,39 @@ def render_1d(spec: dict) -> Figure:
                               label=t.get("label", meta.get("label")))
             if t.get("color"):
                 line.set_color(t["color"])
-        xlabel = spec.get("xlabel") or (nucleus_xlabel(nucleus) if nucleus else "shift (ppm)")
+        # ppm spectra run high→low with a hidden intensity axis; a generic x-y
+        # plot (e.g. a parameter-vs-sample series) keeps a normal, upright axis
+        x_is_ppm = spec.get("x_is_ppm", True)
+        hide_y = spec.get("hide_yaxis", x_is_ppm)
+        xlabel = spec.get("xlabel") or (
+            nucleus_xlabel(nucleus) if (nucleus and x_is_ppm)
+            else ("shift (ppm)" if x_is_ppm else "x"))
         ax.set_xlabel(xlabel)
+        if spec.get("ylabel"):
+            ax.set_ylabel(spec["ylabel"])
         if spec.get("xlim"):
             hi, lo = spec["xlim"]
-            ax.set_xlim(max(hi, lo), min(hi, lo))  # ppm axes run high -> low
-        else:
+            ax.set_xlim((max(hi, lo), min(hi, lo)) if x_is_ppm else (lo, hi))
+        elif x_is_ppm:
             ax.invert_xaxis()
         if spec.get("ylim"):
             ax.set_ylim(*spec["ylim"])
-        ax.set_yticks([]) if spec.get("hide_yaxis", True) else None
-        if spec.get("hide_yaxis", True):
-            ax.spines["left"].set_visible(False)
-            ax.spines["right"].set_visible(False)
-            ax.spines["top"].set_visible(False)
+        # custom ticks: [[pos, "label"], …] for either axis (e.g. sample names)
+        if spec.get("xticks"):
+            ax.set_xticks([float(p) for p, _ in spec["xticks"]])
+            ax.set_xticklabels([str(lab) for _, lab in spec["xticks"]],
+                               rotation=spec.get("xtick_rotation", 0),
+                               ha="right" if spec.get("xtick_rotation") else "center")
+        if spec.get("yticks"):
+            ax.set_yticks([float(p) for p, _ in spec["yticks"]])
+            ax.set_yticklabels([str(lab) for _, lab in spec["yticks"]])
+        if hide_y:
+            ax.set_yticks([])
+            for s in ("left", "right", "top"):
+                ax.spines[s].set_visible(False)
+        else:                                           # clean upright x-y plot
+            for s in ("right", "top"):
+                ax.spines[s].set_visible(False)
         for a in spec.get("annotations", []):
             ax.text(a["x"], a["y"], a["text"], fontsize=a.get("fontsize"),
                     ha=a.get("ha", "left"))

@@ -59,9 +59,14 @@ def traces_from_plot(widget) -> list[dict]:
 
 
 def attach_plot_menu(widget, *, title: str = "figure", parent=None,
-                     studio: bool = True) -> None:
+                     studio: bool = True, studio_spec=None) -> None:
     """Add Export + Send-to-studio to a pyqtgraph PlotWidget's right-click menu
-    and disable the freeze-prone native exporter."""
+    and disable the freeze-prone native exporter.
+
+    ``studio_spec`` (optional) is a callable returning a full figure spec for
+    "Send to Plotting studio" — use it when the plot isn't an NMR spectrum (e.g. a
+    parameter-vs-sample series), so the right data, axis and ticks transfer. When
+    omitted, the plotted curves are sent as a generic 1D overlay."""
     _disable_native_export(widget)
     try:
         menu = widget.getPlotItem().getViewBox().menu
@@ -73,7 +78,7 @@ def attach_plot_menu(widget, *, title: str = "figure", parent=None,
     menu.addAction(act_exp)
     if studio:
         act_std = QAction("Send to Plotting studio", menu)
-        act_std.triggered.connect(lambda: _to_studio(widget, parent))
+        act_std.triggered.connect(lambda: _to_studio(widget, parent, studio_spec))
         menu.addAction(act_std)
 
 
@@ -86,7 +91,11 @@ def _export(widget, title, parent):
         QMessageBox.warning(widget, "Export", f"export failed: {exc}")
 
 
-def _to_studio(widget, parent):
+def _to_studio(widget, parent, studio_spec=None):
     from larmor.desktop.plotting_studio import PlottingStudio
-    traces = [t for t in traces_from_plot(widget) if t["data"]["x"]]
-    PlottingStudio(parent or widget.window(), {"kind": "1d", "traces": traces}).exec()
+    if studio_spec is not None:
+        spec = studio_spec()
+    else:
+        traces = [t for t in traces_from_plot(widget) if t["data"]["x"]]
+        spec = {"kind": "1d", "traces": traces}
+    PlottingStudio(parent or widget.window(), spec).exec()

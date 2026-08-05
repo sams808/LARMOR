@@ -63,6 +63,19 @@ def test_series_dialog_builds(qapp):
     assert len(dlg._selected()) == 1                     # first option preselected
 
 
+def test_series_send_to_studio_spec_is_correct(qapp):
+    # right-click a subplot → studio must get THIS parameter's values, an upright
+    # axis and the sample names as x-ticks (not a mislabelled ppm spectrum)
+    from larmor.desktop.series_plot import SeriesPlotDialog
+    dlg = SeriesPlotDialog(None, _result())
+    pop_spec = next(s for s in dlg._params if s["kind"] == "pop_integral")
+    spec = dlg._studio_spec_for(pop_spec)
+    assert spec["x_is_ppm"] is False and spec["hide_yaxis"] is False
+    assert [lab for _, lab in spec["xticks"]] == dlg._labels   # sample names
+    assert spec["ylabel"] == pop_spec["label"]
+    assert spec["traces"] and len(spec["traces"][0]["data"]["y"]) == len(dlg._labels)
+
+
 def test_estimate_baseline_recovers_a_slope():
     from larmor.desktop.batchfit_dialog import estimate_baseline
     x = np.linspace(-20, 60, 600)

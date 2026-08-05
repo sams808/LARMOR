@@ -160,9 +160,27 @@ class SeriesPlotDialog(QDialog):
             pw.addLegend(labelTextSize="8pt")
             pw.setLabel("left", spec["label"])
             pw.getAxis("bottom").setTicks(ticks)
-            attach_plot_menu(pw, title=spec["param"], parent=self)
+            attach_plot_menu(pw, title=spec["param"], parent=self,
+                             studio_spec=lambda s=spec: self._studio_spec_for(s))
             self._grid.addWidget(pw, idx // 2, idx % 2)
             self._subplots[spec["param"]] = pw
+
+    def _studio_spec_for(self, spec: dict) -> dict:
+        """A publication-figure spec for THIS subplot: the selected sites' values
+        vs the series, on an upright axis with the sample names as x-ticks."""
+        x = list(range(1, len(self._labels) + 1))
+        traces = []
+        for i in self._selected() or [0]:
+            vals, _ = series_values(self._result, {"site": i, "param": spec["param"],
+                                                   "kind": spec["kind"]})
+            traces.append({"data": {"x": x, "y": [float(v) for v in vals]},
+                           "label": f"s{i}", "color": site_color(i),
+                           "linestyle": "-"})
+        return {"kind": "1d", "x_is_ppm": False, "hide_yaxis": False,
+                "xlabel": "sample", "ylabel": spec["label"],
+                "xticks": [[xi, lab] for xi, lab in zip(x, self._labels)],
+                "xtick_rotation": 45, "traces": traces,
+                "title": spec["label"]}
 
     def _draw(self):
         sites = self._selected()

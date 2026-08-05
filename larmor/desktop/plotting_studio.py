@@ -186,6 +186,18 @@ class PlottingStudio(QDialog):
         self.ylabel = QLineEdit(); common.addRow("y label", self.ylabel)
         self.style = QComboBox(); self.style.addItems(list(figures.STYLES))
         common.addRow("Style", self.style)
+        self.chkPpm = QCheckBox("NMR ppm axis (high → low)")
+        self.chkPpm.setChecked(True)
+        self.chkPpm.setToolTip("on: chemical-shift axis, inverted, intensity axis "
+                               "hidden. off: an ordinary x–y plot (e.g. a "
+                               "parameter-vs-sample series)")
+        common.addRow("x-axis", self.chkPpm)
+        self.xticks = QLineEdit()
+        self.xticks.setPlaceholderText("custom tick labels, comma-separated "
+                                       "(e.g. 0Ca, 1Ca, 2Ca) or pos:label")
+        self.xticks.setToolTip("leave empty for automatic numeric ticks; or list "
+                               "labels placed at 1,2,3… or explicit pos:label pairs")
+        common.addRow("x-ticks", self.xticks)
         xr = QWidget(); xrl = QHBoxLayout(xr); xrl.setContentsMargins(0, 0, 0, 0)
         self.xhi = QDoubleSpinBox(); self.xhi.setRange(-1e6, 1e6)
         self.xlo = QDoubleSpinBox(); self.xlo.setRange(-1e6, 1e6)
@@ -201,29 +213,47 @@ class PlottingStudio(QDialog):
         cv.addLayout(common)
         cv.addStretch(1)
 
-        # ---- preview + actions ----
+        # ---- preview (crisp matplotlib canvas) + actions ----
         right = QWidget(); rv = QVBoxLayout(right); splitter.addWidget(right)
         splitter.setSizes([230, 380, 620])
-        self.preview = QLabel("preview")
-        self.preview.setAlignment(Qt.AlignCenter)
-        self.preview.setMinimumSize(560, 480)
-        self.preview.setStyleSheet(f"background:{theme.active().plot_bg};")
-        rv.addWidget(self.preview, 1)
+        from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+        from matplotlib.figure import Figure
+        self._canvas = FigureCanvasQTAgg(Figure(figsize=(5, 4)))
+        self._canvas.setMinimumSize(560, 460)
+        rv.addWidget(self._canvas, 1)
         arow = QHBoxLayout()
-        b_ref = QPushButton("Refresh preview"); b_ref.clicked.connect(self._refresh)
         b_exp = QPushButton("Export…"); b_exp.clicked.connect(self._export)
         b_save = QPushButton("Save spec…"); b_save.clicked.connect(self._save_spec)
         b_load = QPushButton("Load spec…"); b_load.clicked.connect(self._load_spec)
-        for b in (b_ref, b_exp, b_save, b_load):
+        for b in (b_exp, b_save, b_load):
             arow.addWidget(b)
         arow.addStretch(1)
         rv.addLayout(arow)
         self.msg = QLabel(""); self.msg.setWordWrap(True)
         rv.addWidget(self.msg)
 
+        # auto-update: a short debounce so the preview follows every control change
+        # without re-rendering on each keystroke
+        from PySide6.QtCore import QTimer
+        self._debounce = QTimer(self); self._debounce.setSingleShot(True)
+        self._debounce.setInterval(180)
+        self._debounce.timeout.connect(self._refresh)
+        for w in (self.title, self.xlabel, self.ylabel, self.xticks):
+            w.textChanged.connect(self._schedule)
+        for w in (self.style, self.norm, self.cmap, self.cmode, self.levmode):
+            w.currentIndexChanged.connect(self._schedule)
+        for w in (self.wcm, self.hcm, self.xhi, self.xlo, self.nlev, self.stack):
+            w.valueChanged.connect(self._schedule)
+        for w in (self.chkPpm, self.chkXlim, self.chkValues, self.chkTop,
+                  self.chkRight, self.chkNeg):
+            w.toggled.connect(self._schedule)
+
         if spec:
             self._apply_spec(spec)
         self._kind_changed()
+
+    def _schedule(self, *a):
+        self._debounce.start()
 
     # ------------------------------------------------------------------ traces
     def _add_trace_menu(self):
@@ -349,6 +379,13 @@ class PlottingStudio(QDialog):
                 spec["norm"] = self.norm.currentText()
             if self.chkDiff.isChecked():
                 spec["difference"] = True
+            spec["x_is_ppm"] = self.chkPpm.isChecked()
+            if not self.chkPpm.isChecked():
+                spec["hide_yaxis"] = False
+            ticks = self._parse_xticks()
+            if ticks:
+                spec["xticks"] = ticks
+                spec["xtick_rotation"] = 45
             return spec
         if k == 1:
             return {"kind": "2d", "path": self.path2d.text(),
@@ -365,11 +402,34 @@ class PlottingStudio(QDialog):
                 "mode": self.serMode.currentText(),
                 "stretched": self.serStretch.isChecked(), **common}
 
+    def _parse_xticks(self):
+        """The 'x-ticks' field → [[pos, label], …]. Accepts 'a, b, c' (placed at
+        1,2,3…) or explicit 'pos:label' pairs."""
+        txt = self.xticks.text().strip()
+        if not txt:
+            return None
+        out = []
+        for i, part in enumerate(p for p in txt.split(",") if p.strip()):
+            part = part.strip()
+            if ":" in part:
+                pos, lab = part.split(":", 1)
+                try:
+                    out.append([float(pos), lab.strip()])
+                except ValueError:
+                    out.append([float(i + 1), part])
+            else:
+                out.append([float(i + 1), part])
+        return out or None
+
     def _apply_spec(self, spec: dict):
         self.style.setCurrentText(spec.get("style", "article"))
         self.title.setText(spec.get("title", ""))
         self.xlabel.setText(spec.get("xlabel", ""))
         self.ylabel.setText(spec.get("ylabel", ""))
+        self.chkPpm.setChecked(spec.get("x_is_ppm", True))
+        if spec.get("xticks"):
+            self.xticks.setText(", ".join(
+                f"{p:g}:{lab}" for p, lab in spec["xticks"]))
         kind = {"1d": 0, "2d": 1, "series": 2}.get(spec.get("kind", "1d"), 0)
         self.kind.setCurrentIndex(kind)
         if kind == 0:
@@ -388,17 +448,20 @@ class PlottingStudio(QDialog):
 
     # ------------------------------------------------------------------ render
     def _refresh(self):
+        spec = self._spec()
+        if spec["kind"] == "1d" and not spec["traces"]:
+            self.msg.setText("add a trace to preview"); return
+        if spec["kind"] in ("2d", "series") and not spec.get("path"):
+            self.msg.setText("pick an EXPNO folder to preview"); return
         try:
-            spec = self._spec()
-            if spec["kind"] == "1d" and not spec["traces"]:
-                self.preview.setText("add a trace to preview"); return
-            if spec["kind"] in ("2d", "series") and not spec.get("path"):
-                self.preview.setText("pick an EXPNO folder to preview"); return
-            png = figures.render_png_bytes(spec, dpi=110)
-            pix = QPixmap(); pix.loadFromData(png)
-            self.preview.setPixmap(pix.scaled(
-                self.preview.width(), self.preview.height(),
-                Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            # render straight onto the live canvas figure (crisp, no bitmap scaling)
+            new_fig = figures.render(spec)
+            old = self._canvas.figure
+            self._canvas.figure = new_fig
+            new_fig.set_canvas(self._canvas)
+            self._canvas.draw_idle()
+            import matplotlib.pyplot as plt
+            plt.close(old)
             self.msg.setText("")
         except Exception as exc:  # noqa: BLE001
             self.msg.setText(f"cannot render: {exc}")

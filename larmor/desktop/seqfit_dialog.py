@@ -268,7 +268,7 @@ class SeqFitDialog(QDialog):
         self.cbTraj.blockSignals(False)
 
     # ------------------------------------------------------------------ nav
-    def _show_current(self):
+    def _show_current(self, rescale: bool = True):
         d = self._data[self._cur]
         self.lblNav.setText(f"spectrum {self._cur + 1} / {len(self._data)}  ·  "
                             f"{d['sample']}"
@@ -278,6 +278,8 @@ class SeqFitDialog(QDialog):
         self.btnPrev.setEnabled(self._cur > 0)
         self.btnNext.setEnabled(self._cur < len(self._data) - 1)
         self._resim_current()
+        if rescale:
+            self._rescale_x()          # only when arriving at a (new) spectrum
 
     def _prev(self):
         if self._cur > 0:
@@ -304,13 +306,18 @@ class SeqFitDialog(QDialog):
         self._recipes[self._cur] = dst.to_dict()
 
     # ------------------------------------------------------------------ sim/fit
+    def _rescale_x(self):
+        """Fit the x-range to the current spectrum — only on navigation, so a
+        manual zoom is preserved across edits (fix/unfix) and fits."""
+        d = self._data[self._cur]
+        self.plot.getPlotItem().getViewBox().setXRange(
+            float(d["ppm"].min()), float(d["ppm"].max()), padding=0.02)
+
     def _resim_current(self):
         from larmor import engine
         from larmor.recipe import Recipe
         d = self._data[self._cur]
         self._curExp.setData(d["ppm"], d["amp"])
-        self.plot.getPlotItem().getViewBox().setXRange(
-            float(d["ppm"].min()), float(d["ppm"].max()), padding=0.02)
         for it in self._curComp:
             self.plot.removeItem(it)
         self._curComp = []
@@ -391,12 +398,13 @@ class SeqFitDialog(QDialog):
         self.btnCancel.setEnabled(False); self.btnStop.setEnabled(False)
         if mode == "cancel":
             self._recipes = self._pre_recipes
-            self.status.setText("sweep cancelled — reverted"); self._show_current()
+            self.status.setText("sweep cancelled — reverted")
+            self._show_current(rescale=False)      # keep the user's zoom
             return
         self._result = result
         self._recipes = [r.to_dict() for r in result.recipes]
         self._live_rmsd = list(result.rmsd)
-        self._show_current(); self._draw_rms(); self._draw_traj()
+        self._show_current(rescale=False); self._draw_rms(); self._draw_traj()
         means = " → ".join(f"{h['mean']:.4g}" for h in result.history)
         self.status.setText(result.summary + f"   (pass means: {means})")
 

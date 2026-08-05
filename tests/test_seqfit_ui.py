@@ -56,6 +56,20 @@ def test_seqfit_dialog_builds_and_navigates(qapp, tmp_path):
     assert dlg._cur == 0
 
 
+def test_seqfit_edit_does_not_rescale_the_plot(qapp, tmp_path):
+    # a manual zoom must survive edits/fits — only navigation rescales the x-axis
+    from larmor.desktop.seqfit_dialog import SeqFitDialog
+    paths, model = _series(tmp_path)
+    dlg = SeqFitDialog(None, paths, model)
+    vb = dlg.plot.getPlotItem().getViewBox()
+    vb.setXRange(5.0, 25.0, padding=0)                 # user zooms in
+    lo, hi = vb.viewRange()[0]
+    dlg._resim_current()                                # a re-sim (edit/fit)
+    assert vb.viewRange()[0] == pytest.approx([lo, hi], abs=0.01)   # unchanged
+    dlg._show_current(rescale=False)                    # after a sweep — keep zoom
+    assert vb.viewRange()[0] == pytest.approx([lo, hi], abs=0.01)
+
+
 def test_seqfit_dialog_fit_current_and_auto(qapp, tmp_path):
     from larmor.desktop.seqfit_dialog import SeqFitDialog, _SeqWorker
     paths, model = _series(tmp_path)

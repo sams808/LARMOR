@@ -97,6 +97,34 @@ def test_studio_has_file_explorer_and_adds_traces(qapp):
     assert st.path2d.text() == "C:/data/expno2d"
 
 
+def test_generic_xy_axis_with_custom_ticks():
+    import matplotlib.pyplot as plt
+    from larmor import figures
+    spec = {"kind": "1d", "x_is_ppm": False, "hide_yaxis": False,
+            "xlabel": "sample", "ylabel": "pop %",
+            "xticks": [[1, "0Ca"], [2, "1Ca"], [3, "2Ca"]],
+            "traces": [{"data": {"x": [1, 2, 3], "y": [80, 70, 60]}}]}
+    fig = figures.render(spec); ax = fig.axes[0]
+    assert [t.get_text() for t in ax.get_xticklabels()] == ["0Ca", "1Ca", "2Ca"]
+    assert ax.get_xlim()[0] < ax.get_xlim()[1]        # NOT inverted (not ppm)
+    assert len(ax.get_yticks()) > 0                    # intensity axis shown
+    plt.close(fig)
+
+
+def test_studio_ppm_toggle_and_custom_ticks(qapp):
+    from larmor.desktop.plotting_studio import PlottingStudio
+    st = PlottingStudio(None)
+    st._push_trace({"data": {"x": [1, 2, 3], "y": [1, 2, 3]}, "label": "t"})
+    st.chkPpm.setChecked(False)
+    st.xticks.setText("0Ca, 1Ca, 2Ca")
+    spec = st._spec()
+    assert spec["x_is_ppm"] is False and spec["hide_yaxis"] is False
+    assert [lab for _, lab in spec["xticks"]] == ["0Ca", "1Ca", "2Ca"]
+    # explicit pos:label pairs are honoured too
+    st.xticks.setText("10:a, 20:b")
+    assert st._spec()["xticks"] == [[10.0, "a"], [20.0, "b"]]
+
+
 def test_studio_export_and_spec_roundtrip(qapp, tmp_path, monkeypatch):
     from larmor.desktop import plotting_studio, export_dialog
     st = plotting_studio.PlottingStudio(None)
