@@ -88,3 +88,11 @@ def test_direction_alternates():
     res = seqfit.run_sequential(_entries(), passes=2)
     assert res.history[0]["direction"] == "→"
     assert res.history[1]["direction"] == "←"
+
+
+def test_stop_is_responsive_across_many_passes():
+    # Stop must short-circuit the WHOLE sweep, not run all the requested passes
+    # (a 16-pass auto sweep was effectively unstoppable before)
+    res = seqfit.run_sequential(_entries(), passes=16, should_stop=lambda: True)
+    assert len(res.history) == 1                  # stopped after the first check
+    assert res is not None

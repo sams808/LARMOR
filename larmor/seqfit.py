@@ -140,6 +140,12 @@ def run_sequential(entries, *, passes: int = 2, start: str = "first",
     propagate = tuple(propagate)
     base = list(range(n)) if start == "first" else list(range(n - 1, -1, -1))
 
+    # an iter_cb that aborts the individual lmfit run the moment a stop is asked
+    # for — so Stop is responsive DURING a fit, not only between spectra (a single
+    # slow fit otherwise makes the sweep feel unstoppable)
+    def _abort_cb(params, it, resid, *a, **k):
+        return True if (should_stop is not None and should_stop()) else None
+
     history = []
     stopped = False
     for p in range(max(1, passes)):
@@ -147,10 +153,13 @@ def run_sequential(entries, *, passes: int = 2, start: str = "first",
         prev = None
         rmsds = [float("nan")] * n
         for k in order:
+            if should_stop is not None and should_stop():
+                stopped = True
+                break
             if prev is not None:
                 seed_from(recipes[k], recipes[prev], propagate)
             fitmod.fit(recipes[k], ppms[k], amps[k],
-                       window_ppm=windows[k], tol=tol)
+                       window_ppm=windows[k], tol=tol, iter_cb=_abort_cb)
             r = _rmsd(recipes[k], ppms[k], amps[k], windows[k])
             rmsds[k] = r
             if progress is not None:
