@@ -559,6 +559,10 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "m_apply"):
             return
         self.m_apply.clear()
+        # always let the user reach a recipe anywhere on disk, not just recents
+        browse = self.m_apply.addAction("Browse for recipe…")
+        browse.triggered.connect(self.apply_recipe_browse)
+        self.m_apply.addSeparator()
         paths = QSettings("LARMOR", "app").value("recentRecipes", []) or []
         if isinstance(paths, str):
             paths = [paths]
@@ -572,16 +576,36 @@ class MainWindow(QMainWindow):
             a.setToolTip(p)
             a.triggered.connect(lambda _=False, path=p: self.apply_recipe(path))
 
+    def apply_recipe_browse(self):
+        """Pick a recipe/dmfit file from anywhere and apply its lines to the data."""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Apply recipe (its lines → current data)", self._last_dir(),
+            "Fits (*.json *.fxmla *.fxml);;LARMOR recipe (*.json);;All (*)")
+        if path:
+            self.apply_recipe(path)
+
+    def _recipe_model_from(self, path: str) -> dict | None:
+        """The model (sites + nucleus/field) from a LARMOR .json or a dmfit
+        .fxml/.fxmla — data not required. Returns None (and warns) on failure."""
+        try:
+            low = path.lower()
+            if low.endswith((".fxml", ".fxmla")):
+                from larmor.io import fxmla
+                recipe, _warns = fxmla.to_recipe(fxmla.read(path))
+                return recipe.to_dict()
+            return Recipe.load(path).to_dict()
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.warning(self, "Apply recipe", f"could not load: {exc}")
+            return None
+
     def apply_recipe(self, path: str):
         """Load a saved recipe and drop ITS lines onto the currently open data —
         a starting model reused from a similar sample (the fit then refines)."""
         if self.exp_ppm is None or not self.recipe:
             self.statusBar().showMessage("open a spectrum first")
             return
-        try:
-            d = Recipe.load(path).to_dict()
-        except Exception as exc:  # noqa: BLE001
-            QMessageBox.warning(self, "Apply recipe", f"could not load: {exc}")
+        d = self._recipe_model_from(path)
+        if d is None:
             return
         if not d.get("sites"):
             self.statusBar().showMessage("that recipe has no lines")
@@ -918,6 +942,7 @@ class MainWindow(QMainWindow):
                                        QDockWidget.DockWidgetClosable)
         self.explorer = ExplorerPanel()
         self._proj_pick_axis = None      # HMQC: awaiting an Explorer pick
+        self._pending_apply_model = None  # a model awaiting an Explorer data pick
         self.explorer.open_requested.connect(self._explorer_open)
         self.explorer.batch_requested.connect(self.run_batch_fit)
         self.explorer_dock.setWidget(self.explorer)
@@ -1720,6 +1745,41 @@ class MainWindow(QMainWindow):
             return None
         return str(procs[items.index(choice)])
 
+    def _offer_fxml_no_data(self, path: str):
+        """A dmfit fit with a model but no embedded spectrum: let the user apply
+        the model to the current data, pick data in the Explorer, or cancel."""
+        model = self._recipe_model_from(path)
+        if model is None or not model.get("sites"):
+            self.statusBar().showMessage("that fit has no lines to apply")
+            return
+        box = QMessageBox(self)
+        box.setWindowTitle("dmfit fit — no embedded data")
+        box.setIcon(QMessageBox.Question)
+        box.setText(f"“{Path(path).name}” contains a model ({len(model['sites'])} "
+                    "line(s)) but no experimental data.")
+        box.setInformativeText("Apply its lines to the spectrum on screen, or pick "
+                               "experimental data in the Explorer to fit it on?")
+        has_current = self.recipe is not None and self.exp_ppm is not None \
+            and len(self.exp_ppm) > 0
+        b_cur = box.addButton("Apply to current data", QMessageBox.AcceptRole)
+        b_pick = box.addButton("Pick data in Explorer…", QMessageBox.ActionRole)
+        box.addButton(QMessageBox.Cancel)
+        b_cur.setEnabled(bool(has_current))
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is b_cur and has_current:
+            self.snapshot()
+            self.recipe["sites"] = model["sites"]
+            self.on_structure_changed()
+            self.statusBar().showMessage(
+                f"applied {len(model['sites'])} line(s) from {Path(path).name} "
+                "— now Fit")
+        elif clicked is b_pick:
+            self._pending_apply_model = model
+            self.explorer_dock.show(); self.explorer_dock.raise_()
+            self.statusBar().showMessage(
+                "pick the experimental data in the Explorer to fit this model on")
+
     def load_source(self, path: str, keep_fit: bool | None = None):
         """Open ANY dataset with a basic display, then let the user choose a
         process. 1D spectra go to the fit workbench; 2D datasets show a contour
@@ -1743,7 +1803,13 @@ class MainWindow(QMainWindow):
         # First try the 1D-fittable path (dmfit / recipe / 1D processed).
         try:
             ppm, amp, recipe, meta, warnings = _load_any(path)
-        except ValueError:
+        except ValueError as exc:
+            # a dmfit fit that carries a MODEL but no embedded data → let the user
+            # attach it to a spectrum instead of just failing
+            if (Path(path).suffix.lower() in (".fxml", ".fxmla")
+                    and "experimental data" in str(exc).lower()):
+                self._offer_fxml_no_data(path)
+                return
             # not a 1D-fittable source: it may be a 2D or a raw fid/ser.
             handled = self._load_nonfittable(path)
             if handled:
@@ -2012,7 +2078,20 @@ class MainWindow(QMainWindow):
             "(use Browse… to reach one elsewhere)")
 
     def _explorer_open(self, path: str):
-        """Route an Explorer activation: an HMQC projection pick, else a load."""
+        """Route an Explorer activation: a pending model to attach, an HMQC
+        projection pick, else a normal load."""
+        if getattr(self, "_pending_apply_model", None) is not None:
+            model = self._pending_apply_model
+            self._pending_apply_model = None
+            self.load_source(path)
+            if self.recipe is not None and model.get("sites"):
+                self.snapshot()
+                self.recipe["sites"] = model["sites"]
+                self.on_structure_changed()
+                self.statusBar().showMessage(
+                    f"applied {len(model['sites'])} line(s) to "
+                    f"{Path(path).name} — now Fit")
+            return
         axis = self._proj_pick_axis
         if axis is None:
             self.load_source(path)
