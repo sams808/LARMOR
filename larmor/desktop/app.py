@@ -298,6 +298,8 @@ class MainWindow(QMainWindow):
         self._rebuild_recent()
         self._add(m_file, "Open &FID…  (process before FT)", self.open_fid,
                   "Ctrl+F")
+        self._add(m_file, "Open &Varian / Agilent…  (.fid folder)",
+                  self.open_varian)
         m_file.addSeparator()
         self._add(m_file, "Open pro&ject…  (all spectra + fits)", self.open_project)
         self._add(m_file, "Save projec&t…  (all open spectra + fits)",
@@ -1379,6 +1381,13 @@ class MainWindow(QMainWindow):
     def open_expno(self):
         path = QFileDialog.getExistingDirectory(
             self, "Open Bruker EXPNO or pdata folder (read-only)",
+            self._last_dir())
+        if path:
+            self.load_source(path)
+
+    def open_varian(self):
+        path = QFileDialog.getExistingDirectory(
+            self, "Open a Varian / Agilent .fid folder (procpar + fid)",
             self._last_dir())
         if path:
             self.load_source(path)

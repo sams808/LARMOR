@@ -95,6 +95,20 @@ def load_any(path: str | Path, replay: bool = True):
             spin_rate_Hz=float(meta.get("spin_rate_Hz", 0.0) or 0.0))
         return ppm, amp, recipe.to_dict(), f"spectrum {p.name}", []
 
+    from larmor.io import varian
+    if varian.is_varian(p):
+        ppm, amp, meta = varian.read_spectrum(p)
+        recipe = Recipe(
+            sample=meta.get("title") or varian._fid_dir(p).name,
+            source_kind="varian", source_path=str(varian._fid_dir(p)),
+            nucleus=meta.get("nucleus", ""),
+            larmor_frequency_MHz=float(meta.get("larmor_MHz", 0.0) or 0.0),
+            spin_rate_Hz=0.0, sr_hz=float(meta.get("sr_hz", 0.0) or 0.0))
+        return (ppm, amp, recipe.to_dict(),
+                f"Varian {meta.get('nucleus', '')} (default EM+FT+phase)",
+                ["Varian import: a default EM+FT+phase was applied — "
+                 "re-process / re-phase as needed"])
+
     from larmor.io import bruker
 
     # any Bruker path: a 1r/2rr/fid/ser file, a pdata folder, or an EXPNO
