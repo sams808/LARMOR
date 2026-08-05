@@ -33,7 +33,12 @@ def test_lineshapes_item_in_help_menu():
 
     win = MainWindow()
     help_menu = next(m for m in win.menuBar().findChildren(QMenu)
-                     if m.title() == "&?")
-    labels = [a.text() for a in help_menu.actions() if a.text()]
+                     if m.title() == "&Help")
+    # the manuals (incl. Lineshapes) live under the "User manuals" submenu
+    labels = []
+    for a in help_menu.actions():
+        labels.append(a.text())
+        if a.menu() is not None:
+            labels += [b.text() for b in a.menu().actions()]
     assert any("Lineshapes" in x for x in labels)
     win.close()

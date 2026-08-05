@@ -45,7 +45,7 @@ def test_more_menu_item_opens_card(monkeypatch):
     from larmor.desktop.app import MainWindow
     win = MainWindow()
     help_menu = next(m for m in win.menuBar().findChildren(QMenu)
-                     if m.title() == "&?")
+                     if m.title() == "&Help")
     labels = [a.text() for a in help_menu.actions() if a.text()]
     assert "More…" in labels
     # positioned directly below About LARMOR
