@@ -430,6 +430,8 @@ class MainWindow(QMainWindow):
                   self.run_batch_report)
         self._add(m_tools, "Batch &fit spectra…  (one shared model, 1D)",
                   lambda: self.explorer._batch_clicked())
+        self._add(m_tools, "Se&quential fit…  (forward–backward series sweep, 1D)",
+                  self.run_seq_fit)
         self._add(m_tools, "Relaxation / series (T1, T2)…", self.open_satrec)
         self._add(m_tools, "Per-site relaxation…  (uses the current fit)",
                   self.open_per_site_relaxation)
@@ -3605,6 +3607,17 @@ class MainWindow(QMainWindow):
 
         model = self.recipe if (self.recipe and self.recipe.get("sites")) else None
         BatchFitDialog(self, paths, model).exec()
+
+    def run_seq_fit(self, paths=None):
+        """Sequential (forward-backward) fit of the Explorer-selected series."""
+        paths = [p for p in (paths or self.explorer.selected_spectra()) if p]
+        if len(paths) < 2:
+            self.statusBar().showMessage(
+                "Ctrl/Shift-select at least two spectra in the Explorer first")
+            return
+        from larmor.desktop.seqfit_dialog import SeqFitDialog
+        model = self.recipe if (self.recipe and self.recipe.get("sites")) else None
+        SeqFitDialog(self, paths, model).exec()
 
     def open_plotting_studio(self, spec=None):
         """Open the Plotting studio, optionally seeded with a figure spec."""

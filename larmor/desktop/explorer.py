@@ -371,7 +371,9 @@ class ExplorerPanel(QWidget):
             return None
         return procs[labels.index(choice)]
 
-    def _batch_clicked(self):
+    def selected_spectra(self) -> list[str]:
+        """The openable spectra in the selected rows (fits and folders skipped),
+        de-duplicated, in tree order."""
         paths, seen = [], set()
         for it in self.tree.selectedItems():
             op = it.data(0, _ROLE_OPEN)
@@ -380,7 +382,10 @@ class ExplorerPanel(QWidget):
             if op.lower().endswith((".recipe.json", ".fxml", ".fxmla")):
                 continue                           # a fit, not a spectrum
             paths.append(op); seen.add(op)
-        self.batch_requested.emit(paths)
+        return paths
+
+    def _batch_clicked(self):
+        self.batch_requested.emit(self.selected_spectra())
 
     def _apply_filter(self, text: str):
         text = text.strip().lower()

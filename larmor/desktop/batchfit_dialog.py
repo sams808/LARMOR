@@ -520,7 +520,7 @@ class BatchFitDialog(QDialog):
         if self._recipe_tag:
             parts.append(self._recipe_tag)
         parts.append("batch")
-        parts.append(_dt.date.today().strftime("%Y%m%d"))
+        parts.append(_dt.datetime.now().strftime("%Y%m%d_%H%M"))
         slug = "_".join(p for p in parts if p)
         return _slug(slug)
 
@@ -537,7 +537,7 @@ class BatchFitDialog(QDialog):
             self, "Naming",
             "Name the files automatically?\n\n"
             "Yes — auto (sample_nucleus"
-            + ("_recipe" if self._recipe_tag else "") + "_batch_date)\n"
+            + ("_recipe" if self._recipe_tag else "") + "_batch_YYYYMMDD_HHMM)\n"
             "No — type a name for each fit.",
             QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
         recs = self._result.recipes

@@ -156,7 +156,8 @@ populations change. **Ctrl/Shift-click** the spectra in the Explorer and press
    the main fitter.
 5. **Save.** **Save individual fits…** writes one LARMOR `.recipe.json` per
    spectrum, named **automatically**
-   (`sample_nucleus_recipe_batch_YYYYMMDD`) or with a **name you type for each**
+   (`sample_nucleus_recipe_batch_YYYYMMDD_HHMM`) or with a **name you type for
+   each**
    (it prompts in turn, showing the sample and proc number). **Save table…**
    writes a `batch_table.csv` of the shared and per-spectrum values. **Series
    plot…** charts how any parameter (δ_iso, width, C_Q, η, or population %)
@@ -167,6 +168,39 @@ populations change. **Ctrl/Shift-click** the spectra in the Explorer and press
 It builds on the same co-fit engine (§3), so the shared parameters carry full
 uncertainties. The completion threshold is global (set it under **Decomposition ▸
 Advanced ▸ Fit completion threshold**) and honoured by every fit in LARMOR.
+
+## 7 · Sequential fit — forward / backward series sweep (1D)
+
+The batch tool (§6) assumes one *shared* model. Some series don't work that way:
+the lineshape **evolves smoothly** from one end-member to the other (a
+composition or temperature series), and each spectrum deserves its own fit — just
+one that starts from where its neighbour ended. **Tools ▸ Sequential fit** does
+exactly that. Ctrl/Shift-select the series in the Explorer (in order), open it,
+and you get a **one-spectrum-at-a-time** workbench:
+
+1. **Precise, per-spectrum control.** The current spectrum shows with its model
+   and components, and its **full fit-parameters table** — set values, bounds,
+   fixes and links exactly as in the main window. **Fit current** fits just this
+   one.
+2. **Carry it forward.** **◀ Prev / Next ▶** move along the series; when you move,
+   the spectrum you land on is **seeded from the one you left** (tick which
+   parameters carry — positions/widths/quadrupolar by default, amplitudes always
+   re-fit fresh). **Fit → seed next ▶** fits the current spectrum and steps on.
+   This is the manual forward (or backward) chain.
+3. **Automate it.** **Auto ⇄ forward–backward fit** runs the whole sweep itself:
+   choose the number of **passes** (1, 2, 4, 8, 16 — each pass sweeps one
+   direction, so 2 = forward then back), which end to **start** from, and an
+   optional **smoothing** window that gently smooths each parameter's trajectory
+   *between* passes so the series doesn't jitter. A live plot shows the **RMSD of
+   every spectrum** updating and the **mean RMSD falling** pass over pass, plus a
+   **trajectory plot** of any chosen parameter across the series. **Cancel**
+   reverts; **Stop** keeps what's done.
+4. **Save.** **Save individual fits…** (auto `sample_nucleus_seq_YYYYMMDD_HHMM` or
+   a name per fit) and **Series plot…** (parameter/population evolution, with
+   export) — as in the batch tool.
+
+Use §6 when the sites are genuinely the *same* everywhere and only populations
+change; use §7 when the sites themselves **evolve** along the series.
 
 ## References
 
