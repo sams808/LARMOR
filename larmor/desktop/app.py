@@ -644,24 +644,15 @@ class MainWindow(QMainWindow):
 
     def save_plot_image(self):
         w = self._active_plot_widget()
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Save plot image", str(Path(self._last_dir()) / "plot.png"),
-            "PNG image (*.png);;SVG vector (*.svg)")
-        if not path:
+        from larmor.desktop.export_dialog import export_pyqtgraph
+        item = (self.view.getPlotItem() if w is self.view else self.view2d.p_main)
+        try:
+            path = export_pyqtgraph(self, item, "plot")
+        except Exception as exc:
+            QMessageBox.warning(self, "Save image", f"export failed: {exc}")
             return
-        if path.lower().endswith(".svg"):
-            try:
-                from pyqtgraph.exporters import SVGExporter
-
-                scene = (self.view.getPlotItem().scene()
-                         if w is self.view else self.view2d.p_main.scene())
-                SVGExporter(scene).export(path)
-            except Exception as exc:
-                QMessageBox.warning(self, "Save image", f"SVG export failed: {exc}")
-                return
-        else:
-            w.grab().save(path)
-        self.statusBar().showMessage(f"plot saved to {Path(path).name}")
+        if path:
+            self.statusBar().showMessage(f"plot saved to {Path(path).name}")
 
     def open_integrals(self):
         from larmor.desktop.integrate_dialog import IntegralsDialog
