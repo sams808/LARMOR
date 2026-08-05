@@ -2552,7 +2552,27 @@ class MainWindow(QMainWindow):
             bits.append("frozen: " + ", ".join(result.frozen_sites))
         if result.at_bounds:
             bits.append("⚠ at bounds: " + ", ".join(result.at_bounds))
+        # physical sanity: η∈[0,1], positive widths, non-negative amplitudes,
+        # sites inside the window — flag (never silently correct) so the human
+        # can judge whether the fit is physically meaningful
+        from larmor import sanity
+        window = getattr(result.recipe, "fit_window_ppm", None)
+        warns = sanity.check_recipe(result.recipe, window)
+        if warns:
+            bits.append(f"⚠ {len(warns)} physical warning"
+                        f"{'s' if len(warns) != 1 else ''}")
+        # identifiability: parameter pairs the data cannot separate (|r| ≥ 0.95)
+        from larmor.identifiability import unidentifiable_pairs
+        uni = unidentifiable_pairs(getattr(result, "lmfit_result", None))
+        if uni:
+            bits.append(f"⚠ {len(uni)} unidentifiable pair"
+                        f"{'s' if len(uni) != 1 else ''} (see Correlations)")
         self.results_summary.setText("   ·   ".join(bits))
+        tip = sanity.summarize(warns)
+        if uni:
+            tip += ("\n" if tip else "") + "unidentifiable: " + ", ".join(
+                f"{a}↔{b} ({r:+.2f})" for a, b, r in uni[:8])
+        self.results_summary.setToolTip(tip)
         self.report.setPlainText(result.report)
         self.statusBar().showMessage(
             ("fit stopped — kept the latest iteration values"

@@ -81,6 +81,27 @@ class CorrelationDialog(QDialog):
         note.setWordWrap(True); note.setStyleSheet(f"color:{theme.active().text_dim};")
         v.addWidget(note)
 
+        # identifiability: pairs the data genuinely CANNOT separate (|r| ≥ 0.95)
+        from larmor.identifiability import (unidentifiable_pairs,
+                                            IDENTIFIABILITY_THRESHOLD)
+        uni = unidentifiable_pairs(lmfit_result)
+
+        def _short(nm):
+            return (nm.replace("isotropic_chemical_shift_ppm", "pos")
+                      .replace("sigma_Cq_MHz", "σCq").replace("shift_fwhm_ppm", "dCS")
+                      .replace("amplitude", "amp").replace("_", "."))
+        if uni:
+            txt = "  ·  ".join(f"{_short(a)}↔{_short(b)} ({r:+.2f})"
+                               for a, b, r in uni[:6])
+            banner = QLabel(f"⚠ <b>Unidentifiable</b> (|r| ≥ "
+                            f"{IDENTIFIABILITY_THRESHOLD:.2f}): {txt}. "
+                            "These pairs are degenerate — fix or link one, or add "
+                            "a constraint; don't trust their separate values.")
+            banner.setWordWrap(True)
+            banner.setStyleSheet("background:#c0392b; color:white; padding:4px; "
+                                 "border-radius:3px; font-weight:600;")
+            v.addWidget(banner)
+
         bb = QDialogButtonBox(QDialogButtonBox.Close)
         bb.rejected.connect(self.reject)
         bb.button(QDialogButtonBox.Close).clicked.connect(self.accept)
