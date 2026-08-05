@@ -280,6 +280,12 @@ class MainWindow(QMainWindow):
         self._busy_timer.setSingleShot(True)
         self._busy_timer.setInterval(450)
         self._busy_timer.timeout.connect(self._sim_busy_on)
+        # crash-safe autosave: snapshot the session every few minutes (on top of
+        # the per-action save) so a crash never costs more than a couple of minutes
+        self._autosave_timer = QTimer(self)
+        self._autosave_timer.setInterval(180000)          # 3 minutes
+        self._autosave_timer.timeout.connect(self._autosave_tick)
+        self._autosave_timer.start()
         self._data2d = None            # the 2D dataset currently on the map
         self._fit2d_worker = None
         self.view2d.add_requested.connect(self.add_site_2d)
@@ -1024,6 +1030,11 @@ class MainWindow(QMainWindow):
         btnMeth.setToolTip("copy a paper-ready methods sentence describing the fit")
         btnMeth.clicked.connect(self.copy_methods)
         head.addWidget(btnMeth)
+        btnBundle = QPushButton("Publication bundle…")
+        btnBundle.setToolTip("write a figure (png/pdf/svg) + LaTeX table + CSV + "
+                             "methods sentence + report.md for this fit, in one click")
+        btnBundle.clicked.connect(self.export_publication_bundle)
+        head.addWidget(btnBundle)
         v.addLayout(head)
         self.qtable = QTableWidget(0, 4)
         self.qtable.setHorizontalHeaderLabels(
@@ -2865,6 +2876,63 @@ class MainWindow(QMainWindow):
         QApplication.clipboard().setText(methods.methods_sentence(self.recipe))
         self.statusBar().showMessage("methods sentence copied to clipboard")
 
+    def export_publication_bundle(self):
+        """One click: figure (png/pdf/svg) + LaTeX table + CSV + methods sentence
+        + report.md for the current fit, into a chosen folder."""
+        if not self.recipe or not self.recipe.get("sites") or not len(self.exp_ppm):
+            self.statusBar().showMessage("fit a spectrum first")
+            return
+        folder = QFileDialog.getExistingDirectory(
+            self, "Publication bundle — choose an output folder", self._last_dir())
+        if not folder:
+            return
+        folder = Path(folder)
+        from larmor import methods, engine, figures
+        from larmor.recipe import Recipe
+        from larmor.desktop.plot import site_color
+
+        if self._last_quant is None:
+            self.run_quantify(show=False)
+        (folder / "methods.txt").write_text(
+            methods.methods_sentence(self.recipe), encoding="utf-8")
+        (folder / "table.tex").write_text(
+            methods.latex_table(self.recipe, self._last_quant,
+                                caption=(self.recipe.get("sample") or "")),
+            encoding="utf-8")
+        # a model-overlay figure from the current fit
+        rec = Recipe.from_dict(self.recipe)
+        x, total, per = engine.simulate(rec, exp_ppm=self.exp_ppm)
+        traces = [{"data": {"x": list(map(float, self.exp_ppm)),
+                            "y": list(map(float, self.exp_amp))},
+                   "label": "experiment", "color": "#333333"},
+                  {"data": {"x": list(map(float, x)), "y": list(map(float, total))},
+                   "label": "model", "color": "#d1495b"}]
+        for i, ys in enumerate(per):
+            s = rec.sites[i]
+            traces.append({"data": {"x": list(map(float, x)),
+                                    "y": list(map(float, ys))},
+                           "label": s.label or s.model, "linestyle": "--",
+                           "color": site_color(i)})
+        spec = {"kind": "1d", "traces": traces, "style": "article",
+                "title": self.recipe.get("sample") or "",
+                "xlabel": figures.nucleus_xlabel(self.recipe.get("nucleus", ""))}
+        try:
+            figures.export(spec, folder / "figure", formats=("png", "pdf", "svg"),
+                           dpi=300)
+        except Exception as exc:  # noqa: BLE001
+            self.statusBar().showMessage(f"figure export failed: {exc}")
+        # report.md tying it together
+        rows = (self._last_quant or {}).get("rows", [])
+        md = [f"# {self.recipe.get('sample') or 'Fit'} — {self.recipe.get('nucleus','')}",
+              "", methods.methods_sentence(self.recipe), "",
+              "| site | position (ppm) | fraction (%) |", "|---|---|---|"]
+        for r in rows:
+            md.append(f"| {r.get('label')} | {r.get('position_ppm')} | "
+                      f"{r.get('fraction_pct', 0):.1f} |")
+        md += ["", "![figure](figure.png)", ""]
+        (folder / "report.md").write_text("\n".join(md), encoding="utf-8")
+        self.statusBar().showMessage(f"publication bundle written to {folder}")
+
     # ------------------------------------------------------------- processing
     def apply_processing(self, ops: list, use_raw: bool):
         if not self.source_path:
@@ -3910,6 +3978,13 @@ class MainWindow(QMainWindow):
         s = QSettings("LARMOR", "app")
         s.setValue("session/source", self.source_path)
         s.setValue("session/recipe", json.dumps(self.recipe or {}))
+
+    def _autosave_tick(self):
+        """Periodic crash-safe autosave (see the autosave QTimer)."""
+        if self.source_path and not (self._active_fit_worker
+                                     and self._active_fit_worker.isRunning()):
+            self._persist_session()
+            self.statusBar().showMessage("session autosaved", 1500)
 
     def _restore_session(self):
         # tests (and clean-room launches) opt out so they never inherit a
