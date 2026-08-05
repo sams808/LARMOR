@@ -414,6 +414,8 @@ class MainWindow(QMainWindow):
                   self.compare_with_saved_fit)
         self._add(m_dec, "Czjzek distribution P(C_Q)…  (what σ stands for)",
                   self.show_czjzek_dist)
+        self._add(m_dec, "χ² map (parameter pair)…  (is the pair determined?)",
+                  self.show_chi2_map)
         m_dec.addSeparator()
         # --- advanced / configuration (rarely touched) ---
         m_adv = m_dec.addMenu("Ad&vanced")
@@ -605,6 +607,20 @@ class MainWindow(QMainWindow):
         except Exception as exc:  # noqa: BLE001
             QMessageBox.warning(self, "Apply recipe", f"could not load: {exc}")
             return None
+
+    def show_chi2_map(self):
+        """χ² surface over a chosen parameter pair (basin vs degenerate valley)."""
+        if not self.recipe or not self.recipe.get("sites") or not len(self.exp_ppm):
+            self.statusBar().showMessage("fit a spectrum first")
+            return
+        from larmor.chi2map import varying_params
+        if len(varying_params(self.recipe)) < 2:
+            self.statusBar().showMessage("need at least two free parameters")
+            return
+        from larmor.desktop.chi2map_dialog import Chi2MapDialog
+        (x0, x1), _ = self.view.getPlotItem().getViewBox().viewRange()
+        Chi2MapDialog(self, self.recipe, self.exp_ppm, self.exp_amp,
+                      (max(x0, x1), min(x0, x1))).exec()
 
     def compare_with_saved_fit(self):
         """Load a reference fit (recipe/dmfit) and show a parameter diff table."""
