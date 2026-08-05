@@ -249,6 +249,99 @@ def cmd_multifit(args: argparse.Namespace) -> int:
     return 0
 
 
+def _series_entries(spectra, model_path, window_arg):
+    """Load spectra + a shared model into ``(recipe, ppm, amp, window)`` entries
+    for the batch / sequential engines. Model = --model recipe, else the first
+    spectrum that carries sites."""
+    import copy
+    import numpy as np
+    from larmor.loader import load_any
+    from larmor.recipe import Recipe
+
+    loaded = []
+    model_sites = None
+    win = None
+    if model_path:
+        md = Recipe.load(model_path).to_dict()
+        model_sites = md.get("sites")
+        win = md.get("fit_window_ppm")
+    for p in spectra:
+        ppm, amp, rec, meta, warns = load_any(p)
+        loaded.append((np.asarray(ppm, float), np.asarray(amp, float), rec, p))
+        if model_sites is None and rec.get("sites"):
+            model_sites = rec["sites"]
+    if not model_sites:
+        return None, "no model — pass --model recipe.json (or a spectrum with a fit)"
+    if window_arg:
+        win = tuple(window_arg)
+    entries = []
+    for ppm, amp, rec, p in loaded:
+        r = Recipe.from_dict({
+            "nucleus": rec.get("nucleus", ""),
+            "larmor_frequency_MHz": rec.get("larmor_frequency_MHz", 0.0),
+            "spin_rate_Hz": rec.get("spin_rate_Hz", 0.0),
+            "sample": rec.get("sample") or Path(p).stem,
+            "fit_window_ppm": win,
+            "sites": copy.deepcopy(model_sites)})
+        entries.append((r, ppm, amp, win))
+    return entries, None
+
+
+def _write_recipes_and_table(recipes, outdir, table_rows, tag):
+    import csv
+    outdir = Path(outdir or "."); outdir.mkdir(parents=True, exist_ok=True)
+    for rec in recipes:
+        slug = "".join(c if c.isalnum() or c in "-_" else "_"
+                       for c in (rec.sample or "fit"))[:60] or "fit"
+        rec.save(outdir / f"{slug}_{tag}.recipe.json")
+    with open(outdir / f"{tag}_table.csv", "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["scope", "site", "label", "param", "value", "stderr"])
+        for r in table_rows:
+            w.writerow([r["scope"], r["site"], r["label"], r["param"],
+                        f"{r['value']:.6g}",
+                        "" if r["stderr"] is None else f"{r['stderr']:.4g}"])
+    print(f"wrote {len(recipes)} recipe(s) + {tag}_table.csv to {outdir}")
+
+
+def cmd_batchfit(args: argparse.Namespace) -> int:
+    from larmor import batchfit
+
+    entries, err = _series_entries(args.spectra, args.model, args.window)
+    if err:
+        print(err, file=sys.stderr); return 1
+    release = tuple(args.release.split(",")) if args.release else ()
+    res = batchfit.batch_fit(entries, release=release,
+                             release_frac=args.release_frac, tol=args.tol)
+    print(res.summary)
+    _write_recipes_and_table(res.recipes, args.outdir,
+                             batchfit.shared_table(res), "batch")
+    return 0
+
+
+def cmd_seqfit(args: argparse.Namespace) -> int:
+    from larmor import batchfit, seqfit
+
+    entries, err = _series_entries(args.spectra, args.model, args.window)
+    if err:
+        print(err, file=sys.stderr); return 1
+
+    def prog(p, k, r):
+        print(f"  pass {p + 1} · spectrum {k + 1}: RMSD {r:.4f}")
+
+    res = seqfit.run_sequential(
+        entries, passes=args.passes, start=args.start, smooth=args.smooth,
+        tol=args.tol, progress=prog if args.verbose else None)
+    print(res.summary)
+    # sequential fits are independent per spectrum → tabulate every parameter
+    rows = batchfit.shared_table(batchfit.BatchFitResult(
+        recipes=res.recipes, labels=res.labels, rmsd=res.rmsd,
+        per_dataset=res.per_dataset, shared=(),
+        released=batchfit.all_but_amplitude(res.recipes)))
+    _write_recipes_and_table(res.recipes, args.outdir, rows, "seq")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="larmor", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -311,6 +404,36 @@ def main(argv: list[str] | None = None) -> int:
     p_mf.add_argument("--share", help="comma-separated parameter names "
                                       "(default: physical set)")
     p_mf.set_defaults(func=cmd_multifit)
+
+    p_bf = sub.add_parser("batchfit", help="batch fit many 1D spectra with one "
+                                           "shared model (amplitudes free)")
+    p_bf.add_argument("spectra", nargs="+", help="two or more spectra "
+                                                 "(EXPNO / 1r / .fxmla / .csv)")
+    p_bf.add_argument("--model", help="recipe.json used as the shared model "
+                                      "(default: a spectrum that carries a fit)")
+    p_bf.add_argument("--window", nargs=2, type=float, metavar=("HI", "LO"))
+    p_bf.add_argument("--release", help="comma-separated params to release ±frac")
+    p_bf.add_argument("--release-frac", dest="release_frac", type=float, default=0.1)
+    p_bf.add_argument("--tol", type=float, default=None,
+                      help="completion threshold: %% change in stdev (0=full)")
+    p_bf.add_argument("-o", "--outdir", help="output folder (default: .)")
+    p_bf.set_defaults(func=cmd_batchfit)
+
+    p_sf = sub.add_parser("seqfit", help="sequential forward-backward fit of a "
+                                         "series (warm-start each from its neighbour)")
+    p_sf.add_argument("spectra", nargs="+", help="spectra in series order")
+    p_sf.add_argument("--model", help="recipe.json used as the starting model")
+    p_sf.add_argument("--window", nargs=2, type=float, metavar=("HI", "LO"))
+    p_sf.add_argument("--passes", type=int, default=2,
+                      help="sweeps (each alternates direction; default 2)")
+    p_sf.add_argument("--start", choices=["first", "last"], default="first")
+    p_sf.add_argument("--smooth", type=int, default=0,
+                      help="trajectory smoothing window between passes (0=off)")
+    p_sf.add_argument("--tol", type=float, default=None)
+    p_sf.add_argument("-v", "--verbose", action="store_true",
+                      help="print each spectrum's RMSD as it fits")
+    p_sf.add_argument("-o", "--outdir", help="output folder (default: .)")
+    p_sf.set_defaults(func=cmd_seqfit)
 
     p_app = sub.add_parser("app", help="launch the interactive web app")
     p_app.add_argument("--host", default="127.0.0.1")
