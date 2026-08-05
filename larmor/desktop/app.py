@@ -2322,16 +2322,51 @@ class MainWindow(QMainWindow):
     }
 
     def _seed_nucleus_defaults(self, name: str, params: dict):
-        """Pre-fill quadrupolar starting values from the nucleus (idea #17)."""
-        if name not in ("czjzek", "ext_czjzek", "quad_ct", "quad_first",
-                        "quad_csa", "csa_czjzek"):
-            return
-        d = self._NUCLEUS_START.get((self.recipe or {}).get("nucleus", ""))
-        if not d:
-            return
-        for k, val in d.items():
+        """Pre-fill starting values for a new site from the nucleus (idea #17):
+        first what the user last fitted for this nucleus+model, else the built-in
+        quadrupolar starting table."""
+        nucleus = (self.recipe or {}).get("nucleus", "")
+        # 1) what worked last time for this nucleus + model (remembered on fit)
+        remembered = self._remembered_site_defaults(nucleus, name)
+        for k, val in (remembered or {}).items():
             if k in params:
                 params[k]["value"] = val
+        # 2) built-in quadrupolar starting points (only if not remembered)
+        if name in ("czjzek", "ext_czjzek", "quad_ct", "quad_first",
+                    "quad_csa", "csa_czjzek"):
+            for k, val in (self._NUCLEUS_START.get(nucleus) or {}).items():
+                if k in params and not (remembered and k in remembered):
+                    params[k]["value"] = val
+
+    @staticmethod
+    def _remembered_site_defaults(nucleus: str, model: str) -> dict:
+        import json
+        if not nucleus:
+            return {}
+        lib = json.loads(QSettings("LARMOR", "app").value("siteDefaults", "{}")
+                         or "{}")
+        return lib.get(f"{nucleus}/{model}", {})
+
+    def _remember_site_defaults(self):
+        """After a fit, remember each site's shape parameters (not position or
+        amplitude) per nucleus+model, so the next new site starts from them."""
+        import json
+        nucleus = (self.recipe or {}).get("nucleus", "")
+        if not nucleus or not self.recipe.get("sites"):
+            return
+        lib = json.loads(QSettings("LARMOR", "app").value("siteDefaults", "{}")
+                         or "{}")
+        for s in self.recipe["sites"]:
+            keep = {}
+            for pn, p in s.get("params", {}).items():
+                if pn in ("amplitude", "isotropic_chemical_shift_ppm", "gl"):
+                    continue
+                v = p.get("value") if isinstance(p, dict) else p
+                if v is not None:
+                    keep[pn] = float(v)
+            if keep:
+                lib[f"{nucleus}/{s.get('model')}"] = keep
+        QSettings("LARMOR", "app").setValue("siteDefaults", json.dumps(lib))
 
     def add_site_at(self, ppm: float, amp: float):
         name = next((n for n, a in self._model_actions.items()
@@ -2869,6 +2904,7 @@ class MainWindow(QMainWindow):
             + ("  ⚠ parameters at bounds — check constraints"
                if result.at_bounds else ""))
         self.run_quantify(show=False)
+        self._remember_site_defaults()   # per-nucleus smart defaults for next time
         self._persist_session()
 
     # ------------------------------------------------------------- quantify
