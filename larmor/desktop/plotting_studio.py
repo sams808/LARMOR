@@ -113,7 +113,18 @@ class PlottingStudio(QDialog):
         self.stack = QDoubleSpinBox(); self.stack.setRange(0, 1e6)
         self.stack.setToolTip("shift each trace up by this × its index (a stacked plot)")
         srow.addWidget(self.stack)
+        srow.addWidget(QLabel("normalize:"))
+        self.norm = QComboBox(); self.norm.addItems(["none", "max", "area", "noise"])
+        self.norm.setToolTip("scale every trace to unit peak / area / noise before "
+                             "stacking (for honest series comparison)")
+        self.norm.currentIndexChanged.connect(self._refresh)
+        srow.addWidget(self.norm)
         b1.addLayout(srow)
+        self.chkDiff = QCheckBox("difference vs first trace")
+        self.chkDiff.setToolTip("subtract the first trace from the others "
+                                "(what changed across the series)")
+        self.chkDiff.toggled.connect(self._refresh)
+        b1.addWidget(self.chkDiff)
         cv.addWidget(self.box1d)
 
         # 2D controls
@@ -305,7 +316,12 @@ class PlottingStudio(QDialog):
                 if self.stack.value():
                     tt["offset"] = float(tt.get("offset", 0.0)) + i * self.stack.value()
                 traces.append(tt)
-            return {"kind": "1d", "traces": traces, **common}
+            spec = {"kind": "1d", "traces": traces, **common}
+            if self.norm.currentText() != "none":
+                spec["norm"] = self.norm.currentText()
+            if self.chkDiff.isChecked():
+                spec["difference"] = True
+            return spec
         if k == 1:
             return {"kind": "2d", "path": self.path2d.text(),
                     "contour_mode": self.cmode.currentText(),

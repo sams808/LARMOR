@@ -57,6 +57,28 @@ STYLES: dict[str, dict] = {
                "font.family": "serif", "legend.fontsize": 9,
                "legend.frameon": False},
     },
+    # journal presets (single-column widths + each house's typographic minimums)
+    "nature": {  # Nature single column = 89 mm ≈ 3.50 in, sans, ≥7 pt, ticks in
+        "figsize": (3.50, 2.7),
+        "rc": {"font.size": 7, "axes.linewidth": 0.6, "lines.linewidth": 1.0,
+               "xtick.direction": "in", "ytick.direction": "in",
+               "font.family": "sans-serif", "legend.fontsize": 6,
+               "legend.frameon": False, "axes.labelpad": 2.0},
+    },
+    "acs": {  # ACS single column = 3.25 in, sans, 8 pt
+        "figsize": (3.25, 2.6),
+        "rc": {"font.size": 8, "axes.linewidth": 0.8, "lines.linewidth": 1.0,
+               "xtick.direction": "in", "ytick.direction": "in",
+               "font.family": "sans-serif", "legend.fontsize": 7,
+               "legend.frameon": False},
+    },
+    "rsc": {  # RSC single column = 8.3 cm ≈ 3.27 in, sans, 8 pt
+        "figsize": (3.27, 2.6),
+        "rc": {"font.size": 8, "axes.linewidth": 0.8, "lines.linewidth": 1.1,
+               "xtick.direction": "out", "ytick.direction": "out",
+               "font.family": "sans-serif", "legend.fontsize": 7,
+               "legend.frameon": False},
+    },
 }
 
 #: superscripted isotope label, e.g. "27Al" -> "$^{27}$Al NMR shift (ppm)"
@@ -137,16 +159,42 @@ def load_trace(t: dict) -> tuple[np.ndarray, np.ndarray, dict]:
 # ---------------------------------------------------------------------------
 # 1D figures
 
+def _norm_factor(x, y, mode: str) -> float:
+    """Normalisation divisor for a trace: by peak, by area, or by edge noise."""
+    y = np.asarray(y, float)
+    if mode == "max":
+        return float(np.max(np.abs(y))) or 1.0
+    if mode == "area":
+        return float(np.trapz(np.abs(y), np.asarray(x, float))) or 1.0
+    if mode == "noise":
+        n = max(3, y.size // 20)
+        return float(np.std(np.concatenate([y[:n], y[-n:]]))) or 1.0
+    return 1.0
+
+
 def render_1d(spec: dict) -> Figure:
     style = STYLES[spec.get("style", "article")]
+    norm_mode = spec.get("norm")                    # None|"max"|"area"|"noise"
     with plt.rc_context(style["rc"]):
         fig, ax = plt.subplots(figsize=spec.get("figsize", style["figsize"]))
         nucleus = None
+        # load every trace first (so we can normalise consistently and difference
+        # against a reference — for series comparison)
+        loaded = []
         for t in spec.get("traces", []):
             x, y, meta = load_trace(t)
             nucleus = nucleus or meta.get("nucleus")
             if t.get("normalize") is not None:
                 y = _norm_window(x, y, t["normalize"] if t["normalize"] is not True else None)
+            elif norm_mode:
+                y = np.asarray(y, float) / _norm_factor(x, y, norm_mode)
+            loaded.append([np.asarray(x, float), np.asarray(y, float), meta, t])
+        if spec.get("difference") and loaded:        # subtract the first trace
+            rx, ry = loaded[0][0], loaded[0][1]
+            for row in loaded[1:]:
+                row[1] = row[1] - np.interp(row[0], rx, ry)
+            loaded = loaded[1:] if spec.get("difference") == "drop_ref" else loaded
+        for x, y, meta, t in loaded:
             y = y * float(t.get("scale", 1.0)) + float(t.get("offset", 0.0))
             (line,) = ax.plot(x, y,
                               lw=t.get("linewidth", None),

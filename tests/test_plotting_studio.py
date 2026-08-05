@@ -53,6 +53,36 @@ def test_studio_builds_2d_spec_with_contour_and_iso(qapp):
     assert spec["iso_lines"] and spec["iso_lines"][0]["label"] == "CS"
 
 
+def test_journal_style_presets_render():
+    from larmor import figures
+    for style in ("nature", "acs", "rsc"):
+        assert style in figures.STYLES
+        png = figures.render_png_bytes(
+            {"kind": "1d", "style": style, "traces": [_trace()]}, dpi=70)
+        assert png[:4] == b"\x89PNG"
+
+
+def test_norm_max_scales_traces_to_unit_peak():
+    import matplotlib.pyplot as plt
+    from larmor import figures
+    x = np.linspace(0, 100, 80)
+    t1 = {"data": {"x": list(x), "y": list(5 * np.exp(-((x - 40) / 6) ** 2))}}
+    t2 = {"data": {"x": list(x), "y": list(9 * np.exp(-((x - 42) / 6) ** 2))}}
+    fig = figures.render({"kind": "1d", "norm": "max", "traces": [t1, t2]})
+    peaks = [float(l.get_ydata().max()) for l in fig.axes[0].lines]
+    assert peaks == pytest.approx([1.0, 1.0], abs=1e-6)
+    plt.close(fig)
+
+
+def test_difference_subtracts_reference(qapp):
+    from larmor.desktop.plotting_studio import PlottingStudio
+    st = PlottingStudio(None)
+    st._push_trace(_trace()); st._push_trace(_trace())
+    st.chkDiff.setChecked(True); st.norm.setCurrentText("max")
+    spec = st._spec()
+    assert spec["difference"] is True and spec["norm"] == "max"
+
+
 def test_studio_export_and_spec_roundtrip(qapp, tmp_path, monkeypatch):
     from larmor.desktop import plotting_studio, export_dialog
     st = plotting_studio.PlottingStudio(None)
