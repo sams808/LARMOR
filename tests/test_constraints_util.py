@@ -68,6 +68,38 @@ def test_references_self_only_same_site_and_param():
     assert references_self("s4.amplitude * 0.5", 4, ISO) is False
 
 
+def test_sanitize_drops_self_reference():
+    from larmor.constraints_util import sanitize_constraints
+    sites = _sites([None, f"s1.{ISO} + 5.3"])          # s1 links to itself
+    dropped = sanitize_constraints(sites)
+    assert dropped == [f"s1.{ISO}"]
+    assert _iso(sites[1]) is None
+
+
+def test_sanitize_drops_out_of_range_reference():
+    from larmor.constraints_util import sanitize_constraints
+    sites = _sites([f"s9.{ISO}", None])                # no s9
+    dropped = sanitize_constraints(sites)
+    assert dropped == [f"s0.{ISO}"] and _iso(sites[0]) is None
+
+
+def test_sanitize_breaks_a_cycle():
+    from larmor.constraints_util import sanitize_constraints
+    # s0 ← s1, s1 ← s0  (a two-line loop)
+    sites = _sites([f"s1.{ISO}", f"s0.{ISO}"])
+    dropped = sanitize_constraints(sites)
+    assert len(dropped) == 1                            # break exactly one link
+    remaining = [i for i in (0, 1) if _iso(sites[i]) is not None]
+    assert len(remaining) == 1                          # the loop is broken
+
+
+def test_sanitize_keeps_valid_links():
+    from larmor.constraints_util import sanitize_constraints
+    sites = _sites([None, f"s0.{ISO} + 5.3"])
+    assert sanitize_constraints(sites) == []
+    assert _iso(sites[1]) == f"s0.{ISO} + 5.3"
+
+
 def test_site_refs():
     assert site_refs("0.5 * s0.amplitude + s2.eta") == {0, 2}
     assert site_refs("") == set()

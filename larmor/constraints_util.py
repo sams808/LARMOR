@@ -14,6 +14,70 @@ from __future__ import annotations
 import re
 
 _SITE_REF = re.compile(r"\bs(\d+)\.")
+_REF_FULL = re.compile(r"\bs(\d+)\.([A-Za-z_][A-Za-z0-9_]*)")
+
+
+def param_refs(expr: str) -> list[tuple[int, str]]:
+    """The (site index, parameter name) pairs a constraint expression references."""
+    return [(int(m.group(1)), m.group(2)) for m in _REF_FULL.finditer(expr or "")]
+
+
+def _find_cycle(graph: dict):
+    """Return a node on a dependency cycle, or None (constraint graph = nodes are
+    (site, param) with an expr; edges are the params they reference)."""
+    color: dict = {}
+
+    def dfs(node):
+        color[node] = 1                          # grey (on the stack)
+        for ref in graph.get(node, []):
+            if ref not in graph:                 # references a free (leaf) param
+                continue
+            if color.get(ref) == 1:              # back-edge → cycle
+                return ref
+            if color.get(ref) is None and (r := dfs(ref)):
+                return r
+        color[node] = 2                          # black (done)
+        return None
+
+    for node in graph:
+        if color.get(node) is None and (r := dfs(node)):
+            return r
+    return None
+
+
+def sanitize_constraints(sites: list) -> list[str]:
+    """Remove constraints that would make the fitter loop forever (recursion):
+    direct self-references, references to a non-existent site, and cross-line
+    cycles (A→B→A). Mutates ``sites`` in place; returns the dropped labels.
+
+    Repairs a recipe loaded from a file that carries a broken link — the everyday
+    cause of 'maximum recursion depth exceeded' during a fit."""
+    n = len(sites)
+    dropped: list[str] = []
+
+    def _graph():
+        g = {}
+        for i, s in enumerate(sites):
+            for pn, p in (s.get("params", {}) or {}).items():
+                if isinstance(p, dict) and p.get("expr"):
+                    g[(i, pn)] = param_refs(p["expr"])
+        return g
+
+    # 1) self-references and dangling (out-of-range) references
+    for (i, pn), refs in _graph().items():
+        if any((ri == i and rp == pn) or ri >= n or ri < 0 for ri, rp in refs):
+            sites[i]["params"][pn]["expr"] = None
+            dropped.append(f"s{i}.{pn}")
+
+    # 2) cross-line cycles — break one link per cycle until none remain
+    for _ in range(n * 4 + len(dropped) + 1):    # bounded
+        cyc = _find_cycle(_graph())
+        if cyc is None:
+            break
+        i, pn = cyc
+        sites[i]["params"][pn]["expr"] = None
+        dropped.append(f"s{i}.{pn}")
+    return dropped
 
 
 def site_refs(expr: str) -> set[int]:

@@ -67,6 +67,32 @@ def _emit_progress(sig, should_stop=None, converge_frac=None):
     return cb
 
 
+def humanize_error(msg) -> str:
+    """Turn a cryptic engine/Qt exception into a plain-language explanation the
+    user can act on (keeps the original text as a tail for reference)."""
+    m = str(msg)
+    low = m.lower()
+    if "recursion" in low:
+        return ("A line's parameter is linked to itself (or two lines link to "
+                "each other in a loop), so the fit can't evaluate it. Check your "
+                "position/width links — the “+/−” entries must reference ANOTHER "
+                "line, not their own line. LARMOR removes such links before "
+                "fitting; if this persists, re-open the recipe and re-check the "
+                "links.")
+    if "singular" in low or ("nan" in low and "residual" in low):
+        return ("The fit became numerically unstable (a singular/NaN residual). "
+                "Usually a parameter hit a bound or a line collapsed to zero "
+                "amplitude — widen the bounds or remove a redundant line.\n\n"
+                f"(details: {m})")
+    if "at least two" in low:
+        return m
+    if "no experimental data" in low:
+        return ("This dmfit file holds a model but no spectrum — open it onto a "
+                "spectrum (File ▸ Open a spectrum first, then Decomposition ▸ "
+                "Apply recipe) or pick data when prompted.")
+    return m
+
+
 def _fit_tol():
     """The user's global completion threshold (% change in the residual stdev at
     which a fit is considered done). Default 0.1 % ≈ dmfit's 1.0e-3; set to 0 for
@@ -1864,11 +1890,11 @@ class MainWindow(QMainWindow):
             try:
                 _load_any(path)
             except Exception as exc:
-                QMessageBox.warning(self, "Load failed", str(exc))
+                QMessageBox.warning(self, "Load failed", humanize_error(exc))
                 self.statusBar().showMessage("load failed")
             return
         except Exception as exc:
-            QMessageBox.warning(self, "Load failed", str(exc))
+            QMessageBox.warning(self, "Load failed", humanize_error(exc))
             self.statusBar().showMessage("load failed")
             return
 
@@ -2741,6 +2767,7 @@ class MainWindow(QMainWindow):
             return
         if self._fit_worker and self._fit_worker.isRunning():
             return
+        self._sanitize_constraints_before_fit()
         self.snapshot()
         (x0, x1), _ = self.view.getPlotItem().getViewBox().viewRange()
         hi, lo = max(x0, x1), min(x0, x1)
@@ -2793,6 +2820,7 @@ class MainWindow(QMainWindow):
             return
         if self._fit2d_worker and self._fit2d_worker.isRunning():
             return
+        self._sanitize_constraints_before_fit()
         self.snapshot()
         self.statusBar().showMessage(
             "fitting the 2D (building the MQMAS kernel, first time is slow)…")
@@ -2833,12 +2861,29 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"2D fit done · RMSD {result.rmsd:.4f}{refmsg}")
         self._persist_session()
 
+    def _sanitize_constraints_before_fit(self):
+        """Repair invalid links (self-references / cycles) so the fit can't loop
+        forever — the common cause of a recipe that errors on load-then-fit."""
+        if not self.recipe or not self.recipe.get("sites"):
+            return
+        from larmor.constraints_util import sanitize_constraints
+        dropped = sanitize_constraints(self.recipe["sites"])
+        if dropped:
+            self.lines_table.rebuild(self.recipe, self.hidden)
+            QMessageBox.information(
+                self, "Fixed invalid line links",
+                "This model had constraint(s) that reference a line itself or "
+                "form a loop, which would make the fit run forever. LARMOR "
+                "removed them so you can fit:\n\n  " + ", ".join(dropped)
+                + "\n\nRe-add the links you meant (each must reference ANOTHER "
+                "line).")
+
     def _fit_failed(self, msg: str):
         self._active_fit_worker = None
         self.lines_table.btnFit.setEnabled(True)
         self.view.stop_fit_animation()
         self._progress_end(False)
-        QMessageBox.warning(self, "Fit failed", msg)
+        QMessageBox.warning(self, "Fit failed", humanize_error(msg))
         self.statusBar().showMessage("fit failed")
 
     @staticmethod
@@ -3837,7 +3882,7 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             self._progress_end(False)
             self.btnCofitRun.setEnabled(True)
-            QMessageBox.warning(self, "Co-fit", f"co-fit failed: {exc}")
+            QMessageBox.warning(self, "Co-fit", humanize_error(f"co-fit failed: {exc}"))
             return
         self._progress_end(True)
         self.btnCofitRun.setEnabled(True)
