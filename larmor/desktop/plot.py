@@ -63,7 +63,7 @@ class SpectrumView(pg.PlotWidget):
 
     def __init__(self, parent=None):
         t = theme.active()
-        super().__init__(parent, background=t.plot_bg)
+        super().__init__(parent, background=t.plot_bg, viewBox=AnchoredViewBox())
         pi = self.getPlotItem()
         pi.invertX(True)                              # ppm convention
         tick_font = QFont()
