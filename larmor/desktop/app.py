@@ -392,6 +392,10 @@ class MainWindow(QMainWindow):
                   self.edit_computing_params)
         self._add(m_adv, "Fit completion &threshold…  (Δσ % to stop)",
                   self.edit_fit_tol)
+        m_adv.addSeparator()
+        self._add(m_adv, "Save &constraints as…  (reusable link/bound set)",
+                  self.save_constraint_set)
+        self._add(m_adv, "Apply saved co&nstraints…", self.apply_constraint_set)
         self._add(m_adv, "MQMAS F1 &reference…  (isotropic-axis align)",
                   self.edit_mqmas_f1_ref)
         self._add(m_adv, "Predict at another &field…  (what at X T?)",
@@ -1060,6 +1064,56 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(
                 "fit completion threshold: "
                 + ("full precision" if val <= 0 else f"Δσ < {val:g}%"))
+
+    def save_constraint_set(self):
+        """Capture the current model's links/bounds/fixes as a named, reusable
+        constraint set (stored in QSettings, applyable to any model)."""
+        import json
+        from PySide6.QtWidgets import QInputDialog
+        from larmor import constraint_library as clib
+
+        if not self.recipe or not self.recipe.get("sites"):
+            self.statusBar().showMessage("no model to capture constraints from")
+            return
+        cset = clib.capture(Recipe.from_dict(self.recipe))
+        name, ok = QInputDialog.getText(self, "Save constraints",
+                                        f"Name for this set ({clib.describe(cset)}):")
+        if not ok or not name.strip():
+            return
+        s = QSettings("LARMOR", "app")
+        lib = json.loads(s.value("constraintLibrary", "{}") or "{}")
+        lib[name.strip()] = cset
+        s.setValue("constraintLibrary", json.dumps(lib))
+        self.statusBar().showMessage(f"saved constraint set “{name.strip()}” "
+                                     f"({clib.describe(cset)})")
+
+    def apply_constraint_set(self):
+        """Apply a saved constraint set to the current model."""
+        import json
+        from PySide6.QtWidgets import QInputDialog
+        from larmor import constraint_library as clib
+
+        if not self.recipe or not self.recipe.get("sites"):
+            self.statusBar().showMessage("open/build a model first")
+            return
+        lib = json.loads(QSettings("LARMOR", "app").value(
+            "constraintLibrary", "{}") or "{}")
+        if not lib:
+            self.statusBar().showMessage("no saved constraint sets yet")
+            return
+        items = [f"{k}  ({clib.describe(v)})" for k, v in lib.items()]
+        choice, ok = QInputDialog.getItem(self, "Apply constraints",
+                                          "Constraint set:", items, 0, False)
+        if not ok:
+            return
+        name = list(lib.keys())[items.index(choice)]
+        self.snapshot()
+        rec = Recipe.from_dict(self.recipe)
+        applied = clib.apply(rec, lib[name])
+        self.recipe = rec.to_dict()
+        self.lines_table.rebuild(self.recipe, self.hidden)
+        self.on_structure_changed()
+        self.statusBar().showMessage(f"applied “{name}” to {len(applied)} parameter(s)")
 
     def edit_experiment(self):
         if self.recipe is None:
