@@ -166,16 +166,35 @@ def test_procs_toggle_adds_layer_only_when_multiple(qapp, tmp_path):
     assert exp.childCount() == 1                        # >1 proc → expandable
 
 
-def test_single_proc_not_expandable(qapp, tmp_path):
+def test_single_proc_no_fits_not_expandable(qapp, tmp_path):
     from larmor.desktop import explorer
-    expno = _expno(tmp_path, {"1": ["x.recipe.json"]})
+    expno = _expno(tmp_path, {"1": []})                 # one proc, no fits
     panel = explorer.ExplorerPanel()
     exp = QTreeWidgetItem(["10"])
     exp.setData(0, explorer._ROLE_KIND, "exp")
     exp.setData(0, explorer._ROLE_PATH, str(expno))
     panel.tree.addTopLevelItem(exp)
     panel.chkProcs.setChecked(False); panel.chkProcs.setChecked(True)
-    assert exp.childCount() == 0                        # one proc → open directly
+    assert exp.childCount() == 0                        # open directly, nothing to show
+
+
+def test_single_proc_with_fits_shows_fits_on_experiment(qapp, tmp_path):
+    # regression: a single-proc experiment that holds a fit must still show it
+    # (no redundant proc layer) — the .fxml directly under the experiment
+    from larmor.desktop import explorer
+    expno = _expno(tmp_path, {"1": ["P1_31P.fxml"]})
+    panel = explorer.ExplorerPanel()
+    exp = QTreeWidgetItem(["3102"])
+    exp.setData(0, explorer._ROLE_KIND, "exp")
+    exp.setData(0, explorer._ROLE_PATH, str(expno))
+    panel._reset_exp_children(exp)
+    assert exp.childCount() == 1
+    assert exp.child(0).data(0, explorer._ROLE_KIND) == "ph_expfit"
+    exp.takeChildren()
+    panel._add_fit_items(exp, explorer._procs_of(str(expno))[0])
+    names = [exp.child(i).text(0) for i in range(exp.childCount())]
+    assert any("P1_31P.fxml" in t for t in names)
+    assert exp.child(0).data(0, explorer._ROLE_OPEN).endswith(".fxml")
 
 
 def test_proc_without_fits_not_expandable(qapp, tmp_path):

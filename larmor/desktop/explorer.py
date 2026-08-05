@@ -251,9 +251,19 @@ class ExplorerPanel(QWidget):
         if info.title:
             tip += f"\n{info.title}"
         it.setToolTip(0, tip)
-        if self._show_procs and len(_procs_of(info.path)) > 1:
-            self._add_ph(it, "ph_proc")            # expandable to procs
+        self._reset_exp_children(it)
         return it
+
+    def _reset_exp_children(self, it: QTreeWidgetItem):
+        """Give an experiment the right expandable layer: procs when it has more
+        than one, else — for a single proc that holds fits — the fits directly
+        (no redundant proc level; double-click still opens that proc)."""
+        it.takeChildren(); it.setExpanded(False)
+        procs = _procs_of(it.data(0, _ROLE_PATH) or "")
+        if self._show_procs and len(procs) > 1:
+            self._add_ph(it, "ph_proc")
+        elif self._show_fits and len(procs) == 1 and _list_fits(procs[0]):
+            self._add_ph(it, "ph_expfit")          # single proc → its fits here
 
     def _add_ph(self, parent: QTreeWidgetItem, kind: str):
         ph = QTreeWidgetItem(["…"])
@@ -279,6 +289,11 @@ class ExplorerPanel(QWidget):
             item.takeChildren(); self._populate_procs(item)
         elif kind == "ph_fit":
             item.takeChildren(); self._populate_fits(item)
+        elif kind == "ph_expfit":                  # single-proc experiment's fits
+            item.takeChildren()
+            procs = _procs_of(item.data(0, _ROLE_PATH) or "")
+            if procs:
+                self._add_fit_items(item, procs[0])
         elif ch.text(0) == "…":
             item.takeChildren(); self._populate(item)
 
@@ -297,32 +312,37 @@ class ExplorerPanel(QWidget):
             exp_item.addChild(it)
 
     def _populate_fits(self, proc_item: QTreeWidgetItem):
-        for f in _list_fits(Path(proc_item.data(0, _ROLE_PATH) or "")):
+        self._add_fit_items(proc_item, Path(proc_item.data(0, _ROLE_PATH) or ""))
+
+    def _add_fit_items(self, parent: QTreeWidgetItem, folder):
+        for f in _list_fits(Path(folder)):
             origin = _FIT_EXT.get("".join(f.suffixes[-1:]).lower(), "fit")
             it = QTreeWidgetItem([f"📄 {f.name}"])
             it.setData(0, _ROLE_PATH, str(f))
             it.setData(0, _ROLE_OPEN, str(f))
             it.setData(0, _ROLE_KIND, "fit")
             it.setToolTip(0, f"{origin}\n{f}")
-            proc_item.addChild(it)
+            parent.addChild(it)
 
     def _toggle_procs(self, on: bool):
         self._show_procs = on
         for it in list(self._iter_items()):
-            if it.data(0, _ROLE_KIND) != "exp":
-                continue
-            it.takeChildren(); it.setExpanded(False)
-            if on and len(_procs_of(it.data(0, _ROLE_PATH) or "")) > 1:
-                self._add_ph(it, "ph_proc")
+            if it.data(0, _ROLE_KIND) == "exp":
+                self._reset_exp_children(it)
 
     def _toggle_fits(self, on: bool):
         self._show_fits = on
         for it in list(self._iter_items()):
-            if it.data(0, _ROLE_KIND) != "proc":
-                continue
-            it.takeChildren(); it.setExpanded(False)
-            if on and _list_fits(Path(it.data(0, _ROLE_PATH) or "")):
-                self._add_ph(it, "ph_fit")
+            kind = it.data(0, _ROLE_KIND)
+            if kind == "exp":
+                # single-proc experiments carry their fits directly — refresh them;
+                # multi-proc ones keep their proc layer (handled below)
+                if len(_procs_of(it.data(0, _ROLE_PATH) or "")) <= 1:
+                    self._reset_exp_children(it)
+            elif kind == "proc":
+                it.takeChildren(); it.setExpanded(False)
+                if on and _list_fits(Path(it.data(0, _ROLE_PATH) or "")):
+                    self._add_ph(it, "ph_fit")
 
     def _populate(self, item: QTreeWidgetItem):
         from larmor.io import scan

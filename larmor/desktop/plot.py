@@ -20,6 +20,34 @@ def site_color(i: int) -> str:
     return series[i % len(series)]
 
 
+class AnchoredViewBox(pg.ViewBox):
+    """A ViewBox whose wheel-zoom keeps the data point **under the cursor** fixed.
+
+    pyqtgraph's default anchors full-plot zoom at the mouse, but single-axis zoom
+    (scrolling over an axis) computes its centre from the axis-item-local position
+    mapped through the *viewbox* transform — which is wrong, so the axis zooms
+    about its middle. Re-deriving the centre from the scene position fixes both:
+    scroll on the x-axis at 100 ppm and it zooms about 100 ppm; likewise for y.
+    """
+
+    def wheelEvent(self, ev, axis=None):
+        if axis in (0, 1):
+            mask = [False, False]
+            mask[axis] = self.state["mouseEnabled"][axis]
+        else:
+            mask = self.state["mouseEnabled"][:]
+        if not any(mask):
+            ev.ignore()
+            return
+        s = 1.02 ** (ev.delta() * self.state["wheelScaleFactor"])
+        s = [(None if m is False else s) for m in mask]
+        center = self.mapSceneToView(ev.scenePos())     # the point under the cursor
+        self._resetTarget()
+        self.scaleBy(s, center)
+        ev.accept()
+        self.sigRangeChangedManually.emit(mask)
+
+
 class SpectrumView(pg.PlotWidget):
     """Experiment + model + components + residual, with dmfit-style paddles."""
 
