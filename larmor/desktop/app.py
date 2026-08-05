@@ -978,6 +978,15 @@ class MainWindow(QMainWindow):
         btnCsv = QPushButton("Copy CSV")
         btnCsv.clicked.connect(self.copy_csv)
         head.addWidget(btnCsv)
+        btnTex = QPushButton("Copy LaTeX")
+        btnTex.setToolTip("copy a LaTeX results table (sites × parameters + "
+                          "population %) to the clipboard")
+        btnTex.clicked.connect(self.copy_latex)
+        head.addWidget(btnTex)
+        btnMeth = QPushButton("Copy methods")
+        btnMeth.setToolTip("copy a paper-ready methods sentence describing the fit")
+        btnMeth.clicked.connect(self.copy_methods)
+        head.addWidget(btnMeth)
         v.addLayout(head)
         self.qtable = QTableWidget(0, 4)
         self.qtable.setHorizontalHeaderLabels(
@@ -2749,6 +2758,24 @@ class MainWindow(QMainWindow):
                                             "fraction_err_pct")))
         QApplication.clipboard().setText("\n".join(lines))
         self.statusBar().showMessage("report table copied as CSV")
+
+    def copy_latex(self):
+        if not self.recipe or not self.recipe.get("sites"):
+            self.statusBar().showMessage("no fit to tabulate")
+            return
+        from larmor import methods
+        tex = methods.latex_table(self.recipe, self._last_quant,
+                                  caption=(self.recipe.get("sample") or ""))
+        QApplication.clipboard().setText(tex)
+        self.statusBar().showMessage("LaTeX table copied to clipboard")
+
+    def copy_methods(self):
+        if not self.recipe or not self.recipe.get("sites"):
+            self.statusBar().showMessage("no fit to describe")
+            return
+        from larmor import methods
+        QApplication.clipboard().setText(methods.methods_sentence(self.recipe))
+        self.statusBar().showMessage("methods sentence copied to clipboard")
 
     # ------------------------------------------------------------- processing
     def apply_processing(self, ops: list, use_raw: bool):
