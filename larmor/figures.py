@@ -165,7 +165,8 @@ def _norm_factor(x, y, mode: str) -> float:
     if mode == "max":
         return float(np.max(np.abs(y))) or 1.0
     if mode == "area":
-        return float(np.trapz(np.abs(y), np.asarray(x, float))) or 1.0
+        trap = getattr(np, "trapezoid", None) or np.trapz
+        return float(trap(np.abs(y), np.asarray(x, float))) or 1.0
     if mode == "noise":
         n = max(3, y.size // 20)
         return float(np.std(np.concatenate([y[:n], y[-n:]]))) or 1.0
