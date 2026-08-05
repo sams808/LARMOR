@@ -744,9 +744,9 @@ def _proc_number(path: str) -> str:
 def _saved_tol() -> float:
     from PySide6.QtCore import QSettings
     try:
-        return float(QSettings("LARMOR", "app").value("fitStdevPct", 0.0) or 0.0)
+        return float(QSettings("LARMOR", "app").value("fitStdevPct", 0.1) or 0.0)
     except (TypeError, ValueError):
-        return 0.0
+        return 0.1
 
 
 def _save_tol(v: float):

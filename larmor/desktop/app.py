@@ -40,11 +40,14 @@ from larmor.recipe import Recipe
 
 
 
-def _emit_progress(sig, should_stop=None):
-    """An lmfit iter_cb that reports (iteration, residual RMS) to a Qt signal.
-    Returning True aborts the minimisation — so if `should_stop()` is truthy the
-    fit halts at the current iteration (lmfit keeps the latest parameters)."""
-    state = {"n": 0}
+def _emit_progress(sig, should_stop=None, converge_frac=None):
+    """An lmfit iter_cb that reports (iteration, residual stdev) to a Qt signal.
+
+    Returning True aborts the minimisation. It halts if ``should_stop()`` is
+    truthy, or — dmfit-style — once the residual stdev changes by less than
+    ``converge_frac`` (a fraction, e.g. 1e-3 = 0.1 %) between iterations, keeping
+    the latest parameters."""
+    state = {"n": 0, "prev": None}
 
     def cb(params, it, resid, *args, **kws):
         state["n"] += 1
@@ -53,19 +56,26 @@ def _emit_progress(sig, should_stop=None):
         except Exception:
             rms = float("nan")
         sig.emit(state["n"], rms)
-        return True if (should_stop is not None and should_stop()) else None
+        if should_stop is not None and should_stop():
+            return True
+        prev = state["prev"]
+        if (converge_frac and prev is not None and prev > 0 and rms == rms
+                and abs(rms - prev) / prev < converge_frac):
+            return True                      # sdev not changing more than threshold
+        state["prev"] = rms
+        return None
     return cb
 
 
 def _fit_tol():
     """The user's global completion threshold (% change in the residual stdev at
-    which a fit is considered done); 0/unset → full-precision solver default.
-    Honoured by every fit button in the app."""
+    which a fit is considered done). Default 0.1 % ≈ dmfit's 1.0e-3; set to 0 for
+    the full-precision solver default. Honoured by every fit button in the app."""
     from PySide6.QtCore import QSettings
     try:
-        return float(QSettings("LARMOR", "app").value("fitStdevPct", 0.0) or 0.0)
+        return float(QSettings("LARMOR", "app").value("fitStdevPct", 0.1) or 0.0)
     except (TypeError, ValueError):
-        return 0.0
+        return 0.1
 
 
 class _StoppableFit:
@@ -102,8 +112,9 @@ class FitWorker(QThread, _StoppableFit):
                         if self.animate else None)
             result = fitmod.fit(recipe, self.ppm, self.amp,
                                 window_ppm=self.window, tol=_fit_tol(),
-                                iter_cb=_emit_progress(self.progress,
-                                                       lambda: self._stop),
+                                iter_cb=_emit_progress(
+                                    self.progress, lambda: self._stop,
+                                    converge_frac=(_fit_tol() / 100.0) or None),
                                 frame_cb=frame_cb)
             self.done.emit(result, self._stop_mode)
         except Exception as exc:
@@ -128,8 +139,9 @@ class Fit2DWorker(QThread, _StoppableFit):
             recipe = Recipe.from_dict(self.recipe_dict)
             result = twod.fit_2d(recipe, self.data2d, method=self.method,
                                  tol=_fit_tol(),
-                                 iter_cb=_emit_progress(self.progress,
-                                                        lambda: self._stop))
+                                 iter_cb=_emit_progress(
+                                     self.progress, lambda: self._stop,
+                                     converge_frac=(_fit_tol() / 100.0) or None))
             self.done.emit(result, self._stop_mode)
         except Exception as exc:
             self.failed.emit(str(exc))
@@ -1087,8 +1099,9 @@ class MainWindow(QMainWindow):
         cur = _fit_tol()
         val, ok = QInputDialog.getDouble(
             self, "Fit completion threshold",
-            "Stop a fit once the residual stdev changes by less than (%):\n"
-            "0 = fit to full precision.", cur, 0.0, 50.0, 3)
+            "Stop a fit once the residual stdev (sdev) changes by less than (%):\n"
+            "default 0.1 % ≈ dmfit's 1.0e-3;  0 = fit to full precision.", cur,
+            0.0, 50.0, 3)
         if ok:
             QSettings("LARMOR", "app").setValue("fitStdevPct", float(val))
             self.statusBar().showMessage(
@@ -3188,16 +3201,29 @@ class MainWindow(QMainWindow):
 
     def _progress_start(self, label: str):
         self._prog_label = label
+        self._prog_prev_sdev = None          # for the live Δσ% (dmfit varsdev%)
         # a fit's iteration count has no known total, so run the bar as a busy
         # (indeterminate) marquee — it never sticks near the end. The iteration
-        # count and residual in the text give the real feedback.
+        # count and the residual stdev in the text give the real feedback.
         self.progress.setRange(0, 0)
         self.progress.setFormat(f"{label} — starting…")
         self.progress.setVisible(True)
         QApplication.processEvents()
 
     def _progress_tick(self, it: int, rms: float):
-        self.progress.setFormat(f"{self._prog_label} — iter {it} · rms {rms:.3g}")
+        # dmfit-style live read-out: the residual stdev and its % change per
+        # iteration (varsdev%). Convergence stops the fit once |Δσ%| drops below
+        # the completion threshold (Decomposition ▸ Advanced).
+        prev = getattr(self, "_prog_prev_sdev", None)
+        if prev and prev > 0 and rms == rms:
+            dpct = 100.0 * (rms - prev) / prev
+            self.progress.setFormat(
+                f"{self._prog_label} — iter {it} · sdev {rms:.5g} · "
+                f"Δσ {dpct:+.3f}%")
+        else:
+            self.progress.setFormat(
+                f"{self._prog_label} — iter {it} · sdev {rms:.5g}")
+        self._prog_prev_sdev = rms
 
     def _progress_end(self, ok: bool = True):
         self.progress.setRange(0, 100)
