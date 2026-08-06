@@ -24,9 +24,9 @@ from PySide6.QtCore import QSettings, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QDockWidget, QFileDialog, QLabel, QMainWindow,
-    QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QSplitter,
-    QStackedWidget, QTableWidget, QTableWidgetItem, QToolBar, QVBoxLayout,
-    QWidget, QHBoxLayout,
+    QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QSizePolicy,
+    QSplitter, QStackedWidget, QTableWidget, QTableWidgetItem, QToolBar,
+    QVBoxLayout, QWidget, QHBoxLayout,
 )
 
 from larmor import models as model_registry
@@ -1083,6 +1083,11 @@ class MainWindow(QMainWindow):
         head = QHBoxLayout()
         self.results_summary = QLabel("")
         self.results_summary.setStyleSheet("font-weight: 600;")
+        # wrap + shrinkable so a long fit summary never forces the Report dock —
+        # and thus the whole window — wider than the screen (it sits full-width in
+        # a bottom dock; a non-wrapping label would push its min to the text width)
+        self.results_summary.setWordWrap(True)
+        self.results_summary.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         head.addWidget(self.results_summary, 1)
         btnCsv = QPushButton("Copy CSV")
         btnCsv.clicked.connect(self.copy_csv)

@@ -788,3 +788,18 @@ def test_twopoint_background_subtracts_the_line_through_two_picks(qapp, win):
     assert not win.proc_panel.btnTpPick.isChecked()    # pick mode released
     win.undo()
     assert np.allclose(win.exp_amp, before)            # undoable
+
+
+def test_report_summary_never_forces_window_width(qapp, win):
+    """A long fit summary must not widen the Report dock (and thus force the
+    whole window past the screen): the label wraps and is horizontally
+    shrinkable, so it contributes ~0 to the minimum width regardless of text."""
+    from PySide6.QtWidgets import QSizePolicy
+
+    assert win.results_summary.wordWrap()
+    assert (win.results_summary.sizePolicy().horizontalPolicy()
+            == QSizePolicy.Ignored)
+    win.results_summary.setText(
+        "RMSD 0.01  ·  χ² 1e6  ·  " + "unidentifiable (see Correlations)  ·  " * 12)
+    # the label's minimum width stays near the widest word, not the sentence
+    assert win.results_summary.minimumSizeHint().width() < 200
