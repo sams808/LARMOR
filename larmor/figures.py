@@ -114,7 +114,10 @@ def load_trace(t: dict) -> tuple[np.ndarray, np.ndarray, dict]:
     """
     meta: dict = {}
     if "data" in t:
-        return np.asarray(t["data"]["x"], float), np.asarray(t["data"]["y"], float), meta
+        d = t["data"]
+        if d.get("yerr") is not None:
+            meta["yerr"] = np.asarray(d["yerr"], float)
+        return np.asarray(d["x"], float), np.asarray(d["y"], float), meta
 
     if "recipe" in t:
         from larmor import engine
@@ -205,10 +208,9 @@ def _norm_factor(x, y, mode: str) -> float:
 
 
 def render_1d(spec: dict) -> Figure:
-    style = STYLES[spec.get("style", "article")]
     norm_mode = spec.get("norm")                    # None|"max"|"area"|"noise"
-    with plt.rc_context(style["rc"]):
-        fig, ax = plt.subplots(figsize=spec.get("figsize", style["figsize"]))
+    with plt.rc_context(_rc(spec)):
+        fig, ax = plt.subplots(figsize=_figsize(spec))
         nucleus = None
         # load every trace first (so we can normalise consistently and difference
         # against a reference — for series comparison)
@@ -216,10 +218,18 @@ def render_1d(spec: dict) -> Figure:
         for t in spec.get("traces", []):
             x, y, meta = load_trace(t)
             nucleus = nucleus or meta.get("nucleus")
+            factor = 1.0                             # multiplicative norm factor
             if t.get("normalize") is not None:
-                y = _norm_window(x, y, t["normalize"] if t["normalize"] is not True else None)
+                y2 = _norm_window(x, y, t["normalize"] if t["normalize"] is not True else None)
+                factor = (y2 / y)[np.isfinite(y) & (y != 0)][:1]
+                factor = float(factor[0]) if len(factor) else 1.0
+                y = y2
             elif norm_mode:
-                y = np.asarray(y, float) / _norm_factor(x, y, norm_mode)
+                nf = _norm_factor(x, y, norm_mode)
+                factor = 1.0 / nf if nf else 1.0
+                y = np.asarray(y, float) * factor
+            if meta.get("yerr") is not None:         # keep error bars consistent
+                meta["yerr"] = np.asarray(meta["yerr"], float) * factor
             loaded.append([np.asarray(x, float), np.asarray(y, float), meta, t])
         if spec.get("difference") and loaded:        # subtract the first trace
             rx, ry = loaded[0][0], loaded[0][1]
@@ -227,14 +237,22 @@ def render_1d(spec: dict) -> Figure:
                 row[1] = row[1] - np.interp(row[0], rx, ry)
             loaded = loaded[1:] if spec.get("difference") == "drop_ref" else loaded
         for x, y, meta, t in loaded:
-            y = y * float(t.get("scale", 1.0)) + float(t.get("offset", 0.0))
+            scale = float(t.get("scale", 1.0))
+            y = y * scale + float(t.get("offset", 0.0))
             (line,) = ax.plot(x, y,
                               lw=t.get("linewidth", None),
                               ls=t.get("linestyle", "-"),
+                              marker=t.get("marker"),
                               alpha=t.get("alpha", 1.0),
                               label=t.get("label", meta.get("label")))
             if t.get("color"):
                 line.set_color(t["color"])
+            ye = meta.get("yerr")
+            if ye is not None and np.isfinite(ye).any():
+                ax.errorbar(x, y, yerr=np.abs(np.nan_to_num(ye)) * abs(scale),
+                            fmt="none", ecolor=line.get_color(),
+                            capsize=t.get("capsize", 2.5), elinewidth=0.9,
+                            alpha=t.get("alpha", 1.0))
         # ppm spectra run high→low with a hidden intensity axis; a generic x-y
         # plot (e.g. a parameter-vs-sample series) keeps a normal, upright axis
         x_is_ppm = spec.get("x_is_ppm", True)
@@ -251,33 +269,88 @@ def render_1d(spec: dict) -> Figure:
         elif x_is_ppm:
             ax.invert_xaxis()
         if spec.get("ylim"):
-            ax.set_ylim(*spec["ylim"])
-        # custom ticks: [[pos, "label"], …] for either axis (e.g. sample names)
-        if spec.get("xticks"):
-            ax.set_xticks([float(p) for p, _ in spec["xticks"]])
-            ax.set_xticklabels([str(lab) for _, lab in spec["xticks"]],
-                               rotation=spec.get("xtick_rotation", 0),
-                               ha="right" if spec.get("xtick_rotation") else "center")
-        if spec.get("yticks"):
-            ax.set_yticks([float(p) for p, _ in spec["yticks"]])
-            ax.set_yticklabels([str(lab) for _, lab in spec["yticks"]])
+            lo, hi = spec["ylim"]
+            ax.set_ylim(min(lo, hi), max(lo, hi))
+        _apply_axis_extras(ax, spec)                 # ticks, grid, spines
+        for a in spec.get("annotations", []):
+            ax.text(a["x"], a["y"], a["text"], fontsize=a.get("fontsize"),
+                    ha=a.get("ha", "left"))
         if hide_y:
             ax.set_yticks([])
             for s in ("left", "right", "top"):
                 ax.spines[s].set_visible(False)
-        else:                                           # clean upright x-y plot
+        elif not spec.get("box"):                    # clean upright x-y plot
             for s in ("right", "top"):
                 ax.spines[s].set_visible(False)
-        for a in spec.get("annotations", []):
-            ax.text(a["x"], a["y"], a["text"], fontsize=a.get("fontsize"),
-                    ha=a.get("ha", "left"))
-        if any(t.get("label") for t in spec.get("traces", [])):
-            ax.legend(loc=spec.get("legend_loc", "best"),
-                      ncol=spec.get("legend_ncol", 1))
+        _apply_legend(ax, spec, has_labels=any(
+            t.get("label") for t in spec.get("traces", [])))
         if spec.get("title"):
             ax.set_title(spec["title"])
         fig.tight_layout()
         return fig
+
+
+# ---------------------------------------------------------------------------
+# shared axis customisation (used by the 1D renderer and the plotting studio)
+
+def _rc(spec: dict) -> dict:
+    """rcParams for this figure: the chosen style, with optional font-size /
+    line-width / legend-font-size overrides from the spec."""
+    rc = dict(STYLES.get(spec.get("style", "article"), STYLES["article"])["rc"])
+    if spec.get("font_size"):
+        rc["font.size"] = float(spec["font_size"])
+    if spec.get("legend_fontsize"):
+        rc["legend.fontsize"] = float(spec["legend_fontsize"])
+    if spec.get("line_width"):
+        rc["lines.linewidth"] = float(spec["line_width"])
+    if spec.get("tick_direction"):
+        rc["xtick.direction"] = rc["ytick.direction"] = spec["tick_direction"]
+    return rc
+
+
+def _figsize(spec: dict):
+    return spec.get("figsize",
+                    STYLES.get(spec.get("style", "article"), STYLES["article"])["figsize"])
+
+
+def _apply_axis_extras(ax, spec: dict) -> None:
+    """Ticks, grid and tick styling common to the customisation panel."""
+    from matplotlib.ticker import MultipleLocator
+
+    # explicit tick positions+labels (e.g. sample names) take precedence
+    if spec.get("xticks"):
+        ax.set_xticks([float(p) for p, _ in spec["xticks"]])
+        ax.set_xticklabels([str(lab) for _, lab in spec["xticks"]],
+                           rotation=spec.get("xtick_rotation", 0),
+                           ha="right" if spec.get("xtick_rotation") else "center")
+    elif spec.get("xtick_step"):
+        ax.xaxis.set_major_locator(MultipleLocator(float(spec["xtick_step"])))
+    if spec.get("yticks"):
+        ax.set_yticks([float(p) for p, _ in spec["yticks"]])
+        ax.set_yticklabels([str(lab) for _, lab in spec["yticks"]])
+    elif spec.get("ytick_step"):
+        ax.yaxis.set_major_locator(MultipleLocator(float(spec["ytick_step"])))
+    if spec.get("minor_ticks"):
+        ax.minorticks_on()
+    if spec.get("tick_direction"):
+        ax.tick_params(which="both", direction=spec["tick_direction"])
+    if spec.get("tick_labelsize"):
+        ax.tick_params(labelsize=float(spec["tick_labelsize"]))
+    if spec.get("grid"):
+        ax.grid(True, which="major", ls=spec.get("grid_style", ":"),
+                lw=0.6, color="0.7", alpha=0.8)
+
+
+def _apply_legend(ax, spec: dict, has_labels: bool, default_loc: str = "best") -> None:
+    """Legend at the requested location; 'none'/'off' hides it entirely."""
+    loc = spec.get("legend_loc", default_loc)
+    if not has_labels or loc in ("none", "off", None):
+        return
+    ax.legend(loc=loc, ncol=spec.get("legend_ncol", 1),
+              fontsize=spec.get("legend_fontsize"),
+              title=spec.get("legend_title"),
+              framealpha=spec.get("legend_frame_alpha", 0.0),
+              frameon=bool(spec.get("legend_frame", False)))
 
 
 # ---------------------------------------------------------------------------
@@ -301,6 +374,7 @@ def load_2d(path: str | Path, procno: int = 1):
 
 def render_2d(spec: dict) -> Figure:
     style = STYLES[spec.get("style", "article")]
+    rc = _rc(spec)
     x, y, Z = load_2d(spec["path"], int(spec.get("procno", 1)))
     Z = Z / np.abs(Z).max()
 
@@ -320,7 +394,7 @@ def render_2d(spec: dict) -> Figure:
     else:
         levels = np.linspace(min_frac, 1.0, n)
 
-    with plt.rc_context(style["rc"]):
+    with plt.rc_context(rc):
         base_w, base_h = spec.get("figsize", (5.2, 5.6))
         show_top = spec.get("proj_top", True)
         show_right = spec.get("proj_right", True)
@@ -381,8 +455,9 @@ def render_2d(spec: dict) -> Figure:
             plt.setp(ax_top.get_xticklabels(), visible=False)
             for s in ("left", "right", "top"):
                 ax_top.spines[s].set_visible(False)
-            if any(l.get_label() and not l.get_label().startswith("_")
-                   for l in ax_top.lines):
+            if (spec.get("legend_top_loc", "upper right") not in ("none", "off")
+                    and any(l.get_label() and not l.get_label().startswith("_")
+                            for l in ax_top.lines)):
                 ax_top.legend(loc=spec.get("legend_top_loc", "upper right"))
 
         if ax_right is not None:
@@ -400,8 +475,11 @@ def render_2d(spec: dict) -> Figure:
             ax.plot(xs, sl["slope"] * xs + sl.get("intercept", 0.0),
                     color=sl.get("color", "k"), lw=sl.get("linewidth", 0.9),
                     ls=sl.get("linestyle", "-"), label=sl.get("label"))
-        if any(l.get_label() and not l.get_label().startswith("_") for l in ax.lines):
-            ax.legend(loc=spec.get("legend_loc", "lower left"), fontsize=7)
+        if (spec.get("legend_loc", "lower left") not in ("none", "off")
+                and any(l.get_label() and not l.get_label().startswith("_")
+                        for l in ax.lines)):
+            ax.legend(loc=spec.get("legend_loc", "lower left"),
+                      fontsize=spec.get("legend_fontsize", 7))
 
         if spec.get("annotation"):
             ax.text(0.04, 0.94, spec["annotation"], transform=ax.transAxes,
@@ -487,11 +565,10 @@ def _fit_satrec(x: np.ndarray, y: np.ndarray, stretched: bool):
 
 
 def render_series(spec: dict) -> Figure:
-    style = STYLES[spec.get("style", "article")]
     data = load_series(spec)
     mode = spec.get("mode", "satrec")
-    with plt.rc_context(style["rc"]):
-        fig, ax = plt.subplots(figsize=spec.get("figsize", style["figsize"]))
+    with plt.rc_context(_rc(spec)):
+        fig, ax = plt.subplots(figsize=_figsize(spec))
         ax.plot(data["x"], data["y"], "o", ms=4, mfc="white",
                 label=spec.get("label", {"satrec": "integrals",
                                          "redor": r"$\Delta S/S_0$"}.get(mode)))
@@ -523,7 +600,11 @@ def render_series(spec: dict) -> Figure:
             ax.text(0.05, 0.78, spec["annotation"], transform=ax.transAxes)
         if spec.get("title"):
             ax.set_title(spec["title"])
-        ax.legend(loc=spec.get("legend_loc", "lower right"))
+        if spec.get("ylim"):
+            lo, hi = spec["ylim"]; ax.set_ylim(min(lo, hi), max(lo, hi))
+        if spec.get("grid"):
+            ax.grid(True, ls=spec.get("grid_style", ":"), lw=0.6, color="0.7")
+        _apply_legend(ax, spec, has_labels=True, default_loc="lower right")
         fig.tight_layout()
         return fig
 

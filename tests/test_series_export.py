@@ -76,6 +76,47 @@ def test_series_send_to_studio_spec_is_correct(qapp):
     assert spec["traces"] and len(spec["traces"][0]["data"]["y"]) == len(dlg._labels)
 
 
+def _result_with_mc():
+    """A batch result carrying a Monte-Carlo error detail on the amplitudes."""
+    from larmor.batchfit import ParamError
+    res = _result()
+    # mark amplitude free so it counts as a fitted parameter, and attach MC errors
+    detail = []
+    for k, rec in enumerate(res.recipes):
+        rec.sites[0].params["amplitude"].vary = True
+        detail.append({(0, "amplitude"): ParamError(
+            0, "amplitude", "s0.amplitude",
+            float(rec.sites[0].params["amplitude"].value), 1.5 + k, (None, None),
+            2.0)})
+    res.error_detail = {"montecarlo": detail}
+    res.error_method = "montecarlo"
+    return res
+
+
+def test_series_values_use_selected_error_method():
+    from larmor.desktop.series_plot import series_values, error_methods
+    res = _result_with_mc()
+    assert error_methods(res) == ["none", "covariance", "montecarlo"]
+    opt = {"site": 0, "param": "amplitude", "kind": "param"}
+    _, mc = series_values(res, opt, "montecarlo")
+    assert list(mc) == pytest.approx([1.5, 2.5, 3.5])      # the MC σ per spectrum
+    _, none = series_values(res, opt, "none")
+    assert np.isnan(none).all()                            # 'none' → no error bars
+
+
+def test_series_dialog_error_selector_and_studio_yerr(qapp):
+    from larmor.desktop.series_plot import SeriesPlotDialog
+    dlg = SeriesPlotDialog(None, _result_with_mc())
+    methods = [dlg.errSel.itemData(i) for i in range(dlg.errSel.count())]
+    assert methods == ["none", "covariance", "montecarlo"]
+    assert dlg._error_method() == "montecarlo"             # defaults to computed
+    amp = next(s for s in dlg._params if s["param"] == "amplitude")
+    spec = dlg._studio_spec_for(amp)
+    # the studio spec carries the selected error as per-point yerr
+    assert "yerr" in spec["traces"][0]["data"]
+    assert len(spec["traces"][0]["data"]["yerr"]) == len(dlg._labels)
+
+
 def test_estimate_baseline_recovers_a_slope():
     from larmor.desktop.batchfit_dialog import estimate_baseline
     x = np.linspace(-20, 60, 600)

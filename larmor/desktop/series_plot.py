@@ -11,9 +11,9 @@ import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QAbstractItemView, QDialog, QDialogButtonBox, QFileDialog, QGridLayout,
-    QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QPushButton, QScrollArea,
-    QVBoxLayout, QWidget,
+    QAbstractItemView, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
+    QGridLayout, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QPushButton,
+    QScrollArea, QVBoxLayout, QWidget,
 )
 
 from larmor.desktop import theme
@@ -77,22 +77,57 @@ def series_options(result) -> list[dict]:
     return out
 
 
-def series_values(result, opt: dict):
-    """(values, errors) of one option across every spectrum in the series."""
+def error_methods(result) -> list[str]:
+    """Which error-calculation methods this batch result can display: always
+    'none' and 'covariance' (from the fit), plus any that were computed
+    (Monte-Carlo, χ² profile)."""
+    methods = ["none", "covariance"]
+    for m in getattr(result, "error_detail", {}) or {}:
+        if m not in methods:
+            methods.append(m)
+    return methods
+
+
+def _param_error(result, site: int, param: str, k: int, method: str | None):
+    """The error of (site, param) for spectrum k under the chosen method:
+    a specific computed method (Monte-Carlo / χ² profile / stored covariance),
+    or the covariance stderr on the fit; NaN for 'none'."""
+    if method in (None, "none"):
+        return np.nan
+    detail = (getattr(result, "error_detail", {}) or {}).get(method)
+    if detail is not None and k < len(detail):
+        pe = detail[k].get((site, param))
+        if pe is not None and pe.stderr is not None:
+            return float(pe.stderr)
+        return np.nan
+    if method == "covariance":                    # fall back to the fit's stderr
+        p = result.recipes[k].sites[site].params.get(param)
+        if p is not None and p.stderr is not None:
+            return float(p.stderr)
+    return np.nan
+
+
+def series_values(result, opt: dict, error_method: str | None = "covariance"):
+    """(values, errors) of one option across every spectrum in the series.
+
+    ``error_method`` selects which computed error to show — 'covariance' (the
+    least-squares stderr, default), 'montecarlo', 'profile', or 'none'.
+    Population options carry no error."""
     if opt["kind"] == "pop_integral":
         vals = population_integral(result)[:, opt["site"]]
         return np.asarray(vals, float), np.full(len(vals), np.nan)
     vals, errs = [], []
-    for rec in result.recipes:
+    for k, rec in enumerate(result.recipes):
         site = rec.sites[opt["site"]]
         p = site.params.get(opt["param"])
         v = float(p.value) if p is not None else np.nan
-        e = float(p.stderr) if (p is not None and p.stderr is not None) else np.nan
         if opt["kind"] == "popfrac":
             tot = sum(abs(float(s.params["amplitude"].value))
                       for s in rec.sites if "amplitude" in s.params) or 1.0
             v = 100.0 * abs(v) / tot
-            e = np.nan
+            e = np.nan                            # a population % has no direct σ
+        else:
+            e = _param_error(result, opt["site"], opt["param"], k, error_method)
         vals.append(v); errs.append(e)
     return np.array(vals, float), np.array(errs, float)
 
@@ -108,9 +143,19 @@ class SeriesPlotDialog(QDialog):
         self._pop = None
 
         v = QVBoxLayout(self)
-        v.addWidget(QLabel("Pick one or more <b>lines</b> (Ctrl-click for several) "
-                           "— each parameter is plotted across the series on the "
-                           "right."))
+        top = QHBoxLayout()
+        top.addWidget(QLabel("Pick one or more <b>lines</b> (Ctrl-click for "
+                             "several) — each parameter is plotted across the "
+                             "series on the right."), 1)
+        top.addWidget(QLabel("Error bars:"))
+        self.errSel = QComboBox()
+        self.errSel.setToolTip("which computed error to draw as error bars "
+                               "(and export). Run Monte-Carlo or χ² profile in "
+                               "the batch dialog to add those options.")
+        self._fill_error_methods()
+        self.errSel.currentIndexChanged.connect(self._draw)
+        top.addWidget(self.errSel)
+        v.addLayout(top)
         body = QHBoxLayout(); v.addLayout(body, 1)
 
         self.list = QListWidget()
@@ -146,6 +191,18 @@ class SeriesPlotDialog(QDialog):
         self._draw()
 
     # ------------------------------------------------------------------
+    def _fill_error_methods(self):
+        labels = {"none": "none", "covariance": "covariance (fit)",
+                  "montecarlo": "Monte-Carlo", "profile": "χ² profile"}
+        for m in error_methods(self._result):
+            self.errSel.addItem(labels.get(m, m), m)
+        want = getattr(self._result, "error_method", "covariance") or "covariance"
+        idx = self.errSel.findData(want)
+        self.errSel.setCurrentIndex(idx if idx >= 0 else self.errSel.findData("covariance"))
+
+    def _error_method(self) -> str:
+        return self.errSel.currentData() or "covariance"
+
     def _selected(self) -> list[int]:
         return [it.data(Qt.UserRole) for it in self.list.selectedItems()]
 
@@ -171,11 +228,14 @@ class SeriesPlotDialog(QDialog):
         x = list(range(1, len(self._labels) + 1))
         traces = []
         for i in self._selected() or [0]:
-            vals, _ = series_values(self._result, {"site": i, "param": spec["param"],
-                                                   "kind": spec["kind"]})
-            traces.append({"data": {"x": x, "y": [float(v) for v in vals]},
-                           "label": f"s{i}", "color": site_color(i),
-                           "linestyle": "-"})
+            vals, errs = series_values(
+                self._result, {"site": i, "param": spec["param"],
+                               "kind": spec["kind"]}, self._error_method())
+            data = {"x": x, "y": [float(v) for v in vals]}
+            if np.isfinite(errs).any():
+                data["yerr"] = [float(e) if np.isfinite(e) else 0.0 for e in errs]
+            traces.append({"data": data, "label": f"s{i}", "marker": "o",
+                           "color": site_color(i), "linestyle": "-"})
         return {"kind": "1d", "x_is_ppm": False, "hide_yaxis": False,
                 "xlabel": "sample", "ylabel": spec["label"],
                 "xticks": [[xi, lab] for xi, lab in zip(x, self._labels)],
@@ -195,7 +255,7 @@ class SeriesPlotDialog(QDialog):
             for i in sites:
                 vals, errs = series_values(
                     self._result, {"site": i, "param": spec["param"],
-                                   "kind": spec["kind"]})
+                                   "kind": spec["kind"]}, self._error_method())
                 col = site_color(i)
                 pw.plot(x, vals, pen=pg.mkPen(col, width=2), symbol="o",
                         symbolBrush=col, symbolSize=7, name=f"s{i}")
@@ -213,15 +273,16 @@ class SeriesPlotDialog(QDialog):
         if not path:
             return
         import csv
+        method = self._error_method()
         cols = {"spectrum": self._labels}
         for i in sites:
             for spec in self._params:
                 vals, errs = series_values(
                     self._result, {"site": i, "param": spec["param"],
-                                   "kind": spec["kind"]})
+                                   "kind": spec["kind"]}, method)
                 cols[f"s{i}:{spec['param']}"] = vals
                 if np.isfinite(errs).any():
-                    cols[f"s{i}:{spec['param']} ±"] = errs
+                    cols[f"s{i}:{spec['param']} ±({method})"] = errs
         with open(path, "w", newline="", encoding="utf-8") as f:
             w = csv.writer(f); w.writerow(cols.keys())
             for r in range(len(self._labels)):
@@ -245,7 +306,7 @@ class SeriesPlotDialog(QDialog):
             for i in sites:
                 vals, errs = series_values(
                     self._result, {"site": i, "param": spec["param"],
-                                   "kind": spec["kind"]})
+                                   "kind": spec["kind"]}, self._error_method())
                 ax.errorbar(x, vals, yerr=np.nan_to_num(errs) if np.isfinite(errs).any()
                             else None, marker="o", capsize=2, label=f"s{i}",
                             color=site_color(i))

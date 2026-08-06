@@ -150,6 +150,57 @@ def test_studio_ppm_toggle_and_custom_ticks(qapp):
     assert st._spec()["xticks"] == [[10.0, "a"], [20.0, "b"]]
 
 
+def test_render_1d_draws_error_bars_from_trace_yerr():
+    import matplotlib.pyplot as plt
+    from larmor import figures
+    spec = {"kind": "1d", "x_is_ppm": False, "hide_yaxis": False,
+            "traces": [{"data": {"x": [1, 2, 3], "y": [10, 12, 9],
+                                 "yerr": [0.5, 0.8, 0.4]}, "label": "s0"}]}
+    fig = figures.render(spec)
+    # an ErrorbarContainer is present on the axes
+    assert fig.axes[0].containers, "no error bars drawn"
+    plt.close(fig)
+
+
+def test_render_1d_axis_customisation_options():
+    import matplotlib.pyplot as plt
+    from larmor import figures
+    base = {"kind": "1d", "x_is_ppm": False, "hide_yaxis": False,
+            "traces": [{"data": {"x": [1, 2, 3], "y": [1, 2, 3]}, "label": "a"}]}
+    # y-limits (order-independent), legend hidden, grid on
+    fig = figures.render({**base, "ylim": (5, 0), "legend_loc": "none",
+                          "grid": True})
+    ax = fig.axes[0]
+    assert ax.get_ylim() == pytest.approx((0.0, 5.0))
+    assert ax.get_legend() is None                      # 'none' hides it
+    plt.close(fig)
+    # tick step + minor ticks + font-size override all render
+    fig2 = figures.render({**base, "ytick_step": 0.5, "minor_ticks": True,
+                           "tick_direction": "out", "font_size": 6})
+    assert len(fig2.axes[0].get_yticks()) > 3
+    plt.close(fig2)
+
+
+def test_studio_spec_carries_axis_customisation(qapp):
+    from larmor.desktop.plotting_studio import PlottingStudio
+    st = PlottingStudio(None)
+    st._push_trace({"data": {"x": [1, 2, 3], "y": [1, 2, 3]}, "label": "t"})
+    st.chkPpm.setChecked(False)
+    st.chkYlim.setChecked(True); st.ylo.setValue(0); st.yhi.setValue(10)
+    st.legloc.setCurrentText("upper left"); st.legncol.setValue(2)
+    st.chkGrid.setChecked(True); st.chkMinor.setChecked(True)
+    st.xstep.setValue(1.0); st.fontsz.setValue(9)
+    spec = st._spec()
+    assert spec["ylim"] == (0.0, 10.0)
+    assert spec["legend_loc"] == "upper left" and spec["legend_ncol"] == 2
+    assert spec["grid"] is True and spec["minor_ticks"] is True
+    assert spec["xtick_step"] == pytest.approx(1.0) and spec["font_size"] == 9
+    # round-trips through _apply_spec
+    st2 = PlottingStudio(None); st2._apply_spec(spec)
+    assert st2.legloc.currentText() == "upper left"
+    assert st2.chkYlim.isChecked() and st2.chkGrid.isChecked()
+
+
 def test_studio_export_and_spec_roundtrip(qapp, tmp_path, monkeypatch):
     from larmor.desktop import plotting_studio, export_dialog
     st = plotting_studio.PlottingStudio(None)

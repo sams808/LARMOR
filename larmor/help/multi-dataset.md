@@ -178,9 +178,13 @@ populations change. **Ctrl/Shift-click** the spectra in the Explorer and press
    errors from the last error-calculation you ran. **Save table…**
    writes a `batch_table.csv` of the shared and per-spectrum values. **Series
    plot…** charts how any parameter (δ_iso, width, C_Q, η, or population %)
-   evolves along the series, with export of the numbers and the figure. (For a
-   fuller publication table across independent fits, see the **Batch fit report**
-   tool.)
+   evolves along the series. Its **Error bars** menu chooses which computed error
+   to draw and export — *covariance*, *Monte-Carlo*, or *χ² profile* (whichever
+   you ran in step 5), or *none*. Export the numbers (the ± column is labelled
+   with the chosen method) or the figure, and **Send to Plotting studio** carries
+   the points *and their error bars* into the studio, where the axes, limits,
+   ticks, legend and fonts are fully customisable. (For a fuller publication table
+   across independent fits, see the **Batch fit report** tool.)
 
 It builds on the same co-fit engine (§3), so the shared parameters carry full
 uncertainties. The completion threshold is global (set it under **Decomposition ▸

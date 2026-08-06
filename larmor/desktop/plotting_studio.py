@@ -3,8 +3,11 @@
 Compose a figure — 1D overlay/stack, 2D contour (contour / density / filled,
 projections, iso & quadrupolar reference lines, contour values) or a series —
 from any of LARMOR's data (spectra, dmfit fits, saved recipes, fit components),
-customise it (title, labels, size, limits, colours, line styles, colour map,
-contour levels…), preview it live, and export it at any DPI/size/format.
+customise it fully (title, labels, colours, line styles, colour map, contour
+levels, x/y limits, major-tick spacing, minor ticks, tick direction, grid,
+legend position & columns, font and line-width, figure size) and — for series /
+parameter traces that carry them — **error bars**, preview it live, and export
+it at any DPI/size/format.
 
 It is a thin GUI over :mod:`larmor.figures`, which does the actual rendering and
 is fully spec-driven — so a figure here is a plain dict you can save, reload, or
@@ -199,11 +202,60 @@ class PlottingStudio(QDialog):
                                "labels placed at 1,2,3… or explicit pos:label pairs")
         common.addRow("x-ticks", self.xticks)
         xr = QWidget(); xrl = QHBoxLayout(xr); xrl.setContentsMargins(0, 0, 0, 0)
-        self.xhi = QDoubleSpinBox(); self.xhi.setRange(-1e6, 1e6)
-        self.xlo = QDoubleSpinBox(); self.xlo.setRange(-1e6, 1e6)
-        self.chkXlim = QCheckBox("x-range")
+        self.xhi = QDoubleSpinBox(); self.xhi.setRange(-1e9, 1e9)
+        self.xlo = QDoubleSpinBox(); self.xlo.setRange(-1e9, 1e9)
+        self.chkXlim = QCheckBox("set")
+        self.xhi.setToolTip("x max (left on a ppm axis)")
+        self.xlo.setToolTip("x min (right on a ppm axis)")
         xrl.addWidget(self.chkXlim); xrl.addWidget(self.xhi); xrl.addWidget(self.xlo)
-        common.addRow("Limits", xr)
+        common.addRow("x-limits", xr)
+        yr = QWidget(); yrl = QHBoxLayout(yr); yrl.setContentsMargins(0, 0, 0, 0)
+        self.ylo = QDoubleSpinBox(); self.ylo.setRange(-1e9, 1e9)
+        self.yhi = QDoubleSpinBox(); self.yhi.setRange(-1e9, 1e9)
+        self.chkYlim = QCheckBox("set")
+        self.ylo.setToolTip("y min (bottom)"); self.yhi.setToolTip("y max (top)")
+        yrl.addWidget(self.chkYlim); yrl.addWidget(self.ylo); yrl.addWidget(self.yhi)
+        common.addRow("y-limits", yr)
+
+        tr = QWidget(); trl = QHBoxLayout(tr); trl.setContentsMargins(0, 0, 0, 0)
+        self.xstep = QDoubleSpinBox(); self.xstep.setRange(0, 1e6); self.xstep.setDecimals(3)
+        self.xstep.setToolTip("major x-tick spacing (0 = automatic)")
+        self.ystep = QDoubleSpinBox(); self.ystep.setRange(0, 1e6); self.ystep.setDecimals(3)
+        self.ystep.setToolTip("major y-tick spacing (0 = automatic)")
+        self.chkMinor = QCheckBox("minor")
+        self.chkMinor.setToolTip("show minor ticks")
+        trl.addWidget(QLabel("Δx")); trl.addWidget(self.xstep)
+        trl.addWidget(QLabel("Δy")); trl.addWidget(self.ystep)
+        trl.addWidget(self.chkMinor)
+        common.addRow("Tick step", tr)
+        dr = QWidget(); drl = QHBoxLayout(dr); drl.setContentsMargins(0, 0, 0, 0)
+        self.tickdir = QComboBox(); self.tickdir.addItems(["in", "out", "inout"])
+        self.tickdir.setToolTip("tick mark direction")
+        self.chkGrid = QCheckBox("grid")
+        drl.addWidget(self.tickdir, 1); drl.addWidget(self.chkGrid)
+        common.addRow("Ticks / grid", dr)
+
+        lr = QWidget(); lrl = QHBoxLayout(lr); lrl.setContentsMargins(0, 0, 0, 0)
+        self.legloc = QComboBox()
+        self.legloc.addItems(["best", "upper right", "upper left", "lower left",
+                              "lower right", "center", "center left",
+                              "center right", "upper center", "lower center",
+                              "none"])
+        self.legloc.setToolTip("legend position ('none' hides it)")
+        self.legncol = QSpinBox(); self.legncol.setRange(1, 8); self.legncol.setValue(1)
+        self.legncol.setToolTip("legend columns")
+        lrl.addWidget(self.legloc, 1); lrl.addWidget(QLabel("cols")); lrl.addWidget(self.legncol)
+        common.addRow("Legend", lr)
+
+        fr = QWidget(); frl = QHBoxLayout(fr); frl.setContentsMargins(0, 0, 0, 0)
+        self.fontsz = QDoubleSpinBox(); self.fontsz.setRange(0, 48); self.fontsz.setValue(0)
+        self.fontsz.setToolTip("base font size (0 = the style's default)")
+        self.lwd = QDoubleSpinBox(); self.lwd.setRange(0, 10); self.lwd.setDecimals(2); self.lwd.setValue(0)
+        self.lwd.setToolTip("line width (0 = the style's default)")
+        frl.addWidget(QLabel("font")); frl.addWidget(self.fontsz)
+        frl.addWidget(QLabel("line")); frl.addWidget(self.lwd)
+        common.addRow("Font / line", fr)
+
         wr = QWidget(); wrl = QHBoxLayout(wr); wrl.setContentsMargins(0, 0, 0, 0)
         self.wcm = QDoubleSpinBox(); self.wcm.setRange(2, 60); self.wcm.setValue(12)
         self.hcm = QDoubleSpinBox(); self.hcm.setRange(2, 60); self.hcm.setValue(9)
@@ -240,12 +292,16 @@ class PlottingStudio(QDialog):
         self._debounce.timeout.connect(self._refresh)
         for w in (self.title, self.xlabel, self.ylabel, self.xticks):
             w.textChanged.connect(self._schedule)
-        for w in (self.style, self.norm, self.cmap, self.cmode, self.levmode):
+        for w in (self.style, self.norm, self.cmap, self.cmode, self.levmode,
+                  self.tickdir, self.legloc):
             w.currentIndexChanged.connect(self._schedule)
-        for w in (self.wcm, self.hcm, self.xhi, self.xlo, self.nlev, self.stack):
+        for w in (self.wcm, self.hcm, self.xhi, self.xlo, self.yhi, self.ylo,
+                  self.nlev, self.stack, self.xstep, self.ystep, self.fontsz,
+                  self.lwd, self.legncol):
             w.valueChanged.connect(self._schedule)
-        for w in (self.chkPpm, self.chkXlim, self.chkValues, self.chkTop,
-                  self.chkRight, self.chkNeg):
+        for w in (self.chkPpm, self.chkXlim, self.chkYlim, self.chkValues,
+                  self.chkTop, self.chkRight, self.chkNeg, self.chkMinor,
+                  self.chkGrid):
             w.toggled.connect(self._schedule)
 
         if spec:
@@ -371,6 +427,23 @@ class PlottingStudio(QDialog):
             common["ylabel"] = self.ylabel.text()
         if self.chkXlim.isChecked():
             common["xlim"] = (self.xhi.value(), self.xlo.value())
+        if self.chkYlim.isChecked():
+            common["ylim"] = (self.ylo.value(), self.yhi.value())
+        if self.xstep.value():
+            common["xtick_step"] = self.xstep.value()
+        if self.ystep.value():
+            common["ytick_step"] = self.ystep.value()
+        if self.chkMinor.isChecked():
+            common["minor_ticks"] = True
+        common["tick_direction"] = self.tickdir.currentText()
+        common["legend_loc"] = self.legloc.currentText()
+        common["legend_ncol"] = self.legncol.value()
+        if self.chkGrid.isChecked():
+            common["grid"] = True
+        if self.fontsz.value():
+            common["font_size"] = self.fontsz.value()
+        if self.lwd.value():
+            common["line_width"] = self.lwd.value()
         k = self.kind.currentIndex()
         if k == 0:
             traces = []
@@ -435,6 +508,21 @@ class PlottingStudio(QDialog):
         if spec.get("xticks"):
             self.xticks.setText(", ".join(
                 f"{p:g}:{lab}" for p, lab in spec["xticks"]))
+        if spec.get("xlim"):
+            self.chkXlim.setChecked(True)
+            self.xhi.setValue(spec["xlim"][0]); self.xlo.setValue(spec["xlim"][1])
+        if spec.get("ylim"):
+            self.chkYlim.setChecked(True)
+            self.ylo.setValue(spec["ylim"][0]); self.yhi.setValue(spec["ylim"][1])
+        self.xstep.setValue(float(spec.get("xtick_step", 0) or 0))
+        self.ystep.setValue(float(spec.get("ytick_step", 0) or 0))
+        self.chkMinor.setChecked(bool(spec.get("minor_ticks")))
+        self.tickdir.setCurrentText(spec.get("tick_direction", "in"))
+        self.chkGrid.setChecked(bool(spec.get("grid")))
+        self.legloc.setCurrentText(spec.get("legend_loc", "best"))
+        self.legncol.setValue(int(spec.get("legend_ncol", 1)))
+        self.fontsz.setValue(float(spec.get("font_size", 0) or 0))
+        self.lwd.setValue(float(spec.get("line_width", 0) or 0))
         kind = {"1d": 0, "2d": 1, "series": 2}.get(spec.get("kind", "1d"), 0)
         self.kind.setCurrentIndex(kind)
         if kind == 0:
