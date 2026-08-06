@@ -201,6 +201,44 @@ def test_studio_spec_carries_axis_customisation(qapp):
     assert st2.chkYlim.isChecked() and st2.chkGrid.isChecked()
 
 
+def test_trace_editor_exposes_error_bar_style_only_when_data_has_yerr(qapp):
+    from larmor.desktop.plotting_studio import _TraceEditor
+
+    no_err = _TraceEditor(None, {"data": {"x": [1, 2], "y": [1, 2]}})
+    assert no_err.errVisible is None
+    assert "err_visible" not in no_err.values()
+
+    with_err = _TraceEditor(
+        None, {"data": {"x": [1, 2], "y": [1, 2], "yerr": [0.1, 0.1]}})
+    assert with_err.errVisible is not None
+    with_err.errVisible.setChecked(False)
+    with_err.errWidth.setValue(2.0)
+    with_err.errCap.setValue(5.0)
+    with_err._err_color = "#ff0000"
+    v = with_err.values()
+    assert v["err_visible"] is False
+    assert v["err_width"] == pytest.approx(2.0)
+    assert v["err_capsize"] == pytest.approx(5.0)
+    assert v["err_color"] == "#ff0000"
+
+
+def test_render_1d_error_bar_style_is_controllable():
+    import matplotlib.pyplot as plt
+    from larmor import figures
+    trace = {"data": {"x": [1, 2, 3], "y": [20, 25, 30],
+                      "yerr": [0.1, 0.2, 0.15]}, "label": "pop%"}
+    shown = figures.render({"kind": "1d", "x_is_ppm": False, "hide_yaxis": False,
+                            "traces": [{**trace, "err_visible": True,
+                                       "err_color": "#ff0000", "err_width": 2.5,
+                                       "err_capsize": 6.0}]})
+    assert len(shown.axes[0].containers) == 1
+    plt.close(shown)
+    hidden = figures.render({"kind": "1d", "x_is_ppm": False, "hide_yaxis": False,
+                             "traces": [{**trace, "err_visible": False}]})
+    assert len(hidden.axes[0].containers) == 0        # explicitly hidden
+    plt.close(hidden)
+
+
 def test_studio_export_and_spec_roundtrip(qapp, tmp_path, monkeypatch):
     from larmor.desktop import plotting_studio, export_dialog
     st = plotting_studio.PlottingStudio(None)

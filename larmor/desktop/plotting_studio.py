@@ -58,9 +58,35 @@ class _TraceEditor(QDialog):
         self.scale = QDoubleSpinBox(); self.scale.setRange(-1e6, 1e6)
         self.scale.setDecimals(3); self.scale.setValue(float(self.trace.get("scale", 1.0)))
         form.addRow("Scale", self.scale)
+
+        has_yerr = bool((self.trace.get("data") or {}).get("yerr"))
+        note = QLabel("(no error data on this trace)" if not has_yerr else "")
+        note.setStyleSheet("color:#888; font-size:10px;")
+        form.addRow("Error bars", note if not has_yerr else self._error_row())
+        if has_yerr:
+            self.errWidth = QDoubleSpinBox(); self.errWidth.setRange(0.2, 6.0)
+            self.errWidth.setDecimals(2)
+            self.errWidth.setValue(float(self.trace.get("err_width", 1.2)))
+            form.addRow("  width", self.errWidth)
+            self.errCap = QDoubleSpinBox(); self.errCap.setRange(0.0, 12.0)
+            self.errCap.setDecimals(1)
+            self.errCap.setValue(float(self.trace.get("err_capsize", 3.5)))
+            form.addRow("  cap size", self.errCap)
+            self._err_color = self.trace.get("err_color")
+            self.btnErrColor = QPushButton(self._err_color or "match line")
+            self.btnErrColor.clicked.connect(self._pick_err_color)
+            form.addRow("  colour", self.btnErrColor)
+        else:
+            self.errVisible = None
+
         bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         bb.accepted.connect(self.accept); bb.rejected.connect(self.reject)
         form.addRow(bb)
+
+    def _error_row(self):
+        self.errVisible = QCheckBox("show")
+        self.errVisible.setChecked(self.trace.get("err_visible", True))
+        return self.errVisible
 
     def _pick_color(self):
         c = QColorDialog.getColor()
@@ -68,12 +94,24 @@ class _TraceEditor(QDialog):
             self._color = c.name()
             self.btnColor.setText(self._color)
 
+    def _pick_err_color(self):
+        c = QColorDialog.getColor()
+        if c.isValid():
+            self._err_color = c.name()
+            self.btnErrColor.setText(self._err_color)
+
     def values(self) -> dict:
         t = dict(self.trace)
         t["label"] = self.label.text() or None
         t["linestyle"] = self.ls.currentText()
         t["offset"] = self.off.value()
         t["scale"] = self.scale.value()
+        if self.errVisible is not None:
+            t["err_visible"] = self.errVisible.isChecked()
+            t["err_width"] = self.errWidth.value()
+            t["err_capsize"] = self.errCap.value()
+            if self._err_color:
+                t["err_color"] = self._err_color
         if self._color:
             t["color"] = self._color
         return t

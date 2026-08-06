@@ -19,6 +19,7 @@ from pathlib import Path
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFileDialog,
     QGridLayout, QHBoxLayout, QInputDialog, QLabel, QMessageBox, QProgressBar,
@@ -343,7 +344,8 @@ class BatchFitDialog(QDialog):
                 "larmor": float(rec.get("larmor_frequency_MHz", 0.0) or 0.0),
                 "spin": float(rec.get("spin_rate_Hz", 0.0) or 0.0),
                 "sample": sample_label(p, rec), "path": p,
-                "proc": _proc_number(p), "snr": _snr(amp)})
+                "proc": _proc_number(p), "snr": _snr(amp),
+                "baseline_ops": []})   # per-spectrum manual baseline (2-point…)
             if self._model_sites is None and rec.get("sites"):
                 self._model_sites = rec["sites"]
         return data
@@ -376,12 +378,29 @@ class BatchFitDialog(QDialog):
                 plot.setXRange(d["ppm"].min(), d["ppm"].max())   # inverted → high→low
                 from larmor.desktop.plot_menu import attach_plot_menu
                 attach_plot_menu(plot, title=d["sample"], parent=self)
+                vb_menu = plot.getPlotItem().getViewBox().menu
+                vb_menu.addSeparator()
+                act_bg = QAction("Add 2-point linear baseline", vb_menu)
+                act_bg.setToolTip(
+                    "click two points on THIS spectrum (one each side of the "
+                    "peaks); the straight line through them is subtracted — "
+                    "right-click to cancel")
+                act_bg.triggered.connect(lambda _=False, kk=k: self._start_bg_pick(kk))
+                vb_menu.addAction(act_bg)
+                act_bg_clear = QAction("Clear this spectrum's baseline", vb_menu)
+                act_bg_clear.triggered.connect(
+                    lambda _=False, kk=k: self._clear_cell_baseline(kk))
+                vb_menu.addAction(act_bg_clear)
+                plot.scene().sigMouseClicked.connect(
+                    lambda ev, kk=k: self._cell_clicked(kk, ev))
                 rmsd = QLabel(""); rmsd.setStyleSheet(
                     f"font-size:9px; color:{theme.active().text_dim};")
                 cv.addWidget(title); cv.addWidget(plot, 1); cv.addWidget(rmsd)
                 grid.addWidget(cell, j // 3, j % 3)
                 self._cells.append({"plot": plot, "exp": exp, "model": model,
-                                    "rmsd": rmsd, "comp": [], "title": title})
+                                    "rmsd": rmsd, "comp": [], "title": title,
+                                    "bl_picking": False, "bl_markers": [],
+                                    "bl_line": None})
             self.tabs.addTab(page, f"{start + 1}–{min(start + PER_TAB, n)}")
 
     def _fill_release_params(self):
@@ -485,23 +504,166 @@ class BatchFitDialog(QDialog):
             return
         kind, o = combo.currentText(), order.value()
         self._baseline_kind = kind
+        had_manual = any(d.get("baseline_ops") for d in self._data)
         for k, d in enumerate(self._data):
             base = estimate_baseline(d["ppm"], d["amp0"], kind, o)
             d["amp"] = d["amp0"] - base
-            if k < len(self._cells):
+            d["baseline_ops"] = []      # this recomputes from raw — clears any
+            if k < len(self._cells):    # per-spectrum manual correction on top
                 self._cells[k]["exp"].setData(d["ppm"], d["amp"])
         self.lblBaseline.setText(f"{kind}" + (f" (order {o})"
                                               if kind == "Polynomial" else ""))
-        self.status.setText(f"baseline subtracted per spectrum: {kind}")
+        msg = f"baseline subtracted per spectrum: {kind}"
+        if had_manual:
+            msg += "  (cleared per-spectrum manual baselines)"
+        self.status.setText(msg)
 
     def _reset_baseline(self):
         self._baseline_kind = "None"
+        for k in range(len(self._data)):
+            self._end_bg_pick(k)        # abandon any in-progress manual pick
         for k, d in enumerate(self._data):
             d["amp"] = d["amp0"].copy()
+            d["baseline_ops"] = []
             if k < len(self._cells):
                 self._cells[k]["exp"].setData(d["ppm"], d["amp"])
         self.lblBaseline.setText("none")
         self.status.setText("baseline removed — using raw spectra")
+
+    # ------------------------------------------------------------------ manual
+    # per-spectrum 2-point linear baseline (right-click a cell's plot)
+    def _start_bg_pick(self, k: int):
+        cell = self._cells[k]
+        if cell["bl_picking"]:
+            return
+        cell["bl_picking"] = True
+        cell["bl_line"] = None
+        cell["plot"].setCursor(Qt.PointingHandCursor)
+        cell["plot"].getPlotItem().getViewBox().setMenuEnabled(False)
+        self.status.setText(
+            f"click two baseline points on “{self._data[k]['sample']}” — one "
+            "each side of the peaks (drag either to adjust; right-click to "
+            "cancel, or to Apply once both are placed)")
+
+    def _cell_clicked(self, k: int, ev):
+        cell = self._cells[k]
+        if not cell["bl_picking"]:
+            return
+        if ev.button() == Qt.RightButton:
+            ev.accept()
+            if len(cell["bl_markers"]) >= 2:
+                self._confirm_bg_pick(k, ev)   # both points placed: Apply / Cancel
+            else:
+                self._end_bg_pick(k)
+                self.status.setText("2-point background cancelled")
+            return
+        if ev.button() != Qt.LeftButton:
+            return
+        if len(cell["bl_markers"]) >= 2:
+            return                              # drag an existing point instead
+        plot = cell["plot"]
+        if not plot.sceneBoundingRect().contains(ev.scenePos()):
+            return
+        vb = plot.getPlotItem().getViewBox()
+        p = vb.mapSceneToView(ev.scenePos())
+        marker = pg.TargetItem(
+            pos=(float(p.x()), float(p.y())), size=11, movable=True,
+            pen=pg.mkPen(theme.active().baseline, width=1.5),
+            brush=pg.mkBrush(255, 255, 255, 220))
+        marker.sigPositionChanged.connect(lambda *_, kk=k: self._update_bg_preview(kk))
+        plot.addItem(marker)
+        cell["bl_markers"].append(marker)
+        ev.accept()
+        if len(cell["bl_markers"]) == 2:
+            self._update_bg_preview(k)
+            self.status.setText(
+                f"drag either point on “{self._data[k]['sample']}” to adjust — "
+                "right-click to Apply or Cancel")
+
+    def _bg_points(self, k: int):
+        """Current (possibly dragged) positions of the two picked markers."""
+        return [(float(m.pos().x()), float(m.pos().y()))
+                for m in self._cells[k]["bl_markers"]]
+
+    def _update_bg_preview(self, k: int):
+        cell = self._cells[k]
+        if len(cell["bl_markers"]) < 2:
+            return
+        (x1, y1), (x2, y2) = self._bg_points(k)
+        if cell["bl_line"] is None:
+            cell["bl_line"] = cell["plot"].plot(
+                [x1, x2], [y1, y2],
+                pen=pg.mkPen(theme.active().baseline, width=1.2, style=Qt.DashLine))
+        else:
+            cell["bl_line"].setData([x1, x2], [y1, y2])
+
+    def _confirm_bg_pick(self, k: int, ev):
+        """Right-click with both points placed: a tiny Apply/Cancel menu, so a
+        bad click can be fixed (drag) or the whole pick abandoned, instead of
+        committing the moment the second point lands."""
+        cell = self._cells[k]
+        pos = cell["plot"].mapToGlobal(cell["plot"].mapFromScene(ev.scenePos()))
+        choice = self._ask_apply_or_cancel(cell["plot"], pos)
+        if choice == "apply":
+            self._apply_bg_pick(k)
+        elif choice == "cancel":
+            self._end_bg_pick(k)
+            self.status.setText("2-point background cancelled")
+
+    def _ask_apply_or_cancel(self, plot, global_pos) -> str:
+        """Show the tiny confirm menu; returns "apply" or "cancel". Isolated
+        from _confirm_bg_pick so tests can stub the UI without exec()'ing a
+        real native menu (which blocks under Qt regardless of monkeypatching
+        QMenu.exec — it's a wrapped virtual, not a plain Python attribute)."""
+        from PySide6.QtWidgets import QMenu
+
+        menu = QMenu(plot)
+        act_apply = menu.addAction("Apply this baseline")
+        menu.addAction("Cancel")
+        chosen = menu.exec(global_pos)
+        return "apply" if chosen is act_apply else "cancel"
+
+    def _apply_bg_pick(self, k: int):
+        cell = self._cells[k]
+        d = self._data[k]
+        (x1, y1), (x2, y2) = self._bg_points(k)
+        if abs(x2 - x1) < 1e-9:
+            self.status.setText(
+                "the two points are at the same position — drag one apart, "
+                "then right-click to Apply")
+            return                               # keep picking; don't discard
+        m_ = (y2 - y1) / (x2 - x1)          # line through the two picked points
+        base = m_ * (d["ppm"] - x1) + y1
+        d["amp"] = d["amp"] - base
+        d["baseline_ops"].append(
+            {"op": "twopoint_bg", "x1": x1, "y1": y1, "x2": x2, "y2": y2})
+        cell["exp"].setData(d["ppm"], d["amp"])
+        self._end_bg_pick(k)
+        self.status.setText(
+            f"2-point background subtracted on “{d['sample']}” "
+            "(carried into its saved fit / recipe)")
+
+    def _end_bg_pick(self, k: int):
+        cell = self._cells[k]
+        cell["bl_picking"] = False
+        for m in cell["bl_markers"]:
+            cell["plot"].removeItem(m)
+        cell["bl_markers"] = []
+        if cell["bl_line"] is not None:
+            cell["plot"].removeItem(cell["bl_line"])
+            cell["bl_line"] = None
+        cell["plot"].unsetCursor()
+        cell["plot"].getPlotItem().getViewBox().setMenuEnabled(True)
+
+    def _clear_cell_baseline(self, k: int):
+        self._end_bg_pick(k)
+        d = self._data[k]
+        d["amp"] = d["amp0"].copy()
+        d["baseline_ops"] = []
+        if k < len(self._cells):
+            self._cells[k]["exp"].setData(d["ppm"], d["amp"])
+        self.status.setText(
+            f"baseline cleared for “{d['sample']}” (back to the raw spectrum)")
 
     # ------------------------------------------------------------------ view opts
     def _toggle_components(self, on: bool):
@@ -563,6 +725,12 @@ class BatchFitDialog(QDialog):
             rec = Recipe.from_dict({
                 "nucleus": d["nucleus"], "larmor_frequency_MHz": d["larmor"],
                 "spin_rate_Hz": d["spin"], "sample": d["sample"],
+                # per-spectrum manual baseline (e.g. a 2-point pick), recorded so
+                # the exported fit is reproducible against the raw source; the
+                # global "Fit baseline…" tool is NOT recorded (several of its
+                # kinds have no registered processing op yet)
+                "processing": list(d.get("baseline_ops") or []),
+                "source_path": d.get("path", ""),
                 "sites": copy.deepcopy(self._model_sites)})
             out.append((rec, d["ppm"], d["amp"], self._window))
         return out

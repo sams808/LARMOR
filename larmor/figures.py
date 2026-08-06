@@ -248,11 +248,16 @@ def render_1d(spec: dict) -> Figure:
             if t.get("color"):
                 line.set_color(t["color"])
             ye = meta.get("yerr")
-            if ye is not None and np.isfinite(ye).any():
+            if (ye is not None and np.isfinite(ye).any()
+                    and t.get("err_visible", True)):
+                ew = float(t.get("err_width", 1.2))
                 ax.errorbar(x, y, yerr=np.abs(np.nan_to_num(ye)) * abs(scale),
-                            fmt="none", ecolor=line.get_color(),
-                            capsize=t.get("capsize", 2.5), elinewidth=0.9,
-                            alpha=t.get("alpha", 1.0))
+                            fmt="none",
+                            ecolor=t.get("err_color") or line.get_color(),
+                            capsize=t.get("err_capsize", t.get("capsize", 3.5)),
+                            elinewidth=ew, capthick=ew,
+                            alpha=t.get("err_alpha", t.get("alpha", 1.0)),
+                            zorder=line.get_zorder() + 1)
         # ppm spectra run high→low with a hidden intensity axis; a generic x-y
         # plot (e.g. a parameter-vs-sample series) keeps a normal, upright axis
         x_is_ppm = spec.get("x_is_ppm", True)

@@ -170,6 +170,202 @@ def test_batch_fit_dialog_loads_grid_and_fits(qapp, tmp_path):
     assert amp and all(ln.split(",")[6] == "covariance" for ln in amp)
 
 
+def test_batch_dialog_per_spectrum_twopoint_baseline(qapp, tmp_path):
+    """Right-click 'Add 2-point linear baseline' on one cell: two picks
+    subtract the line through them for THAT spectrum only, the correction is
+    recorded on its recipe (processing + source_path) so it survives the fit
+    and export, and is reproducible on reload; other spectra are untouched."""
+    import pyqtgraph as pg
+    from PySide6.QtCore import Qt
+    from larmor import batchfit
+    from larmor.desktop.batchfit_dialog import BatchFitDialog
+    from larmor.loader import load_any
+    from larmor.recipe import Recipe
+
+    model = {"nucleus": "11B", "larmor_frequency_MHz": 160.0,
+             "sites": [{"model": "gauss_lor", "label": "A", "params": {
+                 "isotropic_chemical_shift_ppm": {"value": 14.0},
+                 "shift_fwhm_ppm": {"value": 5.0},
+                 "amplitude": {"value": 80.0},
+                 "gl": {"value": 1.0, "vary": False}}}]}
+    dlg = BatchFitDialog(None, [], model)
+
+    x = np.linspace(-20, 60, 300)
+    # spectrum 0: a real file on disk (source for the replay check) with a
+    # tilted background; spectrum 1: clean, must stay untouched
+    y0 = 0.4 * x + 5.0 + 50 * np.exp(-0.5 * ((x - 15) / 6) ** 2)
+    p0 = tmp_path / "s0.csv"
+    p0.write_text("# nucleus = 11B\n# larmor_MHz = 160\n" +
+                  "\n".join(f"{xi:.6f} {yi:.6f}" for xi, yi in zip(x, y0)))
+    y1 = 50 * np.exp(-0.5 * ((x - 15) / 6) ** 2)
+    dlg._data = [
+        {"ppm": x.copy(), "amp": y0.copy(), "amp0": y0.copy(), "nucleus": "11B",
+         "larmor": 160.0, "spin": 0.0, "sample": "s0", "path": str(p0),
+         "proc": "", "snr": 50, "baseline_ops": []},
+        {"ppm": x.copy(), "amp": y1.copy(), "amp0": y1.copy(), "nucleus": "11B",
+         "larmor": 160.0, "spin": 0.0, "sample": "s1", "path": "s1.csv",
+         "proc": "", "snr": 50, "baseline_ops": []},
+    ]
+    dlg._cells = [{"plot": pg.PlotWidget(), "exp": None, "model": None,
+                  "rmsd": None, "comp": [], "title": None,
+                  "bl_picking": False, "bl_markers": [], "bl_line": None}
+                 for _ in range(2)]
+    for c in dlg._cells:
+        c["exp"] = c["plot"].plot([], [])
+
+    # right-click cancel BEFORE two points are placed leaves the spectrum untouched
+    dlg._start_bg_pick(0)
+    assert dlg._cells[0]["bl_picking"]
+
+    class _RightClick:
+        def button(self): return Qt.RightButton
+        def scenePos(self): return None
+        def accept(self): pass
+
+    dlg._cell_clicked(0, _RightClick())
+    assert not dlg._cells[0]["bl_picking"]
+    assert np.allclose(dlg._data[0]["amp"], y0)
+
+    # place two points (a WRONG second one), verify it does NOT auto-apply —
+    # the whole point is that a bad click must be fixable, not committed instantly
+    dlg._start_bg_pick(0)
+    cell0 = dlg._cells[0]
+    for pos in [(-18.0, 0.4 * -18.0 + 5.0), (58.0, 999.0)]:   # 2nd point is wrong
+        m = pg.TargetItem(pos=pos, movable=True)
+        m.sigPositionChanged.connect(lambda *_: dlg._update_bg_preview(0))
+        cell0["plot"].addItem(m)
+        cell0["bl_markers"].append(m)
+    dlg._update_bg_preview(0)
+    assert cell0["bl_picking"]                          # still armed — not applied
+    assert np.allclose(dlg._data[0]["amp"], y0)          # data untouched so far
+    assert cell0["bl_line"] is not None                  # live preview shown
+
+    # fix the bad point by DRAGGING it (what the user asked for) instead of
+    # having to cancel and restart from scratch
+    cell0["bl_markers"][1].setPos(58.0, 0.4 * 58.0 + 5.0)
+    assert dlg._bg_points(0)[1] == pytest.approx((58.0, 0.4 * 58.0 + 5.0))
+
+    dlg._apply_bg_pick(0)                                # the explicit confirm step
+    assert not dlg._cells[0]["bl_picking"]
+
+    d0, d1 = dlg._data
+    edge = np.concatenate([d0["amp"][:15], d0["amp"][-15:]])
+    assert abs(float(np.mean(edge))) < 0.5           # tilt removed on s0
+    assert d0["baseline_ops"] == [
+        {"op": "twopoint_bg", "x1": -18.0, "y1": pytest.approx(-2.2),
+         "x2": 58.0, "y2": pytest.approx(28.2)}]
+    assert np.allclose(d1["amp"], y1)                # s1 untouched
+    assert d1["baseline_ops"] == []
+
+    # the correction is carried into the recipe fed to the fit
+    entries = dlg._entries()
+    rec0, rec1 = entries[0][0], entries[1][0]
+    assert rec0.processing == d0["baseline_ops"]
+    assert rec0.source_path == str(p0)
+    assert rec1.processing == []
+
+    res = batchfit.batch_fit(entries)
+    assert res.recipes[0].processing == d0["baseline_ops"]   # survives the fit
+
+    # saved fit reproduces the corrected spectrum on reload (closed-loop)
+    out = tmp_path / "s0.recipe.json"
+    Recipe.from_dict(res.recipes[0].to_dict()).save(out)
+    _, amp_reloaded, _, _, warns = load_any(str(out))
+    assert any("processing step" in w for w in warns)
+    assert np.allclose(np.sort(amp_reloaded), np.sort(d0["amp"]), atol=1e-6)
+
+    # "Clear this spectrum's baseline" restores the raw spectrum
+    dlg._clear_cell_baseline(0)
+    assert d0["baseline_ops"] == []
+    assert np.allclose(d0["amp"], y0)
+
+
+def test_batch_baseline_right_click_confirm_apply_and_cancel(qapp, monkeypatch):
+    """Once both points are down, right-click offers Apply/Cancel — it must NOT
+    silently commit (the bug report this guards): Cancel discards the pick and
+    leaves the spectrum untouched; Apply commits it."""
+    import pyqtgraph as pg
+    from PySide6.QtCore import Qt
+    from larmor.desktop.batchfit_dialog import BatchFitDialog
+
+    model = {"nucleus": "11B", "larmor_frequency_MHz": 160.0,
+             "sites": [{"model": "gauss_lor", "label": "A", "params": {
+                 "isotropic_chemical_shift_ppm": {"value": 14.0},
+                 "shift_fwhm_ppm": {"value": 5.0}, "amplitude": {"value": 80.0},
+                 "gl": {"value": 1.0, "vary": False}}}]}
+    dlg = BatchFitDialog(None, [], model)
+    x = np.linspace(-20, 60, 200)
+    y = 0.4 * x + 5.0
+    dlg._data = [{"ppm": x.copy(), "amp": y.copy(), "amp0": y.copy(),
+                 "nucleus": "11B", "larmor": 160.0, "spin": 0.0, "sample": "s0",
+                 "path": "s0.csv", "proc": "", "snr": 50, "baseline_ops": []}]
+    plot = pg.PlotWidget()
+    dlg._cells = [{"plot": plot, "exp": plot.plot([], []), "model": None,
+                  "rmsd": None, "comp": [], "title": None,
+                  "bl_picking": False, "bl_markers": [], "bl_line": None}]
+
+    class _RightClick:
+        def button(self): return Qt.RightButton
+        def scenePos(self):
+            from PySide6.QtCore import QPointF
+            return QPointF(0.0, 0.0)
+        def accept(self): pass
+
+    def _place_two_points():
+        dlg._start_bg_pick(0)
+        for pos in [(-18.0, 0.4 * -18.0 + 5.0), (58.0, 0.4 * 58.0 + 5.0)]:
+            m = pg.TargetItem(pos=pos, movable=True)
+            plot.addItem(m)
+            dlg._cells[0]["bl_markers"].append(m)
+
+    # Cancel: discards the pick, spectrum stays raw
+    _place_two_points()
+    monkeypatch.setattr(dlg, "_ask_apply_or_cancel", lambda plot, pos: "cancel")
+    dlg._cell_clicked(0, _RightClick())
+    assert not dlg._cells[0]["bl_picking"]
+    assert np.allclose(dlg._data[0]["amp"], y)
+    assert dlg._data[0]["baseline_ops"] == []
+
+    # Apply: commits it
+    _place_two_points()
+    monkeypatch.setattr(dlg, "_ask_apply_or_cancel", lambda plot, pos: "apply")
+    dlg._cell_clicked(0, _RightClick())
+    assert not dlg._cells[0]["bl_picking"]
+    assert dlg._data[0]["baseline_ops"]
+    assert not np.allclose(dlg._data[0]["amp"], y)
+
+
+def test_batch_baseline_coincident_points_keep_picking_open():
+    """Dragging both points to the same x must not silently discard the pick —
+    the user needs to be able to keep adjusting, not start over."""
+    import pyqtgraph as pg
+    from larmor.desktop.batchfit_dialog import BatchFitDialog
+
+    model = {"nucleus": "11B", "larmor_frequency_MHz": 160.0,
+             "sites": [{"model": "gauss_lor", "label": "A", "params": {
+                 "isotropic_chemical_shift_ppm": {"value": 14.0},
+                 "shift_fwhm_ppm": {"value": 5.0}, "amplitude": {"value": 80.0},
+                 "gl": {"value": 1.0, "vary": False}}}]}
+    dlg = BatchFitDialog(None, [], model)
+    x = np.linspace(-20, 60, 100)
+    dlg._data = [{"ppm": x, "amp": x * 0.0, "amp0": x * 0.0, "nucleus": "11B",
+                 "larmor": 160.0, "spin": 0.0, "sample": "s0", "path": "s0.csv",
+                 "proc": "", "snr": 50, "baseline_ops": []}]
+    plot = pg.PlotWidget()
+    dlg._cells = [{"plot": plot, "exp": plot.plot([], []), "model": None,
+                  "rmsd": None, "comp": [], "title": None,
+                  "bl_picking": True, "bl_markers": [], "bl_line": None}]
+    for pos in [(5.0, 1.0), (5.0, 2.0)]:      # same x -> a degenerate line
+        m = pg.TargetItem(pos=pos, movable=True)
+        plot.addItem(m)
+        dlg._cells[0]["bl_markers"].append(m)
+
+    dlg._apply_bg_pick(0)
+    assert dlg._cells[0]["bl_picking"]        # still open — didn't discard
+    assert len(dlg._cells[0]["bl_markers"]) == 2
+    assert dlg._data[0]["baseline_ops"] == []
+
+
 def _expno(tmp_path, procs):
     """Build an EXPNO with the given ``{proc: [fit filenames]}`` pdata layout."""
     expno = tmp_path / "10"

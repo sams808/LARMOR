@@ -385,6 +385,21 @@ def op_scale(s: Spectrum1D, factor: float = 1.0) -> Spectrum1D:
     return s
 
 
+def op_twopoint_bg(s: Spectrum1D, x1: float, y1: float, x2: float, y2: float
+                   ) -> Spectrum1D:
+    """Subtract the straight line through two user-picked points — a flat or
+    tilted 2-point linear background, extrapolated across the whole spectrum
+    (dmfit-style; the manual pick tool in the app and the batch dialog)."""
+    if s.domain != "freq" or s.x_ppm is None:
+        raise ValueError("2-point background needs frequency-domain data")
+    if abs(x2 - x1) < 1e-12:
+        raise ValueError("the two background points must be at different positions")
+    m = (y2 - y1) / (x2 - x1)
+    base = m * (s.x_ppm - x1) + y1
+    s.y = s.y - base
+    return s
+
+
 def op_subtract_avg(s: Spectrum1D, hi_ppm: float | None = None,
                     lo_ppm: float | None = None) -> Spectrum1D:
     """Subtract the mean of a (signal-free) region — a DC/offset correction
@@ -565,6 +580,7 @@ OPS = {
     "autophase": op_autophase,
     "baseline": op_baseline,
     "iterbaseline": op_iterbaseline,
+    "twopoint_bg": op_twopoint_bg,
     "sr": op_sr,
     "magnitude": op_magnitude,
     "hilbert": op_hilbert,

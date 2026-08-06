@@ -146,7 +146,18 @@ populations change. **Ctrl/Shift-click** the spectra in the Explorer and press
 3. **Baseline, per spectrum.** **Fit baseline…** estimates and subtracts a
    baseline from every spectrum *independently* before fitting — **Polynomial**
    (robust asymmetric, choose the order), **Iterative** (Yon 2020), or a flat
-   edge-median level. **Reset** restores the raw spectra.
+   edge-median level. **Reset** restores the raw spectra. For a spectrum that
+   needs its own manual correction, **right-click its cell ▸ Add 2-point linear
+   baseline** — click two points (one each side of the peaks, right-click to
+   cancel) and the straight line through them is subtracted, for **that
+   spectrum only** — the same tool as the main workbench's 2-point background.
+   **Clear this spectrum's baseline** (same menu) restores just that one
+   spectrum to raw. This correction is **recorded on the spectrum's own fit**
+   (its `.recipe.json` carries the two points and the source file), so
+   **Save individual fits…** exports it faithfully and reopening that fit later
+   reproduces the exact corrected spectrum — re-running the global **Fit
+   baseline…** afterward recomputes from raw and clears any per-spectrum
+   corrections layered on top.
 4. **One Fit button; choose what may move.** **Fit** refines **only the
    amplitudes** per spectrum — everything else is held at the recipe. Whichever
    parameters you tick under **Release per spectrum** are additionally fit,

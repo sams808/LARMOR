@@ -38,5 +38,25 @@ def test_real_imag_conj():
 
 
 def test_ops_are_registered():
-    for name in ("subtract_avg", "scale_sw", "ift", "real", "imag", "conj"):
+    for name in ("subtract_avg", "scale_sw", "ift", "real", "imag", "conj",
+                "twopoint_bg"):
         assert name in P.OPS
+
+
+def test_twopoint_bg_subtracts_the_line_through_the_two_points():
+    x = np.linspace(-20, 20, 400)
+    peak = 50.0 * np.exp(-0.5 * (x / 2.0) ** 2)
+    tilt = 0.5 * x + 3.0                    # a tilted linear background
+    s = P.op_twopoint_bg(P.from_processed(x, peak + tilt, 100.0),
+                         x1=-18.0, y1=0.5 * -18.0 + 3.0,
+                         x2=18.0, y2=0.5 * 18.0 + 3.0)
+    edge = np.concatenate([s.y.real[:20], s.y.real[-20:]])
+    assert abs(float(np.mean(edge))) < 0.1                  # background gone
+    assert s.y.real.max() == pytest.approx(50.0, abs=0.5)   # peak preserved
+
+
+def test_twopoint_bg_rejects_coincident_points():
+    x = np.linspace(-10, 10, 50)
+    s = P.from_processed(x, x + 0j, 100.0)
+    with pytest.raises(ValueError):
+        P.op_twopoint_bg(s, x1=1.0, y1=0.0, x2=1.0, y2=5.0)
