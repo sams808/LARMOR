@@ -1122,6 +1122,9 @@ class MainWindow(QMainWindow):
         self.proc_panel.baseline_mode.connect(self._baseline_mode)
         self.proc_panel.baseline_apply.connect(self.apply_manual_baseline)
         self.proc_panel.baseline_clear.connect(self.view.clear_baseline)
+        self.proc_panel.twopoint_mode.connect(self._twopoint_mode)
+        self.proc_panel.twopoint_apply.connect(self.apply_twopoint_bg)
+        self.proc_panel.twopoint_clear.connect(self.view.clear_baseline)
         self.proc_dock.setWidget(self.proc_panel)
         self.addDockWidget(Qt.RightDockWidgetArea, self.proc_dock)
         self.proc_dock.hide()
@@ -1291,6 +1294,8 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------- baseline
     def _baseline_mode(self, on: bool):
+        if on:
+            self.proc_panel.btnTpPick.setChecked(False)   # not the 2-point picker
         self.view.set_baseline_mode(on)
         self._set_add_mode(None)
         if on:
@@ -1301,6 +1306,44 @@ class MainWindow(QMainWindow):
         elif len(self.view.baseline_anchors()) >= 2:
             # dmfit behaviour: exiting anchor mode auto-applies the correction
             self.apply_manual_baseline()
+
+    def _twopoint_mode(self, on: bool):
+        """Pick two baseline points; subtract the straight line through them."""
+        self.proc_panel.btnBlPick.setChecked(False)   # not the anchor baseline
+        self.view.set_baseline_mode(on)
+        self._set_add_mode(None)
+        if on:
+            self.statusBar().showMessage(
+                "2-point background: click TWO baseline points (one each side of "
+                "the peaks); the straight line through them is subtracted when you "
+                "turn 'Pick 2 points' back off")
+        elif len(self.view.baseline_anchors()) >= 2:
+            self.apply_twopoint_bg()
+
+    def apply_twopoint_bg(self):
+        """Subtract the straight line through the first and last picked points — a
+        flat/tilted 2-point background, extrapolated across the whole spectrum."""
+        pts = self.view.baseline_anchors()
+        if len(pts) < 2 or self.exp_ppm is None or not len(self.exp_ppm):
+            self.statusBar().showMessage("click two baseline points first")
+            return
+        (x1, y1), (x2, y2) = pts[0], pts[-1]
+        if abs(x2 - x1) < 1e-9:
+            self.statusBar().showMessage("pick two points at different positions")
+            return
+        m = (y2 - y1) / (x2 - x1)                      # line through the two points
+        base = m * (self.exp_ppm - x1) + y1
+        self.snapshot(with_axis=True)                 # undoable (changes the data)
+        self.exp_amp = self.exp_amp - base
+        if self._proc_base is not None:               # keep live-processing in sync
+            bx, by = self._proc_base
+            self._proc_base = (bx, by - (m * (bx - x1) + y1))
+        self.view.clear_baseline()
+        self.proc_panel.btnTpPick.setChecked(False)
+        self.view.set_experiment(self.exp_ppm, self.exp_amp)
+        self.request_simulation()
+        self.statusBar().showMessage(
+            "2-point (linear) background subtracted — 'Reset to original' / Undo")
 
     def apply_manual_baseline(self):
         base = self.view.baseline_curve(self.exp_ppm)

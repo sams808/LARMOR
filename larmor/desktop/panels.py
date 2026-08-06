@@ -209,10 +209,26 @@ class ProcessingPanel(QWidget):
     baseline_mode = Signal(bool)           # pick-anchors toggle
     baseline_apply = Signal()
     baseline_clear = Signal()
+    twopoint_mode = Signal(bool)           # 2-point background: pick-two toggle
+    twopoint_apply = Signal()
+    twopoint_clear = Signal()
 
     def __init__(self):
         super().__init__()
-        v = QVBoxLayout(self)
+        # All controls live inside a scroll area so this panel can be made
+        # narrow without forcing the main window wider than the screen (a wide
+        # row scrolls instead of pushing the whole window past the monitor).
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        outer.addWidget(scroll)
+        content = QWidget()
+        scroll.setWidget(content)
+        self.setMinimumWidth(280)                # usable floor, well under a screen
+        v = QVBoxLayout(content)
         v.setAlignment(Qt.AlignTop)
 
         self.rb_pdata = QRadioButton("TopSpin-processed (pdata)")
@@ -318,6 +334,20 @@ class ProcessingPanel(QWidget):
         quick.addStretch(1)
         v.addLayout(quick)
 
+        # 2-point background: pick two baseline points, subtract the straight line
+        # through them (removes a flat/tilted background before the auto baseline)
+        tp = QHBoxLayout()
+        tp.addWidget(QLabel("<b>2-point background</b>"))
+        self.btnTpPick = QPushButton("Pick 2 points"); self.btnTpPick.setCheckable(True)
+        self.btnTpPick.setToolTip("click two baseline points on the spectrum "
+                                  "(one each side of the peaks); the straight line "
+                                  "through them is subtracted — turn off to apply")
+        self.btnTpApply = QPushButton("Subtract")
+        self.btnTpClear = QPushButton("Clear")
+        tp.addWidget(self.btnTpPick); tp.addWidget(self.btnTpApply)
+        tp.addWidget(self.btnTpClear)
+        v.addLayout(tp)
+
         bl = QHBoxLayout()
         bl.addWidget(QLabel("<b>Baseline auto</b> order"))
         self.blOrder = QSpinBox(); self.blOrder.setRange(0, 9); self.blOrder.setValue(3)
@@ -365,6 +395,9 @@ class ProcessingPanel(QWidget):
         self.btnBlPick.toggled.connect(self.baseline_mode)
         self.btnBlApply.clicked.connect(self.baseline_apply)
         self.btnBlClear.clicked.connect(self.baseline_clear)
+        self.btnTpPick.toggled.connect(self.twopoint_mode)
+        self.btnTpApply.clicked.connect(self.twopoint_apply)
+        self.btnTpClear.clicked.connect(self.twopoint_clear)
 
         # ---- live preview: coalesce rapid edits into one re-apply ----
         self._live_timer = QTimer(self)

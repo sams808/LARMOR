@@ -760,3 +760,31 @@ def test_fit_progress_bar_ticks(qapp, win):
     win._progress_end(True)
     assert (win.progress.minimum(), win.progress.maximum()) == (0, 100)
     assert win.progress.value() == 100
+
+
+def test_twopoint_background_subtracts_the_line_through_two_picks(qapp, win):
+    """The 2-point background tool subtracts the straight line through the two
+    picked points (a tilted flat baseline), leaves the peak, and is undoable."""
+    x = np.linspace(-50, 50, 600)
+    peak = 100.0 * np.exp(-0.5 * (x / 5.0) ** 2)
+    tilt = 0.5 * x + 20.0                              # a sloped background
+    win.exp_ppm = x; win.exp_amp = peak + tilt
+    win.recipe = {"nucleus": "31P", "larmor_frequency_MHz": 162.0, "sites": [
+        {"model": "gauss_lor", "label": "A", "params": {
+            "isotropic_chemical_shift_ppm": {"value": 0.0, "vary": True},
+            "shift_fwhm_ppm": {"value": 5.0, "vary": True},
+            "gl": {"value": 1.0, "vary": False},
+            "amplitude": {"value": 100.0, "vary": True}}}]}
+    win.view.set_experiment(x, win.exp_amp)
+    before = win.exp_amp.copy()
+    # pick two baseline points, one each side, sitting on the tilt
+    win._twopoint_mode(True)
+    for xp in (-45.0, 45.0):
+        win.view._add_baseline_anchor(xp, 0.5 * xp + 20.0)
+    win._twopoint_mode(False)                          # turning off applies it
+    edge = np.concatenate([win.exp_amp[:50], win.exp_amp[-50:]])
+    assert abs(float(np.mean(edge))) < 1.0             # background flattened to ~0
+    assert win.exp_amp.max() == pytest.approx(100.0, abs=0.5)   # peak preserved
+    assert not win.proc_panel.btnTpPick.isChecked()    # pick mode released
+    win.undo()
+    assert np.allclose(win.exp_amp, before)            # undoable
