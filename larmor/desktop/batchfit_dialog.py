@@ -988,7 +988,7 @@ class BatchFitDialog(QDialog):
             self.errStatus.setText("")
             return
         sel = self.errCombo.currentData()
-        have = sel == "covariance" or sel in getattr(self._result, "error_detail", {})
+        have = sel in getattr(self._result, "error_detail", {})
         name = self.errCombo.currentText().split(" (")[0]
         self.errStatus.setText(
             f"{name} ready to export" if have
@@ -997,20 +997,18 @@ class BatchFitDialog(QDialog):
     def _compute_errors(self):
         if self._result is None:
             return
-        m = self.errCombo.currentData()
-        if m == "covariance":
-            from larmor import batchfit
-            batchfit.batch_error_analysis(self._result, [], method="covariance")
-            self.status.setText("using covariance (least-squares) errors")
-            self._refresh_err_status()
-            return
-        self._start_err_worker(m)
+        # covariance is NOT a free snapshot: batch_fit's initial pass skips
+        # the errorbar-rescue retry for speed, so Param.stderr is commonly
+        # None until this actually refits with compute_errorbars=True -- so
+        # it goes through the same threaded worker as Monte-Carlo/profile,
+        # not a synchronous "just read what's there" shortcut.
+        self._start_err_worker(self.errCombo.currentData())
 
     def _export_csv(self):
         if self._result is None:
             return
         m = self.errCombo.currentData()
-        have = m == "covariance" or m in getattr(self._result, "error_detail", {})
+        have = m in getattr(self._result, "error_detail", {})
         path, _ = QFileDialog.getSaveFileName(
             self, "Export fit table with errors",
             f"batch_fit_{m}.csv", "CSV (*.csv)")
@@ -1021,11 +1019,7 @@ class BatchFitDialog(QDialog):
             self._export_after = True
             self._start_err_worker(m)
         else:
-            if m == "covariance":
-                from larmor import batchfit
-                batchfit.batch_error_analysis(self._result, [], method="covariance")
-            else:
-                self._result.error_method = m
+            self._result.error_method = m
             self._write_err_csv(path)
 
     def _start_err_worker(self, method: str):
@@ -1062,8 +1056,32 @@ class BatchFitDialog(QDialog):
         self._post_err_enable()
         self.prog.setValue(100)
         method = getattr(result, "error_method", "covariance")
-        self.status.setText(
-            f"{method} errors computed for {len(result.recipes)} spectra")
+        # a worker completing "successfully" does NOT mean the numbers are
+        # any good -- every refit/scan can fail or come back degenerate
+        # (silently, one exception at a time) while the worker itself still
+        # finishes and reports done. Count how many parameter-spectrum
+        # combinations actually got a usable error before claiming success.
+        detail = (getattr(result, "error_detail", {}) or {}).get(method) or []
+        total = sum(len(d) for d in detail)
+        ok = sum(1 for d in detail for pe in d.values()
+                if pe.stderr is not None and np.isfinite(pe.stderr))
+        if detail and total and ok == 0:
+            self.status.setText(
+                f"⚠ {method} produced NO usable errors for any of "
+                f"{len(result.recipes)} spectra — every refit/scan failed or "
+                "was degenerate (a near-zero-amplitude site, an unidentifiable "
+                "released parameter, or too few points for the model). Try "
+                "fewer released parameters, a looser release %, or check the "
+                "flagged/high-RMSD spectra's fit quality first.")
+        elif detail and total and ok < total:
+            self.status.setText(
+                f"{method} errors: {ok}/{total} parameter-spectrum "
+                f"combinations succeeded ({len(result.recipes)} spectra) — "
+                "some failed or were degenerate; export still writes what "
+                "succeeded (blank for what didn't)")
+        else:
+            self.status.setText(
+                f"{method} errors computed for {len(result.recipes)} spectra")
         self._refresh_err_status()
         if self._export_after:
             self._export_after = False

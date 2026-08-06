@@ -249,8 +249,15 @@ def batch_error_analysis(result: BatchFitResult, data: list[tuple], *,
     ``data`` is ``[(ppm, amp, window), ...]`` aligned with ``result.recipes``.
     ``method``:
 
-    * ``"covariance"`` — the least-squares covariance stderr already on the fit
-      (no refit; just recorded as the export method).
+    * ``"covariance"`` — the least-squares covariance stderr. batch_fit's
+      initial pass uses compute_errorbars=False for speed (see its
+      docstring), which means Param.stderr is often None for every parameter
+      of any spectrum whose covariance came out ill-conditioned (a very
+      plausible outcome for a many-site, several-released-parameter fit) —
+      so this REFITS each spectrum once more with compute_errorbars=True,
+      starting from its already-converged values (normally fast: a couple of
+      confirming iterations, plus the errorbar-rescue retry only where it's
+      actually needed), rather than silently reporting nothing.
     * ``"montecarlo"`` — parametric bootstrap: refit ``n_trials`` synthetic
       noisy copies per spectrum (``autofit.monte_carlo_errors``). Captures
       correlations and non-linearity.
@@ -267,13 +274,27 @@ def batch_error_analysis(result: BatchFitResult, data: list[tuple], *,
               "errors": "profile", "error": "profile",
               "chi2": "profile"}.get(method.lower(), method.lower())
 
+    if method == "covariance":
+        n = len(result.recipes)
+        for k, rec in enumerate(result.recipes):
+            if should_stop is not None and should_stop():
+                break
+            if k < len(data):
+                ppm, amp, window = data[k]
+                try:
+                    fitmod.fit(rec, np.asarray(ppm, float), np.asarray(amp, float),
+                              window_ppm=window, compute_errorbars=True)
+                except Exception:
+                    pass                     # keep whatever stderr it already had
+            if progress:
+                progress(k + 1, n, 0, 1)
+        result.error_detail["covariance"] = _snapshot_covariance(result)
+        result.error_method = "covariance"
+        return result
+
     # preserve the covariance errors before any overwrite, so it stays exportable
     if "covariance" not in result.error_detail:
         result.error_detail["covariance"] = _snapshot_covariance(result)
-
-    if method == "covariance":
-        result.error_method = "covariance"
-        return result
 
     n = len(result.recipes)
     detail: list[dict] = []

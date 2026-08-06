@@ -170,6 +170,66 @@ def test_batch_fit_dialog_loads_grid_and_fits(qapp, tmp_path):
     assert amp and all(ln.split(",")[6] == "covariance" for ln in amp)
 
 
+def test_batch_dialog_covariance_errors_go_through_the_threaded_worker(qapp, tmp_path):
+    """Regression: covariance is NOT a free snapshot (batch_fit's initial pass
+    skips the errorbar-rescue retry for speed) -- Compute errors / Export CSV
+    with Covariance selected must go through the same _ErrorWorker as Monte-
+    Carlo/profile (so it actually refits with compute_errorbars=True), not the
+    old synchronous "just read whatever's already there" shortcut, which left
+    every exported row blank whenever the fast fit's covariance was singular."""
+    from larmor.recipe import Recipe, SiteModel, Param
+    from larmor.desktop.batchfit_dialog import BatchFitDialog, _BatchWorker
+    from larmor import batchfit, engine
+
+    # a genuinely degenerate 2-site-per-spectrum setup (see test_batchfit.py's
+    # _degenerate_batch_entries): amplitudes are perfectly correlated, so the
+    # fast fit's covariance is reliably singular
+    x = np.linspace(-30, 30, 400)
+    paths = []
+    for k in range(2):
+        truth = Recipe(nucleus="11B", larmor_frequency_MHz=160.0, sites=[
+            SiteModel(model="gauss_lor", label="A", params={
+                "isotropic_chemical_shift_ppm": Param(0.0),
+                "shift_fwhm_ppm": Param(10.0), "amplitude": Param(80.0),
+                "gl": Param(1.0, vary=False)})])
+        _, y, _ = engine.simulate(truth, exp_ppm=x)
+        d = y + np.random.default_rng(k).normal(0, 0.3, x.size)
+        p = tmp_path / f"s{k}.csv"
+        p.write_text("# nucleus = 11B\n# larmor_MHz = 160\n" +
+                     "\n".join(f"{xi:.4f} {yi:.4f}" for xi, yi in zip(x, d)))
+        paths.append(str(p))
+    model = {"nucleus": "11B", "larmor_frequency_MHz": 160.0, "sites": [
+        {"model": "gauss_lor", "label": "A", "params": {
+            "isotropic_chemical_shift_ppm": {"value": 0.0, "vary": False},
+            "shift_fwhm_ppm": {"value": 10.0, "vary": False},
+            "amplitude": {"value": 40.0, "min": 0},
+            "gl": {"value": 1.0, "vary": False}}},
+        {"model": "gauss_lor", "label": "B", "params": {
+            "isotropic_chemical_shift_ppm": {"value": 0.0, "vary": False},
+            "shift_fwhm_ppm": {"value": 10.0, "vary": False},
+            "amplitude": {"value": 40.0, "min": 0},
+            "gl": {"value": 1.0, "vary": False}}}]}
+    dlg = BatchFitDialog(None, paths, model)
+    w = _BatchWorker(dlg._entries(), (), 0.1)
+    w.done.connect(dlg._done)
+    w.run()
+    assert dlg._result is not None
+    # (the exact "every stderr is None right after the fit" precondition is
+    # proven deterministically at the pure-function level in test_batchfit.py's
+    # test_error_analysis_covariance_refits_when_the_fast_fit_had_none; this
+    # test's job is the DIALOG WIRING -- that Covariance goes through the
+    # worker and ends up with real numbers regardless of the raw starting point)
+
+    dlg.errCombo.setCurrentIndex(0)        # covariance
+    dlg._compute_errors()                  # must route through the worker...
+    assert dlg._err_worker is not None
+    dlg._err_worker.run()                  # ...and run synchronously here
+    dlg._err_done(dlg._result)
+    rows = batchfit.error_table(dlg._result, method="covariance")
+    assert any(r["stderr"] is not None for r in rows)
+    assert "NO usable errors" not in dlg.status.text()
+
+
 def test_batch_worker_request_stop_reaches_batch_fit(qapp):
     """_BatchWorker.request_stop must actually propagate to batch_fit's
     should_stop -- not just abort lmfit's iter_cb (which only affects the ONE

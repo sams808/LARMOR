@@ -174,8 +174,13 @@ populations change. **Ctrl/Shift-click** the spectra in the Explorer and press
    main fitter.
 5. **Error calculation.** After the fit, choose how the per-spectrum errors are
    estimated from the **Error calculation** menu, then **Compute errors**:
-   * **Covariance** — the least-squares covariance stderr (instant, comes with
-     the fit).
+   * **Covariance** — the least-squares covariance stderr. The batch fit's own
+     pass skips the (potentially costly) errorbar-rescue step for speed, so
+     **Compute errors** here does one quick confirming re-fit per spectrum to
+     get real numbers, rather than reporting nothing when that first pass
+     couldn't get a clean covariance (common for several overlapping,
+     correlated released parameters) — usually still fast, since each
+     spectrum starts from its already-converged values.
    * **Monte-Carlo** — refit *N* synthetic noisy copies of each spectrum and take
      the spread; captures correlations and non-linearity the covariance misses.
    * **χ² profile (error analysis)** — scan each fitted parameter, refit the rest,

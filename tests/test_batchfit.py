@@ -136,13 +136,68 @@ def _data_for(entries):
 def test_error_analysis_covariance_is_default_and_exportable():
     entries = _entries()
     res = batchfit.batch_fit(entries)
-    # covariance is available with no extra work (it comes off the fit)
+    # this fixture's amplitude-only fit is well-conditioned even without the
+    # errorbar-rescue retry, so the raw post-fit stderr already works here --
+    # export still goes through batch_error_analysis explicitly (covariance
+    # is no longer a free snapshot in general, see the test below)
+    batchfit.batch_error_analysis(res, _data_for(entries), method="covariance")
     rows = batchfit.error_table(res, method="covariance")
     assert res.error_method == "covariance"
     amp_rows = [r for r in rows if r["param"] == "amplitude"]
     assert amp_rows and all(r["error_method"] == "covariance" for r in amp_rows)
     # every fitted amplitude has an error and a % error
     assert all(r["stderr"] is not None for r in amp_rows)
+
+
+def _degenerate_batch_entries():
+    """Two IDENTICAL-shape overlapping sites per spectrum: their amplitudes
+    are perfectly correlated (only the SUM is determined by the data), so the
+    covariance is reliably singular on the fast (no-retry) pass -- a
+    controlled trigger, not left to chance like a merely-overlapping fit."""
+    x = np.linspace(-30, 30, 500)
+    entries = []
+    for k in range(3):
+        truth = Recipe(nucleus="11B", larmor_frequency_MHz=160.0, sites=[
+            SiteModel(model="gauss_lor", label="A", params={
+                "isotropic_chemical_shift_ppm": Param(0.0),
+                "shift_fwhm_ppm": Param(10.0), "amplitude": Param(80.0),
+                "gl": Param(1.0, vary=False)})])
+        _, y, _ = engine.simulate(truth, exp_ppm=x)
+        data = y + np.random.default_rng(k).normal(0, 0.3, x.size)
+        rec = Recipe(nucleus="11B", larmor_frequency_MHz=160.0, sample=f"g{k}",
+                    sites=[
+            SiteModel(model="gauss_lor", label="A", params={
+                "isotropic_chemical_shift_ppm": Param(0.0, vary=False),
+                "shift_fwhm_ppm": Param(10.0, vary=False),
+                "amplitude": Param(40.0, min=0), "gl": Param(1.0, vary=False)}),
+            SiteModel(model="gauss_lor", label="B", params={
+                "isotropic_chemical_shift_ppm": Param(0.0, vary=False),
+                "shift_fwhm_ppm": Param(10.0, vary=False),
+                "amplitude": Param(40.0, min=0), "gl": Param(1.0, vary=False)}),
+        ])
+        entries.append((rec, x, data, None))
+    return entries
+
+
+def test_error_analysis_covariance_refits_when_the_fast_fit_had_none():
+    """Regression: batch_fit's initial pass uses compute_errorbars=False for
+    speed (see its docstring) -- for a genuinely degenerate released fit this
+    leaves every parameter's stderr as None right after the fit (verified: the
+    exact mechanism test_engine_fit.py's degenerate-covariance test exercises
+    at the single-fit level). Requesting covariance errors must not just
+    silently report that emptiness -- it must refit with
+    compute_errorbars=True and get the TOTAL (identifiable) amplitude's real
+    error, not leave every row blank."""
+    entries = _degenerate_batch_entries()
+    res = batchfit.batch_fit(entries)
+    free = [(i, pn) for rec in res.recipes for i, pn in batchfit._free_params(rec)]
+    n_none_raw = sum(1 for rec in res.recipes for i, pn in batchfit._free_params(rec)
+                     if rec.sites[i].params[pn].stderr is None)
+    assert n_none_raw == len(free)          # confirms the fixture DOES trigger it
+
+    batchfit.batch_error_analysis(res, _data_for(entries), method="covariance")
+    rows = batchfit.error_table(res, method="covariance")
+    assert any(r["stderr"] is not None for r in rows)
 
 
 def test_error_analysis_montecarlo_writes_errors_and_detail():
