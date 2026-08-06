@@ -182,7 +182,11 @@ def error_profile(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
         tp.vary = False               # fixed at the scan point
         tp.expr = None
         try:
-            res = fitmod.fit(trial, exp_ppm, exp_amp, window_ppm=window_ppm)
+            # only chisqr is read below -- this scan point's own covariance/
+            # error bars are never used (the WHOLE profile's shape is the
+            # error estimate), so skip the errorbar-rescue retry
+            res = fitmod.fit(trial, exp_ppm, exp_amp, window_ppm=window_ppm,
+                             compute_errorbars=False)
             chi2.append(float(res.lmfit_result.chisqr))
         except Exception:
             chi2.append(np.nan)
@@ -311,7 +315,11 @@ def monte_carlo_errors(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
         synth = model + rng.normal(0.0, sigma, size=model.shape)
         trial = Recipe.from_dict(json.loads(base_best))
         try:
-            fitmod.fit(trial, exp_ppm, synth, window_ppm=window_ppm)
+            # the MC estimate IS the spread of .value across trials -- each
+            # trial's own covariance/error bars are never read, so skip the
+            # errorbar-rescue retry (worth up to 2x on every one of n_trials)
+            fitmod.fit(trial, exp_ppm, synth, window_ppm=window_ppm,
+                      compute_errorbars=False)
         except Exception:
             if progress:
                 progress(k + 1, n_trials)

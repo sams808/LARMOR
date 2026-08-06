@@ -171,17 +171,11 @@ def _simulate_model_curve(recipe, n: int = 3000):
     if win and len(win) == 2:
         lo, hi = min(win), max(win)
     else:
-        centers, spans = [], [10.0]
-        for s in recipe.sites:
-            c = s.params.get("isotropic_chemical_shift_ppm")
-            if c is not None:
-                centers.append(float(c.value))
-            for wn in ("shift_fwhm_ppm", "line_fwhm_ppm", "lorentz_fwhm_ppm",
-                       "gauss_fwhm_ppm", "fwhm"):
-                if wn in s.params:
-                    spans.append(abs(float(s.params[wn].value)))
+        centers = [float(c.value) for s in recipe.sites
+                  for c in [s.params.get("isotropic_chemical_shift_ppm")]
+                  if c is not None]
         if centers:
-            m = max(spans) * 6.0
+            m = engine.site_width_margin(recipe.sites)
             lo, hi = min(centers) - m, max(centers) + m
         else:
             lo, hi = -100.0, 100.0

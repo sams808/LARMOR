@@ -135,9 +135,14 @@ def batch_fit(entries: list[tuple], *, share: tuple[str, ...] | None = None,
                 for k in range(len(entries))]
 
     # nothing is tied across spectra: amplitudes (and any released params) are
-    # optimised independently per spectrum; the fixed shape is the recipe's
+    # optimised independently per spectrum; the fixed shape is the recipe's.
+    # compute_errorbars=False: the covariance stderr from this pass is never
+    # read (batch fit has its own dedicated Error calculation menu -- covariance
+    # snapshot / Monte-Carlo / chi-square profile, run as an explicit later
+    # step), so it isn't worth potentially doubling this already-expensive
+    # joint optimization just to rescue error bars nothing will use.
     res = fit_cofit(_conv(recipes), share=(), windows=windows,
-                    iter_cb=iter_cb, tol=tol)
+                    iter_cb=iter_cb, tol=tol, compute_errorbars=False)
 
     fixed = tuple(p for p in all_but_amplitude(recipes) if p not in released)
     labels = [(r.sample or f"spectrum {k + 1}")

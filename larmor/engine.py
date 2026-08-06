@@ -114,6 +114,57 @@ def needs_kernel(recipe: Recipe) -> bool:
     return any(s.model == "czjzek" for s in recipe.sites)
 
 
+#: models safe to simulate on a grid RESTRICTED to the fit window (+ margin)
+#: rather than the full experimental axis. Deliberately an ALLOWLIST, not a
+#: denylist: a new/unaudited model defaults to the full grid (always correct,
+#: just not optimized) until someone verifies it belongs here. A model
+#: qualifies if either (a) its render() is a closed-form formula evaluated
+#: pointwise at each x (gauss_lor, voigt, ...) -- restricting the grid can't
+#: change any value, since points don't interact -- or (b) it simulates on its
+#: OWN independent grid (the Czjzek kernel family, engine.build_kernel) and
+#: only interpolates the result onto ctx.x_ppm at the very end -- restricting
+#: ctx.x_ppm only shrinks that final, always-safe downsampling step.
+#:
+#: Explicitly EXCLUDED: quad_ct/quad_first/quad_csa/csa_mas/csa_czjzek (all via
+#: models/_singlesite.py's render_single_site) build their OWN cached
+#: simulation directly from ctx.x_ppm's first/last VALUE, and broaden it with a
+#: real convolution (gaussian_filter1d, mode="constant" == zero-padded edges) —
+#: restricting the grid there would truncate the sideband/satellite manifold
+#: and change the result, not just its cost. Also excluded: "function" (an
+#: arbitrary user expression -- unknowable in general).
+_GRID_RESTRICTABLE = frozenset({
+    "gauss_lor", "gl_norm", "jmultiplet", "sidebands", "voigt",   # pointwise
+    "czjzek", "ext_czjzek", "amorphous",                          # own kernel grid
+    "spectrum",                                                    # interpolates a reference trace pointwise
+})
+
+
+def grid_restrictable(recipe: Recipe) -> bool:
+    """True if every site's model tolerates simulating on a window-restricted
+    grid instead of the full experimental axis (see _GRID_RESTRICTABLE)."""
+    return all(s.model in _GRID_RESTRICTABLE for s in recipe.sites)
+
+
+#: parameter names treated as a lineshape "width" when estimating how far a
+#: site's visible extent reaches beyond its center (shared by figures.py's
+#: data-less-fit preview and fit.py's windowed simulation grid, so the two
+#: never drift apart).
+_WIDTH_PARAM_NAMES = ("shift_fwhm_ppm", "line_fwhm_ppm", "lorentz_fwhm_ppm",
+                     "gauss_fwhm_ppm", "fwhm")
+
+
+def site_width_margin(sites, default: float = 10.0, factor: float = 6.0) -> float:
+    """A generous margin (ppm) beyond a site's center that a lineshape needs
+    room to be simulated in: factor x the widest declared width among the
+    sites (dmfit/ssNake lineshapes are negligible beyond a few widths)."""
+    spans = [default]
+    for s in sites:
+        for wn in _WIDTH_PARAM_NAMES:
+            if wn in s.params:
+                spans.append(abs(float(s.params[wn].value)))
+    return max(spans) * factor
+
+
 def make_context(recipe: Recipe, exp_ppm: np.ndarray | None = None) -> SimContext:
     """Build the simulation context; picks the axis a recipe should render on."""
     if needs_kernel(recipe):

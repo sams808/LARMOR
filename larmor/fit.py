@@ -15,7 +15,8 @@ import numpy as np
 import lmfit
 
 from larmor import models as model_registry
-from larmor.engine import make_context, simulate_site
+from larmor.engine import (grid_restrictable, make_context, simulate_site,
+                           site_width_margin)
 from larmor.recipe import Recipe
 
 # user-facing constraint syntax: s<index>.<recipe param name>, e.g.
@@ -157,7 +158,7 @@ def _model(recipe: Recipe, params: lmfit.Parameters, ctx,
 def fit(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
         window_ppm: tuple[float, float] | None = None,
         kernel=None, iter_cb=None, tol=None, frame_cb=None,
-        frame_every: int = 10) -> FitResult:
+        frame_every: int = 10, compute_errorbars: bool = True) -> FitResult:
     """Refine `recipe` against (exp_ppm, exp_amp). Modifies recipe in place.
 
     `kernel` is accepted for backward compatibility and ignored; kernels are
@@ -165,8 +166,16 @@ def fit(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
     threshold (% change in the residual stdev, see ``ftol_from_pct``).
     `frame_cb(x_ppm, y_model, iteration)`, if given, is called each iteration with
     the current full model curve — for a live fit animation.
+
+    `compute_errorbars`: when the primary least_squares pass can't get a valid
+    covariance (an ill-conditioned Jacobian — a parameter at/near a bound, or
+    degenerate with another free one), the default (True) reruns the WHOLE
+    optimization a second time with a different algorithm to try to rescue
+    error bars. That is a good tradeoff for one interactive fit but doubles the
+    cost of every caller that never reads the resulting stderr anyway (batch
+    fit's initial pass, each Monte-Carlo trial, each chi-square-profile scan
+    point) — pass False there.
     """
-    ctx = make_context(recipe, exp_ppm=exp_ppm)
     zones = [z for z in (recipe.fit_zones or []) if z and len(z) == 2]
     if zones:
         # dmfit-style Zones: residual evaluated on the union of the regions
@@ -182,6 +191,24 @@ def fit(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
         hi, lo = max(window), min(window)
         sel = (exp_ppm >= lo) & (exp_ppm <= hi)
     xw, yw = exp_ppm[sel], exp_amp[sel]
+
+    # a full-grid context is always needed for the RETURNED model curve (so the
+    # displayed fit still spans the whole experiment, not just the fit window
+    # -- unchanged from before). Models that tolerate it (engine.
+    # grid_restrictable -- pointwise formulas, or ones that simulate on their
+    # OWN independent grid like the Czjzek kernel family) also get a SEPARATE
+    # context restricted to the window + a generous margin, used ONLY during
+    # optimisation -- so every one of the thousands of Jacobian-probe
+    # evaluations simulates a fraction of the points instead of the whole
+    # spectrum. Models excluded from the allowlist (quad_ct/quad_first/
+    # quad_csa/csa_*) keep simulating on the full grid exactly as before.
+    ctx_full = make_context(recipe, exp_ppm=exp_ppm)
+    if grid_restrictable(recipe):
+        margin = site_width_margin(recipe.sites)
+        sel_pad = (exp_ppm >= lo - margin) & (exp_ppm <= hi + margin)
+        ctx = make_context(recipe, exp_ppm=exp_ppm[sel_pad])
+    else:
+        ctx = ctx_full
 
     params = _make_params(recipe)
 
@@ -227,8 +254,12 @@ def fit(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
         if frame_cb is not None and (_fs["n"] <= 2
                                      or _fs["n"] % max(1, frame_every) == 0):
             try:
-                ym, _ = _model(recipe, p, ctx)
-                frame_cb(np.asarray(ctx.x_ppm, float), np.asarray(ym, float),
+                # the full-grid context, not the (possibly window-restricted)
+                # fit context -- already throttled to every frame_every-th
+                # iteration, so the extra width costs nothing noticeable, and
+                # the animated curve's span then matches the final result's
+                ym, _ = _model(recipe, p, ctx_full)
+                frame_cb(np.asarray(ctx_full.x_ppm, float), np.asarray(ym, float),
                          _fs["n"])
             except Exception:
                 pass
@@ -250,7 +281,7 @@ def fit(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
         return names
 
     at_bounds_internal = _at_bounds(result)
-    if not result.errorbars:
+    if compute_errorbars and not result.errorbars:
         # covariance didn't come out of least_squares; Levenberg-Marquardt from
         # the solution usually recovers it
         retry_params = result.params.copy()
@@ -282,8 +313,10 @@ def fit(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
             key_to_name[_lmfit_name(i, site, pname)] = f"s{i}.{pname}"
     at_bounds = [key_to_name.get(n, n) for n in at_bounds_internal]
 
-    y_fit, per_site = _model(recipe, result.params, ctx)
-    y_fit_w = np.interp(xw, ctx.x_ppm, y_fit)
+    # the returned curve always spans the FULL experimental axis, whether or
+    # not the optimisation itself ran on a restricted grid
+    y_fit, per_site = _model(recipe, result.params, ctx_full)
+    y_fit_w = np.interp(xw, ctx_full.x_ppm, y_fit)
     rmsd = float(np.sqrt(np.mean((y_fit_w - yw) ** 2)) / (yw.max() or 1.0))
 
     recipe.fit_window_ppm = (hi, lo)
@@ -297,6 +330,6 @@ def fit(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
                 "model; uncertainties are conditional on them): " + ", ".join(at_bounds))
         if note not in recipe.notes:
             recipe.notes.append(note)
-    return FitResult(recipe=recipe, lmfit_result=result, x_ppm=ctx.x_ppm,
+    return FitResult(recipe=recipe, lmfit_result=result, x_ppm=ctx_full.x_ppm,
                      y_exp=exp_amp, y_fit=y_fit, per_site=per_site, rmsd=rmsd,
                      frozen_sites=frozen, at_bounds=at_bounds)
