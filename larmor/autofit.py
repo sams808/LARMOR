@@ -274,11 +274,14 @@ def monte_carlo_errors(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
     exp_ppm = np.asarray(exp_ppm, float)
     exp_amp = np.asarray(exp_amp, float)
 
-    # 1. lock the best fit + its model on the experimental axis
+    # 1. lock the best fit + its model on the experimental axis. A kernel model
+    # (Czjzek family) simulates on its OWN grid regardless of exp_ppm, so the
+    # model must be interpolated onto exp_ppm before it can be compared to
+    # exp_amp — the same pattern larmor.fit uses for its residual.
     best = Recipe.from_dict(json.loads(json.dumps(recipe.to_dict())))
     fitmod.fit(best, exp_ppm, exp_amp, window_ppm=window_ppm)
-    _, model, _ = engine.simulate(best, exp_ppm=exp_ppm)
-    model = np.asarray(model, float)
+    mx, model_raw, _ = engine.simulate(best, exp_ppm=exp_ppm)
+    model = np.interp(exp_ppm, mx, np.asarray(model_raw, float))
 
     # 2. noise level: residual std inside the fit window
     if window_ppm:

@@ -62,6 +62,32 @@ def test_manual_noise_and_early_stop():
     assert res.trials == 100
 
 
+def test_kernel_model_does_not_crash_on_grid_mismatch():
+    """A Czjzek site simulates on the KERNEL's own fixed grid, never on exp_ppm
+    (engine.needs_kernel) -- monte_carlo_errors must interpolate that grid onto
+    exp_ppm before comparing to exp_amp, or every kernel-model MC run crashes
+    with a shape mismatch (was: IndexError, 2048 vs len(exp_ppm))."""
+    x = np.linspace(-40, 120, 700)                 # deliberately NOT the kernel size
+    truth = Recipe(nucleus="27Al", larmor_frequency_MHz=130.3, sites=[
+        SiteModel(model="czjzek", label="Al", params={
+            "isotropic_chemical_shift_ppm": Param(60.0),
+            "sigma_Cq_MHz": Param(3.0, min=0.05),
+            "shift_fwhm_ppm": Param(8.0, min=0.1),
+            "line_fwhm_ppm": Param(1.0, min=0.0),
+            "amplitude": Param(100.0, min=0.0)})])
+    kx, model, _ = engine.simulate(truth)           # the kernel's own grid
+    y = np.interp(x, np.sort(kx), model[np.argsort(kx)])
+    data = y + np.random.default_rng(2).normal(0.0, y.max() * 0.01, x.size)
+
+    res = autofit.monte_carlo_errors(
+        Recipe.from_dict(truth.to_dict()), x, data, window_ppm=(120, -40),
+        n_trials=12, seed=1)
+    assert res.n_ok == 12
+    amp = next(p for p in res.params if p.param == "amplitude")
+    assert amp.std > 0 and np.isfinite(amp.std)
+    assert abs(amp.mean - 100.0) < max(10 * amp.std, 20.0)
+
+
 def test_report_lists_every_free_parameter():
     truth, x, data = _synthetic()
     res = autofit.monte_carlo_errors(

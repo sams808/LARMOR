@@ -39,22 +39,38 @@ def _param_specs(result) -> list[dict]:
     return specs
 
 
-def population_integral(result) -> np.ndarray:
-    """(n_spectra × n_sites) integral populations (%), from the same
-    integrate-over-the-window quantification as Report (F6)."""
+def population_integral(result, error_method: str | None = None
+                        ) -> tuple[np.ndarray, np.ndarray]:
+    """(n_spectra × n_sites) integral populations (%) and their errors, from the
+    same integrate-over-the-window quantification as Report (F6).
+
+    A site's integral is proportional to its amplitude for a fixed lineshape, so
+    the population's error is the amplitude's *relative* error under the chosen
+    ``error_method`` (covariance / Monte-Carlo / χ² profile), applied to the
+    fraction — first-order, same approximation as quantify.py's own table
+    (the other sites' amplitude errors, which also shift the total, are
+    neglected)."""
     from larmor.quantify import quantify
     n = len(result.recipes)
     ns = len(result.recipes[0].sites)
-    m = np.full((n, ns), np.nan)
+    vals = np.full((n, ns), np.nan)
+    errs = np.full((n, ns), np.nan)
     for k, rec in enumerate(result.recipes):
         try:
             q = quantify(rec, getattr(rec, "fit_window_ppm", None))
         except Exception:
             continue
         for i, row in enumerate(q["rows"]):
-            if i < ns:
-                m[k, i] = row["fraction_pct"]
-    return m
+            if i >= ns:
+                continue
+            vals[k, i] = row["fraction_pct"]
+            amp = rec.sites[i].params.get("amplitude")
+            if amp is None or not amp.value:
+                continue
+            amp_err = _param_error(result, i, "amplitude", k, error_method)
+            if np.isfinite(amp_err):
+                errs[k, i] = row["fraction_pct"] * abs(amp_err / amp.value)
+    return vals, errs
 
 
 # ----- kept for scripting / CSV export / tests -----------------------------
@@ -111,11 +127,13 @@ def series_values(result, opt: dict, error_method: str | None = "covariance"):
     """(values, errors) of one option across every spectrum in the series.
 
     ``error_method`` selects which computed error to show — 'covariance' (the
-    least-squares stderr, default), 'montecarlo', 'profile', or 'none'.
-    Population options carry no error."""
+    least-squares stderr, default), 'montecarlo', 'profile', or 'none'. Both
+    population kinds get an error too (first-order, from the amplitude's error
+    under the chosen method — see :func:`population_integral`)."""
     if opt["kind"] == "pop_integral":
-        vals = population_integral(result)[:, opt["site"]]
-        return np.asarray(vals, float), np.full(len(vals), np.nan)
+        vals, errs = population_integral(result, error_method)
+        return np.asarray(vals[:, opt["site"]], float), \
+               np.asarray(errs[:, opt["site"]], float)
     vals, errs = [], []
     for k, rec in enumerate(result.recipes):
         site = rec.sites[opt["site"]]
@@ -124,8 +142,11 @@ def series_values(result, opt: dict, error_method: str | None = "covariance"):
         if opt["kind"] == "popfrac":
             tot = sum(abs(float(s.params["amplitude"].value))
                       for s in rec.sites if "amplitude" in s.params) or 1.0
-            v = 100.0 * abs(v) / tot
-            e = np.nan                            # a population % has no direct σ
+            frac = 100.0 * abs(v) / tot
+            amp_err = _param_error(result, opt["site"], "amplitude", k, error_method)
+            e = (frac * abs(amp_err / v)
+                 if (np.isfinite(amp_err) and v) else np.nan)
+            v = frac
         else:
             e = _param_error(result, opt["site"], opt["param"], k, error_method)
         vals.append(v); errs.append(e)

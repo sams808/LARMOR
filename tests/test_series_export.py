@@ -104,6 +104,22 @@ def test_series_values_use_selected_error_method():
     assert np.isnan(none).all()                            # 'none' → no error bars
 
 
+def test_population_integral_carries_an_error():
+    from larmor.desktop.series_plot import population_integral, series_values
+    res = _result_with_mc()          # MC error stored for site 0 only
+    vals, errs = population_integral(res, "montecarlo")
+    assert np.isfinite(vals).all()
+    assert np.isfinite(errs[:, 0]).all() and (errs[:, 0] > 0).all()
+    assert np.isnan(errs[:, 1]).all()          # site 1 has no MC error -> NaN
+    # 'none' gives no error at all; the same call routed through series_values agrees
+    _, e_none = population_integral(res, "none")
+    assert np.isnan(e_none).all()
+    v2, e2 = series_values(
+        res, {"site": 0, "param": "population_pct", "kind": "pop_integral"},
+        "montecarlo")
+    assert v2 == pytest.approx(vals[:, 0]) and e2 == pytest.approx(errs[:, 0])
+
+
 def test_series_dialog_error_selector_and_studio_yerr(qapp):
     from larmor.desktop.series_plot import SeriesPlotDialog
     dlg = SeriesPlotDialog(None, _result_with_mc())

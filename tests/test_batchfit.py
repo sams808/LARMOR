@@ -193,6 +193,54 @@ def test_switching_export_method_keeps_covariance():
     assert cov2_amp == pytest.approx(cov_amp)
 
 
+def _czjzek_entries():
+    """A batch of synthetic 27Al Czjzek spectra: a kernel-based model, unlike the
+    Gauss/Lorentz fixture above -- exercises the batch pipeline end-to-end on the
+    lineshape family the user actually runs next (27Al)."""
+    x = np.linspace(-40, 120, 700)
+
+    def start(sample):
+        return Recipe(nucleus="27Al", larmor_frequency_MHz=130.3, sample=sample,
+                      sites=[SiteModel(model="czjzek", label="Al", params={
+                          "isotropic_chemical_shift_ppm": Param(60.0, min=40, max=80),
+                          "sigma_Cq_MHz": Param(3.0, min=0.05),
+                          "shift_fwhm_ppm": Param(8.0, min=0.1),
+                          "line_fwhm_ppm": Param(1.0, min=0.0),
+                          "amplitude": Param(100.0, min=0)})])
+
+    def spec(amp, seed):
+        tr = start("t")
+        tr.sites[0].params["amplitude"].value = amp
+        kx, m, _ = engine.simulate(tr)
+        y = np.interp(x, np.sort(kx), m[np.argsort(kx)])
+        return y + np.random.default_rng(seed).normal(0.0, y.max() * 0.01, x.size)
+
+    return [(start(f"g{k}"), x, spec(amp, k), (120.0, -40.0))
+            for k, amp in enumerate([100.0, 80.0, 120.0])]
+
+
+def test_batch_fit_holds_czjzek_shape_and_frees_amplitude():
+    res = batchfit.batch_fit(_czjzek_entries())
+    sigma = [r.sites[0].params["sigma_Cq_MHz"].value for r in res.recipes]
+    assert all(s == pytest.approx(3.0) for s in sigma)     # shape held fixed
+    amps = [r.sites[0].params["amplitude"].value for r in res.recipes]
+    assert amps[2] > amps[0] > amps[1]                     # amplitudes track truth
+
+
+def test_batch_error_analysis_montecarlo_works_on_czjzek():
+    # the kernel-model grid-mismatch bug this generalisation surfaced
+    # (autofit.monte_carlo_errors) must not resurface here
+    entries = _czjzek_entries()
+    res = batchfit.batch_fit(entries)
+    batchfit.batch_error_analysis(
+        res, [(a, b, c) for _, a, b, c in entries], method="montecarlo",
+        n_trials=15, seed=1)
+    rows = batchfit.error_table(res, method="montecarlo")
+    amp_rows = [r for r in rows if r["param"] == "amplitude"]
+    assert amp_rows and all(r["stderr"] is not None and r["stderr"] >= 0
+                            for r in amp_rows)
+
+
 def test_batch_fit_accepts_tol_and_still_runs():
     # a loose threshold still returns a result; released position tracks the data
     res = batchfit.batch_fit(_entries(), tol=1.0,
