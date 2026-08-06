@@ -101,13 +101,23 @@ def _make_params(recipe: Recipe) -> lmfit.Parameters:
     # pass 1: every parameter exists as a plain value, so that pass-2
     # expressions can reference any of them regardless of site order
     for i, site in enumerate(recipe.sites):
+        try:
+            pdefs = {pd.name: pd for pd in model_registry.get(site.model).params}
+        except Exception:
+            pdefs = {}
         for pname, p in site.params.items():
+            # fall back to the MODEL's physical bounds when the recipe omits them,
+            # so e.g. a width can never be fitted negative even if an old recipe
+            # saved it with min=None (a released width otherwise blows up)
+            pd = pdefs.get(pname)
+            pmin = p.min if p.min is not None else (pd.min if pd else None)
+            pmax = p.max if p.max is not None else (pd.max if pd else None)
             params.add(
                 _lmfit_name(i, site, pname),
                 value=p.value,
                 vary=p.vary,
-                min=p.min if p.min is not None else -np.inf,
-                max=p.max if p.max is not None else np.inf,
+                min=pmin if pmin is not None else -np.inf,
+                max=pmax if pmax is not None else np.inf,
             )
     # pass 2: attach constraint expressions
     for i, site in enumerate(recipe.sites):
