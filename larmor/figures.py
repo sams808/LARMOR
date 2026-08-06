@@ -364,7 +364,7 @@ def load_2d(path: str | Path, procno: int = 1):
     axes = []
     for key, npts in (("procs", Z.shape[1]), ("proc2s", Z.shape[0])):
         p = dic[key]
-        si, sf = int(p["SI"]), float(p["SF"])
+        sf = float(p["SF"])
         offset, sw = float(p["OFFSET"]), float(p["SW_p"])
         axes.append(offset - np.arange(npts) * (sw / sf / npts))
     x_f2, y_f1 = axes

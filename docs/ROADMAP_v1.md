@@ -65,12 +65,16 @@ mean and what it takes to get there.
 
 ## Proposed milestones
 
-| Release | Theme | Headline |
-|---|---|---|
-| **v0.3** | Trust & safety | validation report · format versioning · project bundles · CI · dialog smoke test |
-| **v0.4** | Sustainability & reach | split `app.py` · Windows+macOS installers · docs site + tutorials |
-| **v0.5** | Feature completeness | assignment table · drag-to-phase · amp calib · bootstrapped errors · annotation layer |
-| **v1.0** | Sign-off | validation signed off · zero known crashes · "recommend to a colleague" |
+Thematic, not tied to specific version numbers — shipped releases land
+incrementally as features/fixes are ready (v0.3.x/v0.4.x already cover UX and
+performance work outside this list), not one theme per release:
+
+| Theme | Headline |
+|---|---|
+| **Trust & safety** | validation report · format versioning · project bundles · CI · dialog smoke test |
+| **Sustainability & reach** | split `app.py` · Windows+macOS installers · docs site + tutorials |
+| **Feature completeness** | assignment table · drag-to-phase · amp calib · bootstrapped errors · annotation layer |
+| **v1.0 sign-off** | validation signed off · zero known crashes · "recommend to a colleague" |
 
 ## If only three things before 1.0
 1. **A validation report** (turns "it fits" into "it fits *correctly*").

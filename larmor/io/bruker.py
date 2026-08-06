@@ -118,7 +118,6 @@ def _find_expno(start: Path) -> Path:
 def resolve(path: str | Path) -> BrukerRef:
     """Turn any Bruker-ish path into (expno, procno, what-to-read, ndim)."""
     p = Path(path)
-    is2d_expno = lambda e: (e / "acqu2s").exists() or (e / "ser").exists()
 
     # a processed data file, e.g. .../pdata/1/1r or .../pdata/1/2rr
     if p.is_file() and p.name in ("1r", "1i", "2rr", "2ri", "2ir", "2ii"):

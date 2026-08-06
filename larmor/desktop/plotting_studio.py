@@ -19,7 +19,6 @@ import json
 from pathlib import Path
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QCheckBox, QColorDialog, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
     QFileDialog, QFormLayout, QHBoxLayout, QInputDialog, QLabel, QLineEdit,
@@ -28,7 +27,6 @@ from PySide6.QtWidgets import (
 )
 
 from larmor import figures
-from larmor.desktop import theme
 
 _LINESTYLES = ["-", "--", "-.", ":"]
 _CMAPS = ["viridis", "plasma", "magma", "cividis", "coolwarm", "Blues",

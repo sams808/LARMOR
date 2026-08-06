@@ -75,7 +75,8 @@ png + svg + pdf export.
 
 Reuse-first design: the physics comes from mrsimulator + lmfit; LARMOR adds ingestion, the
 dmfit-faithful UX, orchestration, uncertainties, and reproducibility. Instrument folders are
-always read-only. See `ROADMAP.md` for what's next (v0.3 → v1.0).
+always read-only. See `ROADMAP.md` for what's next, and `docs/ROADMAP_v1.md`
+for the themes remaining before a 1.0 sign-off.
 
 ## Status
 

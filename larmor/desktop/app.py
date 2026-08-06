@@ -847,7 +847,6 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("open a 2D MQMAS map first")
             return
         cur = float(self.recipe.get("mqmas_f1_ref_ppm", 0.0))
-        vary = bool(self.recipe.get("mqmas_f1_ref_vary", True))
         val, ok = QInputDialog.getDouble(
             self, "MQMAS F1 reference",
             "Isotropic-axis (F1) reference offset [ppm].\n"
