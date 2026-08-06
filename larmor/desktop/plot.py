@@ -265,8 +265,20 @@ class SpectrumView(pg.PlotWidget):
         self._add_mode = model_name
         self.setCursor(Qt.CrossCursor if model_name else Qt.ArrowCursor)
         # while placing lines, right-click exits the mode instead of opening the
-        # viewbox menu — so suppress that menu until the mode ends
+        # viewbox menu — so suppress that menu until the mode ends. NOTE:
+        # pyqtgraph's setMenuEnabled(False) DESTROYS the ViewBoxMenu object, and
+        # setMenuEnabled(True) builds a brand-new default one from scratch — so
+        # re-enabling silently wiped our custom "Export figure…" / "Send to
+        # Plotting studio" items (added once at construction) the first time add
+        # mode was ever toggled off. Re-attach them every time the menu comes
+        # back so they survive every add/exit cycle, not just the first.
         self.getPlotItem().getViewBox().setMenuEnabled(model_name is None)
+        if model_name is None:
+            try:
+                from larmor.desktop.plot_menu import attach_plot_menu
+                attach_plot_menu(self, title="spectrum")
+            except Exception:
+                pass
 
     def _on_click(self, ev):
         if ev.button() == Qt.RightButton:

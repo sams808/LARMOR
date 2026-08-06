@@ -332,6 +332,32 @@ def test_add_site_and_paddles(qapp, win):
     assert win.lines_table.table.rowCount() == n + 1
 
 
+def test_add_mode_does_not_wipe_the_plot_menu(qapp):
+    """pyqtgraph's setMenuEnabled(False) DESTROYS the ViewBoxMenu object and
+    setMenuEnabled(True) builds a brand-new default one -- set_add_mode used
+    that to suppress right-click while placing lines, which silently wiped
+    "Export figure..."/"Send to Plotting studio" (added once at construction)
+    the first time add-mode was ever exited. Must survive every cycle."""
+    from larmor.desktop.plot import SpectrumView
+
+    view = SpectrumView()
+    vb = view.getPlotItem().getViewBox()
+    before = [a.text() for a in vb.menu.actions()]
+    assert "Export figure…" in before and "Send to Plotting studio" in before
+
+    view.set_add_mode("gauss_lor")
+    assert vb.menu is None                       # pyqtgraph tears it down here
+    view.set_add_mode(None)
+    after = [a.text() for a in vb.menu.actions()]
+    assert after == before                        # fully restored, no duplicates
+
+    # a second cycle must not duplicate or drop anything either
+    view.set_add_mode("czjzek")
+    view.set_add_mode(None)
+    assert [a.text() for a in vb.menu.actions()] == before
+    view.close()
+
+
 def test_cofit_dialog_plots_both_datasets(qapp):
     """The co-fit dialog draws one plot per dataset: a 1D exp-vs-fit overlay and
     a 2D experiment/model contour overlay (not just the text report)."""

@@ -241,6 +241,17 @@ def test_batch_error_analysis_montecarlo_works_on_czjzek():
                             for r in amp_rows)
 
 
+def test_snapshot_covariance_normalizes_nan_stderr_to_none():
+    """An ill-conditioned covariance makes lmfit report stderr as NaN, not
+    None. NaN is truthy, so an unguarded `if se` would treat it as a real
+    error -- _snapshot_covariance must normalize it to None."""
+    res = batchfit.batch_fit(_entries())
+    res.recipes[0].sites[0].params["amplitude"].stderr = float("nan")
+    detail = batchfit._snapshot_covariance(res)
+    pe = detail[0][(0, "amplitude")]
+    assert pe.stderr is None and pe.pct is None
+
+
 def test_batch_fit_accepts_tol_and_still_runs():
     # a loose threshold still returns a result; released position tracks the data
     res = batchfit.batch_fit(_entries(), tol=1.0,

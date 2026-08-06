@@ -280,6 +280,55 @@ def test_batch_dialog_per_spectrum_twopoint_baseline(qapp, tmp_path):
     assert np.allclose(d0["amp"], y0)
 
 
+def test_batch_baseline_menu_survives_apply_and_allows_a_second_one(qapp):
+    """The right-click baseline options must NOT disappear after applying one
+    (the bug report this guards) -- pyqtgraph rebuilds a bare default menu
+    every time setMenuEnabled(True) runs, so the cell's custom items (Export /
+    Send to studio / the two baseline actions) must be re-attached each time
+    picking ends. A second correction must then be addable (and compose with
+    the first) or cancellable, not just the very first."""
+    import pyqtgraph as pg
+    from larmor.desktop.batchfit_dialog import BatchFitDialog
+
+    model = {"nucleus": "11B", "larmor_frequency_MHz": 160.0,
+             "sites": [{"model": "gauss_lor", "label": "A", "params": {
+                 "isotropic_chemical_shift_ppm": {"value": 14.0},
+                 "shift_fwhm_ppm": {"value": 5.0}, "amplitude": {"value": 80.0},
+                 "gl": {"value": 1.0, "vary": False}}}]}
+    dlg = BatchFitDialog(None, [], model)
+    x = np.linspace(-20, 60, 300)
+    y = 0.4 * x + 5.0 + 50 * np.exp(-0.5 * ((x - 15) / 6) ** 2)
+    dlg._data = [{"ppm": x.copy(), "amp": y.copy(), "amp0": y.copy(),
+                 "nucleus": "11B", "larmor": 160.0, "spin": 0.0, "sample": "s0",
+                 "path": "s0.csv", "proc": "", "snr": 50, "baseline_ops": []}]
+    plot = pg.PlotWidget()
+    dlg._cells = [{"plot": plot, "exp": plot.plot([], []), "model": None,
+                  "rmsd": None, "comp": [], "title": None,
+                  "bl_picking": False, "bl_markers": [], "bl_line": None}]
+    dlg._attach_cell_menu(0)
+    vb = plot.getPlotItem().getViewBox()
+    expected = [a.text() for a in vb.menu.actions()]
+    assert "Add 2-point linear baseline" in expected
+    assert "Clear this spectrum's baseline" in expected
+
+    def pick(pts):
+        dlg._start_bg_pick(0)
+        for p in pts:
+            m = pg.TargetItem(pos=p, movable=True)
+            plot.addItem(m)
+            dlg._cells[0]["bl_markers"].append(m)
+        dlg._apply_bg_pick(0)
+
+    pick([(-18.0, 0.4 * -18.0 + 5.0), (58.0, 0.4 * 58.0 + 5.0)])
+    assert [a.text() for a in vb.menu.actions()] == expected   # still there
+    assert len(dlg._data[0]["baseline_ops"]) == 1
+
+    # right-click again works: a second correction composes with the first
+    pick([(-19.0, -0.1), (59.0, 0.1)])
+    assert [a.text() for a in vb.menu.actions()] == expected   # still there
+    assert len(dlg._data[0]["baseline_ops"]) == 2
+
+
 def test_batch_baseline_right_click_confirm_apply_and_cancel(qapp, monkeypatch):
     """Once both points are down, right-click offers Apply/Cancel — it must NOT
     silently commit (the bug report this guards): Cancel discards the pick and

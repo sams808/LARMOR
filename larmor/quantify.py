@@ -31,14 +31,22 @@ def quantify(recipe: Recipe, window_ppm: tuple[float, float] | None = None,
         y = simulate_site(site, ctx)
         integral = float(np.trapezoid(y[sel], ctx.x_ppm[sel]))
         amp = site.params["amplitude"]
-        rel_err = (amp.stderr / amp.value) if (amp.stderr and amp.value) else None
+        # an ill-conditioned covariance (e.g. an amplitude at/near a bound, or
+        # degenerate with another free parameter) makes lmfit report stderr as
+        # NaN rather than None -- and NaN is truthy, so a plain "if amp.stderr"
+        # would let it through as if it were a real error. Require it finite.
+        amp_err = amp.stderr if (amp.stderr is not None
+                                 and np.isfinite(amp.stderr)) else None
+        rel_err = (amp_err / amp.value) if (amp_err and amp.value) else None
         pos = site.params["isotropic_chemical_shift_ppm"]
+        pos_err = (pos.stderr if (pos.stderr is not None
+                                  and np.isfinite(pos.stderr)) else None)
         rows.append({
             "site": f"s{i}",
             "label": site.label or site.model,
             "model": site.model,
             "position_ppm": pos.value,
-            "position_err": pos.stderr,
+            "position_err": pos_err,
             "integral": integral,
             "integral_err": abs(integral) * rel_err if rel_err is not None else None,
         })

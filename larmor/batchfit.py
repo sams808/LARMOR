@@ -177,14 +177,19 @@ def _free_params(rec: Recipe):
 
 def _snapshot_covariance(result: BatchFitResult) -> list[dict]:
     """Capture the least-squares covariance stderr currently on the recipes,
-    so it survives a later Monte-Carlo/profile pass overwriting Param.stderr."""
+    so it survives a later Monte-Carlo/profile pass overwriting Param.stderr.
+
+    An ill-conditioned covariance (a parameter at/near a bound, or degenerate
+    with another free one) makes lmfit report stderr as NaN rather than None —
+    and NaN is truthy, so a plain ``if se`` would treat it as a real error.
+    Normalize to None so "no error available" is unambiguous downstream."""
     out = []
     for rec in result.recipes:
         d = {}
         for i, pn in _free_params(rec):
             p = rec.sites[i].params[pn]
-            se = p.stderr
-            pct = abs(se / p.value) * 100.0 if se and p.value else None
+            se = p.stderr if (p.stderr is not None and np.isfinite(p.stderr)) else None
+            pct = abs(se / p.value) * 100.0 if (se and p.value) else None
             d[(i, pn)] = ParamError(i, pn, f"s{i}.{pn}", float(p.value), se,
                                     (None, None), pct)
         out.append(d)

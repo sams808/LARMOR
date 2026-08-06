@@ -376,21 +376,6 @@ class BatchFitDialog(QDialog):
                 model = plot.plot([], [],
                                   pen=pg.mkPen(theme.active().model, width=1.4))
                 plot.setXRange(d["ppm"].min(), d["ppm"].max())   # inverted → high→low
-                from larmor.desktop.plot_menu import attach_plot_menu
-                attach_plot_menu(plot, title=d["sample"], parent=self)
-                vb_menu = plot.getPlotItem().getViewBox().menu
-                vb_menu.addSeparator()
-                act_bg = QAction("Add 2-point linear baseline", vb_menu)
-                act_bg.setToolTip(
-                    "click two points on THIS spectrum (one each side of the "
-                    "peaks); the straight line through them is subtracted — "
-                    "right-click to cancel")
-                act_bg.triggered.connect(lambda _=False, kk=k: self._start_bg_pick(kk))
-                vb_menu.addAction(act_bg)
-                act_bg_clear = QAction("Clear this spectrum's baseline", vb_menu)
-                act_bg_clear.triggered.connect(
-                    lambda _=False, kk=k: self._clear_cell_baseline(kk))
-                vb_menu.addAction(act_bg_clear)
                 plot.scene().sigMouseClicked.connect(
                     lambda ev, kk=k: self._cell_clicked(kk, ev))
                 rmsd = QLabel(""); rmsd.setStyleSheet(
@@ -401,6 +386,7 @@ class BatchFitDialog(QDialog):
                                     "rmsd": rmsd, "comp": [], "title": title,
                                     "bl_picking": False, "bl_markers": [],
                                     "bl_line": None})
+                self._attach_cell_menu(k)
             self.tabs.addTab(page, f"{start + 1}–{min(start + PER_TAB, n)}")
 
     def _fill_release_params(self):
@@ -532,6 +518,33 @@ class BatchFitDialog(QDialog):
 
     # ------------------------------------------------------------------ manual
     # per-spectrum 2-point linear baseline (right-click a cell's plot)
+    def _attach_cell_menu(self, k: int):
+        """(Re)build one cell's right-click menu: Export/Send-to-studio plus
+        the per-spectrum baseline actions. Called at construction AND every
+        time the menu is re-enabled after a pick, because pyqtgraph's
+        setMenuEnabled(True) discards the old ViewBoxMenu and builds a fresh
+        DEFAULT one from scratch — silently wiping any custom items unless
+        they are re-added (this is also why the baseline options must never
+        appear to "vanish": re-attaching keeps them available every time)."""
+        from larmor.desktop.plot_menu import attach_plot_menu
+
+        plot = self._cells[k]["plot"]
+        attach_plot_menu(plot, title=self._data[k]["sample"], parent=self)
+        vb_menu = plot.getPlotItem().getViewBox().menu
+        vb_menu.addSeparator()
+        act_bg = QAction("Add 2-point linear baseline", vb_menu)
+        act_bg.setToolTip(
+            "click two points on THIS spectrum (one each side of the peaks); "
+            "the straight line through them is subtracted — right-click to "
+            "cancel. Available again any time you right-click, including "
+            "after applying one, so you can add another or replace it.")
+        act_bg.triggered.connect(lambda _=False, kk=k: self._start_bg_pick(kk))
+        vb_menu.addAction(act_bg)
+        act_bg_clear = QAction("Clear this spectrum's baseline", vb_menu)
+        act_bg_clear.triggered.connect(
+            lambda _=False, kk=k: self._clear_cell_baseline(kk))
+        vb_menu.addAction(act_bg_clear)
+
     def _start_bg_pick(self, k: int):
         cell = self._cells[k]
         if cell["bl_picking"]:
@@ -654,6 +667,7 @@ class BatchFitDialog(QDialog):
             cell["bl_line"] = None
         cell["plot"].unsetCursor()
         cell["plot"].getPlotItem().getViewBox().setMenuEnabled(True)
+        self._attach_cell_menu(k)   # re-enabling built a fresh blank menu
 
     def _clear_cell_baseline(self, k: int):
         self._end_bg_pick(k)

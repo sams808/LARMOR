@@ -60,6 +60,23 @@ def test_quantify_fractions():
     assert q["rows"][0]["fraction_err_pct"] is not None
 
 
+def test_quantify_nan_stderr_reported_as_no_error_not_as_nan():
+    """An ill-conditioned covariance (amplitude at/near a bound, degenerate
+    with another free parameter) makes lmfit report stderr as NaN rather than
+    None -- and NaN is truthy, so a naive `if amp.stderr` would treat it as a
+    real error and the Report table would literally print "± nan"."""
+    recipe = Recipe(nucleus="11B", larmor_frequency_MHz=160.0, sites=[
+        SiteModel(model="gauss_lor", label="a", params={
+            "isotropic_chemical_shift_ppm": Param(15.0, stderr=float("nan")),
+            "shift_fwhm_ppm": Param(6.0), "amplitude": Param(100.0,
+                                                             stderr=float("nan")),
+            "gl": Param(1.0, vary=False)})])
+    row = quantify(recipe, window_ppm=(40.0, -20.0))["rows"][0]
+    assert row["integral_err"] is None
+    assert row["fraction_err_pct"] is None
+    assert row["position_err"] is None
+
+
 def test_processing_pipeline_synthetic():
     """em -> zf -> ft -> phase roundtrip on a synthetic fid."""
     sw, n, freq_hz = 10000.0, 1024, 1234.0
