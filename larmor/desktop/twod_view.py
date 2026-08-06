@@ -23,9 +23,23 @@ from PySide6.QtCore import Qt, Signal
 from larmor.desktop import theme
 from larmor.desktop.plot import site_color
 from PySide6.QtWidgets import (
-    QComboBox, QDoubleSpinBox, QHBoxLayout, QLabel, QMenu, QPushButton, QSlider,
-    QStackedWidget, QToolButton, QVBoxLayout, QWidget,
+    QComboBox, QDoubleSpinBox, QHBoxLayout, QLabel, QMenu, QPushButton,
+    QScrollArea, QSlider, QStackedWidget, QToolButton, QVBoxLayout, QWidget,
 )
+
+
+def _hscroll(inner: QWidget) -> QScrollArea:
+    """Wrap a control row so it scrolls horizontally when narrow, instead of
+    forcing the whole window wider than the screen."""
+    sc = QScrollArea()
+    sc.setWidget(inner)
+    sc.setWidgetResizable(False)
+    sc.setFrameShape(QScrollArea.NoFrame)
+    sc.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+    sc.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+    sc.setFixedHeight(inner.sizeHint().height() + 16)
+    sc.setMinimumWidth(120)
+    return sc
 
 
 class Contour2DView(QWidget):
@@ -170,7 +184,8 @@ class Contour2DView(QWidget):
         ops.addAction("Save F1 projection…", lambda: self._save_proj("f1"))
         self.btnOps.setMenu(ops)
         bar.addWidget(self.btnOps)
-        v.addLayout(bar)
+        _barw = QWidget(); _barw.setLayout(bar)     # scroll it instead of forcing
+        v.addWidget(_hscroll(_barw))                # the window wider than the screen
         self._mtargets: list = []
 
         # ---- HMQC bar (hidden until HMQC) ----
