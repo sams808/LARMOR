@@ -376,6 +376,8 @@ class MainWindow(QMainWindow):
                   self.edit_processing_steps)
         self._add(m_proc, "Autophase (ACME)",
                   lambda: self.apply_processing([{"op": "autophase"}], False))
+        self._add(m_proc, "2-point background…  (pick two flat points)",
+                  self.start_twopoint_bg)
         self._add(m_proc, "Baseline auto (order 3)",
                   lambda: self.apply_processing([{"op": "baseline", "order": 3}], False))
         self._add(m_proc, "Baseline iterative (dead-time; Yon 2020)…",
@@ -870,8 +872,11 @@ class MainWindow(QMainWindow):
     def _about(self):
         from PySide6.QtWidgets import QDialog, QTextBrowser
 
-        html = """
-        <h2 style="margin-bottom:2px;">LARMOR</h2>
+        from larmor import __version__
+
+        html = f"""
+        <h2 style="margin-bottom:2px;">LARMOR <span style="font-size:14px;
+        color:#8a9099; font-weight:normal;">v{__version__}</span></h2>
         <p style="color:#4a4f58; margin-top:0;"><i>An open desktop successor to
         dmfit — solid-state NMR lineshape fitting for disordered solids.</i></p>
 
@@ -1306,6 +1311,14 @@ class MainWindow(QMainWindow):
         elif len(self.view.baseline_anchors()) >= 2:
             # dmfit behaviour: exiting anchor mode auto-applies the correction
             self.apply_manual_baseline()
+
+    def start_twopoint_bg(self):
+        """Process-menu entry point: reveal the processing panel and arm its
+        two-point picker so the user can click two baseline points. The panel's
+        Pick / Subtract / Clear buttons then drive it (same flow as the panel)."""
+        self.proc_dock.show()
+        self.proc_dock.raise_()
+        self.proc_panel.btnTpPick.setChecked(True)     # -> _twopoint_mode(True)
 
     def _twopoint_mode(self, on: bool):
         """Pick two baseline points; subtract the straight line through them."""
