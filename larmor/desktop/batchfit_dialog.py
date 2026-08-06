@@ -97,7 +97,8 @@ class _BatchWorker(QThread):
                 return True if self._stop else None
 
             res = batch_fit(self.entries, release=self.release,
-                            release_frac=self.frac, iter_cb=cb, tol=self.tol)
+                            release_frac=self.frac, iter_cb=cb, tol=self.tol,
+                            should_stop=lambda: self._stop)
             self.done.emit(res, self._mode)
         except Exception as exc:  # noqa: BLE001
             self.failed.emit(str(exc))

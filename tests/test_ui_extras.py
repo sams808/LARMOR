@@ -170,6 +170,62 @@ def test_batch_fit_dialog_loads_grid_and_fits(qapp, tmp_path):
     assert amp and all(ln.split(",")[6] == "covariance" for ln in amp)
 
 
+def test_batch_worker_request_stop_reaches_batch_fit(qapp):
+    """_BatchWorker.request_stop must actually propagate to batch_fit's
+    should_stop -- not just abort lmfit's iter_cb (which only affects the ONE
+    spectrum being fit when Stop is pressed) -- so spectra later in the batch
+    are also skipped, not fit to completion regardless."""
+    from larmor.recipe import Recipe, SiteModel, Param
+    from larmor import engine
+    from larmor.desktop.batchfit_dialog import _BatchWorker
+
+    x = np.linspace(-20, 60, 400)
+
+    def spec(sh, amp, seed):
+        tr = Recipe(nucleus="11B", larmor_frequency_MHz=160.0, sites=[
+            SiteModel(model="gauss_lor", label="A", params={
+                "isotropic_chemical_shift_ppm": Param(15.0 + sh),
+                "shift_fwhm_ppm": Param(6.0), "amplitude": Param(amp),
+                "gl": Param(1.0, vary=False)})])
+        _, m, _ = engine.simulate(tr, exp_ppm=x)
+        return m + np.random.default_rng(seed).normal(0, 1.0, x.size)
+
+    def start(sample):
+        return Recipe(nucleus="11B", larmor_frequency_MHz=160.0, sample=sample,
+                      sites=[SiteModel(model="gauss_lor", label="A", params={
+                          "isotropic_chemical_shift_ppm": Param(14.0, min=0, max=30),
+                          "shift_fwhm_ppm": Param(5.0, min=0.1),
+                          "amplitude": Param(80.0, min=0),
+                          "gl": Param(1.0, vary=False)})])
+
+    entries = [(start(f"g{k}"), x, spec(0.0, 100.0, k), (60.0, -20.0))
+              for k in range(3)]
+    w = _BatchWorker(entries, (), 0.1)
+
+    seen = {"n": 0}
+    orig_run = w.run
+
+    def counting_run():
+        # request_stop as soon as the batch is under way, before any spectrum
+        # could plausibly finish fitting on its own
+        w.request_stop("stop")
+        orig_run()
+
+    w.run = counting_run
+    results = []
+    w.done.connect(lambda res, mode: results.append((res, mode)))
+    w.run()
+
+    assert results
+    res, mode = results[0]
+    assert mode == "stop"
+    assert len(res.recipes) == 3          # every entry still present, aligned
+    # with stop requested before the loop even starts, nothing was fit
+    for k in range(3):
+        assert res.recipes[k].sites[0].params["amplitude"].value == \
+            pytest.approx(80.0)
+
+
 def test_batch_dialog_per_spectrum_twopoint_baseline(qapp, tmp_path):
     """Right-click 'Add 2-point linear baseline' on one cell: two picks
     subtract the line through them for THAT spectrum only, the correction is

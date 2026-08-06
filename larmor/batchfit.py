@@ -3,16 +3,21 @@
 The everyday case is a whole sample series measured the same way: you want ONE
 set of lineshape/position parameters that describes every spectrum, with only
 the **amplitudes** free per spectrum (relative populations change, the sites do
-not). That is a co-fit with *everything except amplitude* shared — and it is far
-more robust than fitting each spectrum alone, because the shared parameters are
-constrained by all the data together.
+not). The loaded recipe's shape is treated as the answer and held fixed at that
+value for every spectrum, which is what makes this robust — not a joint
+optimisation: nothing here is ever tied *across* spectra (every varying
+parameter is fit fully independently per spectrum), so each spectrum is fit on
+its own via ``larmor.fit.fit`` rather than as one combined multi-spectrum
+problem — same result, far less work (no re-simulating every other spectrum to
+test a change that can only affect one, and no O(spectra x parameters)
+bookkeeping on every evaluation).
 
 An optional second stage **releases** chosen parameters: they come off the
 shared tie and are allowed to drift by a small ±fraction around the shared value,
 independently per spectrum (a "relaxation" — e.g. let δ_iso wander ±5 % while
 widths stay locked).
 
-Built on larmor.multifit.fit_cofit; 1D only. Qt-free and testable.
+1D only. Qt-free and testable.
 """
 from __future__ import annotations
 
@@ -20,7 +25,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from larmor.multifit import fit_cofit
+from larmor import fit as fitmod
 from larmor.recipe import Recipe
 
 
@@ -92,9 +97,26 @@ def _relax_bounds(value: float, frac: float, cur_min, cur_max):
     return lo, hi
 
 
+def _unfit_result(rec: Recipe, ppm: np.ndarray, amp: np.ndarray, window):
+    """rmsd + model curve for a recipe AS GIVEN, no optimisation -- used for
+    spectra a Stop request reaches before their turn to be fit."""
+    from larmor import engine
+
+    x_ppm, total, _ = engine.simulate(rec, exp_ppm=ppm)
+    if window:
+        hi, lo = max(window), min(window)
+        sel = (ppm >= lo) & (ppm <= hi)
+    else:
+        sel = np.ones(ppm.shape, dtype=bool)
+    yw = amp[sel]
+    mw = np.interp(ppm[sel], x_ppm, total)
+    rmsd = float(np.sqrt(np.mean((mw - yw) ** 2)) / (yw.max() or 1.0))
+    return rmsd, x_ppm, total
+
+
 def batch_fit(entries: list[tuple], *, share: tuple[str, ...] | None = None,
               release: tuple[str, ...] = (), release_frac: float = 0.1,
-              iter_cb=None, tol=None) -> BatchFitResult:
+              iter_cb=None, tol=None, should_stop=None) -> BatchFitResult:
     """Apply one recipe to several 1D spectra, fitting **only the amplitudes**
     (per spectrum), unless parameters are explicitly released.
 
@@ -105,11 +127,23 @@ def batch_fit(entries: list[tuple], *, share: tuple[str, ...] | None = None,
     are additionally freed and fit **per spectrum**, allowed to drift by
     ±``release_frac`` around their recipe value. (``share`` is accepted for
     backward compatibility and ignored.)
+
+    Each spectrum is fit **independently** (a plain ``larmor.fit.fit`` call per
+    spectrum), not as one combined joint optimisation: with ``share=()`` nothing
+    is ever tied across spectra (this was already true before this became
+    literal — every parameter that varies here is either fully independent per
+    spectrum, or fixed), so a single N-spectrum x M-parameter joint problem was
+    solving something that decomposes exactly into N independent, much smaller
+    problems, at a real cost — every joint-Jacobian evaluation re-simulated
+    every OTHER spectrum too, and re-did O(N x M) parameter bookkeeping, to
+    test a change that could only affect one spectrum's own residual.
+    ``should_stop()``, if given, is checked between spectra; a spectrum the
+    loop reaches after it turns true is reported with its CURRENT (unfit)
+    values rather than skipped, so every entry always gets a result.
     """
     if len(entries) < 2:
         raise ValueError("batch fit needs at least two spectra")
     recipes = [e[0] for e in entries]
-    windows = [e[3] for e in entries]
     released = tuple(release)
 
     # amplitudes: always free per spectrum, allowed to reach zero (a line can be
@@ -129,29 +163,34 @@ def batch_fit(entries: list[tuple], *, share: tuple[str, ...] | None = None,
                 else:
                     p.vary = False               # held at the recipe value
 
-    def _conv(recs):
-        return [(recs[k], (np.asarray(entries[k][1], float),
-                           np.asarray(entries[k][2], float)))
-                for k in range(len(entries))]
-
-    # nothing is tied across spectra: amplitudes (and any released params) are
-    # optimised independently per spectrum; the fixed shape is the recipe's.
-    # compute_errorbars=False: the covariance stderr from this pass is never
-    # read (batch fit has its own dedicated Error calculation menu -- covariance
-    # snapshot / Monte-Carlo / chi-square profile, run as an explicit later
-    # step), so it isn't worth potentially doubling this already-expensive
-    # joint optimization just to rescue error bars nothing will use.
-    res = fit_cofit(_conv(recipes), share=(), windows=windows,
-                    iter_cb=iter_cb, tol=tol, compute_errorbars=False)
+    labels, rmsds, per_dataset = [], [], []
+    stopped = False
+    for k, (rec, ppm, amp, window) in enumerate(entries):
+        ppm = np.asarray(ppm, float); amp = np.asarray(amp, float)
+        if should_stop is not None and should_stop():
+            stopped = True
+        if stopped:
+            rmsd, x_ppm, total = _unfit_result(rec, ppm, amp, window)
+        else:
+            # compute_errorbars=False: batch fit has its own dedicated Error
+            # calculation menu (covariance snapshot / Monte-Carlo / chi-square
+            # profile), run as an explicit later step -- the covariance stderr
+            # from this pass is never read, so it isn't worth ever doubling
+            # any one spectrum's fit just to rescue error bars nothing will use.
+            fr = fitmod.fit(rec, ppm, amp, window_ppm=window, tol=tol,
+                            iter_cb=iter_cb, compute_errorbars=False)
+            rmsd, x_ppm, total = fr.rmsd, fr.x_ppm, fr.y_fit
+            if should_stop is not None and should_stop():
+                stopped = True     # this spectrum's own fit was itself aborted
+        labels.append(rec.sample or f"spectrum {k + 1}")
+        rmsds.append(rmsd)
+        per_dataset.append({"x": x_ppm, "y_fit": total})
 
     fixed = tuple(p for p in all_but_amplitude(recipes) if p not in released)
-    labels = [(r.sample or f"spectrum {k + 1}")
-              for k, r in enumerate(res.recipes)]
     return BatchFitResult(
-        recipes=res.recipes, labels=labels, rmsd=res.rmsd,
-        per_dataset=res.per_dataset, shared=fixed, released=released,
-        release_frac=release_frac if released else 0.0,
-        lmfit_result=res.lmfit_result)
+        recipes=recipes, labels=labels, rmsd=rmsds,
+        per_dataset=per_dataset, shared=fixed, released=released,
+        release_frac=release_frac if released else 0.0)
 
 
 # --------------------------------------------------------------------------

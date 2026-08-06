@@ -260,3 +260,58 @@ def test_batch_fit_accepts_tol_and_still_runs():
     posA = [r.sites[0].params["isotropic_chemical_shift_ppm"].value
             for r in res.recipes]
     assert posA[0] == pytest.approx(15.0, abs=0.8)
+
+
+def test_batch_fit_is_independent_per_spectrum_not_a_joint_optimisation():
+    """Each spectrum is fit on its own (larmor.fit.fit), not as one combined
+    multi-spectrum problem -- verified two ways: (1) the iter_cb / progress
+    callback keeps firing continuously across MULTIPLE spectra's fits (the
+    existing dialog code relies on this to show one running counter, unchanged
+    since before this refactor), and (2) each fitted recipe's rmsd is
+    consistent with ONLY its own data (spot-checked against a direct
+    single-spectrum larmor.fit.fit call on the same data)."""
+    from larmor import fit as fitmod
+
+    entries = _entries()
+    calls = []
+    res = batchfit.batch_fit(entries, iter_cb=lambda *a, **k: calls.append(1))
+    assert len(calls) > len(entries)          # more than one call per spectrum
+    assert res.lmfit_result is None           # no single combined result anymore
+
+    # spot check spectrum 1 in isolation: same recipe/data/window as inside
+    # batch_fit (shape held fixed, only amplitude free) must give the same rmsd
+    rec, ppm, amp, window = entries[1]
+    solo = Recipe.from_dict(rec.to_dict())
+    for s in solo.sites:
+        for pn, p in s.params.items():
+            p.vary = (pn == "amplitude")
+    fitmod.fit(solo, ppm, amp, window_ppm=window)
+    assert res.rmsd[1] == pytest.approx(solo.fit_rmsd, rel=1e-6)
+
+
+def test_batch_fit_should_stop_gives_every_entry_a_result():
+    """A Stop mid-batch must not misalign indices: every entry (fit or not)
+    gets a recipe/rmsd/label/per_dataset entry, in order, so the dialog's
+    per-cell UI (indexed by k) never goes out of sync."""
+    entries = _entries()      # 3 spectra
+    seen = {"n": 0}
+
+    def stop_after_first():
+        # true once the FIRST spectrum's fit has made real progress, so
+        # spectra 1 and 2 are reached only after stop is already requested
+        return seen["n"] > 3
+
+    def cb(*a, **k):
+        seen["n"] += 1
+
+    res = batchfit.batch_fit(entries, iter_cb=cb, should_stop=stop_after_first)
+    assert len(res.recipes) == len(entries)
+    assert len(res.rmsd) == len(entries)
+    assert len(res.labels) == len(entries)
+    assert len(res.per_dataset) == len(entries)
+    for pd in res.per_dataset:
+        assert len(pd["x"]) == len(pd["y_fit"]) > 0
+    # a spectrum reached after the stop keeps its PRE-fit (unmodified) recipe
+    unfit_amp = _start("g2").sites[0].params["amplitude"].value
+    assert res.recipes[2].sites[0].params["amplitude"].value == \
+        pytest.approx(unfit_amp)
