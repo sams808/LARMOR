@@ -102,6 +102,36 @@ class _BatchWorker(QThread):
             self.failed.emit(str(exc))
 
 
+class _ErrorWorker(QThread):
+    """Run a per-spectrum error analysis (covariance / Monte-Carlo / χ² profile)
+    on a finished batch result, off the UI thread and interruptibly."""
+    done = Signal(object)                       # the (mutated) result
+    failed = Signal(str)
+    progress = Signal(int, int, int, int)       # spectrum k, n, sub-step j, tot
+
+    def __init__(self, result, data, method, n_trials, seed, n_points):
+        super().__init__()
+        self.result, self.data, self.method = result, data, method
+        self.n_trials, self.seed, self.n_points = n_trials, seed, n_points
+        self._stop = False
+
+    def request_stop(self, mode: str = ""):
+        self._stop = True
+
+    def run(self):
+        try:
+            from larmor.batchfit import batch_error_analysis
+
+            batch_error_analysis(
+                self.result, self.data, method=self.method,
+                n_trials=self.n_trials, seed=self.seed, n_points=self.n_points,
+                progress=lambda k, n, j, tot: self.progress.emit(k, n, j, tot),
+                should_stop=lambda: self._stop)
+            self.done.emit(self.result)
+        except Exception as exc:  # noqa: BLE001
+            self.failed.emit(str(exc))
+
+
 class BatchFitDialog(QDialog):
     def __init__(self, parent, paths, model_recipe: dict | None):
         super().__init__(parent)
@@ -214,6 +244,50 @@ class BatchFitDialog(QDialog):
         ctl.addWidget(self.tol)
         ctl.addStretch(1)
         v.addLayout(ctl)
+
+        # ---- error calculation (the methods we have; export with the chosen one) ----
+        er = QHBoxLayout()
+        er.addWidget(QLabel("<b>Error calculation:</b>"))
+        self.errCombo = QComboBox()
+        self.errCombo.addItem("Covariance (from the fit)", "covariance")
+        self.errCombo.addItem("Monte-Carlo (synthetic-noise refits)", "montecarlo")
+        self.errCombo.addItem("χ² profile (error analysis)", "profile")
+        self.errCombo.setToolTip(
+            "how per-spectrum parameter errors are estimated:\n"
+            "• Covariance — the least-squares covariance matrix (instant, from the fit)\n"
+            "• Monte-Carlo — refit N synthetic noisy copies; captures correlations "
+            "and non-linearity the covariance misses\n"
+            "• χ² profile — scan each parameter and refit the rest; a real 1σ "
+            "confidence interval")
+        self.errCombo.currentIndexChanged.connect(self._on_err_method)
+        er.addWidget(self.errCombo)
+        self.errNlbl = QLabel("trials")
+        er.addWidget(self.errNlbl)
+        self.errN = QSpinBox(); self.errN.setRange(5, 5000); self.errN.setValue(200)
+        self.errN.setToolTip("Monte-Carlo: number of synthetic refits per spectrum · "
+                             "χ² profile: points scanned per parameter")
+        er.addWidget(self.errN)
+        self.btnErr = QPushButton("Compute errors")
+        self.btnErr.setToolTip("estimate errors for every spectrum with the selected "
+                               "method (writes them into each fit)")
+        self.btnErr.setEnabled(False)
+        self.btnErr.clicked.connect(self._compute_errors)
+        er.addWidget(self.btnErr)
+        self.btnErrCsv = QPushButton("Export CSV…")
+        self.btnErrCsv.setToolTip("write a CSV of every fitted parameter with its "
+                                  "value and error, using the SELECTED error method "
+                                  "(computes it first if needed)")
+        self.btnErrCsv.setEnabled(False)
+        self.btnErrCsv.clicked.connect(self._export_csv)
+        er.addWidget(self.btnErrCsv)
+        self.errStatus = QLabel("")
+        self.errStatus.setStyleSheet(f"color:{theme.active().text_dim};")
+        er.addWidget(self.errStatus, 1)
+        v.addLayout(er)
+        self._err_worker = None
+        self._export_after = False
+        self._export_path = None
+        self._on_err_method()
 
         self.prog = QProgressBar(); v.addWidget(self.prog)
         self.status = QLabel(self._model_status())
@@ -503,6 +577,7 @@ class BatchFitDialog(QDialog):
         self.btnCancel.setEnabled(True); self.btnStop.setEnabled(True)
         self.btnSave.setEnabled(False); self.btnTable.setEnabled(False)
         self.btnSeries.setEnabled(False)
+        self.btnErr.setEnabled(False); self.btnErrCsv.setEnabled(False)
         self.prog.setRange(0, 0)                       # busy while fitting
         rtxt = (f" · releasing {', '.join(rel)} (±{self.frac.value():.0f}%)"
                 if rel else "")
@@ -519,6 +594,10 @@ class BatchFitDialog(QDialog):
         self._worker.start()
 
     def _interrupt(self, mode: str):
+        if self._err_worker is not None and self._err_worker.isRunning():
+            self._err_worker.request_stop(mode)
+            self.status.setText("stopping error analysis — keeping what's computed…")
+            return
         if self._worker is not None and self._worker.isRunning():
             self._worker.request_stop(mode)
             self.status.setText("cancelling — discarding this fit…" if mode == "cancel"
@@ -538,6 +617,8 @@ class BatchFitDialog(QDialog):
         self._result = result
         self.btnSave.setEnabled(True); self.btnTable.setEnabled(True)
         self.btnSeries.setEnabled(True)
+        self.btnErr.setEnabled(True); self.btnErrCsv.setEnabled(True)
+        self._refresh_err_status()
         for k, pd in enumerate(result.per_dataset):
             if k < len(self._cells):
                 self._cells[k]["model"].setData(np.asarray(pd["x"], float),
@@ -701,6 +782,140 @@ class BatchFitDialog(QDialog):
             return
         from larmor.desktop.series_plot import SeriesPlotDialog
         SeriesPlotDialog(self, self._result).exec()
+
+    # ------------------------------------------------------------------ errors
+    def _on_err_method(self):
+        m = self.errCombo.currentData()
+        prof = (m == "profile")
+        self.errNlbl.setText("points" if prof else "trials")
+        self.errNlbl.setVisible(m != "covariance")
+        self.errN.setVisible(m != "covariance")
+        if prof:
+            self.errN.setRange(5, 61)
+            if self.errN.value() > 61:
+                self.errN.setValue(15)
+        elif m == "montecarlo":
+            self.errN.setRange(5, 5000)
+            if self.errN.value() < 40:
+                self.errN.setValue(200)
+        self._refresh_err_status()
+
+    def _refresh_err_status(self):
+        if self._result is None:
+            self.errStatus.setText("")
+            return
+        sel = self.errCombo.currentData()
+        have = sel == "covariance" or sel in getattr(self._result, "error_detail", {})
+        name = self.errCombo.currentText().split(" (")[0]
+        self.errStatus.setText(
+            f"{name} ready to export" if have
+            else f"Export will compute {name} first")
+
+    def _compute_errors(self):
+        if self._result is None:
+            return
+        m = self.errCombo.currentData()
+        if m == "covariance":
+            from larmor import batchfit
+            batchfit.batch_error_analysis(self._result, [], method="covariance")
+            self.status.setText("using covariance (least-squares) errors")
+            self._refresh_err_status()
+            return
+        self._start_err_worker(m)
+
+    def _export_csv(self):
+        if self._result is None:
+            return
+        m = self.errCombo.currentData()
+        have = m == "covariance" or m in getattr(self._result, "error_detail", {})
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export fit table with errors",
+            f"batch_fit_{m}.csv", "CSV (*.csv)")
+        if not path:
+            return
+        if not have:                     # compute the selected method, then export
+            self._export_path = path
+            self._export_after = True
+            self._start_err_worker(m)
+        else:
+            if m == "covariance":
+                from larmor import batchfit
+                batchfit.batch_error_analysis(self._result, [], method="covariance")
+            else:
+                self._result.error_method = m
+            self._write_err_csv(path)
+
+    def _start_err_worker(self, method: str):
+        data = [(d["ppm"], d["amp"], self._window) for d in self._data]
+        n = self.errN.value()
+        self.btnFit.setEnabled(False)
+        self.btnErr.setEnabled(False); self.btnErrCsv.setEnabled(False)
+        self.btnSave.setEnabled(False); self.btnTable.setEnabled(False)
+        self.btnSeries.setEnabled(False)
+        self.btnStop.setEnabled(True); self.btnCancel.setEnabled(False)
+        self.prog.setRange(0, len(data)); self.prog.setValue(0)
+        name = self.errCombo.currentText().split(" (")[0]
+        self.status.setText(f"computing {name} errors…")
+        self._err_worker = _ErrorWorker(self._result, data, method, n, 0, n)
+        self._err_worker.progress.connect(self._err_progress)
+        self._err_worker.done.connect(self._err_done)
+        self._err_worker.failed.connect(self._err_failed)
+        self._err_worker.start()
+
+    def _err_progress(self, k, n, j, tot):
+        self.prog.setValue(min(k, n))
+        self.status.setText(f"error analysis — spectrum {min(k + 1, n)}/{n}"
+                            + (f" · step {j}/{tot}" if tot > 1 else ""))
+
+    def _post_err_enable(self):
+        self.prog.setRange(0, 100)
+        self.btnStop.setEnabled(False)
+        self._update_fit_enabled()
+        self.btnErr.setEnabled(True); self.btnErrCsv.setEnabled(True)
+        self.btnSave.setEnabled(True); self.btnTable.setEnabled(True)
+        self.btnSeries.setEnabled(True)
+
+    def _err_done(self, result):
+        self._post_err_enable()
+        self.prog.setValue(100)
+        method = getattr(result, "error_method", "covariance")
+        self.status.setText(
+            f"{method} errors computed for {len(result.recipes)} spectra")
+        self._refresh_err_status()
+        if self._export_after:
+            self._export_after = False
+            self._write_err_csv(self._export_path)
+
+    def _err_failed(self, msg):
+        self._post_err_enable()
+        self.prog.setValue(0)
+        self._export_after = False
+        self.status.setText(f"error analysis failed: {msg}")
+
+    def _write_err_csv(self, path):
+        if not path or self._result is None:
+            return
+        import csv
+        from larmor import batchfit
+
+        method = self.errCombo.currentData()
+
+        def num(v, fmt=".6g"):
+            if v is None or (isinstance(v, float) and not np.isfinite(v)):
+                return ""
+            return format(v, fmt)
+
+        rows = batchfit.error_table(self._result, method=method)
+        with open(path, "w", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            w.writerow(["scope", "site", "label", "param", "value", "stderr",
+                        "error_method", "sigma_pct", "ci68_lo", "ci68_hi"])
+            for r in rows:
+                w.writerow([r["scope"], r["site"], r["label"], r["param"],
+                            num(r["value"]), num(r["stderr"]), r["error_method"],
+                            num(r["sigma_pct"], ".3g"),
+                            num(r["ci68_lo"]), num(r["ci68_hi"])])
+        self.status.setText(f"exported {Path(path).name} · {method} errors")
 
     def _help(self):
         from larmor.desktop.help_dialog import show_help

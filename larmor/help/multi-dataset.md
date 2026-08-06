@@ -157,11 +157,25 @@ populations change. **Ctrl/Shift-click** the spectra in the Explorer and press
    residual stdev stops improving. Interrupt any time with **Cancel** (discard,
    revert) or **Stop** (keep the latest iteration) — the same two modes as the
    main fitter.
-5. **Save.** **Save individual fits…** writes one LARMOR `.recipe.json` per
+5. **Error calculation.** After the fit, choose how the per-spectrum errors are
+   estimated from the **Error calculation** menu, then **Compute errors**:
+   * **Covariance** — the least-squares covariance stderr (instant, comes with
+     the fit).
+   * **Monte-Carlo** — refit *N* synthetic noisy copies of each spectrum and take
+     the spread; captures correlations and non-linearity the covariance misses.
+   * **χ² profile (error analysis)** — scan each fitted parameter, refit the rest,
+     and read a real 1σ interval off the χ² curve.
+   These are the same estimators as the single-fit **Errors** tools, run for
+   every spectrum. **Export CSV…** writes one row per fitted parameter — value,
+   error, %-error, and (for the χ² profile) the 1σ interval — tagged with the
+   selected method (it computes that method first if you have not yet). Switching
+   the menu never loses a method you already computed.
+6. **Save.** **Save individual fits…** writes one LARMOR `.recipe.json` per
    spectrum, named **automatically**
    (`sample_nucleus_recipe_batch_YYYYMMDD_HHMM`) or with a **name you type for
    each**
-   (it prompts in turn, showing the sample and proc number). **Save table…**
+   (it prompts in turn, showing the sample and proc number) — each carries the
+   errors from the last error-calculation you ran. **Save table…**
    writes a `batch_table.csv` of the shared and per-spectrum values. **Series
    plot…** charts how any parameter (δ_iso, width, C_Q, η, or population %)
    evolves along the series, with export of the numbers and the figure. (For a

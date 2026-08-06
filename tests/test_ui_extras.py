@@ -146,12 +146,28 @@ def test_batch_fit_dialog_loads_grid_and_fits(qapp, tmp_path):
     dlg = BatchFitDialog(None, paths, model)
     assert len(dlg._data) == 2 and dlg.tabs.count() == 1
     assert "isotropic_chemical_shift_ppm" in dlg._rel_checks
+    # error-calculation menu offers the methods we have, disabled until a fit
+    assert [dlg.errCombo.itemData(i) for i in range(dlg.errCombo.count())] == \
+        ["covariance", "montecarlo", "profile"]
+    assert not dlg.btnErr.isEnabled() and not dlg.btnErrCsv.isEnabled()
+
     w = _BatchWorker(dlg._entries(), (), 0.1)
     w.done.connect(dlg._done)
     w.run()                                   # synchronous
     assert dlg._result is not None
     assert dlg.btnSave.isEnabled()
     assert dlg._cells[0]["model"].xData is not None
+    # error buttons enable after the fit; covariance CSV exports with the method
+    assert dlg.btnErr.isEnabled() and dlg.btnErrCsv.isEnabled()
+    out = tmp_path / "errs.csv"
+    dlg.errCombo.setCurrentIndex(0)           # covariance
+    dlg._write_err_csv(str(out))
+    lines = out.read_text(encoding="utf-8").splitlines()
+    assert lines[0].split(",") == ["scope", "site", "label", "param", "value",
+                                   "stderr", "error_method", "sigma_pct",
+                                   "ci68_lo", "ci68_hi"]
+    amp = [ln for ln in lines[1:] if ln.split(",")[3] == "amplitude"]
+    assert amp and all(ln.split(",")[6] == "covariance" for ln in amp)
 
 
 def _expno(tmp_path, procs):

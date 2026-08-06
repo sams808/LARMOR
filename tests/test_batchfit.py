@@ -129,6 +129,70 @@ def test_completion_threshold_maps_pct_to_ftol():
     assert _tol_kws(5)["ftol"] == pytest.approx(0.1)
 
 
+def _data_for(entries):
+    return [(ppm, amp, win) for _rec, ppm, amp, win in entries]
+
+
+def test_error_analysis_covariance_is_default_and_exportable():
+    entries = _entries()
+    res = batchfit.batch_fit(entries)
+    # covariance is available with no extra work (it comes off the fit)
+    rows = batchfit.error_table(res, method="covariance")
+    assert res.error_method == "covariance"
+    amp_rows = [r for r in rows if r["param"] == "amplitude"]
+    assert amp_rows and all(r["error_method"] == "covariance" for r in amp_rows)
+    # every fitted amplitude has an error and a % error
+    assert all(r["stderr"] is not None for r in amp_rows)
+
+
+def test_error_analysis_montecarlo_writes_errors_and_detail():
+    entries = _entries()
+    res = batchfit.batch_fit(entries)
+    data = _data_for(entries)
+    seen = []
+    batchfit.batch_error_analysis(res, data, method="montecarlo", n_trials=40,
+                                  seed=1, progress=lambda *a: seen.append(a))
+    assert res.error_method == "montecarlo"
+    assert "montecarlo" in res.error_detail
+    assert "covariance" in res.error_detail        # snapshot preserved
+    # MC σ written into the recipes and non-negative
+    for rec in res.recipes:
+        se = rec.sites[0].params["amplitude"].stderr
+        assert se is not None and se >= 0
+    rows = batchfit.error_table(res, method="montecarlo")
+    assert any(r["param"] == "amplitude" and r["sigma_pct"] is not None
+               for r in rows)
+    assert seen                                    # progress was reported
+
+
+def test_error_analysis_profile_gives_confidence_intervals():
+    entries = _entries()
+    res = batchfit.batch_fit(entries)
+    data = _data_for(entries)
+    batchfit.batch_error_analysis(res, data, method="profile", n_points=9,
+                                  span=3.0)
+    assert res.error_method == "profile"
+    rows = batchfit.error_table(res, method="profile")
+    amp = [r for r in rows if r["param"] == "amplitude"]
+    # at least one amplitude has a bracketed 1σ interval around its value
+    assert any(r["ci68_lo"] is not None and r["ci68_hi"] is not None
+               and r["ci68_lo"] <= r["value"] <= r["ci68_hi"] for r in amp)
+
+
+def test_switching_export_method_keeps_covariance():
+    entries = _entries()
+    res = batchfit.batch_fit(entries)
+    cov = batchfit.error_table(res, method="covariance")
+    cov_amp = next(r["stderr"] for r in cov if r["param"] == "amplitude")
+    batchfit.batch_error_analysis(res, _data_for(entries), method="montecarlo",
+                                  n_trials=40, seed=2)
+    # after MC overwrote Param.stderr, exporting covariance still returns the
+    # original least-squares errors (the snapshot), not the MC σ
+    cov2 = batchfit.error_table(res, method="covariance")
+    cov2_amp = next(r["stderr"] for r in cov2 if r["param"] == "amplitude")
+    assert cov2_amp == pytest.approx(cov_amp)
+
+
 def test_batch_fit_accepts_tol_and_still_runs():
     # a loose threshold still returns a result; released position tracks the data
     res = batchfit.batch_fit(_entries(), tol=1.0,
