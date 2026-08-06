@@ -165,7 +165,7 @@ def test_batch_fit_dialog_loads_grid_and_fits(qapp, tmp_path):
     lines = out.read_text(encoding="utf-8").splitlines()
     assert lines[0].split(",") == ["scope", "site", "label", "param", "value",
                                    "stderr", "error_method", "sigma_pct",
-                                   "ci68_lo", "ci68_hi"]
+                                   "ci68_lo", "ci68_hi", "model", "source_path"]
     amp = [ln for ln in lines[1:] if ln.split(",")[3] == "amplitude"]
     assert amp and all(ln.split(",")[6] == "covariance" for ln in amp)
 

@@ -295,10 +295,10 @@ def render_overlay(entry: FitEntry, recipe: Recipe, path: Path) -> bool:
     ax.plot(entry.ppm, entry.amp, color="#222", lw=1.0, label="experiment")
     ax.plot(entry.ppm, total, color="#c0392b", lw=1.3, ls=(0, (4, 2)),
             label="model")
-    palette = ["#0072b2", "#009e73", "#d55e00", "#8f6e00", "#0e7c86", "#7f3fbf"]
+    from larmor.figures import site_color
     for i, ys in enumerate(per):
         ax.fill_between(entry.ppm, np.asarray(ys, float),
-                        color=palette[i % len(palette)], alpha=0.18)
+                        color=site_color(i), alpha=0.18)
     ax.set_xlim(entry.ppm.max(), entry.ppm.min())
     ax.set_yticks([])
     ax.legend(fontsize=8, loc="upper left")

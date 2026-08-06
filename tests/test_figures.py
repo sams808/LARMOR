@@ -88,3 +88,164 @@ def test_render_series_satrec_and_redor():
 def test_unknown_kind_rejected():
     with pytest.raises(ValueError, match="unknown figure kind"):
         figures.render({"kind": "3d-hologram"})
+
+
+def _saved_fit(tmp_path, sample, pos, amp, seed, with_data=True):
+    from larmor import engine
+    from larmor.recipe import Recipe, SiteModel, Param
+    sites = [SiteModel(model="gauss_lor", label=chr(65 + i), params={
+        "isotropic_chemical_shift_ppm": Param(p), "shift_fwhm_ppm": Param(w),
+        "amplitude": Param(a), "gl": Param(1.0, vary=False)})
+            for i, (p, w, a) in enumerate(zip(pos, [5.0] * len(pos), amp))]
+    rec = Recipe(nucleus="11B", larmor_frequency_MHz=160.0, sample=sample, sites=sites)
+    if with_data:
+        x = np.linspace(-40, 40, 400)
+        _, y, _ = engine.simulate(rec, exp_ppm=x)
+        data = y + np.random.default_rng(seed).normal(0, 1.0, x.size)
+        csv_path = tmp_path / f"{sample}_raw.csv"
+        csv_path.write_text("# nucleus = 11B\n# larmor_MHz = 160\n" +
+                            "\n".join(f"{xi:.4f} {yi:.4f}" for xi, yi in zip(x, data)))
+        rec.source_path = str(csv_path)
+    p = tmp_path / f"{sample}.recipe.json"
+    rec.save(p)
+    return str(p)
+
+
+def test_load_trace_dataless_recipe_falls_back_to_a_framed_model(tmp_path):
+    """A non-kernel recipe with NO source_path (or an unreachable one) must
+    fall back to a sites-framed model grid, not raise -- the same graceful
+    behaviour a data-less dmfit .fxmla already gets."""
+    p = _saved_fit(tmp_path, "g0", [10.0], [50.0], 0, with_data=False)
+    x, y, meta = figures.load_trace({"recipe": p, "part": "total"})
+    assert len(x) > 100 and np.isfinite(y).all()
+    assert abs(float(x[np.argmax(y)]) - 10.0) < 3.0
+    with pytest.raises(ValueError, match="source_path"):
+        figures.load_trace({"recipe": p, "part": "residual"})
+
+
+def test_site_colors_are_the_fixed_categorical_palette():
+    assert len(figures.SITE_COLORS) >= 8
+    assert figures.site_color(0) == figures.SITE_COLORS[0]
+    assert figures.site_color(len(figures.SITE_COLORS)) == figures.SITE_COLORS[0]  # wraps
+
+
+def test_render_batch_grid_deconvolution(tmp_path):
+    paths = [_saved_fit(tmp_path, f"g{k}", [10.0, -5.0], [80.0, 40.0], k)
+            for k in range(3)]
+    spec = {"kind": "batch_grid", "panels": [{"recipe": p} for p in paths],
+            "component_mode": "fill", "peak_labels": "position", "cols": 2}
+    fig = figures.render(spec)
+    assert len(fig.axes) == 4                       # 3 panels + 1 hidden filler
+    visible = [a for a in fig.axes if a.get_visible()]
+    assert len(visible) == 3
+    assert {a.get_title() for a in visible} == {"g0", "g1", "g2"}
+    # a shared legend names the two components once, not per panel
+    assert fig.legends and {t.get_text() for t in fig.legends[0].get_texts()} == {"A", "B"}
+    import matplotlib.pyplot as plt
+    plt.close(fig)
+
+
+def test_render_batch_grid_shade_only_hides_the_rest():
+    """Category-3 style: only the flagged component(s) draw; everything else
+    is invisible except the total fit line."""
+    import tempfile
+    from pathlib import Path as _P
+    tmp_path = _P(tempfile.mkdtemp())
+    paths = [_saved_fit(tmp_path, f"g{k}", [10.0, -5.0], [80.0, 40.0], k)
+            for k in range(2)]
+    spec = {"kind": "batch_grid", "panels": [{"recipe": p} for p in paths],
+            "component_mode": "fill", "shade_only": [1],
+            "peak_labels": "position+pct"}
+    fig = figures.render(spec)
+    # only site B (index 1) gets a legend entry
+    assert {t.get_text() for t in fig.legends[0].get_texts()} == {"B"}
+    import matplotlib.pyplot as plt
+    plt.close(fig)
+
+
+def test_render_batch_grid_hidden_components_shows_no_legend():
+    import tempfile
+    from pathlib import Path as _P
+    tmp_path = _P(tempfile.mkdtemp())
+    p = _saved_fit(tmp_path, "g0", [10.0, -5.0], [80.0, 40.0], 0)
+    fig = figures.render({"kind": "batch_grid",
+                          "panels": [{"recipe": p}],
+                          "component_mode": "hidden"})
+    assert not fig.legends
+    import matplotlib.pyplot as plt
+    plt.close(fig)
+
+
+def test_render_batch_grid_requires_at_least_one_panel():
+    with pytest.raises(ValueError, match="at least one panel"):
+        figures.render({"kind": "batch_grid", "panels": []})
+
+
+def test_render_batch_grid_accepts_data_only_and_empty_panels(tmp_path):
+    """A batch CSV can name a sample series_grid couldn't pair with a saved
+    fit -- panels without "recipe" must still render (experiment-only, or a
+    placeholder), never break the rest of the grid."""
+    import matplotlib.pyplot as plt
+
+    fitted = _saved_fit(tmp_path, "g0", [10.0], [50.0], 0)
+    data_only = tmp_path / "g1_raw.csv"
+    x = np.linspace(-30, 30, 100)
+    data_only.write_text("# nucleus = 11B\n# larmor_MHz = 160\n" +
+                         "\n".join(f"{xi:.4f} {np.exp(-(xi/6)**2):.4f}" for xi in x))
+
+    fig = figures.render({"kind": "batch_grid", "panels": [
+        {"recipe": fitted},
+        {"data_path": str(data_only), "title": "g1"},
+        {"title": "g2 (unresolved)"},
+    ], "cols": 3})
+    titles = [a.get_title() for a in fig.axes if a.get_visible()]
+    assert titles == ["g0", "g1", "g2 (unresolved)"]
+    # the data-only panel drew a line; the fully-empty one drew none
+    axes = [a for a in fig.axes if a.get_visible()]
+    assert len(axes[1].lines) == 1
+    assert len(axes[2].lines) == 0
+    assert any(t.get_text() == "no data located" for t in axes[2].texts)
+    plt.close(fig)
+
+
+def test_render_species_bar_normalizes_and_stacks():
+    spec = {"kind": "species_bar", "categories": ["P-5", "P-10"],
+            "series": [{"label": "Q0", "values": [10, 20]},
+                      {"label": "Q1", "values": [30, 20]},
+                      {"label": "Q2", "values": [60, 60]}]}
+    fig = figures.render(spec)
+    ax = fig.axes[0]
+    assert ax.get_ylim() == pytest.approx((0.0, 100.0))
+    assert [t.get_text() for t in ax.get_xticklabels()] == ["P-5", "P-10"]
+    bars = [c for c in ax.containers]
+    assert len(bars) == 3                            # one per series
+    import matplotlib.pyplot as plt
+    plt.close(fig)
+
+
+def test_render_species_bar_needs_categories_and_series():
+    with pytest.raises(ValueError):
+        figures.render({"kind": "species_bar", "categories": [], "series": []})
+
+
+def test_end_label_places_text_at_the_traces_own_displayed_edge():
+    import matplotlib.pyplot as plt
+    spec = {"kind": "1d", "x_is_ppm": True, "hide_yaxis": True,
+            "legend_loc": "none",
+            "traces": [{"data": {"x": [1, 2, 3], "y": [1, 2, 1]},
+                       "label": "sample-A", "end_label": True}]}
+    fig = figures.render(spec)
+    texts = [t.get_text() for t in fig.axes[0].texts]
+    assert texts == ["sample-A"]
+    assert not fig.axes[0].get_legend()              # legend_loc none honoured
+    plt.close(fig)
+
+
+def test_templates_are_well_formed_and_generic():
+    assert len(figures.TEMPLATES) >= 6
+    for name, tpl in figures.TEMPLATES.items():
+        assert tpl["kind"] in figures.RENDERERS
+        assert "description" in tpl and "spec" in tpl
+        # generic by construction: no nucleus name leaks into a template name
+        for nuc in ("1H", "13C", "27Al", "29Si", "31P", "11B", "23Na"):
+            assert nuc not in name

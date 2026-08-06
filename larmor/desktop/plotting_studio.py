@@ -22,11 +22,14 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox, QColorDialog, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
     QFileDialog, QFormLayout, QHBoxLayout, QInputDialog, QLabel, QLineEdit,
-    QListWidget, QListWidgetItem, QMenu, QPushButton, QSpinBox, QVBoxLayout,
-    QWidget,
+    QListWidget, QListWidgetItem, QMenu, QPushButton, QSpinBox, QTableWidget,
+    QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
-from larmor import figures
+from larmor import figures, series_grid
+
+_KINDS = ["1D overlay / stack", "2D contour", "Series", "Batch grid",
+         "Species distribution"]
 
 _LINESTYLES = ["-", "--", "-.", ":"]
 _CMAPS = ["viridis", "plasma", "magma", "cividis", "coolwarm", "Blues",
@@ -122,6 +125,8 @@ class PlottingStudio(QDialog):
         self.resize(1240, 720)
         self._traces: list[dict] = []
         self._iso: list[dict] = []
+        self._panels: list[dict] = []       # batch-grid: [{"path","sample","include"}]
+        self._trace_defaults: dict = {}     # from the selected template, applied to new traces
 
         from PySide6.QtWidgets import QSplitter
         root = QHBoxLayout(self)
@@ -140,9 +145,26 @@ class PlottingStudio(QDialog):
         ctl = QWidget(); cv = QVBoxLayout(ctl); ctl.setMaximumWidth(390)
         splitter.addWidget(ctl)
 
+        trow0 = QHBoxLayout(); trow0.addWidget(QLabel("Template:"))
+        self.template = QComboBox()
+        self.template.addItem("(none — build from scratch)", None)
+        for name in figures.TEMPLATES:
+            self.template.addItem(name, name)
+        self.template.setToolTip("A named, generic starting point (layout + "
+                                 "sensible defaults) for a common NMR figure "
+                                 "type — pick one, then customise anything "
+                                 "below. Combines freely with any Style.")
+        self.template.currentIndexChanged.connect(self._template_changed)
+        trow0.addWidget(self.template, 1)
+        cv.addLayout(trow0)
+        self.templateDesc = QLabel("")
+        self.templateDesc.setWordWrap(True)
+        self.templateDesc.setStyleSheet("color:#888; font-size:10px;")
+        cv.addWidget(self.templateDesc)
+
         krow = QHBoxLayout(); krow.addWidget(QLabel("Plot:"))
         self.kind = QComboBox()
-        self.kind.addItems(["1D overlay / stack", "2D contour", "Series"])
+        self.kind.addItems(_KINDS)
         self.kind.currentIndexChanged.connect(self._kind_changed)
         krow.addWidget(self.kind, 1)
         cv.addLayout(krow)
@@ -217,6 +239,108 @@ class PlottingStudio(QDialog):
         self.serStretch = QCheckBox("stretched (β)")
         bs.addRow(self.serStretch)
         cv.addWidget(self.boxSer)
+
+        # batch grid: a publication small-multiples figure from already-fitted
+        # spectra — load a batch_table*.csv (auto-matched to its saved fits) or
+        # a folder of .recipe.json fits, pick/reorder which panels to show
+        self.boxGrid = QWidget(); bg = QVBoxLayout(self.boxGrid)
+        bg.setContentsMargins(0, 0, 0, 0)
+        grow = QHBoxLayout()
+        b_csv = QPushButton("Load CSV…")
+        b_csv.setToolTip("a batch_table*.csv from the batch-fit dialog — "
+                         "auto-matches its rows to sibling .recipe.json fits "
+                         "saved from the same session (Save individual fits…)")
+        b_csv.clicked.connect(self._grid_load_csv)
+        b_folder = QPushButton("Load folder…")
+        b_folder.setToolTip("a folder of saved .recipe.json / .fxmla fits")
+        b_folder.clicked.connect(self._grid_load_folder)
+        grow.addWidget(b_csv); grow.addWidget(b_folder)
+        bg.addLayout(grow)
+        self.gridList = QListWidget()
+        self.gridList.setToolTip("check the spectra to include; select one "
+                                 "and use ▲▼ to reorder. Double-click a row "
+                                 "needing data to locate it, or a resolved "
+                                 "one to rename its panel title")
+        self.gridList.itemChanged.connect(self._grid_item_changed)
+        self.gridList.itemDoubleClicked.connect(self._grid_item_double_clicked)
+        bg.addWidget(QLabel("Panels (checked = included):"))
+        bg.addWidget(self.gridList)
+        gmrow = QHBoxLayout()
+        b_up = QPushButton("▲"); b_up.setFixedWidth(28)
+        b_up.clicked.connect(lambda: self._grid_move(-1))
+        b_down = QPushButton("▼"); b_down.setFixedWidth(28)
+        b_down.clicked.connect(lambda: self._grid_move(1))
+        b_rm = QPushButton("Remove")
+        b_rm.clicked.connect(self._grid_remove)
+        gmrow.addWidget(b_up); gmrow.addWidget(b_down); gmrow.addWidget(b_rm)
+        gmrow.addStretch(1)
+        bg.addLayout(gmrow)
+        gf = QFormLayout()
+        self.gridCols = QSpinBox(); self.gridCols.setRange(0, 12)
+        self.gridCols.setToolTip("grid columns (0 = automatic)")
+        gf.addRow("Columns", self.gridCols)
+        self.gridComp = QComboBox()
+        self.gridComp.addItems(["fill", "dashed", "hidden"])
+        self.gridComp.setToolTip("how each site's component curve is drawn — "
+                                 "fill = classic deconvolution look, dashed = "
+                                 "outline only, hidden = experiment + total fit only")
+        gf.addRow("Components", self.gridComp)
+        self.gridShade = QLineEdit()
+        self.gridShade.setPlaceholderText("empty = show all")
+        self.gridShade.setToolTip("site indices to draw (0-based, comma-"
+                                  "separated) — leave empty to show every "
+                                  "site, or list e.g. '1' to highlight just "
+                                  "one component per panel (a composition-"
+                                  "series style)")
+        gf.addRow("Shade only", self.gridShade)
+        self.gridLabels = QComboBox()
+        self.gridLabels.addItems(["none", "position", "label", "position+pct"])
+        self.gridLabels.setToolTip("label each shown component with its "
+                                   "position, its letter, or position + "
+                                   "integrated population %")
+        gf.addRow("Peak labels", self.gridLabels)
+        self.gridTotal = QCheckBox("total fit"); self.gridTotal.setChecked(True)
+        self.gridExp = QCheckBox("experiment"); self.gridExp.setChecked(True)
+        gtrow = QHBoxLayout(); gtrow.addWidget(self.gridTotal); gtrow.addWidget(self.gridExp)
+        gf.addRow("Show", gtrow)
+        bg.addLayout(gf)
+        self.gridMsg = QLabel(""); self.gridMsg.setWordWrap(True)
+        self.gridMsg.setStyleSheet("color:#888; font-size:10px;")
+        bg.addWidget(self.gridMsg)
+        cv.addWidget(self.boxGrid)
+
+        # species distribution: a 100%-stacked bar from a small category x
+        # species table (typed in, or pivoted from a batch CSV's own values)
+        self.boxBar = QWidget(); bb_ = QVBoxLayout(self.boxBar)
+        bb_.setContentsMargins(0, 0, 0, 0)
+        b_barcsv = QPushButton("Load from batch CSV…")
+        b_barcsv.setToolTip("pivot a chosen parameter (e.g. amplitude) from a "
+                            "batch_table*.csv into this table, one row per "
+                            "sample — each row is normalized to 100% "
+                            "automatically, so raw amplitudes work directly")
+        b_barcsv.clicked.connect(self._bar_load_csv)
+        bb_.addWidget(b_barcsv)
+        self.barTable = QTableWidget(1, 1)
+        self.barTable.setHorizontalHeaderLabels(["category"])
+        self.barTable.setToolTip("one row per composition point; column 0 is "
+                                 "its category label, each further column is "
+                                 "one species — edit the column header by "
+                                 "double-clicking it")
+        self.barTable.horizontalHeader().sectionDoubleClicked.connect(
+            self._bar_rename_column)
+        bb_.addWidget(self.barTable)
+        btrow = QHBoxLayout()
+        b_barrow = QPushButton("+ row"); b_barrow.clicked.connect(self._bar_add_row)
+        b_barcol = QPushButton("+ species"); b_barcol.clicked.connect(self._bar_add_col)
+        b_barrmrow = QPushButton("− row"); b_barrmrow.clicked.connect(self._bar_remove_row)
+        b_barrmcol = QPushButton("− species"); b_barrmcol.clicked.connect(self._bar_remove_col)
+        for b in (b_barrow, b_barcol, b_barrmrow, b_barrmcol):
+            btrow.addWidget(b)
+        bb_.addLayout(btrow)
+        self.barValueLabels = QCheckBox("value labels on bars")
+        self.barValueLabels.setChecked(True)
+        bb_.addWidget(self.barValueLabels)
+        cv.addWidget(self.boxBar)
 
         # common
         common = QFormLayout()
@@ -339,6 +463,14 @@ class PlottingStudio(QDialog):
                   self.chkTop, self.chkRight, self.chkNeg, self.chkMinor,
                   self.chkGrid):
             w.toggled.connect(self._schedule)
+        for w in (self.gridComp, self.gridLabels):
+            w.currentIndexChanged.connect(self._schedule)
+        self.gridCols.valueChanged.connect(self._schedule)
+        self.gridShade.textChanged.connect(self._schedule)
+        for w in (self.gridTotal, self.gridExp):
+            w.toggled.connect(self._schedule)
+        self.barTable.itemChanged.connect(self._schedule)
+        self.barValueLabels.toggled.connect(self._schedule)
 
         if spec:
             self._apply_spec(spec)
@@ -401,8 +533,11 @@ class PlottingStudio(QDialog):
             self._push_trace({"path": path, "label": label})
 
     def _push_trace(self, t):
-        self._traces.append(t)
-        self.traceList.addItem(QListWidgetItem(t.get("label") or t.get("path", "trace")))
+        # a selected template's trace_defaults (e.g. end_label: True for a
+        # stacked-series style) fill in anything this trace doesn't already set
+        merged = {**self._trace_defaults, **t}
+        self._traces.append(merged)
+        self.traceList.addItem(QListWidgetItem(merged.get("label") or merged.get("path", "trace")))
         self._refresh()
 
     def _remove_trace(self):
@@ -433,6 +568,199 @@ class PlottingStudio(QDialog):
         self.isoLabel.setText(f"{len(self._iso)} line(s)")
         self._refresh()
 
+    # ------------------------------------------------------------------ batch grid
+    def _grid_load_csv(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Batch table CSV", "", "CSV (*.csv)")
+        if path:
+            self._grid_load(path)
+
+    def _grid_load_folder(self):
+        folder = QFileDialog.getExistingDirectory(self, "Folder of saved fits")
+        if folder:
+            self._grid_load(folder)
+
+    def _grid_load(self, source):
+        panels, warnings = series_grid.load_panels(source)
+        if not panels:
+            self.gridMsg.setText(" ".join(warnings) or "no spectra found there")
+            return
+        self._panels = [{
+            "path": p.path, "sample": p.sample, "nucleus": p.nucleus,
+            "models": list(p.models), "has_data": p.has_data,
+            "data_path": p.data_path, "needs_manual": p.needs_manual,
+            "title": None, "include": True,
+        } for p in panels]
+        self._grid_resolve_manual()
+        self._grid_refresh_list()
+        self.gridMsg.setText(" ".join(warnings))
+        self._refresh()
+
+    def _grid_ask_manual_path(self, sample: str) -> str:
+        """The "successive popups" fallback: series_grid couldn't pair this
+        sample with a saved fit or a source_path hint (an older CSV, moved
+        files, or no matching .recipe.json at all) — ask directly, one dialog
+        per sample, rather than dropping it from the figure. Offers a file
+        first (e.g. a dmfit fit) and, if cancelled, an EXPNO/pdata folder
+        (a Bruker "1r") instead."""
+        path, _ = QFileDialog.getOpenFileName(
+            self, f"Locate data for '{sample}'", "",
+            "dmfit (*.fxmla *.fxml);;All files (*)")
+        if path:
+            return path
+        folder = QFileDialog.getExistingDirectory(
+            self, f"…or pick the EXPNO/pdata folder for '{sample}' (containing 1r)")
+        return folder or ""
+
+    def _grid_resolve_manual(self):
+        for p in self._panels:
+            if not p.get("needs_manual"):
+                continue
+            got = self._grid_ask_manual_path(p["sample"])
+            if got:
+                p["data_path"] = got
+                p["has_data"] = True
+                p["needs_manual"] = False
+
+    def _grid_refresh_list(self):
+        self.gridList.blockSignals(True)
+        self.gridList.clear()
+        for p in self._panels:
+            label = p.get("title") or p["sample"]
+            if p.get("needs_manual"):
+                label += "  ⚠ locate data…"
+            elif not p.get("path") and p.get("data_path"):
+                label += "  (data only, no fit)"
+            item = QListWidgetItem(label)
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            item.setCheckState(Qt.Checked if p.get("include", True) else Qt.Unchecked)
+            self.gridList.addItem(item)
+        self.gridList.blockSignals(False)
+
+    def _grid_item_changed(self, item):
+        r = self.gridList.row(item)
+        if 0 <= r < len(self._panels):
+            self._panels[r]["include"] = item.checkState() == Qt.Checked
+            self._refresh()
+
+    def _grid_item_double_clicked(self, item):
+        r = self.gridList.row(item)
+        if not (0 <= r < len(self._panels)):
+            return
+        p = self._panels[r]
+        if p.get("needs_manual") or not (p.get("path") or p.get("data_path")):
+            got = self._grid_ask_manual_path(p["sample"])
+            if got:
+                p["data_path"] = got; p["has_data"] = True; p["needs_manual"] = False
+                self._grid_refresh_list(); self._refresh()
+            return
+        title, ok = QInputDialog.getText(self, "Panel title", "Title:",
+                                         text=p.get("title") or p["sample"])
+        if ok:
+            p["title"] = title.strip() or None
+            self._grid_refresh_list(); self._refresh()
+
+    def _grid_move(self, delta):
+        r = self.gridList.currentRow()
+        nr = r + delta
+        if r < 0 or not (0 <= nr < len(self._panels)):
+            return
+        self._panels[r], self._panels[nr] = self._panels[nr], self._panels[r]
+        self._grid_refresh_list()
+        self.gridList.setCurrentRow(nr)
+        self._refresh()
+
+    def _grid_remove(self):
+        r = self.gridList.currentRow()
+        if r >= 0:
+            self._panels.pop(r)
+            self._grid_refresh_list()
+            self._refresh()
+
+    # ------------------------------------------------------------------ species bar
+    def _bar_load_csv(self):
+        """Pivot one parameter (e.g. amplitude) out of a batch_table*.csv into
+        the table, one row per sample/scope, one column per (site, param)
+        found — the 100%-stacked normalization then happens at render time."""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Batch table CSV", "", "CSV (*.csv)")
+        if not path:
+            return
+        rows_by_scope = series_grid.csv_rows_by_scope(path)
+        categories = [s for s in rows_by_scope if s.lower() != "shared"]
+        if not categories:
+            self.msg.setText("no per-spectrum rows found in that CSV")
+            return
+        available = sorted({r.get("param", "") for rows in rows_by_scope.values()
+                            for r in rows} - {""})
+        param, ok = QInputDialog.getItem(
+            self, "Species distribution",
+            "Parameter to pivot into species columns:", available, 0, False)
+        if not ok or not param:
+            return
+        site_labels: list[tuple] = []
+        seen = set()
+        for cat in categories:
+            for r in rows_by_scope[cat]:
+                if r.get("param") != param:
+                    continue
+                key = (r.get("site"), r.get("label"))
+                if key not in seen:
+                    seen.add(key); site_labels.append(key)
+        if not site_labels:
+            self.msg.setText(f"no rows found for parameter '{param}'")
+            return
+
+        self.barTable.blockSignals(True)
+        self.barTable.setRowCount(len(categories))
+        self.barTable.setColumnCount(1 + len(site_labels))
+        self.barTable.setHorizontalHeaderLabels(
+            ["category"] + [(lbl or site) for site, lbl in site_labels])
+        for r, cat in enumerate(categories):
+            self.barTable.setItem(r, 0, QTableWidgetItem(cat))
+            by_key = {(row.get("site"), row.get("label")): row.get("value")
+                     for row in rows_by_scope[cat] if row.get("param") == param}
+            for c, key in enumerate(site_labels):
+                self.barTable.setItem(r, c + 1, QTableWidgetItem(str(by_key.get(key, "0"))))
+        self.barTable.blockSignals(False)
+        self.msg.setText(f"loaded {len(categories)} × {len(site_labels)} "
+                         f"from {Path(path).name}")
+        self._refresh()
+
+    def _bar_add_row(self):
+        r = self.barTable.rowCount()
+        self.barTable.insertRow(r)
+        self.barTable.setItem(r, 0, QTableWidgetItem(f"c{r + 1}"))
+        self._schedule()
+
+    def _bar_add_col(self):
+        c = self.barTable.columnCount()
+        self.barTable.insertColumn(c)
+        self.barTable.setHorizontalHeaderItem(c, QTableWidgetItem(f"species{c}"))
+        self._schedule()
+
+    def _bar_remove_row(self):
+        r = self.barTable.currentRow()
+        if r >= 0 and self.barTable.rowCount() > 1:
+            self.barTable.removeRow(r)
+            self._schedule()
+
+    def _bar_remove_col(self):
+        c = self.barTable.currentColumn()
+        if c >= 1:                                  # keep the category column
+            self.barTable.removeColumn(c)
+            self._schedule()
+
+    def _bar_rename_column(self, index):
+        if index == 0:
+            return                                  # "category" header is fixed
+        header = self.barTable.horizontalHeaderItem(index)
+        current = header.text() if header else f"species{index}"
+        name, ok = QInputDialog.getText(self, "Species name", "Name:", text=current)
+        if ok and name.strip():
+            self.barTable.setHorizontalHeaderItem(index, QTableWidgetItem(name.strip()))
+            self._schedule()
+
     # ------------------------------------------------------------------ pickers
     def _pick_2d(self):
         folder = QFileDialog.getExistingDirectory(self, "2D EXPNO folder")
@@ -449,6 +777,25 @@ class PlottingStudio(QDialog):
         self.box1d.setVisible(k == 0)
         self.box2d.setVisible(k == 1)
         self.boxSer.setVisible(k == 2)
+        self.boxGrid.setVisible(k == 3)
+        self.boxBar.setVisible(k == 4)
+        self._refresh()
+
+    # ------------------------------------------------------------------ templates
+    def _template_changed(self):
+        name = self.template.currentData()
+        if name is None:
+            self.templateDesc.setText("")
+            self._trace_defaults = {}
+            return
+        tpl = figures.TEMPLATES[name]
+        self.templateDesc.setText(tpl["description"])
+        self._trace_defaults = dict(tpl.get("trace_defaults") or {})
+        self.kind.setCurrentIndex(_KINDS.index(
+            {"1d": "1D overlay / stack", "2d": "2D contour", "series": "Series",
+             "batch_grid": "Batch grid",
+             "species_bar": "Species distribution"}[tpl["kind"]]))
+        self._apply_common(tpl["spec"])
         self._refresh()
 
     # ------------------------------------------------------------------ spec
@@ -512,9 +859,81 @@ class PlottingStudio(QDialog):
                     "proj_right": self.chkRight.isChecked(),
                     "negative": self.chkNeg.isChecked(),
                     "iso_lines": self._iso, **common}
-        return {"kind": "series", "path": self.pathSer.text(),
-                "mode": self.serMode.currentText(),
-                "stretched": self.serStretch.isChecked(), **common}
+        if k == 2:
+            return {"kind": "series", "path": self.pathSer.text(),
+                    "mode": self.serMode.currentText(),
+                    "stretched": self.serStretch.isChecked(), **common}
+        # batch_grid / species_bar: the shared "legend"/"title" fields don't
+        # mean the same thing to these renderers as to 1d/2d/series (a fixed
+        # shared legend, a figure suptitle) -- keep style/tick/limit fields
+        # from `common` but leave legend_loc/legend_ncol out unless the user
+        # actually left "best" for something else, so each renderer's own
+        # sensible default legend placement (species_bar's row of swatches,
+        # batch_grid's one shared legend) isn't silently overridden.
+        common_grid = {kk: v for kk, v in common.items()
+                       if kk not in ("legend_loc", "legend_ncol")}
+        if self.legloc.currentText() != "best":
+            common_grid["legend_loc"] = self.legloc.currentText()
+            common_grid["legend_ncol"] = self.legncol.value()
+        if k == 3:
+            title = common_grid.pop("title", None)
+            if title:
+                common_grid["suptitle"] = title
+            if common_grid.get("legend_loc") == "none":
+                common_grid["legend"] = False
+                common_grid.pop("legend_loc", None)
+            panels = []
+            for p in self._panels:
+                if not p.get("include", True):
+                    continue
+                entry = {"title": p.get("title") or p.get("sample")}
+                if p.get("path"):
+                    entry["recipe"] = p["path"]
+                elif p.get("data_path"):
+                    entry["data_path"] = p["data_path"]
+                if p.get("nucleus"):
+                    entry["nucleus"] = p["nucleus"]
+                panels.append(entry)
+            spec = {"kind": "batch_grid", "panels": panels,
+                    "component_mode": self.gridComp.currentText(),
+                    "peak_labels": (self.gridLabels.currentText()
+                                   if self.gridLabels.currentText() != "none" else None),
+                    "show_total": self.gridTotal.isChecked(),
+                    "show_experiment": self.gridExp.isChecked(),
+                    "x_is_ppm": self.chkPpm.isChecked(), **common_grid}
+            if self.gridCols.value():
+                spec["cols"] = self.gridCols.value()
+            shade = []
+            for tok in self.gridShade.text().split(","):
+                tok = tok.strip()
+                if tok:
+                    try:
+                        shade.append(int(tok))
+                    except ValueError:
+                        pass
+            if shade:
+                spec["shade_only"] = shade
+            return spec
+        # k == 4: species distribution
+        nrows, ncols = self.barTable.rowCount(), self.barTable.columnCount()
+        categories = []
+        for r in range(nrows):
+            it = self.barTable.item(r, 0)
+            categories.append(it.text() if it else "")
+        series = []
+        for c in range(1, ncols):
+            hdr = self.barTable.horizontalHeaderItem(c)
+            values = []
+            for r in range(nrows):
+                it = self.barTable.item(r, c)
+                try:
+                    values.append(float(it.text()) if it and it.text().strip() else 0.0)
+                except ValueError:
+                    values.append(0.0)
+            series.append({"label": hdr.text() if hdr else f"s{c - 1}",
+                          "values": values})
+        return {"kind": "species_bar", "categories": categories, "series": series,
+                "value_labels": self.barValueLabels.isChecked(), **common_grid}
 
     def _parse_xticks(self):
         """The 'x-ticks' field → [[pos, label], …]. Accepts 'a, b, c' (placed at
@@ -535,12 +954,20 @@ class PlottingStudio(QDialog):
                 out.append([float(i + 1), part])
         return out or None
 
-    def _apply_spec(self, spec: dict):
-        self.style.setCurrentText(spec.get("style", "article"))
-        self.title.setText(spec.get("title", ""))
-        self.xlabel.setText(spec.get("xlabel", ""))
-        self.ylabel.setText(spec.get("ylabel", ""))
-        self.chkPpm.setChecked(spec.get("x_is_ppm", True))
+    def _apply_common(self, spec: dict):
+        """Apply whichever COMMON fields `spec` sets (style/labels/limits/
+        ticks/legend/font) without touching kind-specific data — used both
+        for a full "Load spec…" and for a template's partial pre-fill."""
+        if spec.get("style"):
+            self.style.setCurrentText(spec["style"])
+        if "title" in spec:
+            self.title.setText(spec.get("title", ""))
+        if "xlabel" in spec:
+            self.xlabel.setText(spec.get("xlabel", ""))
+        if "ylabel" in spec:
+            self.ylabel.setText(spec.get("ylabel", ""))
+        if "x_is_ppm" in spec:
+            self.chkPpm.setChecked(spec["x_is_ppm"])
         if spec.get("xticks"):
             self.xticks.setText(", ".join(
                 f"{p:g}:{lab}" for p, lab in spec["xticks"]))
@@ -550,16 +977,29 @@ class PlottingStudio(QDialog):
         if spec.get("ylim"):
             self.chkYlim.setChecked(True)
             self.ylo.setValue(spec["ylim"][0]); self.yhi.setValue(spec["ylim"][1])
-        self.xstep.setValue(float(spec.get("xtick_step", 0) or 0))
-        self.ystep.setValue(float(spec.get("ytick_step", 0) or 0))
-        self.chkMinor.setChecked(bool(spec.get("minor_ticks")))
-        self.tickdir.setCurrentText(spec.get("tick_direction", "in"))
-        self.chkGrid.setChecked(bool(spec.get("grid")))
-        self.legloc.setCurrentText(spec.get("legend_loc", "best"))
-        self.legncol.setValue(int(spec.get("legend_ncol", 1)))
-        self.fontsz.setValue(float(spec.get("font_size", 0) or 0))
-        self.lwd.setValue(float(spec.get("line_width", 0) or 0))
-        kind = {"1d": 0, "2d": 1, "series": 2}.get(spec.get("kind", "1d"), 0)
+        if "xtick_step" in spec:
+            self.xstep.setValue(float(spec.get("xtick_step", 0) or 0))
+        if "ytick_step" in spec:
+            self.ystep.setValue(float(spec.get("ytick_step", 0) or 0))
+        if "minor_ticks" in spec:
+            self.chkMinor.setChecked(bool(spec["minor_ticks"]))
+        if "tick_direction" in spec:
+            self.tickdir.setCurrentText(spec["tick_direction"])
+        if "grid" in spec:
+            self.chkGrid.setChecked(bool(spec["grid"]))
+        if "legend_loc" in spec:
+            self.legloc.setCurrentText(spec["legend_loc"])
+        if "legend_ncol" in spec:
+            self.legncol.setValue(int(spec["legend_ncol"]))
+        if "font_size" in spec:
+            self.fontsz.setValue(float(spec.get("font_size", 0) or 0))
+        if "line_width" in spec:
+            self.lwd.setValue(float(spec.get("line_width", 0) or 0))
+
+    def _apply_spec(self, spec: dict):
+        self._apply_common(spec)
+        kind = {"1d": 0, "2d": 1, "series": 2, "batch_grid": 3,
+               "species_bar": 4}.get(spec.get("kind", "1d"), 0)
         self.kind.setCurrentIndex(kind)
         if kind == 0:
             for t in spec.get("traces", []):
@@ -574,6 +1014,42 @@ class PlottingStudio(QDialog):
         elif kind == 2:
             self.pathSer.setText(spec.get("path", ""))
             self.serMode.setCurrentText(spec.get("mode", "satrec"))
+        elif kind == 3:
+            self._panels = []
+            for p in spec.get("panels", []):
+                recipe = p.get("recipe", "")
+                data_path = p.get("data_path", "")
+                sample = (p.get("title") or (Path(recipe).stem if recipe else None)
+                         or "?")
+                self._panels.append({
+                    "path": recipe, "sample": sample, "nucleus": p.get("nucleus", ""),
+                    "models": [], "has_data": bool(recipe or data_path),
+                    "data_path": data_path, "needs_manual": False,
+                    "title": p.get("title"), "include": True,
+                })
+            self._grid_refresh_list()
+            self.gridCols.setValue(int(spec.get("cols") or 0))
+            self.gridComp.setCurrentText(spec.get("component_mode", "fill"))
+            self.gridShade.setText(",".join(str(i) for i in spec.get("shade_only", [])))
+            self.gridLabels.setCurrentText(spec.get("peak_labels") or "none")
+            self.gridTotal.setChecked(spec.get("show_total", True))
+            self.gridExp.setChecked(spec.get("show_experiment", True))
+        elif kind == 4:
+            cats = spec.get("categories", [])
+            series = spec.get("series", [])
+            self.barTable.blockSignals(True)
+            self.barTable.setRowCount(max(len(cats), 1))
+            self.barTable.setColumnCount(1 + len(series))
+            self.barTable.setHorizontalHeaderLabels(
+                ["category"] + [s.get("label", f"s{i}") for i, s in enumerate(series)])
+            for r, cat in enumerate(cats):
+                self.barTable.setItem(r, 0, QTableWidgetItem(str(cat)))
+                for c, s in enumerate(series):
+                    vals = s.get("values", [])
+                    v = vals[r] if r < len(vals) else 0
+                    self.barTable.setItem(r, c + 1, QTableWidgetItem(str(v)))
+            self.barTable.blockSignals(False)
+            self.barValueLabels.setChecked(bool(spec.get("value_labels", True)))
 
     # ------------------------------------------------------------------ render
     def _refresh(self):
@@ -582,6 +1058,12 @@ class PlottingStudio(QDialog):
             self.msg.setText("add a trace to preview"); return
         if spec["kind"] in ("2d", "series") and not spec.get("path"):
             self.msg.setText("pick an EXPNO folder to preview"); return
+        if spec["kind"] == "batch_grid" and not spec.get("panels"):
+            self.msg.setText("load a batch CSV or a folder of saved fits, "
+                             "then check the panels to include"); return
+        if spec["kind"] == "species_bar" and not any(spec.get("categories", [])):
+            self.msg.setText("add categories and species to the table "
+                             "(or load them from a batch CSV)"); return
         try:
             # render straight onto the live canvas figure (crisp, no bitmap scaling)
             new_fig = figures.render(spec)

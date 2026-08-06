@@ -81,6 +81,86 @@ STYLES: dict[str, dict] = {
                                   "legend.fontsize": 7}),
 }
 
+#: Named, generic STRUCTURAL presets — what kind of NMR figure this is, not
+#: what journal it's for (that's STYLES above; the two combine freely: pick a
+#: template for the layout, a style for the typography). Each maps to a
+#: partial spec the Plotting studio pre-fills; nucleus-agnostic by design —
+#: name by what the figure IS, never by which nucleus happened to be in the
+#: reference example. Values are the fixed parameters of that figure type;
+#: user-specific parts (traces/panels/categories) are filled in afterward.
+TEMPLATES: dict[str, dict] = {
+    "Stacked series": {
+        "description": "One 1D spectrum per sample, offset vertically, each "
+                       "labelled at its own trace end instead of a legend box "
+                       "— the standard way to show a composition/time series "
+                       "without a fit (e.g. a raw-spectra overview panel).",
+        "kind": "1d",
+        "spec": {"x_is_ppm": True, "hide_yaxis": True, "legend_loc": "none"},
+        "trace_defaults": {"end_label": True},
+    },
+    "Deconvolution grid": {
+        "description": "One panel per fitted spectrum: experiment + total "
+                       "fit + every component, filled and labelled by "
+                       "position — the standard full-deconvolution figure "
+                       "(dmfit/ssNake style) for a series of related fits.",
+        "kind": "batch_grid",
+        "spec": {"component_mode": "fill", "peak_labels": "position",
+                 "show_total": True, "show_experiment": True, "legend": True},
+    },
+    "Composition series (shaded component)": {
+        "description": "Same grid, but only ONE component per panel is "
+                       "filled/highlighted (the rest are invisible, only the "
+                       "total fit line shows them) with its position and "
+                       "population % labelled — for tracking one species "
+                       "across a composition series.",
+        "kind": "batch_grid",
+        "spec": {"component_mode": "fill", "shade_only": [0],
+                 "peak_labels": "position+pct", "show_total": True,
+                 "show_experiment": True, "legend": False, "cols": 1},
+    },
+    "Composition trend": {
+        "description": "Population (%) — or any fitted quantity — vs. a "
+                       "composition variable, one line+marker series per "
+                       "site/species, with a legend. Not a spectrum: a "
+                       "generic x–y plot (set 'x_is_ppm' off).",
+        "kind": "1d",
+        "spec": {"x_is_ppm": False, "hide_yaxis": False, "grid": False,
+                 "legend_loc": "best"},
+        "trace_defaults": {"marker": "o"},
+    },
+    "Species distribution": {
+        "description": "A 100%-stacked bar of species population vs. "
+                       "composition — the categorical alternative to a "
+                       "composition-trend line plot when you want every "
+                       "sample's full speciation at a glance.",
+        "kind": "species_bar",
+        "spec": {"normalize": True, "value_labels": True},
+    },
+    "2D correlation": {
+        "description": "A 2D contour map (MQMAS/DQ-SQ/HMQC/…) with top and "
+                       "side projections and optional diagonal/connectivity "
+                       "reference lines.",
+        "kind": "2d",
+        "spec": {"contour_mode": "contour", "proj_top": True,
+                 "proj_right": True},
+    },
+}
+
+
+#: the app's one categorical identity palette (Okabe-Ito derived, colorblind-
+#: safe, fixed order — never cycled past, never re-derived per feature). A
+#: static-figure copy of the live desktop's site colors (larmor.desktop.theme.
+#: LIGHT_SERIES): the core layer can't import the desktop layer, but an
+#: exported figure should still show site A in the same colour the fit table
+#: does. Keep the two lists' VALUES in sync if either changes.
+SITE_COLORS = ["#0072b2", "#d55e00", "#009e73", "#b0568c", "#8f6e00",
+              "#0e7c86", "#7f3fbf", "#117733", "#882255", "#5a5a5a"]
+
+
+def site_color(i: int) -> str:
+    return SITE_COLORS[i % len(SITE_COLORS)]
+
+
 #: superscripted isotope label, e.g. "27Al" -> "$^{27}$Al NMR shift (ppm)"
 def nucleus_xlabel(nucleus: str) -> str:
     digits = "".join(c for c in nucleus if c.isdigit())
@@ -126,8 +206,15 @@ def load_trace(t: dict) -> tuple[np.ndarray, np.ndarray, dict]:
         recipe = Recipe.load(t["recipe"])
         meta["nucleus"] = recipe.nucleus
         exp_ppm = None
-        if not engine.needs_kernel(recipe):
-            exp_ppm, _, _ = load_trace({"path": recipe.source_path})
+        if not engine.needs_kernel(recipe) and recipe.source_path:
+            try:
+                exp_ppm, _, _ = load_trace({"path": recipe.source_path})
+            except Exception:
+                exp_ppm = None       # source unreachable -> fall back below
+        if exp_ppm is None and not engine.needs_kernel(recipe):
+            # data-less (or unreachable-source) non-kernel fit: a grid framed
+            # around the sites, same as a data-less dmfit .fxmla just below
+            exp_ppm, _ = _simulate_model_curve(recipe)
         x, total, per_site = engine.simulate(recipe, exp_ppm=exp_ppm)
         part = t.get("part", "total")
         if part == "total":
@@ -137,6 +224,10 @@ def load_trace(t: dict) -> tuple[np.ndarray, np.ndarray, dict]:
             meta["label"] = recipe.sites[i].label
             return x, per_site[i], meta
         if part == "residual":
+            if not recipe.source_path:
+                raise ValueError(
+                    "residual needs the fit's source spectrum, but this "
+                    "recipe carries no source_path (a data-less fit)")
             ex, ey, _ = load_trace({"path": recipe.source_path})
             yi = np.interp(ex, x, total)
             return ex, ey - yi, meta
@@ -241,6 +332,19 @@ def render_1d(spec: dict) -> Figure:
                               label=t.get("label", meta.get("label")))
             if t.get("color"):
                 line.set_color(t["color"])
+            if t.get("end_label"):
+                # a label at the trace's own displayed end -- the literature
+                # convention for a stacked series (e.g. a composition label
+                # beside each spectrum) instead of a legend box per trace
+                ppm = spec.get("x_is_ppm", True)
+                at_min = bool(ppm)                # ppm axis is inverted: its
+                edge = int(np.argmin(x) if at_min else np.argmax(x))  # right edge is the MIN x
+                txt = t.get("label") or meta.get("label") or ""
+                ax.annotate(txt, (x[edge], y[edge]), textcoords="offset points",
+                           xytext=(-4 if at_min else 4, 2),
+                           ha="right" if at_min else "left",
+                           va="bottom", fontsize=plt.rcParams["font.size"],
+                           color=line.get_color())
             ye = meta.get("yerr")
             if (ye is not None and np.isfinite(ye).any()
                     and t.get("err_visible", True)):
@@ -609,7 +713,226 @@ def render_series(spec: dict) -> Figure:
 
 
 # ---------------------------------------------------------------------------
-RENDERERS = {"1d": render_1d, "2d": render_2d, "series": render_series}
+# batch grid: small-multiples publication figure from already-fitted spectra
+# (a deconvolution grid, or a composition series highlighting one component)
+
+def render_batch_grid(spec: dict) -> Figure:
+    """One panel per already-fitted spectrum: experiment + total fit +
+    (optionally) its components, laid out as a small-multiples grid.
+
+    ``panels``: ``[{"recipe": "path/to/fit.recipe.json", "title": "…"}, …]``.
+    Each recipe is resolved through ``load_trace`` exactly like a 1D trace, so
+    it follows the fit's own ``source_path`` for the experimental data
+    (kernel or not, data-less or not) — nothing here re-implements that.
+
+    A panel may instead omit ``"recipe"`` and give ``"data_path"`` (a raw
+    spectrum with no matching fit yet — series_grid.py produces these when a
+    batch CSV names a sample it couldn't pair with a saved .recipe.json): it
+    draws as experiment-only, no total/components. A panel with neither key
+    draws as an empty "no data located" placeholder rather than raising, so
+    one unresolved sample never blocks rendering the rest of the grid.
+
+    ``component_mode``: ``"fill"`` (filled + outlined, the classic
+    deconvolution look), ``"dashed"`` (outline only), or ``"hidden"`` (total +
+    experiment only). ``shade_only``: a list of site indices to draw and skip
+    the rest — combined with ``component_mode="fill"``, this is the
+    "composition series highlighting one component" style (draw every other
+    component invisible, shade just the one of interest). ``peak_labels``:
+    ``None`` | ``"position"`` | ``"label"`` | ``"position+pct"`` (needs
+    ``larmor.quantify`` — adds each shown component's integrated population %).
+    """
+    from pathlib import Path as _Path
+    from larmor.recipe import Recipe
+
+    panels_spec = spec.get("panels", [])
+    n = len(panels_spec)
+    if n == 0:
+        raise ValueError("batch_grid needs at least one panel (a fitted recipe)")
+    cols = int(spec.get("cols") or 0) or max(1, int(np.ceil(np.sqrt(n))))
+    rows = int(np.ceil(n / cols))
+    comp_mode = spec.get("component_mode", "fill")     # fill|dashed|hidden
+    shade_only = set(spec.get("shade_only") or [])
+    comp_alpha = float(spec.get("component_alpha", 0.35))
+    show_total = spec.get("show_total", True)
+    show_exp = spec.get("show_experiment", True)
+    peak_labels = spec.get("peak_labels")              # None|position|label|position+pct
+    label_fmt = spec.get("peak_label_fmt", "{pos:.1f}")
+    x_is_ppm = spec.get("x_is_ppm", True)
+    pw, ph = spec.get("panel_size", (3.0, 2.4))
+
+    with plt.rc_context(_rc(spec)):
+        fsz = plt.rcParams["font.size"]
+        fig, axes = plt.subplots(rows, cols, figsize=(pw * cols, ph * rows),
+                                 squeeze=False)
+        legend_handles: dict[int, tuple] = {}   # site index -> (handle, label)
+        for idx, p in enumerate(panels_spec):
+            ax = axes[idx // cols][idx % cols]
+            recipe = Recipe.load(p["recipe"]) if p.get("recipe") else None
+            x_total = y_total = None
+            if recipe is not None:
+                x_total, y_total, _ = load_trace({"recipe": p["recipe"], "part": "total"})
+            title = (p.get("title") or (recipe.sample if recipe else "")
+                    or (_Path(p["recipe"]).stem if p.get("recipe") else p.get("sample", "?")))
+            nucleus = recipe.nucleus if recipe is not None else p.get("nucleus", "")
+
+            pops = None
+            if recipe is not None and peak_labels == "position+pct":
+                try:
+                    from larmor.quantify import quantify
+                    q = quantify(recipe, getattr(recipe, "fit_window_ppm", None))
+                    pops = {int(r["site"][1:]): r["fraction_pct"] for r in q["rows"]}
+                except Exception:
+                    pops = None
+
+            ex = ey = None
+            src = recipe.source_path if recipe is not None else p.get("data_path", "")
+            if show_exp and src:
+                try:
+                    ex, ey, _ = load_trace({"path": src})
+                    ax.plot(ex, ey, color="#222", lw=0.9, label="_experiment")
+                except Exception:
+                    ex = ey = None
+
+            if recipe is not None and comp_mode != "hidden":
+                for i, site in enumerate(recipe.sites):
+                    if shade_only and i not in shade_only:
+                        continue
+                    xi, yi, _ = load_trace({"recipe": p["recipe"], "part": "site",
+                                            "site": i})
+                    col = site_color(i)
+                    if comp_mode == "fill":
+                        ax.fill_between(xi, yi, color=col, alpha=comp_alpha, lw=0)
+                        (line,) = ax.plot(xi, yi, color=col, lw=0.8)
+                    else:
+                        (line,) = ax.plot(xi, yi, color=col, lw=1.0, ls="--")
+                    legend_handles.setdefault(i, (line, site.label or f"s{i}"))
+                    if peak_labels:
+                        pos = site.params.get("isotropic_chemical_shift_ppm")
+                        if pos is None:
+                            continue
+                        txt = label_fmt.format(pos=float(pos.value))
+                        if peak_labels == "label":
+                            txt = site.label or txt
+                        elif peak_labels == "position+pct" and pops and i in pops:
+                            txt = f"{txt}\n{pops[i]:.0f}%"
+                        ax.annotate(txt, (float(pos.value), float(np.max(yi))),
+                                    textcoords="offset points", xytext=(0, 3),
+                                    ha="center", fontsize=max(fsz - 2, 5))
+
+            if recipe is not None and show_total:
+                ax.plot(x_total, y_total, color="#c0392b", lw=1.2,
+                        ls=(0, (4, 2)), label="_fit")
+
+            if recipe is not None and peak_labels:  # headroom so labels clear the title
+                lo, hi = ax.get_ylim()
+                ax.set_ylim(lo, hi * 1.14)
+
+            x_ref = x_total if x_total is not None else ex
+            if x_is_ppm:
+                if spec.get("xlim"):
+                    hi, lo = spec["xlim"]
+                    ax.set_xlim(max(hi, lo), min(hi, lo))
+                elif x_ref is not None:
+                    ax.set_xlim(float(np.max(x_ref)), float(np.min(x_ref)))
+            ax.set_yticks([])
+            for s in ("left", "right", "top"):
+                ax.spines[s].set_visible(False)
+            if x_ref is None:            # neither a fit nor data was found yet
+                ax.text(0.5, 0.5, "no data located", ha="center", va="center",
+                        transform=ax.transAxes, color="#999", fontsize=max(fsz - 1, 5))
+                ax.set_xticks([])
+            ax.set_title(title, fontsize=fsz, pad=2)
+            if x_ref is not None and (spec.get("xlabel") or (x_is_ppm and nucleus)):
+                ax.set_xlabel(spec.get("xlabel") or nucleus_xlabel(nucleus),
+                             fontsize=fsz)
+
+        for j in range(n, rows * cols):
+            axes[j // cols][j % cols].set_visible(False)
+
+        if spec.get("shared_scale"):
+            live = [a for a in fig.axes if a.get_visible()]
+            los = [a.get_xlim()[1] for a in live]; his = [a.get_xlim()[0] for a in live]
+            for a in live:
+                a.set_xlim(max(his), min(los))
+
+        if spec.get("legend", True) and legend_handles:
+            handles = [h for h, _ in legend_handles.values()]
+            labels = [lbl for _, lbl in legend_handles.values()]
+            fig.legend(handles, labels, loc="lower center",
+                      ncol=min(len(handles), 8), bbox_to_anchor=(0.5, -0.02),
+                      frameon=False, fontsize=max(fsz - 1, 5))
+        if spec.get("suptitle"):
+            fig.suptitle(spec["suptitle"])
+        fig.tight_layout()
+        return fig
+
+
+# ---------------------------------------------------------------------------
+# species distribution: a 100%-stacked bar of population vs. composition
+
+def render_species_bar(spec: dict) -> Figure:
+    """A 100%-stacked bar chart: one bar per composition point, segments are
+    named species/sites in a fixed category order and colour (never re-sorted
+    by value — identity stays with the category, not its rank).
+
+    ``categories``: ``[label, …]`` — the x-axis (composition) points.
+    ``series``: ``[{"label": "Q2", "values": [...]}, …]`` — one entry per
+    species, ``values`` aligned with ``categories``, in **stacking order**
+    (first at the bottom). Values need not already sum to 100 — each bar is
+    normalized to its own total unless ``normalize`` is False.
+    """
+    categories = [str(c) for c in spec.get("categories", [])]
+    series = spec.get("series", [])
+    if not categories or not series:
+        raise ValueError("species_bar needs `categories` and `series`")
+    normalize = spec.get("normalize", True)
+    vals = np.array([[float(v) for v in s["values"]] for s in series], dtype=float)
+    if normalize:
+        totals = vals.sum(axis=0)
+        totals[totals == 0] = 1.0
+        vals = vals / totals * 100.0
+
+    with plt.rc_context(_rc(spec)):
+        fig, ax = plt.subplots(figsize=spec.get("figsize", (5.0, 3.2)))
+        x = np.arange(len(categories))
+        bottom = np.zeros(len(categories))
+        width = float(spec.get("bar_width", 0.7))
+        for i, s in enumerate(series):
+            col = s.get("color") or site_color(i)
+            ax.bar(x, vals[i], width, bottom=bottom, color=col,
+                  label=s.get("label", f"series {i}"),
+                  edgecolor=spec.get("edge_color", "white"), linewidth=0.6)
+            if spec.get("value_labels"):
+                for xi, (v, b) in enumerate(zip(vals[i], bottom)):
+                    if v >= float(spec.get("value_label_min_pct", 6)):
+                        ax.text(xi, b + v / 2, f"{v:.0f}", ha="center",
+                               va="center", fontsize=plt.rcParams["font.size"] - 2,
+                               color="white")
+            bottom += vals[i]
+        ax.set_xticks(x)
+        ax.set_xticklabels(categories, rotation=spec.get("xtick_rotation", 0),
+                           ha="right" if spec.get("xtick_rotation") else "center")
+        ax.set_ylim(0, 100 if normalize else spec.get("ymax") or bottom.max() * 1.05)
+        ax.set_ylabel(spec.get("ylabel", "population (%)" if normalize else "value"))
+        if spec.get("xlabel"):
+            ax.set_xlabel(spec["xlabel"])
+        for s in ("right", "top"):
+            ax.spines[s].set_visible(False)
+        if "legend_loc" not in spec:      # default: a row of swatches above the bars
+            ax.legend(loc="upper center", bbox_to_anchor=(0.5, 1.18),
+                      ncol=min(len(series), 6), frameon=False,
+                      fontsize=plt.rcParams["legend.fontsize"])
+        else:
+            _apply_legend(ax, spec, has_labels=True)
+        if spec.get("title"):
+            ax.set_title(spec["title"])
+        fig.tight_layout()
+        return fig
+
+
+# ---------------------------------------------------------------------------
+RENDERERS = {"1d": render_1d, "2d": render_2d, "series": render_series,
+            "batch_grid": render_batch_grid, "species_bar": render_species_bar}
 
 
 def render(spec: dict) -> Figure:

@@ -214,7 +214,48 @@ It builds on the same co-fit engine (§3), so the shared parameters carry full
 uncertainties. The completion threshold is global (set it under **Decomposition ▸
 Advanced ▸ Fit completion threshold**) and honoured by every fit in LARMOR.
 
-## 7 · Sequential fit — forward / backward series sweep (1D)
+## 7 · Plotting studio — publication figures from a batch
+
+The **Plotting studio** (any *Send to Plotting studio*, or *Tools ▸ Plotting
+studio*) builds a figure as a plain, reloadable spec — style, labels, ticks,
+legend and size are shared across every plot kind. Two kinds are purpose-built
+for a **whole series at once**, so a batch fit (§6) becomes a submission-ready
+figure without hand-assembling panels:
+
+1. **Templates.** The **Template** picker at the top is a set of named,
+   nucleus-generic starting points copied from common published NMR figure
+   styles — *Stacked series*, *Deconvolution grid*, *Composition series
+   (shaded component)*, *Composition trend*, *Species distribution*, *2D
+   correlation*. Picking one sets the plot kind and sensible layout/style
+   defaults; every field underneath is still yours to change, and it combines
+   freely with any journal **Style** (Nature, ACS, RSC, …).
+2. **Batch grid** — one panel per spectrum, small-multiples: experiment + total
+   fit + components, laid out in a grid. **Load CSV…** takes a
+   `batch_table*.csv` (Batch fit's **Save table…** / **Export CSV…**, §6) and
+   auto-matches its rows to the saved `.recipe.json` fits — by sample name next
+   to the CSV, and by each row's own **`source_path`** column (every CSV
+   exported from Batch fit now carries it, so the studio finds the right
+   spectrum even without **Save individual fits…** too). **Load folder…**
+   takes a folder of saved fits directly. Check/reorder/remove panels in the
+   list; **Components** chooses fill / dashed-outline / total-only, **Shade
+   only** highlights one component per panel (the "composition series"
+   style), and **Peak labels** adds position, letter, or position + integrated
+   population %.
+   - **Older CSVs and missing files.** A CSV written before this feature (no
+     `source_path` column), or any sample neither method above can place, is
+     never just dropped — it's flagged **⚠ locate data…** in the panel list,
+     and the studio asks directly (one file dialog per sample, at load time)
+     for that spectrum's data — pick its dmfit fit, or its EXPNO/`pdata`
+     folder (a Bruker `1r`). Double-click the row any time afterward to try
+     again if you cancelled, and double-click a resolved row to rename its
+     panel title.
+3. **Species distribution** — a 100%-stacked bar of species/oxygen population
+   vs. composition. Type the category × species table directly, or **Load
+   from batch CSV…** to pivot one parameter (e.g. `amplitude`) out of a
+   `batch_table*.csv` automatically, one row per sample — each bar normalizes
+   to 100% on its own, so raw amplitudes work without pre-converting to %.
+
+## 8 · Sequential fit — forward / backward series sweep (1D)
 
 The batch tool (§6) assumes one *shared* model. Some series don't work that way:
 the lineshape **evolves smoothly** from one end-member to the other (a
@@ -245,7 +286,7 @@ and you get a **one-spectrum-at-a-time** workbench:
    export) — as in the batch tool.
 
 Use §6 when the sites are genuinely the *same* everywhere and only populations
-change; use §7 when the sites themselves **evolve** along the series.
+change; use §8 when the sites themselves **evolve** along the series.
 
 ## References
 

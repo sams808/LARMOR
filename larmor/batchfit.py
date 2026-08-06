@@ -367,7 +367,8 @@ def error_table(result: BatchFitResult, method: str | None = None) -> list[dict]
                              "label": site.label or site.model, "param": pn,
                              "value": p.value, "stderr": None, "sigma_pct": None,
                              "ci68_lo": None, "ci68_hi": None,
-                             "error_method": method})
+                             "error_method": method, "model": site.model,
+                             "source_path": ""})
     for k, rec in enumerate(result.recipes):       # per-spectrum free params
         d = detail[k] if k < len(detail) else {}
         for i, site in enumerate(rec.sites):
@@ -383,13 +384,17 @@ def error_table(result: BatchFitResult, method: str | None = None) -> list[dict]
                                  "label": site.label or site.model, "param": pn,
                                  "value": p.value, "stderr": stderr,
                                  "sigma_pct": pct, "ci68_lo": lo, "ci68_hi": hi,
-                                 "error_method": method})
+                                 "error_method": method, "model": site.model,
+                                 "source_path": rec.source_path or ""})
     return rows
 
 
 def shared_table(result: BatchFitResult) -> list[dict]:
     """The fitted values for a report: shared parameters (once, from the master)
-    and the per-spectrum amplitudes + any released parameters."""
+    and the per-spectrum amplitudes + any released parameters. Each per-
+    spectrum row carries its recipe's source_path (and model) -- the Plotting
+    studio's batch-grid figure reads these to find the associated spectrum/fit
+    directly from the CSV, without needing "Save individual fits…" too."""
     rows = []
     master = result.recipes[0]
     for i, site in enumerate(master.sites):
@@ -397,12 +402,15 @@ def shared_table(result: BatchFitResult) -> list[dict]:
             if pn in result.shared:
                 rows.append({"scope": "shared", "site": f"s{i}",
                              "label": site.label or site.model, "param": pn,
-                             "value": p.value, "stderr": p.stderr})
+                             "value": p.value, "stderr": p.stderr,
+                             "model": site.model, "source_path": ""})
     for k, rec in enumerate(result.recipes):
         for i, site in enumerate(rec.sites):
             for pn, p in site.params.items():
                 if pn == "amplitude" or pn in result.released:
                     rows.append({"scope": result.labels[k], "site": f"s{i}",
                                  "label": site.label or site.model, "param": pn,
-                                 "value": p.value, "stderr": p.stderr})
+                                 "value": p.value, "stderr": p.stderr,
+                                 "model": site.model,
+                                 "source_path": rec.source_path or ""})
     return rows

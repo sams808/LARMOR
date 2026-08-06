@@ -913,11 +913,16 @@ class BatchFitDialog(QDialog):
         rows = batchfit.shared_table(self._result)
         with open(path, "w", newline="", encoding="utf-8") as f:
             w = csv.writer(f)
-            w.writerow(["scope", "site", "label", "param", "value", "stderr"])
+            # model + source_path: so the Plotting studio's batch-grid figure
+            # can find each row's spectrum/fit straight from this CSV, even
+            # without "Save individual fits…" too
+            w.writerow(["scope", "site", "label", "param", "value", "stderr",
+                        "model", "source_path"])
             for r in rows:
                 w.writerow([r["scope"], r["site"], r["label"], r["param"],
                             f"{r['value']:.6g}",
-                            "" if r["stderr"] is None else f"{r['stderr']:.4g}"])
+                            "" if r["stderr"] is None else f"{r['stderr']:.4g}",
+                            r.get("model", ""), r.get("source_path", "")])
         self.status.setText(f"saved {path}")
 
     def _save_template(self):
@@ -1109,13 +1114,18 @@ class BatchFitDialog(QDialog):
         rows = batchfit.error_table(self._result, method=method)
         with open(path, "w", newline="", encoding="utf-8") as f:
             w = csv.writer(f)
+            # model + source_path: so the Plotting studio's batch-grid figure
+            # can find each row's spectrum/fit straight from this CSV, even
+            # without "Save individual fits…" too
             w.writerow(["scope", "site", "label", "param", "value", "stderr",
-                        "error_method", "sigma_pct", "ci68_lo", "ci68_hi"])
+                        "error_method", "sigma_pct", "ci68_lo", "ci68_hi",
+                        "model", "source_path"])
             for r in rows:
                 w.writerow([r["scope"], r["site"], r["label"], r["param"],
                             num(r["value"]), num(r["stderr"]), r["error_method"],
                             num(r["sigma_pct"], ".3g"),
-                            num(r["ci68_lo"]), num(r["ci68_hi"])])
+                            num(r["ci68_lo"]), num(r["ci68_hi"]),
+                            r.get("model", ""), r.get("source_path", "")])
         self.status.setText(f"exported {Path(path).name} · {method} errors")
 
     def _help(self):
