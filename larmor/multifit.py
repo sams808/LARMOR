@@ -13,6 +13,7 @@ propagation, exactly like intra-recipe links).
 """
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 
 import numpy as np
@@ -235,13 +236,21 @@ def fit_cofit(entries: list[tuple], share: tuple[str, ...] = DEFAULT_SHARE,
                 params[nm].value = float(params[nm].value) * sc
 
     from larmor.fit import _tol_kws
-    result = lmfit.minimize(residual, params, method="least_squares",
-                            iter_cb=iter_cb, **_tol_kws(tol))
-    if compute_errorbars and not result.errorbars:
-        retry = lmfit.minimize(residual, result.params.copy(),
-                               method="leastsq", iter_cb=iter_cb)
-        if retry.errorbars:
-            result = retry
+    with warnings.catch_warnings():
+        # same known-benign covariance warning as larmor.fit._make_params'
+        # own lmfit.minimize call -- see that module's comment for why
+        warnings.filterwarnings("ignore", message="invalid value encountered in sqrt",
+                                category=RuntimeWarning)
+        warnings.filterwarnings("ignore",
+                                message="invalid value encountered in scalar divide",
+                                category=RuntimeWarning)
+        result = lmfit.minimize(residual, params, method="least_squares",
+                                iter_cb=iter_cb, **_tol_kws(tol))
+        if compute_errorbars and not result.errorbars:
+            retry = lmfit.minimize(residual, result.params.copy(),
+                                   method="leastsq", iter_cb=iter_cb)
+            if retry.errorbars:
+                result = retry
     apply_params(result.params)
 
     rmsds, per_dataset = [], []

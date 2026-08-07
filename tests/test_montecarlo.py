@@ -88,6 +88,29 @@ def test_kernel_model_does_not_crash_on_grid_mismatch():
     assert abs(amp.mean - 100.0) < max(10 * amp.std, 20.0)
 
 
+def test_parallel_matches_sequential_for_the_same_seed():
+    """parallel=True must be a pure execution-strategy change, not a
+    different answer: the synthetic noise draws are generated up front in a
+    single sequential pass over `rng` regardless of how the trials
+    themselves get scheduled, so the SAME seed gives BIT-IDENTICAL results
+    whether trials run one at a time or across a process pool."""
+    truth, x, data = _synthetic()
+    seq = autofit.monte_carlo_errors(
+        Recipe.from_dict(truth.to_dict()), x, data, window_ppm=(-10, 40),
+        n_trials=12, seed=7, parallel=False)
+    par = autofit.monte_carlo_errors(
+        Recipe.from_dict(truth.to_dict()), x, data, window_ppm=(-10, 40),
+        n_trials=12, seed=7, parallel=True, max_workers=2)
+    assert par.n_ok == seq.n_ok == 12
+    by_seq = {p.label: p for p in seq.params}
+    by_par = {p.label: p for p in par.params}
+    assert set(by_seq) == set(by_par)
+    for label, ps in by_seq.items():
+        pp = by_par[label]
+        assert pp.mean == pytest.approx(ps.mean, rel=1e-9)
+        assert pp.std == pytest.approx(ps.std, rel=1e-9)
+
+
 def test_report_lists_every_free_parameter():
     truth, x, data = _synthetic()
     res = autofit.monte_carlo_errors(

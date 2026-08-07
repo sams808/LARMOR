@@ -275,6 +275,93 @@ existed — both symptoms traced to one bug in `batchfit.batch_fit()`.
   at all — proving the extra dead parameters were the entire discrepancy.
 - Full suite green after the fix (`pytest tests/ -q`).
 
+## 9 · 2026-08-07: CPU-parallel error analysis (Monte-Carlo / χ² profile)
+
+User report: a real 17-spectrum/8-line batch fit's "Compute errors" (χ²
+profile, 40 points) had been running 30+ minutes with no end in sight, and
+Monte-Carlo (200 trials) was similarly slow. Diagnosis before touching any
+code: with "Release per spectrum" on for 2 parameters across 8 sites, that's
+24 free parameters/spectrum — a χ² profile is 40 refits PER free parameter,
+so one spectrum alone is 960 independent `lmfit` fits, ×17 spectra ≈ 16,000
+total; Monte-Carlo is 200 independent refits × 17. Every one of those is a
+small, fully independent nonlinear fit (a few thousand points, no shared
+state) run **one at a time** in a plain Python loop — the textbook shape for
+OS-level process parallelism, and specifically NOT a fit for a GPU (each
+unit of work is `lmfit`'s serial per-fit control flow, not a large batched
+tensor op the small array sizes here would ever saturate). User chose
+"multiprocessing first" when offered the choice explicitly.
+
+- **NEW `larmor/parallel.py`** (Qt-free, tested in isolation first):
+  `parallel_map(fn, items, ...)` — sequential by default (`use_processes`
+  off, or below `MIN_ITEMS_FOR_PROCESSES=8` items, avoids paying process-pool
+  startup cost for nothing); across a `ProcessPoolExecutor` otherwise.
+  Preserves original item order in the returned list regardless of
+  completion order; `on_result(i, r)` fires per completion for live progress;
+  `should_stop()` cancels not-yet-started work (documented as BEST EFFORT —
+  `ProcessPoolExecutor` prefetches into its own call queue ahead of a worker
+  picking an item up, so exactly how much gets cut off isn't controllable,
+  proven by a test using a real per-item delay rather than asserting an
+  exact cutoff index); `executor=` lets a caller reuse one already-running
+  pool across many calls instead of paying startup cost per call.
+- **`larmor/autofit.py`**: `error_profile()` and `monte_carlo_errors()` each
+  gained `parallel=False` (default — every existing caller, including every
+  test, is unchanged), `max_workers`, `executor`. Both extracted their
+  per-item work into a module-level (picklable) worker function
+  (`_profile_point_worker`, `_mc_trial_worker`) run via `parallel_map`.
+  Monte-Carlo's synthetic noise draws stay a single sequential pass over
+  `rng` **before** dispatch, so the trial set — and the whole result, for a
+  fixed seed — is identical regardless of how trials get scheduled across
+  workers (verified by a dedicated bit-for-bit parallel-vs-sequential test).
+- **`larmor/batchfit.py`**: `batch_error_analysis()` gained `parallel=False`,
+  `max_workers`. When on, ONE `ProcessPoolExecutor` is created up front and
+  reused (via `executor=`) across every spectrum × parameter in the run,
+  not a fresh pool per `autofit` call — with a many-spectrum, many-released-
+  parameter batch that's potentially hundreds of `error_profile` calls, and
+  pool startup has real cost (a fresh interpreter per worker on Windows).
+- **GUI opt-in** (library default stays off/unchanged): the batch-fit
+  dialog's `_ErrorWorker`, the standalone Monte-Carlo dialog, the standalone
+  χ² profile ("Errors Analysis") tool dialog, and the batch-fit-report
+  tool's Monte-Carlo call all now pass `parallel=True`.
+- **PyInstaller correctness fix, found by reasoning through the packaging
+  path, not by reproducing it**: a frozen Windows exe that spawns worker
+  processes without `multiprocessing.freeze_support()` at its entry point
+  has each worker re-execute the frozen entry point from scratch and launch
+  a full second app instance instead of becoming a worker — recursively.
+  Added to `packaging/launcher.py`'s `__main__` guard, the only frozen
+  entry point per the `.spec` file. A no-op for the normal `larmor desktop`
+  /pytest paths (this only matters once LARMOR is rebuilt into an exe).
+- **Warning spam fix** (surfaced by the user mid-run: hundreds of lmfit
+  `RuntimeWarning: invalid value encountered in sqrt`/`scalar divide` lines).
+  Root cause: lmfit computes a covariance-based stderr for every free
+  parameter INSIDE `minimize()` itself, unconditionally — with most
+  parameters fixed at each χ² scan point (routine there, and common anyway
+  for correlated quadrupolar sites), that covariance is often not
+  positive-definite, and lmfit `sqrt()`s the diagonal regardless. Harmless
+  (this exact stderr is never read in these contexts) but at thousands of
+  fits per run, pure noise. Silenced narrowly — scoped inside a
+  `warnings.catch_warnings()` block around ONLY the `lmfit.minimize()` call,
+  by exact message text, so an unrelated `RuntimeWarning` still surfaces —
+  in all three of this codebase's independent `lmfit.minimize()` call sites
+  (`fit.py`, `twod.py`, `multifit.py`; found the latter two by re-running
+  the full suite after the `fit.py` fix and noticing the warning hadn't
+  fully disappeared, rather than assuming one fix covered every call site).
+- **New tests**: `tests/test_parallel.py` (8, the module in isolation —
+  ordering, exception-as-hole, on_result firing, best-effort should_stop,
+  shared-executor reuse, worker-count floor); parallel-vs-sequential
+  bit-identical-result tests added to `test_montecarlo.py`, `test_autofit.py`,
+  and `test_batchfit.py` (covering both `error_profile` and
+  `monte_carlo_errors`, standalone AND through `batch_error_analysis`'s
+  shared-pool path). 520 passed, 16 skipped, full suite green.
+- **Deliberately not done this pass**: GPU acceleration. Not drafted — the
+  user chose "multiprocessing first, GPU only if still needed" when the
+  trade-off was raised, and CPU parallelism plausibly closes the entire
+  reported gap (a 30+ minute run → minutes) for this workload shape. If a
+  genuinely GPU-shaped workload shows up later (e.g. batching the MQMAS 2D
+  kernel build's crystallite-orientation sum, or fitting a MUCH larger
+  N-spectra batch than seen so far), that would be a separate, from-scratch
+  design — a process pool of `lmfit` calls doesn't partially become "a GPU
+  version," they're different architectures end to end.
+
 ## Verdict
 
 LARMOR is a broad, coherent, well-tested application: a clean Qt-free core, one

@@ -9,6 +9,7 @@ with full error propagation.
 from __future__ import annotations
 
 import re
+import warnings
 from dataclasses import dataclass
 
 import numpy as np
@@ -273,9 +274,30 @@ def fit(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
                 pass
         return iter_cb(p, it, resid, *a, **k) if iter_cb is not None else None
 
-    result = lmfit.minimize(residual, params, method="least_squares",
-                            iter_cb=(_main_cb if (frame_cb or iter_cb) else None),
-                            **_tol_kws(tol))
+    with warnings.catch_warnings():
+        # lmfit computes a covariance-based stderr for every free parameter
+        # INSIDE minimize() itself, unconditionally -- with several
+        # correlated/near-degenerate parameters (routine for overlapping
+        # quadrupolar sites, and the norm rather than the exception once a
+        # χ² profile or Monte-Carlo pass has most parameters FIXED at each
+        # point) that covariance is frequently not positive-definite, and
+        # lmfit sqrt()s its diagonal regardless, printing a RuntimeWarning
+        # per ill-conditioned parameter. Harmless (this fit's own use of
+        # that stderr is a NaN either way, and neither the caller nor
+        # compute_errorbars ever reads it when it isn't wanted) but at
+        # hundreds-to-thousands of fits per error-analysis run, purely
+        # noisy -- silence just these two known-benign warnings (the stderr
+        # sqrt, and the correlation divide that follows it for the same
+        # ill-conditioned covariance), narrowly scoped to this call so an
+        # unrelated RuntimeWarning elsewhere still surfaces.
+        warnings.filterwarnings("ignore", message="invalid value encountered in sqrt",
+                                category=RuntimeWarning)
+        warnings.filterwarnings("ignore",
+                                message="invalid value encountered in scalar divide",
+                                category=RuntimeWarning)
+        result = lmfit.minimize(residual, params, method="least_squares",
+                                iter_cb=(_main_cb if (frame_cb or iter_cb) else None),
+                                **_tol_kws(tol))
 
     def _at_bounds(res) -> list[str]:
         names = []

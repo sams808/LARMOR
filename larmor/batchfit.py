@@ -268,7 +268,9 @@ def _snapshot_covariance(result: BatchFitResult) -> list[dict]:
 def batch_error_analysis(result: BatchFitResult, data: list[tuple], *,
                          method: str = "montecarlo", n_trials: int = 200,
                          seed: int = 0, n_points: int = 15, span: float = 3.0,
-                         progress=None, should_stop=None) -> BatchFitResult:
+                         progress=None, should_stop=None,
+                         parallel: bool = False,
+                         max_workers: int | None = None) -> BatchFitResult:
     """Estimate per-spectrum parameter errors on a finished batch fit.
 
     ``data`` is ``[(ppm, amp, window), ...]`` aligned with ``result.recipes``.
@@ -292,6 +294,17 @@ def batch_error_analysis(result: BatchFitResult, data: list[tuple], *,
     The chosen method's error is written back into each recipe's ``Param.stderr``
     (so saved fits carry it) and stored in ``result.error_detail[method]``.
     ``progress(k, n, j, tot)`` = spectrum k of n, sub-step j of tot.
+
+    ``parallel=True`` runs every trial/scan-point across a process pool
+    (larmor.parallel) instead of one at a time -- for "montecarlo" that's
+    n_trials refits, for "profile" it's n_points refits, PER free parameter,
+    PER spectrum, so this is where the real time in a many-spectrum, many-
+    released-parameter batch goes. ONE pool is created up front and reused
+    for every spectrum/parameter in this call (not a fresh pool per
+    ``autofit`` call), since process-pool startup itself has real cost and
+    this can easily make hundreds of those calls. Off by default so existing
+    callers (incl. every test) see unchanged behaviour; the batch-fit dialog
+    opts in explicitly.
     """
     from larmor import autofit
 
@@ -321,49 +334,62 @@ def batch_error_analysis(result: BatchFitResult, data: list[tuple], *,
     if "covariance" not in result.error_detail:
         result.error_detail["covariance"] = _snapshot_covariance(result)
 
-    n = len(result.recipes)
-    detail: list[dict] = []
-    for k, rec in enumerate(result.recipes):
-        if should_stop is not None and should_stop():
-            break
-        ppm, amp, window = data[k]
-        rows: dict = {}
-        if method == "montecarlo":
-            def pcb(j, tot, _k=k):
-                if progress:
-                    progress(_k, n, j, tot)
-            mc = autofit.monte_carlo_errors(
-                rec, ppm, amp, window_ppm=window, n_trials=n_trials, seed=seed,
-                progress=pcb, should_stop=should_stop)
-            for mp in mc.params:
-                rec.sites[mp.site].params[mp.param].stderr = mp.std
-                rows[(mp.site, mp.param)] = ParamError(
-                    mp.site, mp.param, mp.label, mp.best, mp.std, (None, None),
-                    mp.pct)
-        elif method == "profile":
-            free = _free_params(rec)
-            for j, (i, pn) in enumerate(free):
-                if should_stop is not None and should_stop():
-                    break
-                if progress:
-                    progress(k, n, j, len(free))
-                try:
-                    ep = autofit.error_profile(rec, ppm, amp, window_ppm=window,
-                                               site=i, param=pn,
-                                               n_points=n_points, span=span)
-                except Exception:
-                    continue
-                lo, hi = ep.ci68
-                se = (hi - lo) / 2.0 if (lo is not None and hi is not None) else None
-                rec.sites[i].params[pn].stderr = se
-                pct = abs(se / ep.best_value) * 100.0 if se and ep.best_value else None
-                rows[(i, pn)] = ParamError(i, pn, f"s{i}.{pn}", ep.best_value,
-                                           se, ep.ci68, pct)
-        else:
-            raise ValueError(f"unknown error method: {method!r}")
-        detail.append(rows)
-        if progress:
-            progress(k + 1, n, 0, 1)
+    pool = None
+    if parallel:
+        from concurrent.futures import ProcessPoolExecutor
+
+        from larmor.parallel import default_worker_count
+        pool = ProcessPoolExecutor(max_workers=max_workers or default_worker_count())
+
+    try:
+        n = len(result.recipes)
+        detail: list[dict] = []
+        for k, rec in enumerate(result.recipes):
+            if should_stop is not None and should_stop():
+                break
+            ppm, amp, window = data[k]
+            rows: dict = {}
+            if method == "montecarlo":
+                def pcb(j, tot, _k=k):
+                    if progress:
+                        progress(_k, n, j, tot)
+                mc = autofit.monte_carlo_errors(
+                    rec, ppm, amp, window_ppm=window, n_trials=n_trials, seed=seed,
+                    progress=pcb, should_stop=should_stop,
+                    parallel=parallel, max_workers=max_workers, executor=pool)
+                for mp in mc.params:
+                    rec.sites[mp.site].params[mp.param].stderr = mp.std
+                    rows[(mp.site, mp.param)] = ParamError(
+                        mp.site, mp.param, mp.label, mp.best, mp.std, (None, None),
+                        mp.pct)
+            elif method == "profile":
+                free = _free_params(rec)
+                for j, (i, pn) in enumerate(free):
+                    if should_stop is not None and should_stop():
+                        break
+                    if progress:
+                        progress(k, n, j, len(free))
+                    try:
+                        ep = autofit.error_profile(
+                            rec, ppm, amp, window_ppm=window, site=i, param=pn,
+                            n_points=n_points, span=span, should_stop=should_stop,
+                            parallel=parallel, max_workers=max_workers, executor=pool)
+                    except Exception:
+                        continue
+                    lo, hi = ep.ci68
+                    se = (hi - lo) / 2.0 if (lo is not None and hi is not None) else None
+                    rec.sites[i].params[pn].stderr = se
+                    pct = abs(se / ep.best_value) * 100.0 if se and ep.best_value else None
+                    rows[(i, pn)] = ParamError(i, pn, f"s{i}.{pn}", ep.best_value,
+                                               se, ep.ci68, pct)
+            else:
+                raise ValueError(f"unknown error method: {method!r}")
+            detail.append(rows)
+            if progress:
+                progress(k + 1, n, 0, 1)
+    finally:
+        if pool is not None:
+            pool.shutdown(wait=True)
 
     result.error_detail[method] = detail
     result.error_method = method

@@ -130,6 +130,27 @@ class ErrorProfile:
                 f"[1σ: {lo_s} … {hi_s}]")
 
 
+def _profile_point_worker(item):
+    """One χ² profile scan point: fix `param` at `value`, refit everything
+    else free, return chisqr. Module-level (not a closure) so it can be
+    pickled and sent to a worker process -- see larmor/parallel.py."""
+    base_json, site, param, value, exp_ppm, exp_amp, window_ppm = item
+    trial = Recipe.from_dict(json.loads(base_json))
+    tp = trial.sites[site].params[param]
+    tp.value = float(value)
+    tp.vary = False                   # fixed at the scan point
+    tp.expr = None
+    try:
+        # only chisqr is read below -- this scan point's own covariance/
+        # error bars are never used (the WHOLE profile's shape is the
+        # error estimate), so skip the errorbar-rescue retry
+        res = fitmod.fit(trial, exp_ppm, exp_amp, window_ppm=window_ppm,
+                         compute_errorbars=False)
+        return float(res.lmfit_result.chisqr)
+    except Exception:
+        return None
+
+
 def _crossings(x: np.ndarray, y: np.ndarray, level: float, best: float):
     """Where the profile crosses `level`, on each side of the minimum."""
     lo = hi = None
@@ -153,7 +174,8 @@ def error_profile(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
                   site: int, param: str,
                   window_ppm: tuple[float, float] | None = None,
                   n_points: int = 15, span: float = 3.0,
-                  progress=None) -> ErrorProfile:
+                  progress=None, should_stop=None, parallel: bool = False,
+                  max_workers: int | None = None, executor=None) -> ErrorProfile:
     """chi-square profile of one parameter (dmfit's Errors Analysis).
 
     The parameter is fixed at each scanned value while EVERY other free
@@ -161,7 +183,18 @@ def error_profile(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
     `span` = how many stderr (or 25% of the value if no stderr) to scan each
     way. Confidence intervals come from the delta-chi-square rule for one
     parameter of interest: 1.00 for 1σ, 3.84 for 2σ (95%).
+
+    Every scan point is an independent refit -- ``parallel=True`` runs them
+    across a process pool (larmor.parallel) instead of one at a time, which
+    is where nearly all of this function's time goes for a nucleus/model
+    whose fit itself isn't instant. Off by default so existing callers (incl.
+    every test) see unchanged behaviour; GUI call sites opt in explicitly.
+    ``executor``: reuse an already-running pool instead of starting one just
+    for this call -- pass one when calling this many times back-to-back (see
+    ``batchfit.batch_error_analysis``).
     """
+    from larmor.parallel import parallel_map
+
     base = json.dumps(recipe.to_dict())
     p0 = recipe.sites[site].params[param]
     center = p0.value
@@ -173,26 +206,18 @@ def error_profile(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
         hi_v = min(hi_v, p0.max)
     values = np.linspace(lo_v, hi_v, n_points)
 
-    chi2 = []
     notes = []
-    for k, v in enumerate(values):
-        trial = Recipe.from_dict(json.loads(base))
-        tp = trial.sites[site].params[param]
-        tp.value = float(v)
-        tp.vary = False               # fixed at the scan point
-        tp.expr = None
-        try:
-            # only chisqr is read below -- this scan point's own covariance/
-            # error bars are never used (the WHOLE profile's shape is the
-            # error estimate), so skip the errorbar-rescue retry
-            res = fitmod.fit(trial, exp_ppm, exp_amp, window_ppm=window_ppm,
-                             compute_errorbars=False)
-            chi2.append(float(res.lmfit_result.chisqr))
-        except Exception:
-            chi2.append(np.nan)
+    items = [(base, site, param, float(v), exp_ppm, exp_amp, window_ppm)
+             for v in values]
+
+    def _cb(i, _r):
         if progress:
-            progress(k + 1, n_points, float(v))
-    chi2 = np.array(chi2)
+            progress(i + 1, n_points, float(values[i]))
+
+    raw = parallel_map(_profile_point_worker, items, max_workers=max_workers,
+                       should_stop=should_stop, on_result=_cb,
+                       use_processes=parallel, executor=executor)
+    chi2 = np.array([np.nan if c is None else c for c in raw])
     ok = np.isfinite(chi2)
     if ok.sum() < 3:
         raise RuntimeError("chi-square profile failed: too few valid points")
@@ -258,21 +283,53 @@ class MonteCarloResult:
         return "\n".join(lines)
 
 
+def _mc_trial_worker(item):
+    """One Monte-Carlo trial: refit the model against ONE synthetic noisy
+    spectrum, return the fitted value of every tracked free parameter.
+    Module-level (not a closure) so it can be pickled and sent to a worker
+    process -- see larmor/parallel.py."""
+    base_json, exp_ppm, synth_amp, window_ppm, tracked = item
+    trial = Recipe.from_dict(json.loads(base_json))
+    try:
+        # the MC estimate IS the spread of .value across trials -- each
+        # trial's own covariance/error bars are never read, so skip the
+        # errorbar-rescue retry (worth up to 2x on every one of n_trials)
+        fitmod.fit(trial, exp_ppm, synth_amp, window_ppm=window_ppm,
+                  compute_errorbars=False)
+    except Exception:
+        return None
+    return {(i, pn): float(trial.sites[i].params[pn].value)
+            for i, pn, _ in tracked}
+
+
 def monte_carlo_errors(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
                        window_ppm: tuple[float, float] | None = None,
                        n_trials: int = 200, seed: int = 0,
                        noise: float | None = None, progress=None,
-                       should_stop=None) -> MonteCarloResult:
+                       should_stop=None, parallel: bool = False,
+                       max_workers: int | None = None,
+                       executor=None) -> MonteCarloResult:
     """Estimate parameter errors by Monte-Carlo (synthetic-noise refits).
 
     The recipe is fitted once to fix the best fit and estimate the noise level
     (residual std over the window, unless `noise` is given). Then `n_trials`
     synthetic spectra = best-fit model + Gaussian(0, noise) are each re-fitted
     from the best fit; the std of each free parameter over the trials is its
-    error. `progress(k, n_trials)` is called per trial; `should_stop()` truthy
-    aborts early (returns what was collected).
+    error. `progress(k, n_trials)` is called per completed trial (k counts
+    completions, not draw order, when `parallel=True`); `should_stop()`
+    truthy aborts early (returns what was collected).
+
+    Every trial is an independent refit -- ``parallel=True`` runs them across
+    a process pool (larmor.parallel) instead of one at a time; the synthetic
+    noise draws themselves stay a single up-front SEQUENTIAL loop over `rng`
+    so the trial set (and therefore the result, given a fixed seed) doesn't
+    depend on how work happens to be scheduled across worker processes. Off
+    by default so existing callers (incl. every test) see unchanged
+    behaviour; GUI call sites opt in explicitly. ``executor``: reuse an
+    already-running pool instead of starting one just for this call.
     """
     from larmor import engine
+    from larmor.parallel import parallel_map
 
     rng = np.random.default_rng(seed)
     exp_ppm = np.asarray(exp_ppm, float)
@@ -306,29 +363,34 @@ def monte_carlo_errors(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
                  for i, pn, _ in tracked}
     collected: dict = {(i, pn): [] for i, pn, _ in tracked}
 
-    # 4. MC trials — refit model + synthetic noise, starting from the best fit
+    # 4. MC trials — refit model + synthetic noise, starting from the best fit.
+    # The noise draws are generated up front in one sequential pass over
+    # `rng` (NOT inside the possibly-parallel worker) so the trial set --
+    # and therefore the whole result, for a fixed seed -- is independent of
+    # execution order/worker scheduling.
     base_best = json.dumps(best.to_dict())
-    n_ok = 0
-    for k in range(n_trials):
-        if should_stop is not None and should_stop():
-            break
-        synth = model + rng.normal(0.0, sigma, size=model.shape)
-        trial = Recipe.from_dict(json.loads(base_best))
-        try:
-            # the MC estimate IS the spread of .value across trials -- each
-            # trial's own covariance/error bars are never read, so skip the
-            # errorbar-rescue retry (worth up to 2x on every one of n_trials)
-            fitmod.fit(trial, exp_ppm, synth, window_ppm=window_ppm,
-                      compute_errorbars=False)
-        except Exception:
-            if progress:
-                progress(k + 1, n_trials)
-            continue
-        for i, pn, _ in tracked:
-            collected[(i, pn)].append(float(trial.sites[i].params[pn].value))
-        n_ok += 1
+    synths = [model + rng.normal(0.0, sigma, size=model.shape)
+             for _ in range(n_trials)]
+    items = [(base_best, exp_ppm, synth, window_ppm, tracked) for synth in synths]
+
+    done = 0
+
+    def _cb(_i, _r):
+        nonlocal done
+        done += 1
         if progress:
-            progress(k + 1, n_trials)
+            progress(done, n_trials)
+
+    raw = parallel_map(_mc_trial_worker, items, max_workers=max_workers,
+                       should_stop=should_stop, on_result=_cb,
+                       use_processes=parallel, executor=executor)
+    n_ok = 0
+    for r in raw:
+        if r is None:
+            continue
+        for key, val in r.items():
+            collected[key].append(val)
+        n_ok += 1
 
     # 5. per-parameter statistics (mean ± sqrt(var), matching dmfit/pydmfit)
     params = []

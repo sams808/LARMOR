@@ -117,7 +117,7 @@ class MonteCarloDialog(QDialog):
             self._result = autofit.monte_carlo_errors(
                 Recipe.from_dict(self.recipe), self.ppm, self.amp,
                 window_ppm=self.window, n_trials=n, seed=self.seed.value(),
-                progress=prog, should_stop=lambda: self._stop)
+                progress=prog, should_stop=lambda: self._stop, parallel=True)
         except Exception as exc:
             self.status.setText(f"failed: {exc}")
             self.btnRun.setEnabled(True); self.btnStop.setEnabled(False)

@@ -16,6 +16,7 @@ is a true isotropic axis and no manual shear factor has to be hardcoded here.
 """
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -677,8 +678,16 @@ def fit_2d(recipe, data: Data2D, kernel: Kernel2D | None = None,
                 params[name].value *= kk
 
     from larmor.fit import _tol_kws
-    result = lmfit.minimize(residual, params, method="least_squares",
-                            iter_cb=iter_cb, **_tol_kws(tol))
+    with warnings.catch_warnings():
+        # same known-benign covariance warning as larmor.fit._make_params'
+        # own lmfit.minimize call -- see that module's comment for why
+        warnings.filterwarnings("ignore", message="invalid value encountered in sqrt",
+                                category=RuntimeWarning)
+        warnings.filterwarnings("ignore",
+                                message="invalid value encountered in scalar divide",
+                                category=RuntimeWarning)
+        result = lmfit.minimize(residual, params, method="least_squares",
+                                iter_cb=iter_cb, **_tol_kws(tol))
     _apply_params(recipe, result.params)
     recipe.mqmas_f1_ref_ppm = float(result.params["mqmas_f1_ref_ppm"].value)
     z_fit, per_site = simulate_2d(recipe, kernel)

@@ -202,6 +202,14 @@ populations change. **Ctrl/Shift-click** the spectra in the Explorer and press
    error, %-error, and (for the χ² profile) the 1σ interval — tagged with the
    selected method (it computes that method first if you have not yet). Switching
    the menu never loses a method you already computed.
+   Monte-Carlo and χ² profile are each hundreds to thousands of independent
+   refits (every trial, or every scan point of every released parameter of
+   every spectrum), so both run across all of your CPU cores (one left free
+   for the app itself) instead of one refit at a time — the same numbers,
+   much less waiting. **Stop** still works: it finishes whatever's already in
+   flight on each core rather than cutting off instantly, the same "keeps
+   the current work" behaviour as everywhere else in LARMOR that can be
+   interrupted.
 6. **Save.** **Save individual fits…** writes one LARMOR `.recipe.json` per
    spectrum, named **automatically**
    (`sample_nucleus_recipe_batch_YYYYMMDD_HHMM`) or with a **name you type for

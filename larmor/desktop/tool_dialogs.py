@@ -246,7 +246,7 @@ class ErrorsDialog(QDialog):
         try:
             prof = autofit.error_profile(
                 Recipe.from_dict(self.recipe), self.ppm, self.amp,
-                site=i, param=pname, window_ppm=self.window)
+                site=i, param=pname, window_ppm=self.window, parallel=True)
         except Exception as exc:
             self.res.setText(f"failed: {exc}")
             return

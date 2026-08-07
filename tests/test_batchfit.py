@@ -234,6 +234,41 @@ def test_error_analysis_profile_gives_confidence_intervals():
                and r["ci68_lo"] <= r["value"] <= r["ci68_hi"] for r in amp)
 
 
+def test_error_analysis_parallel_gives_the_same_answer_as_sequential():
+    """parallel=True must be a pure execution-strategy change for the batch
+    error-analysis path too (one shared process pool reused across every
+    spectrum/parameter, per batch_error_analysis's own docstring) -- not a
+    different result. Covers both methods, since they share the pool-setup
+    code but call different autofit functions."""
+    entries = _entries()
+
+    res_seq_mc = batchfit.batch_fit(entries)
+    batchfit.batch_error_analysis(res_seq_mc, _data_for(entries),
+                                  method="montecarlo", n_trials=12, seed=9,
+                                  parallel=False)
+    res_par_mc = batchfit.batch_fit(entries)
+    batchfit.batch_error_analysis(res_par_mc, _data_for(entries),
+                                  method="montecarlo", n_trials=12, seed=9,
+                                  parallel=True, max_workers=2)
+    for rs, rp in zip(res_seq_mc.recipes, res_par_mc.recipes):
+        se_s = rs.sites[0].params["amplitude"].stderr
+        se_p = rp.sites[0].params["amplitude"].stderr
+        assert se_p == pytest.approx(se_s, rel=1e-9)
+
+    res_seq_pf = batchfit.batch_fit(entries)
+    batchfit.batch_error_analysis(res_seq_pf, _data_for(entries),
+                                  method="profile", n_points=9, span=3.0,
+                                  parallel=False)
+    res_par_pf = batchfit.batch_fit(entries)
+    batchfit.batch_error_analysis(res_par_pf, _data_for(entries),
+                                  method="profile", n_points=9, span=3.0,
+                                  parallel=True, max_workers=2)
+    for rs, rp in zip(res_seq_pf.recipes, res_par_pf.recipes):
+        se_s = rs.sites[0].params["amplitude"].stderr
+        se_p = rp.sites[0].params["amplitude"].stderr
+        assert se_p == pytest.approx(se_s, rel=1e-6)
+
+
 def test_switching_export_method_keeps_covariance():
     entries = _entries()
     res = batchfit.batch_fit(entries)

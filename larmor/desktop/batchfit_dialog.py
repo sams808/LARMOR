@@ -138,7 +138,8 @@ class _ErrorWorker(QThread):
                 self.result, self.data, method=self.method,
                 n_trials=self.n_trials, seed=self.seed, n_points=self.n_points,
                 progress=lambda k, n, j, tot: self.progress.emit(k, n, j, tot),
-                should_stop=lambda: self._stop)
+                should_stop=lambda: self._stop,
+                parallel=True)
             self.done.emit(self.result)
         except Exception as exc:  # noqa: BLE001
             self.failed.emit(str(exc))

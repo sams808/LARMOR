@@ -90,6 +90,29 @@ def test_error_profile_brackets_1sigma():
     assert "isotropic_chemical_shift_ppm" in prof.summary
 
 
+def test_error_profile_parallel_matches_sequential():
+    """parallel=True is a pure execution-strategy change -- every scan point
+    is an independent, deterministic refit (no shared RNG/state between
+    points), so the two must agree exactly regardless of point count or
+    worker count."""
+    from larmor import fit as fitmod
+
+    x, y = _synthetic()
+    r = _recipe()
+    fitmod.fit(r, x, y)
+    seq = autofit.error_profile(r, x, y, site=0,
+                                param="isotropic_chemical_shift_ppm",
+                                n_points=12, span=3.0, parallel=False)
+    par = autofit.error_profile(r, x, y, site=0,
+                                param="isotropic_chemical_shift_ppm",
+                                n_points=12, span=3.0, parallel=True,
+                                max_workers=3)
+    assert np.array_equal(seq.values, par.values)
+    assert np.allclose(seq.chi2, par.chi2)
+    assert seq.best_value == pytest.approx(par.best_value)
+    assert seq.ci68 == pytest.approx(par.ci68)
+
+
 def test_error_profile_is_parabolic_near_minimum():
     """chi2 must rise on BOTH sides of the minimum -- the signature the
     covariance assumes and that this tool verifies."""

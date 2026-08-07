@@ -39,4 +39,14 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    import multiprocessing
+
+    # REQUIRED for a frozen (PyInstaller) exe that spawns worker processes
+    # (larmor.parallel's process-pool error analysis): without this, each
+    # worker process re-executes THIS SAME frozen entry point from scratch
+    # on Windows (spawn start method) and, lacking the guard, launches a
+    # full second LARMOR instance instead of becoming a worker -- which
+    # itself spawns more workers, recursively. A no-op for the normal
+    # (non-frozen) `larmor desktop` / pytest entry points.
+    multiprocessing.freeze_support()
     raise SystemExit(main())

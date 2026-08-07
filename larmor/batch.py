@@ -157,7 +157,7 @@ def _errors_for(entry: FitEntry, method: str, n_mc: int, seed: int,
     if method == "montecarlo":
         mc = autofit.monte_carlo_errors(
             rec, entry.ppm, entry.amp, window_ppm=entry.window,
-            n_trials=n_mc, seed=seed, progress=progress)
+            n_trials=n_mc, seed=seed, progress=progress, parallel=True)
         for mp in mc.params:
             errors[(mp.site, mp.param)] = mp.std
     quant = quantmod.quantify(rec, window_ppm=entry.window)
