@@ -26,13 +26,26 @@ with needs_manual=True, for the studio to ask the user about directly
 from __future__ import annotations
 
 import csv
-from dataclasses import dataclass, field, replace
+import tempfile
+from dataclasses import dataclass, replace
 from pathlib import Path
 
-from larmor.recipe import Recipe
+from larmor.recipe import Param, Recipe, SiteModel
 
 #: fit files this module recognizes when scanning a folder
 _FIT_GLOBS = ("*.recipe.json", "*.fxmla", "*.fxml")
+
+#: where CSV-reconstructed recipes get written (one per session; the studio
+#: only needs these to exist for as long as it's open) -- lazily created
+_recon_dir: Path | None = None
+
+
+def _reconstructed_recipe_path(scope: str) -> Path:
+    global _recon_dir
+    if _recon_dir is None:
+        _recon_dir = Path(tempfile.mkdtemp(prefix="larmor_csv_recipes_"))
+    safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in scope)
+    return _recon_dir / f"{safe}.recipe.json"
 
 
 @dataclass
@@ -53,6 +66,7 @@ class Panel:
     n_sites: int = 0
     data_path: str = ""             # raw spectrum location when there's no fit
     needs_manual: bool = False      # True: ask the user to locate the data
+    reconstructed: bool = False     # True: `path` is a fit rebuilt from the CSV's own rows, not a saved file
 
 
 def read_csv_hints(csv_path: str | Path) -> dict[str, dict]:
@@ -80,6 +94,83 @@ def read_csv_hints(csv_path: str | Path) -> dict[str, dict]:
                 h["models"].append(m)
     return {k: {"source_path": v["source_path"], "models": tuple(v["models"])}
             for k, v in hints.items()}
+
+
+def recipe_from_csv_rows(shared_rows: list[dict], scope_rows: list[dict],
+                         source_path: str = "") -> Recipe:
+    """Rebuild one spectrum's fitted Recipe purely from a batch CSV's own
+    rows -- a shared-ladder batch fit spreads one site's parameters across
+    two row groups (params held fixed across every spectrum land under
+    scope "shared"; params released or always-free, like amplitude, land
+    under the spectrum's own scope), so a full per-site Param set needs
+    both merged. Needs each row's `model` (only present in CSVs exported
+    after this feature); raises ValueError otherwise so callers fall back
+    to a real saved .recipe.json or a data-only panel instead of a bad guess.
+
+    `source_path`, when it exists on disk, seeds nucleus/larmor_frequency_MHz
+    /spin_rate_Hz from the real spectrum (via loader.load_any) so the
+    reconstructed recipe is a proper, axis-correct Recipe, not a units-blind
+    shell -- exactly what render_batch_grid needs to draw experiment+fit
+    together like any other saved fit.
+    """
+    by_site: dict[str, dict] = {}
+    for r in list(shared_rows) + list(scope_rows):
+        model = (r.get("model") or "").strip()
+        if not model:
+            raise ValueError(
+                "this CSV has no 'model' column (an older export) -- can't "
+                "rebuild a fit from it; use a folder of saved .recipe.json "
+                "fits instead")
+        site = by_site.setdefault(r["site"], {"label": r.get("label", ""),
+                                              "model": model, "params": {}})
+        try:
+            value = float(r["value"])
+        except (TypeError, ValueError):
+            continue
+        stderr = None
+        raw_stderr = r.get("stderr")
+        if raw_stderr not in (None, ""):
+            try:
+                stderr = float(raw_stderr)
+            except ValueError:
+                stderr = None
+        site["params"][r["param"]] = Param(value, stderr=stderr)
+
+    if not by_site:
+        raise ValueError("no fittable rows for this scope")
+
+    from larmor import models
+
+    def _site_key(k: str):
+        return int(k[1:]) if k[1:].isdigit() else k
+
+    sites = []
+    for k in sorted(by_site, key=_site_key):
+        s = by_site[k]
+        try:
+            needed = models.get(s["model"]).param_names
+        except KeyError:
+            raise ValueError(f"unknown model {s['model']!r} for site {k}") from None
+        missing = [n for n in needed if n not in s["params"]]
+        if missing:
+            raise ValueError(
+                f"site {k} ({s['label'] or k}) is missing {', '.join(missing)} "
+                "in this CSV -- can't rebuild a complete fit from it")
+        sites.append(SiteModel(model=s["model"], label=s["label"], params=s["params"]))
+
+    nucleus, larmor_MHz, spin_rate_Hz = "", 0.0, 0.0
+    if source_path and Path(source_path).exists():
+        try:
+            from larmor.loader import load_any
+            _, _, rec_dict, _, _ = load_any(source_path)
+            nucleus = rec_dict.get("nucleus", "")
+            larmor_MHz = float(rec_dict.get("larmor_frequency_MHz", 0.0) or 0.0)
+            spin_rate_Hz = float(rec_dict.get("spin_rate_Hz", 0.0) or 0.0)
+        except Exception:
+            pass    # still usable data-less/unit-less; render falls back too
+
+    return Recipe(nucleus=nucleus, larmor_frequency_MHz=larmor_MHz,
+                  spin_rate_Hz=spin_rate_Hz, source_path=source_path, sites=sites)
 
 
 def find_recipes_near_csv(csv_path: str | Path) -> list[str]:
@@ -162,11 +253,15 @@ def load_panels(source) -> tuple[list[Panel], list[str]]:
     reorderable) -- cheap (reads each recipe's header, not its data).
 
     For a CSV source, every scope it mentions gets a Panel, even when no
-    .recipe.json matched: a scope with a usable source_path hint (see
-    read_csv_hints) becomes a data-only panel (raw spectrum, no fit); a scope
-    with neither comes back with needs_manual=True rather than being dropped,
-    so the studio can ask the user to locate it directly (older CSVs, moved
-    files) instead of the plot silently missing a sample."""
+    .recipe.json matched, in decreasing order of fidelity: (1) a real saved
+    .recipe.json (sample-name or source_path-folder matched); (2) failing
+    that, a full fit REBUILT from the CSV's own rows (recipe_from_csv_rows,
+    needs the `model` column -- most batch-CSV loads land here, since
+    "Save individual fits…" is easy to skip); (3) failing that (an older
+    CSV with no model column), a data-only panel from its source_path hint
+    (raw spectrum, no fit); (4) failing even that, needs_manual=True rather
+    than being dropped, so the studio can ask the user to locate it directly
+    instead of the plot silently missing a sample."""
     paths, warnings = resolve_paths(source)
     panels: list[Panel] = []
     matched_samples: set[str] = set()
@@ -187,14 +282,29 @@ def load_panels(source) -> tuple[list[Panel], list[str]]:
     src_path = Path(source) if isinstance(source, (str, Path)) else None
     if src_path is not None and src_path.suffix.lower() == ".csv" and src_path.exists():
         hints = read_csv_hints(src_path)
-        scopes = [s for s in csv_rows_by_scope(src_path) if s.lower() != "shared"]
+        rows_by_scope = csv_rows_by_scope(src_path)
+        shared_rows = rows_by_scope.get("shared", [])
+        scopes = [s for s in rows_by_scope if s.lower() != "shared"]
         unresolved: list[str] = []
         for scope in scopes:
             if not scope or scope in matched_samples:
                 continue
             hint = hints.get(scope, {})
             sp = hint.get("source_path", "")
-            if sp and Path(sp).exists():
+            sp = sp if sp and Path(sp).exists() else ""
+            try:
+                rec = recipe_from_csv_rows(shared_rows, rows_by_scope[scope], sp)
+                tmp = _reconstructed_recipe_path(scope)
+                rec.sample = scope
+                rec.save(tmp)
+                panels.append(Panel(path=str(tmp), sample=scope, nucleus=rec.nucleus,
+                                    models=tuple(s.model for s in rec.sites),
+                                    has_data=bool(sp), n_sites=len(rec.sites),
+                                    data_path=sp, reconstructed=True))
+                continue
+            except ValueError:
+                pass    # no model column (an older CSV) -- fall through below
+            if sp:
                 panels.append(Panel(path="", sample=scope, nucleus="",
                                     models=hint.get("models", ()), has_data=True,
                                     data_path=sp))

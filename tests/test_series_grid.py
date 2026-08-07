@@ -1,5 +1,7 @@
 """Resolving a batch of fits from a CSV, a folder, or explicit paths, for the
 Plotting studio's batch-grid figures (larmor.series_grid)."""
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -102,8 +104,10 @@ def test_load_panels_via_csv_with_no_matching_fits_warns_usefully(tmp_path):
 
 
 def test_load_panels_via_csv_uses_source_path_hint_when_no_recipe_matches(tmp_path):
-    """A newer CSV's own source_path column resolves a scope to a data-only
-    panel (experiment, no fit) even with zero .recipe.json files around."""
+    """A newer CSV's own source_path column, with an incomplete row set (no
+    position/width -- just amplitude, as an older/partial export might have),
+    resolves a scope to a data-only panel (experiment, no fit) rather than
+    building a broken partial fit -- even with zero .recipe.json around."""
     x = np.linspace(-20, 20, 50)
     raw = tmp_path / "g0_raw.csv"
     raw.write_text("# nucleus = 11B\n# larmor_MHz = 160\n" +
@@ -116,10 +120,78 @@ def test_load_panels_via_csv_uses_source_path_hint_when_no_recipe_matches(tmp_pa
     assert len(panels) == 1
     p = panels[0]
     assert p.sample == "g0" and p.has_data and not p.needs_manual
-    assert p.data_path == str(raw) and p.path == ""
+    assert p.data_path == str(raw) and p.path == "" and not p.reconstructed
     assert p.models == ("gauss_lor",)
     # resolved via the source_path hint -- nothing left to ask the user about
     assert not any("couldn't locate data" in w for w in warnings)
+
+
+def _complete_csv(tmp_path, raw):
+    """A batch CSV with a full gauss_lor row set (shared gl + per-scope
+    position/width/amplitude, the real shape a batch-fit export has) for
+    two scopes sharing one "shared" ladder -- everything needed for a full
+    reconstruction."""
+    csv_path = tmp_path / "batch_table.csv"
+    csv_path.write_text(
+        "scope,site,label,param,value,stderr,model,source_path\n"
+        "shared,s0,A,gl,1,,gauss_lor,\n"
+        f"g0,s0,A,isotropic_chemical_shift_ppm,10.0,0.1,gauss_lor,{raw}\n"
+        f"g0,s0,A,shift_fwhm_ppm,5.0,0.2,gauss_lor,{raw}\n"
+        f"g0,s0,A,amplitude,100.0,3.0,gauss_lor,{raw}\n")
+    return csv_path
+
+
+def test_recipe_from_csv_rows_rebuilds_a_complete_fit(tmp_path):
+    x = np.linspace(-30, 30, 100)
+    raw = tmp_path / "g0_raw.csv"
+    raw.write_text("# nucleus = 11B\n# larmor_MHz = 160\n" +
+                   "\n".join(f"{xi:.4f} {xi:.4f}" for xi in x))
+    csv_path = _complete_csv(tmp_path, raw)
+    rows = series_grid.csv_rows_by_scope(csv_path)
+    rec = series_grid.recipe_from_csv_rows(rows["shared"], rows["g0"], str(raw))
+    assert len(rec.sites) == 1
+    site = rec.sites[0]
+    assert site.model == "gauss_lor"
+    assert site.params["isotropic_chemical_shift_ppm"].value == pytest.approx(10.0)
+    assert site.params["isotropic_chemical_shift_ppm"].stderr == pytest.approx(0.1)
+    assert site.params["gl"].value == pytest.approx(1.0)
+    assert rec.nucleus == "11B" and rec.source_path == str(raw)
+
+
+def test_recipe_from_csv_rows_rejects_incomplete_sites():
+    with pytest.raises(ValueError, match="missing"):
+        series_grid.recipe_from_csv_rows(
+            [], [{"site": "s0", "label": "A", "param": "amplitude",
+                 "value": "100", "stderr": "", "model": "gauss_lor"}])
+
+
+def test_recipe_from_csv_rows_rejects_older_csv_without_model():
+    with pytest.raises(ValueError, match="model"):
+        series_grid.recipe_from_csv_rows(
+            [], [{"site": "s0", "label": "A", "param": "amplitude",
+                 "value": "100", "stderr": "", "model": ""}])
+
+
+def test_load_panels_via_csv_reconstructs_full_fits_when_model_column_present(tmp_path):
+    """The exact new workflow: a batch CSV alone (no .recipe.json anywhere)
+    is enough for a full deconvolution-grid panel -- experiment AND fit."""
+    x = np.linspace(-30, 30, 100)
+    raw = tmp_path / "g0_raw.csv"
+    raw.write_text("# nucleus = 11B\n# larmor_MHz = 160\n" +
+                   "\n".join(f"{xi:.4f} {xi:.4f}" for xi in x))
+    csv_path = _complete_csv(tmp_path, raw)
+    panels, warnings = series_grid.load_panels(str(csv_path))
+    assert len(panels) == 1
+    p = panels[0]
+    assert p.reconstructed and p.has_data and not p.needs_manual
+    assert p.path.endswith(".recipe.json") and Path(p.path).exists()
+    assert p.n_sites == 1 and p.models == ("gauss_lor",)
+
+    from larmor import figures
+    fig = figures.render({"kind": "batch_grid", "panels": [{"recipe": p.path}]})
+    import matplotlib.pyplot as plt
+    assert len(fig.axes) >= 1
+    plt.close(fig)
 
 
 def test_resolve_manual_clears_needs_manual(tmp_path):

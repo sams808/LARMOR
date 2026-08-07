@@ -339,6 +339,90 @@ def test_studio_batch_grid_double_click_relocates_unresolved_panel(qapp, tmp_pat
     assert "⚠" not in st.gridList.item(0).text()
 
 
+def test_studio_grid_arrow_buttons_are_native_qt_arrows(qapp):
+    """Regression: text-glyph arrows ("▲"/"▼") silently render blank on some
+    Windows font setups -- native QToolButton arrows always draw."""
+    from PySide6.QtCore import Qt as _Qt
+    from larmor.desktop.plotting_studio import PlottingStudio
+    st = PlottingStudio(None)
+    assert st.gridBtnUp.arrowType() == _Qt.UpArrow
+    assert st.gridBtnDown.arrowType() == _Qt.DownArrow
+
+
+def test_studio_grid_drag_reorder_updates_panels(qapp, tmp_path):
+    """The list's native InternalMove drag-drop reorders the *visual* items;
+    _grid_rows_reordered must fold that back into self._panels by each row's
+    stamped original index, not just leave the two out of sync."""
+    from larmor.desktop.plotting_studio import PlottingStudio
+    _fit(tmp_path, "g0"); _fit(tmp_path, "g1"); _fit(tmp_path, "g2")
+    st = PlottingStudio(None)
+    st._grid_load(str(tmp_path))
+    order = [p["sample"] for p in st._panels]
+    # simulate what a drag-drop leaves behind: the visual items reordered,
+    # each still carrying its original Qt.UserRole stamp
+    item0 = st.gridList.takeItem(0)
+    st.gridList.insertItem(st.gridList.count(), item0)
+    st._grid_rows_reordered()
+    assert [p["sample"] for p in st._panels] == order[1:] + order[:1]
+    # re-stamped for the next reorder
+    assert [st.gridList.item(i).data(Qt.UserRole) for i in range(3)] == [0, 1, 2]
+
+
+def test_studio_grid_reconstructs_fit_from_csv_and_marks_it(qapp, tmp_path):
+    """The headline ask: a batch CSV with model+source_path columns, and NO
+    saved .recipe.json anywhere, still gets a full fit panel (not "data
+    only") -- listed as rebuilt, spec references the rebuilt recipe file."""
+    from larmor.desktop.plotting_studio import PlottingStudio
+    x = np.linspace(-30, 30, 100)
+    raw = tmp_path / "g0_raw.csv"
+    raw.write_text("# nucleus = 11B\n# larmor_MHz = 160\n" +
+                   "\n".join(f"{xi:.4f} {xi:.4f}" for xi in x))
+    csv_path = tmp_path / "batch_table.csv"
+    csv_path.write_text(
+        "scope,site,label,param,value,stderr,model,source_path\n"
+        "shared,s0,A,gl,1,,gauss_lor,\n"
+        f"g0,s0,A,isotropic_chemical_shift_ppm,10.0,0.1,gauss_lor,{raw}\n"
+        f"g0,s0,A,shift_fwhm_ppm,5.0,0.2,gauss_lor,{raw}\n"
+        f"g0,s0,A,amplitude,100.0,3.0,gauss_lor,{raw}\n")
+    st = PlottingStudio(None)
+    st.kind.setCurrentIndex(3)
+    st._grid_load(str(csv_path))
+    assert len(st._panels) == 1
+    p = st._panels[0]
+    assert p["reconstructed"] and p["path"].endswith(".recipe.json")
+    assert "(rebuilt from CSV)" in st.gridList.item(0).text()
+    spec = st._spec()
+    assert spec["panels"][0]["recipe"] == p["path"]
+    assert "data_path" not in spec["panels"][0]
+
+
+def test_studio_grid_data_roots_setting_seeds_locate_dialog(qapp, tmp_path, monkeypatch):
+    from PySide6.QtCore import QSettings
+    from larmor.desktop.plotting_studio import PlottingStudio
+    QSettings("LARMOR", "app").remove("plottingStudio/dataRoots")
+    try:
+        root = tmp_path / "raw_data"
+        root.mkdir()
+        st = PlottingStudio(None)
+        monkeypatch.setattr("PySide6.QtWidgets.QInputDialog.getText",
+                            staticmethod(lambda *a, **k: (str(root), True)))
+        st._grid_set_data_roots()
+        assert st._grid_data_roots() == [str(root)]
+
+        seen = {}
+        def fake_open(*a, **k):
+            seen["dir"] = a[2] if len(a) > 2 else k.get("dir", "")
+            return ("", "")
+        monkeypatch.setattr("PySide6.QtWidgets.QFileDialog.getOpenFileName",
+                            staticmethod(fake_open))
+        monkeypatch.setattr("PySide6.QtWidgets.QFileDialog.getExistingDirectory",
+                            staticmethod(lambda *a, **k: ""))
+        st._grid_ask_manual_path("g0")
+        assert seen["dir"] == str(root)
+    finally:
+        QSettings("LARMOR", "app").remove("plottingStudio/dataRoots")
+
+
 def test_studio_batch_grid_spec_roundtrips_through_apply_spec(qapp, tmp_path):
     from larmor.desktop.plotting_studio import PlottingStudio
     _fit(tmp_path, "g0")

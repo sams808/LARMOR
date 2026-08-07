@@ -18,12 +18,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QSettings
 from PySide6.QtWidgets import (
-    QCheckBox, QColorDialog, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
-    QFileDialog, QFormLayout, QHBoxLayout, QInputDialog, QLabel, QLineEdit,
-    QListWidget, QListWidgetItem, QMenu, QPushButton, QSpinBox, QTableWidget,
-    QTableWidgetItem, QVBoxLayout, QWidget,
+    QAbstractItemView, QCheckBox, QColorDialog, QComboBox, QDialog,
+    QDialogButtonBox, QDoubleSpinBox, QFileDialog, QFormLayout, QHBoxLayout,
+    QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu,
+    QPushButton, QSpinBox, QTableWidget, QTableWidgetItem, QToolButton,
+    QVBoxLayout, QWidget,
 )
 
 from larmor import figures, series_grid
@@ -254,25 +255,38 @@ class PlottingStudio(QDialog):
         b_folder = QPushButton("Load folder…")
         b_folder.setToolTip("a folder of saved .recipe.json / .fxmla fits")
         b_folder.clicked.connect(self._grid_load_folder)
-        grow.addWidget(b_csv); grow.addWidget(b_folder)
+        b_roots = QPushButton("Data folders…")
+        b_roots.setToolTip("default folder(s) the 'locate data for…' popups "
+                           "start from — set this once to your raw-data "
+                           "root(s) so relocating an unresolved sample is "
+                           "usually one click, not a full browse")
+        b_roots.clicked.connect(self._grid_set_data_roots)
+        grow.addWidget(b_csv); grow.addWidget(b_folder); grow.addWidget(b_roots)
         bg.addLayout(grow)
         self.gridList = QListWidget()
-        self.gridList.setToolTip("check the spectra to include; select one "
-                                 "and use ▲▼ to reorder. Double-click a row "
-                                 "needing data to locate it, or a resolved "
-                                 "one to rename its panel title")
+        self.gridList.setToolTip("check the spectra to include; drag a row "
+                                 "to reorder, or select one and use the ↑↓ "
+                                 "buttons. Double-click a row needing data "
+                                 "to locate it, or a resolved one to rename "
+                                 "its panel title")
+        self.gridList.setDragDropMode(QAbstractItemView.InternalMove)
+        self.gridList.setDefaultDropAction(Qt.MoveAction)
         self.gridList.itemChanged.connect(self._grid_item_changed)
         self.gridList.itemDoubleClicked.connect(self._grid_item_double_clicked)
-        bg.addWidget(QLabel("Panels (checked = included):"))
+        self.gridList.model().rowsMoved.connect(self._grid_rows_reordered)
+        bg.addWidget(QLabel("Panels (checked = included; drag to reorder):"))
         bg.addWidget(self.gridList)
         gmrow = QHBoxLayout()
-        b_up = QPushButton("▲"); b_up.setFixedWidth(28)
-        b_up.clicked.connect(lambda: self._grid_move(-1))
-        b_down = QPushButton("▼"); b_down.setFixedWidth(28)
-        b_down.clicked.connect(lambda: self._grid_move(1))
+        self.gridBtnUp = QToolButton(); self.gridBtnUp.setArrowType(Qt.UpArrow)
+        self.gridBtnUp.setToolTip("move selected panel up")
+        self.gridBtnUp.clicked.connect(lambda: self._grid_move(-1))
+        self.gridBtnDown = QToolButton(); self.gridBtnDown.setArrowType(Qt.DownArrow)
+        self.gridBtnDown.setToolTip("move selected panel down")
+        self.gridBtnDown.clicked.connect(lambda: self._grid_move(1))
         b_rm = QPushButton("Remove")
         b_rm.clicked.connect(self._grid_remove)
-        gmrow.addWidget(b_up); gmrow.addWidget(b_down); gmrow.addWidget(b_rm)
+        gmrow.addWidget(self.gridBtnUp); gmrow.addWidget(self.gridBtnDown)
+        gmrow.addWidget(b_rm)
         gmrow.addStretch(1)
         bg.addLayout(gmrow)
         gf = QFormLayout()
@@ -589,12 +603,28 @@ class PlottingStudio(QDialog):
             "path": p.path, "sample": p.sample, "nucleus": p.nucleus,
             "models": list(p.models), "has_data": p.has_data,
             "data_path": p.data_path, "needs_manual": p.needs_manual,
-            "title": None, "include": True,
+            "reconstructed": p.reconstructed, "title": None, "include": True,
         } for p in panels]
         self._grid_resolve_manual()
         self._grid_refresh_list()
         self.gridMsg.setText(" ".join(warnings))
         self._refresh()
+
+    @staticmethod
+    def _grid_data_roots() -> list[str]:
+        raw = QSettings("LARMOR", "app").value("plottingStudio/dataRoots", "")
+        return [r for r in (raw or "").split(";") if r]
+
+    def _grid_set_data_roots(self):
+        current = "; ".join(self._grid_data_roots())
+        text, ok = QInputDialog.getText(
+            self, "Data folders",
+            "Default folder(s) for 'locate data for…' — separate multiple "
+            "with ';':", text=current)
+        if ok:
+            QSettings("LARMOR", "app").setValue(
+                "plottingStudio/dataRoots",
+                "; ".join(p.strip() for p in text.split(";") if p.strip()))
 
     def _grid_ask_manual_path(self, sample: str) -> str:
         """The "successive popups" fallback: series_grid couldn't pair this
@@ -602,14 +632,19 @@ class PlottingStudio(QDialog):
         files, or no matching .recipe.json at all) — ask directly, one dialog
         per sample, rather than dropping it from the figure. Offers a file
         first (e.g. a dmfit fit) and, if cancelled, an EXPNO/pdata folder
-        (a Bruker "1r") instead."""
+        (a Bruker "1r") instead. Starts browsing from the configured data
+        root(s) (Data folders… button) when one is set, so relocating is
+        usually one click rather than a full re-browse."""
+        roots = self._grid_data_roots()
+        start = next((r for r in roots if Path(r).exists()), roots[0] if roots else "")
         path, _ = QFileDialog.getOpenFileName(
-            self, f"Locate data for '{sample}'", "",
+            self, f"Locate data for '{sample}'", start,
             "dmfit (*.fxmla *.fxml);;All files (*)")
         if path:
             return path
         folder = QFileDialog.getExistingDirectory(
-            self, f"…or pick the EXPNO/pdata folder for '{sample}' (containing 1r)")
+            self, f"…or pick the EXPNO/pdata folder for '{sample}' (containing 1r)",
+            start)
         return folder or ""
 
     def _grid_resolve_manual(self):
@@ -625,17 +660,34 @@ class PlottingStudio(QDialog):
     def _grid_refresh_list(self):
         self.gridList.blockSignals(True)
         self.gridList.clear()
-        for p in self._panels:
+        for i, p in enumerate(self._panels):
             label = p.get("title") or p["sample"]
             if p.get("needs_manual"):
                 label += "  ⚠ locate data…"
+            elif p.get("reconstructed"):
+                label += "  (rebuilt from CSV)"
             elif not p.get("path") and p.get("data_path"):
                 label += "  (data only, no fit)"
             item = QListWidgetItem(label)
             item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
             item.setCheckState(Qt.Checked if p.get("include", True) else Qt.Unchecked)
+            item.setData(Qt.UserRole, i)
             self.gridList.addItem(item)
         self.gridList.blockSignals(False)
+
+    def _grid_rows_reordered(self, *_args):
+        """Native drag-and-drop reorder in the QListWidget (setDragDropMode
+        InternalMove) -- fold the new visual order back into self._panels by
+        each item's own stamped original index, then re-stamp for next time."""
+        new_order = []
+        for i in range(self.gridList.count()):
+            old_idx = self.gridList.item(i).data(Qt.UserRole)
+            if old_idx is not None and 0 <= old_idx < len(self._panels):
+                new_order.append(self._panels[old_idx])
+        if len(new_order) == len(self._panels):
+            self._panels = new_order
+        self._grid_refresh_list()
+        self._refresh()
 
     def _grid_item_changed(self, item):
         r = self.gridList.row(item)
@@ -1025,7 +1077,7 @@ class PlottingStudio(QDialog):
                     "path": recipe, "sample": sample, "nucleus": p.get("nucleus", ""),
                     "models": [], "has_data": bool(recipe or data_path),
                     "data_path": data_path, "needs_manual": False,
-                    "title": p.get("title"), "include": True,
+                    "reconstructed": False, "title": p.get("title"), "include": True,
                 })
             self._grid_refresh_list()
             self.gridCols.setValue(int(spec.get("cols") or 0))
