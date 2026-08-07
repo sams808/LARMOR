@@ -1486,6 +1486,41 @@ class MainWindow(QMainWindow):
             act.triggered.connect(lambda _=False, n=name: self._set_theme(n))
             self._theme_group.addAction(act)
 
+        # hidden, just-for-fun styles — tucked into a submenu (not a sibling
+        # of the 10 normal presets) and restart-required rather than live, so
+        # this never affects the everyday, professional-looking Theme list
+        m.addSeparator()
+        more = m.addMenu("More styles…")
+        more.setToolTip("experimental — applies the next time LARMOR starts")
+        self._aesthetic_group = QActionGroup(self)
+        self._aesthetic_group.setExclusive(True)
+        current_override = QSettings("LARMOR", "app").value("appearanceOverride", "")
+        act_normal = more.addAction("Normal")
+        act_normal.setCheckable(True)
+        act_normal.setChecked(not current_override)
+        act_normal.triggered.connect(lambda _=False: self._set_aesthetic_override(""))
+        self._aesthetic_group.addAction(act_normal)
+        for name in theme.aesthetic_names():
+            act = more.addAction(name)
+            act.setCheckable(True)
+            act.setChecked(name == current_override)
+            act.triggered.connect(
+                lambda _=False, n=name: self._set_aesthetic_override(n))
+            self._aesthetic_group.addAction(act)
+
+    def _set_aesthetic_override(self, name: str):
+        """Persist a hidden "aesthetic" style choice (or "" to go back to
+        Normal) for the NEXT launch only — see main()'s startup theme code.
+        Not applied live: these lean on decorative QSS flourishes on top of
+        the normal role system, and a full restart is the simplest way to
+        guarantee every already-built widget picks it up consistently."""
+        from PySide6.QtWidgets import QMessageBox
+
+        QSettings("LARMOR", "app").setValue("appearanceOverride", name)
+        msg = (f"“{name}” will apply the next time you start LARMOR."
+              if name else "Back to Normal — restart LARMOR to apply.")
+        QMessageBox.information(self, "Style", msg)
+
     def _build_textsize_menu(self, parent):
         from PySide6.QtGui import QActionGroup
 
@@ -4319,9 +4354,18 @@ def main() -> int:
         if f.exactMatch() or family == "Arial":
             app.setFont(f)
             break
-    # apply the saved colour theme (palette + stylesheet + pyqtgraph config)
-    saved = QSettings("LARMOR", "app").value("theme", theme.DEFAULT)
-    theme.apply(app, saved if saved in theme.THEMES else theme.DEFAULT)
+    # apply the saved colour theme (palette + stylesheet + pyqtgraph config).
+    # A hidden "aesthetic" override (View ▸ Theme ▸ More styles…) takes
+    # precedence when set — it's deliberately NOT applied live when chosen
+    # (see _set_aesthetic_override), only here at the next launch, so
+    # "restart LARMOR to see the new style" is literally true.
+    settings = QSettings("LARMOR", "app")
+    override = settings.value("appearanceOverride", "")
+    if override and override in theme.AESTHETIC_THEMES:
+        theme.apply(app, override)
+    else:
+        saved = settings.value("theme", theme.DEFAULT)
+        theme.apply(app, saved if saved in theme.THEMES else theme.DEFAULT)
 
     icon = asset_path("larmor_logo.png")
     if icon:

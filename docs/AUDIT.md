@@ -10,7 +10,7 @@ after the 2026-08-06 performance pass (see §6).
 |---|---|
 | Python modules | 106 (`larmor/` core + `larmor/desktop/` UI) |
 | Lines of code | ~28 k (≈8.6 k core, ≈15 k desktop, rest tests/scripts) |
-| Test files | 59 · full suite **green** (433 passed, 16 skipped) |
+| Test files | 60 · full suite **green** (508 passed, 16 skipped, 2026-08-06) |
 | Biggest module | `desktop/app.py` — 4.4 k LOC, 227 methods (the main window) |
 
 The core (`larmor/…`) is **Qt-free and testable**; the desktop layer is a thin-ish
@@ -192,6 +192,54 @@ outside the fit window — doesn't depend on the data.
 Also written: `docs/GPU_ACCELERATION_PLAN.md` — an opt-in, auto-detected CuPy
 path for users with a CUDA GPU, explicitly gated on profiling actual demand
 after the fixes above (not built speculatively).
+
+## 7 · 2026-08-06 (evening): publication-plotting & batch-fit generality pass
+
+A code-generality survey (15 registered models, `twod.py`, `figures.py`,
+`plotting_studio.py`, real-data test coverage) found the **model registry and
+batch-fit engine are already genuinely nucleus-agnostic** — no hardcoded
+isotope strings anywhere; every quadrupolar/CSA model resolves gyromagnetic
+ratio/spin generically via mrsimulator's `Isotope(symbol=nucleus)`. The real
+gap for "any technique" was on the **2D side**, addressed this pass:
+
+- **Batch fit: per-spectrum "Exclude component"** — right-click a cell to
+  lock one site's amplitude to exactly zero for that spectrum only
+  (`batchfit.is_zeroed_out`); excluded sites are skipped in the CSV export
+  and never drawn/legend-listed when rendered, rather than reported as "a
+  fitted zero". `shared_table`/`error_table` also now export each site's
+  integrated **population %** (`larmor.quantify`, error-method-consistent),
+  and a CSV export can auto-save each spectrum's `.recipe.json` alongside it.
+- **Plotting studio**: per-component colors + legend visibility, an
+  Auto-update toggle (off by default) + Preview button, and — the 2D side —
+  a fitted-model contour overlay on a real experimental map plus
+  **computed** CS-axis/QIS-axis reference lines (`twod.f1_cs_scale`/
+  `qis_slope`, previously only hand-typed).
+- **series_grid.recipe_from_csv_rows correctness fix** (found by a
+  deliberately mixed-model test — gauss_lor + czjzek + quad_ct in one
+  recipe): a site missing a parameter that has a soft render-time default
+  (czjzek's `line_fwhm_ppm`) was wrongly rejected as "incomplete" instead of
+  filled from the model registry's own default — the exact "worked for one
+  dataset, silently wrong for another" class of bug this pass was meant to
+  catch. Also fixed: `fit.py::_make_params` crashed on any FIXED parameter
+  with `min == max` (lmfit itself rejects degenerate bounds even for
+  `vary=False`) — bounds are now cleared for fixed parameters, since they
+  have zero effect on optimisation.
+- **New real-data regression**: `test_twod.py::test_fit_2d_on_real_mqmas_data_gives_a_sane_fit`
+  — every prior `fit_2d` test fit a self-generated synthetic "experiment"
+  (a pure round-trip); this fits a real 27Al 3QMAS 2rr and checks for a
+  genuinely converged result, closing a real blind spot the survey found.
+- **Explicit 2D scope boundary** (unchanged, not a gap introduced here, but
+  now documented so it isn't rediscovered): 2D fitting covers 4 models
+  (czjzek, ext_czjzek, quad_ct, quad_csa) and MQMAS-family methods only
+  (`twod.METHODS`); HMQC/DQ-SQ are visualization-only by design
+  (`larmor.correlate` is deliberately unwired, per its own docstring — 2D
+  batch fitting, per-dimension 2D lineshape, and the generalized
+  multi-experiment correlation engine remain roadmap items, not attempted
+  in this pass).
+- Also shipped: 4 hidden "aesthetic" themes (Y2K/Dreamcore/Gen X Soft
+  Club/Vaporwave — `theme.AESTHETIC_THEMES`, restart-required, View ▸ Theme
+  ▸ More styles…) — a just-for-fun addon, same contrast-floor tests as the
+  10 normal presets, kept out of the normal Theme menu.
 
 ## Verdict
 

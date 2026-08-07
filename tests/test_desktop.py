@@ -829,3 +829,41 @@ def test_report_summary_never_forces_window_width(qapp, win):
         "RMSD 0.01  ·  χ² 1e6  ·  " + "unidentifiable (see Correlations)  ·  " * 12)
     # the label's minimum width stays near the widest word, not the sentence
     assert win.results_summary.minimumSizeHint().width() < 200
+
+
+def test_theme_menu_has_a_hidden_aesthetic_submenu(win):
+    """The 4 just-for-fun styles live in their own "More styles…" submenu
+    (+ "Normal" to clear the override) -- separate from the 10 normal
+    presets' own action group, so the everyday Theme list is unaffected."""
+    from larmor.desktop import theme
+
+    assert win._aesthetic_group is not None
+    labels = {a.text() for a in win._aesthetic_group.actions()}
+    assert labels == {"Normal"} | set(theme.aesthetic_names())
+    assert win._theme_group is not None
+    assert {a.text() for a in win._theme_group.actions()} == set(theme.names())
+
+
+def test_set_aesthetic_override_persists_for_next_launch_only(win, monkeypatch):
+    """Choosing a hidden style writes the setting and prompts for a restart
+    -- it must NOT apply live (theme.apply is never called here)."""
+    from PySide6.QtCore import QSettings
+    from larmor.desktop import theme
+
+    settings = QSettings("LARMOR", "app")
+    original = settings.value("appearanceOverride", "")
+    prompts = []
+    monkeypatch.setattr("PySide6.QtWidgets.QMessageBox.information",
+                        staticmethod(lambda *a, **k: prompts.append(a)))
+    before = theme.active().name
+    try:
+        win._set_aesthetic_override("Vaporwave")
+        assert settings.value("appearanceOverride", "") == "Vaporwave"
+        assert prompts and "Vaporwave" in prompts[-1][-1]
+        assert theme.active().name == before          # NOT applied live
+
+        win._set_aesthetic_override("")                # back to Normal
+        assert settings.value("appearanceOverride", "") == ""
+        assert len(prompts) == 2
+    finally:
+        settings.setValue("appearanceOverride", original)

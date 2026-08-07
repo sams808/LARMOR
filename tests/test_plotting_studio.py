@@ -55,6 +55,63 @@ def test_studio_builds_2d_spec_with_contour_and_iso(qapp):
     assert spec["iso_lines"] and spec["iso_lines"][0]["label"] == "CS"
 
 
+def test_studio_2d_spec_carries_nucleus_and_fit_overlay(qapp, tmp_path):
+    from larmor.desktop.plotting_studio import PlottingStudio
+    from larmor.recipe import Recipe, SiteModel, Param
+    rec = Recipe(nucleus="27Al", larmor_frequency_MHz=195.483, sites=[
+        SiteModel(model="czjzek", label="Al", params={
+            "isotropic_chemical_shift_ppm": Param(60.0),
+            "sigma_Cq_MHz": Param(2.0), "shift_fwhm_ppm": Param(6.0),
+            "amplitude": Param(1.0)})])
+    p = tmp_path / "fit.recipe.json"
+    rec.save(p)
+
+    st = PlottingStudio(None)
+    st.kind.setCurrentIndex(1)
+    st.path2d.setText("/some/expno")
+    st.nuc2d.setText("27Al")
+    st.fitRecipe2d.setText(str(p))
+    st.mqmasMethod.setCurrentText("5QMAS")
+    spec = st._spec()
+    assert spec["nucleus"] == "27Al"
+    assert spec["fit_recipe"] == str(p)
+    assert spec["mqmas_method"] == "5QMAS"
+
+    st2 = PlottingStudio(None)
+    st2._apply_spec(spec)
+    assert st2.nuc2d.text() == "27Al"
+    assert st2.fitRecipe2d.text() == str(p)
+    assert st2.mqmasMethod.currentText() == "5QMAS"
+
+
+def test_studio_reference_line_dialog_computes_cs_and_qis_slopes(qapp):
+    from larmor.desktop.plotting_studio import _ReferenceLineDialog
+    dlg = _ReferenceLineDialog(None, "27Al", 195.483)
+    dlg.kind.setCurrentIndex(1)                # CS axis
+    dlg._compute()
+    cs_slope = dlg.slope.value()
+    assert cs_slope != 1.0 and dlg.intercept.value() == pytest.approx(0.0)
+    assert dlg.labelEdit.text() == "CS axis"
+
+    dlg2 = _ReferenceLineDialog(None, "27Al", 195.483)
+    dlg2.kind.setCurrentIndex(2)                # QIS axis
+    dlg2.anchor.setValue(60.0)
+    dlg2._compute()
+    assert dlg2.slope.value() != 1.0
+    # the QIS line passes through the anchor's OWN point on the CS axis
+    # (loose tolerance: slope/intercept round-trip through 4/3-decimal
+    # QDoubleSpinBox display precision, not exact float storage)
+    f1_at_anchor = cs_slope * 60.0
+    assert dlg2.slope.value() * 60.0 + dlg2.intercept.value() == pytest.approx(
+        f1_at_anchor, abs=0.01)
+
+    dlg3 = _ReferenceLineDialog(None)
+    dlg3.kind.setCurrentIndex(0)                # Manual: fields disabled, no crash
+    assert not dlg3.nucleus.isEnabled()
+    dlg3._compute()                             # a no-op for Manual
+    assert dlg3.slope.value() == 1.0
+
+
 def test_journal_style_presets_render():
     from larmor import figures
     for style in ("nature", "acs", "rsc"):
@@ -275,6 +332,61 @@ def test_studio_batch_grid_loads_folder_and_builds_spec(qapp, tmp_path):
     item.setCheckState(Qt.Unchecked)
     spec2 = st._spec()
     assert len(spec2["panels"]) == 1 and len(st._panels) == 2
+
+
+def _fit2(tmp_path, sample):
+    """A two-site fit, for exercising per-component color/legend/hide UI."""
+    from larmor.recipe import Recipe, SiteModel, Param
+    sites = [SiteModel(model="gauss_lor", label="A", params={
+                "isotropic_chemical_shift_ppm": Param(10.0), "shift_fwhm_ppm": Param(5.0),
+                "amplitude": Param(80.0), "gl": Param(1.0, vary=False)}),
+            SiteModel(model="gauss_lor", label="B", params={
+                "isotropic_chemical_shift_ppm": Param(-8.0), "shift_fwhm_ppm": Param(3.0),
+                "amplitude": Param(40.0), "gl": Param(1.0, vary=False)})]
+    rec = Recipe(nucleus="11B", larmor_frequency_MHz=160.0, sample=sample, sites=sites)
+    path = tmp_path / f"{sample}.recipe.json"
+    rec.save(path)
+    return path
+
+
+def test_studio_grid_component_dialog_sets_colors_and_legend_visibility(qapp, tmp_path):
+    from larmor.desktop.plotting_studio import PlottingStudio
+    _fit2(tmp_path, "g0")
+    st = PlottingStudio(None)
+    st.kind.setCurrentIndex(3)
+    st._grid_load(str(tmp_path))
+
+    sites = st._grid_detect_sites()
+    assert [label for _, label in sites] == ["A", "B"]
+
+    # drive the state the dialog would set (offscreen-safe: exercising the
+    # real exec() loop needs a live event loop / mocked QColorDialog, which
+    # buys nothing over checking the state it commits and _spec() reads)
+    st._component_colors[1] = "#ff00ff"
+    st._legend_hide.add(1)
+    spec = st._spec()
+    assert spec["component_colors"] == {1: "#ff00ff"}
+    assert spec["legend_hide"] == [1]
+
+    st2 = PlottingStudio(None)
+    st2._apply_spec(spec)
+    assert st2._component_colors == {1: "#ff00ff"}
+    assert st2._legend_hide == {1}
+
+
+def test_studio_grid_hide_field_roundtrips(qapp, tmp_path):
+    from larmor.desktop.plotting_studio import PlottingStudio
+    _fit2(tmp_path, "g0")
+    st = PlottingStudio(None)
+    st.kind.setCurrentIndex(3)
+    st._grid_load(str(tmp_path))
+    st.gridHide.setText("1")
+    spec = st._spec()
+    assert spec["hide_components"] == [1]
+
+    st2 = PlottingStudio(None)
+    st2._apply_spec(spec)
+    assert st2.gridHide.text() == "1"
 
 
 def test_studio_batch_grid_reorder_and_remove(qapp, tmp_path):
@@ -520,6 +632,30 @@ def test_studio_trace_defaults_from_template_apply_to_new_traces(qapp):
     st._push_trace({"data": {"x": [1, 2], "y": [1, 2]}, "label": "s0"})
     assert st._traces[-1]["end_label"] is True
     assert st._traces[-1]["label"] == "s0"     # trace-specific fields still win
+
+
+def test_studio_auto_update_defaults_off_and_schedule_is_a_noop(qapp):
+    from larmor.desktop.plotting_studio import PlottingStudio
+    st = PlottingStudio(None)
+    assert not st.chkAuto.isChecked()
+    st._debounce.stop()
+    st._schedule()
+    assert not st._debounce.isActive()   # off -> _schedule() does nothing
+    st.chkAuto.setChecked(True)
+    st._schedule()
+    assert st._debounce.isActive()       # on -> the debounce timer arms
+
+
+def test_studio_preview_button_renders_regardless_of_auto_update(qapp):
+    from larmor.desktop.plotting_studio import PlottingStudio
+    st = PlottingStudio(None)
+    assert not st.chkAuto.isChecked()
+    st._push_trace(_trace())
+    before = st._canvas.figure
+    st.title.setText("new title")     # a control change; auto update is off
+    assert st._canvas.figure is before     # nothing rendered yet
+    st._refresh()                          # what the Preview button calls
+    assert st._canvas.figure.axes[0].get_title() == "new title"
 
 
 def test_studio_export_and_spec_roundtrip(qapp, tmp_path, monkeypatch):

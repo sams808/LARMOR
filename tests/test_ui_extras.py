@@ -262,7 +262,6 @@ def test_batch_worker_request_stop_reaches_batch_fit(qapp):
               for k in range(3)]
     w = _BatchWorker(entries, (), 0.1)
 
-    seen = {"n": 0}
     orig_run = w.run
 
     def counting_run():
@@ -394,6 +393,103 @@ def test_batch_dialog_per_spectrum_twopoint_baseline(qapp, tmp_path):
     dlg._clear_cell_baseline(0)
     assert d0["baseline_ops"] == []
     assert np.allclose(d0["amp"], y0)
+
+
+def test_batch_dialog_exclude_component_and_auto_save_recipes(qapp, tmp_path):
+    """Right-click 'Exclude component' locks a site's amplitude to zero for
+    ONE spectrum only; the exclusion is carried into _entries(), survives
+    the fit, is left out of the exported table, and (with the "also save
+    individual fits" checkbox, default on) the CSV export auto-saves a
+    .recipe.json per spectrum next to it -- series_grid then finds the
+    excluded spectrum's own recipe and reconstructs correctly."""
+    from PySide6.QtWidgets import QLabel
+    from larmor import batchfit, series_grid
+    from larmor.desktop.batchfit_dialog import BatchFitDialog
+
+    model = {"nucleus": "11B", "larmor_frequency_MHz": 160.0,
+             "sites": [
+                 {"model": "gauss_lor", "label": "A", "params": {
+                     "isotropic_chemical_shift_ppm": {"value": 14.0},
+                     "shift_fwhm_ppm": {"value": 5.0},
+                     "amplitude": {"value": 80.0, "min": 0},
+                     "gl": {"value": 1.0, "vary": False}}},
+                 {"model": "gauss_lor", "label": "B", "params": {
+                     "isotropic_chemical_shift_ppm": {"value": -5.0},
+                     "shift_fwhm_ppm": {"value": 3.0},
+                     "amplitude": {"value": 40.0, "min": 0},
+                     "gl": {"value": 1.0, "vary": False}}}]}
+    dlg = BatchFitDialog(None, [], model)
+    assert dlg.chkAutoRecipes.isChecked()          # on by default
+
+    x = np.linspace(-30, 40, 400)
+    from larmor import engine
+    from larmor.recipe import Recipe
+
+    def make(sample, seed):
+        rec = Recipe.from_dict({**model, "sample": sample})
+        _, y, _ = engine.simulate(rec, exp_ppm=x)
+        data = y + np.random.default_rng(seed).normal(0, 1.0, x.size)
+        p = tmp_path / f"{sample}.csv"
+        p.write_text("# nucleus = 11B\n# larmor_MHz = 160\n" +
+                     "\n".join(f"{xi:.4f} {yi:.4f}" for xi, yi in zip(x, data)))
+        return p, data
+
+    p0, y0 = make("g0", 0)
+    p1, y1 = make("g1", 1)
+    dlg._data = [
+        {"ppm": x.copy(), "amp": y0, "amp0": y0.copy(), "nucleus": "11B",
+         "larmor": 160.0, "spin": 0.0, "sample": "g0", "path": str(p0),
+         "proc": "", "snr": 50, "baseline_ops": []},
+        {"ppm": x.copy(), "amp": y1, "amp0": y1.copy(), "nucleus": "11B",
+         "larmor": 160.0, "spin": 0.0, "sample": "g1", "path": str(p1),
+         "proc": "", "snr": 50, "baseline_ops": []},
+    ]
+    dlg._cells = [{"title": QLabel()} for _ in range(2)]
+
+    dlg._toggle_exclude(1, 1, True)          # exclude site B for g1 only
+    assert dlg._excluded == {1: {1}}
+    assert "(excluded: B)" in dlg._cells[1]["title"].text()
+    dlg._toggle_exclude(1, 1, False)         # toggling off clears it
+    assert dlg._excluded == {}
+    dlg._toggle_exclude(1, 1, True)
+
+    entries = dlg._entries()
+    amp1 = entries[1][0].sites[1].params["amplitude"]
+    assert amp1.value == 0.0 and amp1.vary is False
+    assert entries[0][0].sites[1].params["amplitude"].vary is True  # g0 unaffected
+
+    dlg._result = batchfit.batch_fit(entries)
+    assert dlg._result.recipes[1].sites[1].params["amplitude"].value == 0.0
+
+    csv_path = tmp_path / "batch_table.csv"
+    from PySide6.QtWidgets import QFileDialog
+
+    orig_get_save = QFileDialog.getSaveFileName
+    QFileDialog.getSaveFileName = staticmethod(lambda *a, **k: (str(csv_path), ""))
+    try:
+        dlg._save_table()
+    finally:
+        QFileDialog.getSaveFileName = orig_get_save
+
+    assert csv_path.exists()
+    saved_recipes = list(tmp_path.glob("*.recipe.json"))
+    assert len(saved_recipes) == 2                   # auto-saved alongside the CSV
+
+    panels, warnings = series_grid.load_panels(str(csv_path))
+    by_sample = {p.sample: p for p in panels}
+    # tier-1 resolution matched the REAL saved recipes (not a CSV rebuild) --
+    # full fidelity, so g1's recipe file still carries both sites (site B
+    # zeroed, not deleted); what must actually change is what's DRAWN
+    assert not by_sample["g0"].reconstructed and not by_sample["g1"].reconstructed
+    assert by_sample["g0"].n_sites == 2 and by_sample["g1"].n_sites == 2
+
+    from larmor import figures
+    import matplotlib.pyplot as plt
+    fig = figures.render({"kind": "batch_grid",
+                          "panels": [{"recipe": by_sample["g1"].path}]})
+    # site B (excluded, zero-amplitude) never drew a component or legend entry
+    assert not fig.legends or "B" not in {t.get_text() for t in fig.legends[0].get_texts()}
+    plt.close(fig)
 
 
 def test_batch_baseline_menu_survives_apply_and_allows_a_second_one(qapp):

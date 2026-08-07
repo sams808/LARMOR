@@ -103,11 +103,13 @@ def test_load_panels_via_csv_with_no_matching_fits_warns_usefully(tmp_path):
     assert any("g0" in w for w in warnings)
 
 
-def test_load_panels_via_csv_uses_source_path_hint_when_no_recipe_matches(tmp_path):
-    """A newer CSV's own source_path column, with an incomplete row set (no
-    position/width -- just amplitude, as an older/partial export might have),
-    resolves a scope to a data-only panel (experiment, no fit) rather than
-    building a broken partial fit -- even with zero .recipe.json around."""
+def test_load_panels_via_csv_reconstructs_even_a_partial_row_set(tmp_path):
+    """A newer CSV with a `model` column but only "amplitude" for a site
+    (every other param used a soft render-time default, so the original
+    recipe never had a Param for it either -- see
+    recipe_from_csv_rows' registry-default fill-in) still reconstructs a
+    full fit, not just a data-only panel -- even with zero .recipe.json
+    around."""
     x = np.linspace(-20, 20, 50)
     raw = tmp_path / "g0_raw.csv"
     raw.write_text("# nucleus = 11B\n# larmor_MHz = 160\n" +
@@ -120,7 +122,7 @@ def test_load_panels_via_csv_uses_source_path_hint_when_no_recipe_matches(tmp_pa
     assert len(panels) == 1
     p = panels[0]
     assert p.sample == "g0" and p.has_data and not p.needs_manual
-    assert p.data_path == str(raw) and p.path == "" and not p.reconstructed
+    assert p.reconstructed and p.path.endswith(".recipe.json")
     assert p.models == ("gauss_lor",)
     # resolved via the source_path hint -- nothing left to ask the user about
     assert not any("couldn't locate data" in w for w in warnings)
@@ -158,11 +160,23 @@ def test_recipe_from_csv_rows_rebuilds_a_complete_fit(tmp_path):
     assert rec.nucleus == "11B" and rec.source_path == str(raw)
 
 
-def test_recipe_from_csv_rows_rejects_incomplete_sites():
-    with pytest.raises(ValueError, match="missing"):
-        series_grid.recipe_from_csv_rows(
-            [], [{"site": "s0", "label": "A", "param": "amplitude",
-                 "value": "100", "stderr": "", "model": "gauss_lor"}])
+def test_recipe_from_csv_rows_fills_missing_params_from_the_model_registry():
+    """A site the CSV only gave "amplitude" for (e.g. every other param used
+    a soft render-time default and so was never a Param the original recipe
+    even carried, like czjzek's line_fwhm_ppm) reconstructs successfully --
+    the missing params take the model registry's own bootstrap defaults,
+    exactly what a freshly-added site of that model starts from, rather than
+    being rejected as "incomplete" (a real bug a mixed-lineshape test caught:
+    czjzek's line_fwhm_ppm is exactly this case)."""
+    rec = series_grid.recipe_from_csv_rows(
+        [], [{"site": "s0", "label": "A", "param": "amplitude",
+             "value": "100", "stderr": "", "model": "gauss_lor"}])
+    assert len(rec.sites) == 1
+    p = rec.sites[0].params
+    assert p["amplitude"].value == 100.0
+    assert p["isotropic_chemical_shift_ppm"].value == 0.0    # registry default
+    assert p["shift_fwhm_ppm"].value == 5.0                  # registry default
+    assert p["gl"].value == 1.0                              # registry default
 
 
 def test_recipe_from_csv_rows_rejects_older_csv_without_model():
@@ -202,6 +216,111 @@ def test_resolve_manual_clears_needs_manual(tmp_path):
     assert fixed.has_data and not fixed.needs_manual
     assert fixed.data_path == str(tmp_path / "found_it.csv")
     assert panel.needs_manual   # original untouched (dataclasses.replace copies)
+
+
+def test_recipe_from_csv_rows_drops_a_site_absent_from_this_scope():
+    """A site that only exists under "shared" (e.g. excluded/zeroed for this
+    sample via batch fit's "Exclude component") must be OMITTED from the
+    reconstructed recipe, not treated as an incomplete/broken site."""
+    shared = [
+        {"scope": "shared", "site": "s0", "label": "A", "param": "gl",
+         "value": "1", "stderr": "", "model": "gauss_lor"},
+        {"scope": "shared", "site": "s1", "label": "B", "param": "gl",
+         "value": "1", "stderr": "", "model": "gauss_lor"},
+    ]
+    # g0 has both sites; g1 (built below) only reports s0 -- s1 was excluded
+    scope_rows_g1 = [
+        {"scope": "g1", "site": "s0", "label": "A",
+         "param": "isotropic_chemical_shift_ppm", "value": "10.0", "stderr": "",
+         "model": "gauss_lor"},
+        {"scope": "g1", "site": "s0", "label": "A", "param": "shift_fwhm_ppm",
+         "value": "5.0", "stderr": "", "model": "gauss_lor"},
+        {"scope": "g1", "site": "s0", "label": "A", "param": "amplitude",
+         "value": "100.0", "stderr": "", "model": "gauss_lor"},
+    ]
+    rec = series_grid.recipe_from_csv_rows(shared, scope_rows_g1)
+    assert len(rec.sites) == 1 and rec.sites[0].label == "A"
+
+
+def test_recipe_from_csv_rows_ignores_population_pct_rows():
+    """population_pct (batchfit's derived integrated-population column) is
+    not a model parameter -- it must not be treated as one, or fed into the
+    site-completeness check, when rebuilding a fit from the CSV."""
+    shared = [{"scope": "shared", "site": "s0", "label": "A", "param": "gl",
+              "value": "1", "stderr": "", "model": "gauss_lor"}]
+    scope_rows = [
+        {"scope": "g0", "site": "s0", "label": "A",
+         "param": "isotropic_chemical_shift_ppm", "value": "10.0", "stderr": "",
+         "model": "gauss_lor"},
+        {"scope": "g0", "site": "s0", "label": "A", "param": "shift_fwhm_ppm",
+         "value": "5.0", "stderr": "", "model": "gauss_lor"},
+        {"scope": "g0", "site": "s0", "label": "A", "param": "amplitude",
+         "value": "100.0", "stderr": "", "model": "gauss_lor"},
+        {"scope": "g0", "site": "s0", "label": "A", "param": "population_pct",
+         "value": "100.0", "stderr": "", "model": "gauss_lor"},
+    ]
+    rec = series_grid.recipe_from_csv_rows(shared, scope_rows)
+    assert len(rec.sites) == 1
+    assert "population_pct" not in rec.sites[0].params
+
+
+def test_load_panels_via_csv_with_excluded_site_reconstructs_the_rest(tmp_path):
+    """End-to-end: a real batch-fit CSV export (via batchfit's own table
+    builders) with one scope excluding a site reconstructs correctly through
+    load_panels -- the excluded site simply isn't part of that scope's panel."""
+    from larmor import engine, batchfit
+    from larmor.recipe import Recipe, SiteModel, Param
+
+    x = np.linspace(-30, 30, 200)
+
+    def start(sample):
+        return Recipe(nucleus="11B", larmor_frequency_MHz=160.0, sample=sample,
+                      sites=[
+                          SiteModel(model="gauss_lor", label="A", params={
+                              "isotropic_chemical_shift_ppm": Param(10.0),
+                              "shift_fwhm_ppm": Param(4.0),
+                              "amplitude": Param(80.0, min=0),
+                              "gl": Param(1.0, vary=False)}),
+                          SiteModel(model="gauss_lor", label="B", params={
+                              "isotropic_chemical_shift_ppm": Param(-8.0),
+                              "shift_fwhm_ppm": Param(3.0),
+                              "amplitude": Param(40.0, min=0),
+                              "gl": Param(1.0, vary=False)})])
+
+    entries = []
+    raws = {}
+    for k, sample in enumerate(["g0", "g1"]):
+        rec = start(sample)
+        _, y, _ = engine.simulate(rec, exp_ppm=x)
+        data = y + np.random.default_rng(k).normal(0, 0.5, x.size)
+        raw = tmp_path / f"{sample}_raw.csv"
+        raw.write_text("# nucleus = 11B\n# larmor_MHz = 160\n" +
+                       "\n".join(f"{xi:.4f} {yi:.4f}" for xi, yi in zip(x, data)))
+        raws[sample] = raw
+        rec.source_path = str(raw)
+        entries.append((rec, x, data, None))
+    entries[1][0].sites[1].params["amplitude"] = Param(
+        0.0, vary=False, min=0.0, max=0.0)   # exclude site B for g1
+
+    res = batchfit.batch_fit(entries)
+    rows = batchfit.shared_table(res)
+    csv_path = tmp_path / "batch_table.csv"
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+        import csv as _csv
+        w = _csv.writer(f)
+        w.writerow(["scope", "site", "label", "param", "value", "stderr",
+                    "model", "source_path"])
+        for r in rows:
+            w.writerow([r["scope"], r["site"], r["label"], r["param"],
+                       r["value"], r["stderr"] or "", r["model"],
+                       r.get("source_path", "")])
+
+    panels, warnings = series_grid.load_panels(str(csv_path))
+    by_sample = {p.sample: p for p in panels}
+    assert by_sample["g0"].n_sites == 2 and by_sample["g0"].reconstructed
+    assert by_sample["g1"].n_sites == 1 and by_sample["g1"].reconstructed
+    rec_g1 = Recipe.load(by_sample["g1"].path)
+    assert rec_g1.sites[0].label == "A"
 
 
 def test_csv_rows_by_scope_groups_correctly(tmp_path):

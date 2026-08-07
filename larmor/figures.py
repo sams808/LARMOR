@@ -208,7 +208,7 @@ def load_trace(t: dict) -> tuple[np.ndarray, np.ndarray, dict]:
         exp_ppm = None
         if not engine.needs_kernel(recipe) and recipe.source_path:
             try:
-                exp_ppm, _, _ = load_trace({"path": recipe.source_path})
+                exp_ppm, _ = load_recipe_experiment(recipe)
             except Exception:
                 exp_ppm = None       # source unreachable -> fall back below
         if exp_ppm is None and not engine.needs_kernel(recipe):
@@ -228,7 +228,7 @@ def load_trace(t: dict) -> tuple[np.ndarray, np.ndarray, dict]:
                 raise ValueError(
                     "residual needs the fit's source spectrum, but this "
                     "recipe carries no source_path (a data-less fit)")
-            ex, ey, _ = load_trace({"path": recipe.source_path})
+            ex, ey = load_recipe_experiment(recipe)
             yi = np.interp(ex, x, total)
             return ex, ey - yi, meta
         raise ValueError(f"unknown recipe part {part!r}")
@@ -252,6 +252,27 @@ def load_trace(t: dict) -> tuple[np.ndarray, np.ndarray, dict]:
         meta["nucleus"] = rec.get("nucleus", "")
     order = np.argsort(x)
     return np.asarray(x)[order], np.asarray(y)[order], meta
+
+
+def load_recipe_experiment(recipe) -> tuple[np.ndarray, np.ndarray]:
+    """The recipe's own experimental spectrum, with its processing pipeline
+    (baseline correction etc.) replayed -- so "experiment" here always
+    matches what the fit was actually made against, not the untouched raw
+    spectrum. Every recipe-branch trace (total/site/residual) and
+    render_batch_grid's "experiment" curve go through this, not a bare
+    load_trace({"path": recipe.source_path}), so a figure never silently
+    shows a different baseline than the one the fit assumed. Falls back to
+    the raw trace if replay fails (e.g. the recipe references a processing
+    op this LARMOR version doesn't have) rather than failing the whole render.
+    """
+    ex, ey, _ = load_trace({"path": recipe.source_path})
+    if getattr(recipe, "processing", None):
+        try:
+            from larmor.loader import apply_processing
+            ex, ey, _ = apply_processing(recipe, ex, ey, recipe.source_path)
+        except Exception:
+            pass
+    return ex, ey
 
 
 def _simulate_model_curve(recipe, n: int = 3000):
@@ -476,10 +497,32 @@ def load_2d(path: str | Path, procno: int = 1):
 
 
 def render_2d(spec: dict) -> Figure:
+    """A 2D contour figure (MQMAS/DQ-SQ/HMQC/...) with optional projections
+    and reference lines.
+
+    ``fit_recipe``: path to a saved 2D fit (a .recipe.json whose sites were
+    fit against this same data via larmor.twod.fit_2d) — when given,
+    overlays the fitted model as a dashed contour on top of the experimental
+    one, at the same levels. Rebuilds an equivalent kernel from the recipe +
+    this data's own grid (larmor.twod._kernel_for, the same call fit_2d makes
+    internally when no kernel is passed) rather than requiring the original
+    kernel object, so a plain saved recipe is enough. Scoped to the models
+    twod.py can simulate in 2D (czjzek/ext_czjzek/quad_ct/quad_csa) — anything
+    else already errors clearly at fit time, so no separate guard is needed
+    here. ``mqmas_method``: "3QMAS" (default) | "5QMAS" | "ST1" — the method
+    the recipe was actually fit with (not stored on the recipe itself).
+    ``nucleus``: for axis labelling only (falls back to fit_recipe.nucleus).
+    """
     style = STYLES[spec.get("style", "article")]
     rc = _rc(spec)
     x, y, Z = load_2d(spec["path"], int(spec.get("procno", 1)))
     Z = Z / np.abs(Z).max()
+
+    fit_recipe = None
+    if spec.get("fit_recipe"):
+        from larmor.recipe import Recipe as _Recipe
+        fit_recipe = _Recipe.load(spec["fit_recipe"])
+    nucleus = spec.get("nucleus") or (fit_recipe.nucleus if fit_recipe else "")
 
     lev = spec.get("levels", {})
     n = int(lev.get("n", 12))
@@ -524,12 +567,31 @@ def render_2d(spec: dict) -> Figure:
             ax.contour(x, y, -Z, levels=levels, colors="crimson",
                        linewidths=0.7, linestyles="dashed")
 
+        if fit_recipe is not None:
+            from larmor.twod import Data2D, _kernel_for, mqmas_f1_axis, simulate_2d
+            data2d = Data2D(f2_ppm=x, f1_ppm=y, z=Z, nucleus=nucleus,
+                            larmor_MHz=fit_recipe.larmor_frequency_MHz,
+                            spin_rate_Hz=fit_recipe.spin_rate_Hz)
+            kernel = _kernel_for(fit_recipe, data2d, spec.get("mqmas_method", "3QMAS"))
+            z_fit, _per_site = simulate_2d(fit_recipe, kernel)
+            f1_fit = mqmas_f1_axis(kernel, fit_recipe)
+            z_fit = z_fit / (np.abs(z_fit).max() or 1.0)
+            ax.contour(kernel.f2_ppm, f1_fit, z_fit, levels=levels,
+                      colors="#c0392b", linewidths=0.8, linestyles="dashed")
+
         xlim = spec.get("xlim") or (float(x.max()), float(x.min()))
         ylim = spec.get("ylim") or (float(y.max()), float(y.min()))
         ax.set_xlim(max(xlim), min(xlim))
         ax.set_ylim(max(ylim), min(ylim))
-        ax.set_xlabel(spec.get("xlabel", "F2 shift (ppm)"))
-        ax.set_ylabel(spec.get("ylabel", "F1 (ppm)"))
+        if nucleus:
+            digits = "".join(c for c in nucleus if c.isdigit())
+            symbol = "".join(c for c in nucleus if c.isalpha())
+            f2_default = nucleus_xlabel(nucleus)
+            f1_default = rf"$^{{{digits}}}${symbol} $\delta_1$ (ppm)"
+        else:
+            f2_default, f1_default = "F2 shift (ppm)", "F1 (ppm)"
+        ax.set_xlabel(spec.get("xlabel") or f2_default)
+        ax.set_ylabel(spec.get("ylabel") or f1_default)
         ax.grid(spec.get("grid", True), ls="-.", lw=0.5, color="0.75")
 
         xsel = (x >= min(xlim)) & (x <= max(xlim))
@@ -737,7 +799,16 @@ def render_batch_grid(spec: dict) -> Figure:
     experiment only). ``shade_only``: a list of site indices to draw and skip
     the rest — combined with ``component_mode="fill"``, this is the
     "composition series highlighting one component" style (draw every other
-    component invisible, shade just the one of interest). ``peak_labels``:
+    component invisible, shade just the one of interest). ``hide_components``:
+    the complementary blacklist — draw every site EXCEPT these (neither line,
+    fill, nor legend entry) — for permanently dropping one line from a figure
+    without excluding it from the underlying fit. ``legend_hide``: like
+    ``hide_components`` but for the legend ONLY — the component still draws
+    in every panel, it's just not named in the shared legend (for a
+    component that's obvious from position/color and doesn't need a label
+    competing for space). ``component_colors``: ``{index: "#hex"}`` —
+    override ``site_color(i)`` for specific components (any index not given
+    keeps the default palette). ``peak_labels``:
     ``None`` | ``"position"`` | ``"label"`` | ``"position+pct"`` (needs
     ``larmor.quantify`` — adds each shown component's integrated population %).
     """
@@ -752,6 +823,9 @@ def render_batch_grid(spec: dict) -> Figure:
     rows = int(np.ceil(n / cols))
     comp_mode = spec.get("component_mode", "fill")     # fill|dashed|hidden
     shade_only = set(spec.get("shade_only") or [])
+    hide_components = set(spec.get("hide_components") or [])
+    legend_hide = set(spec.get("legend_hide") or [])
+    component_colors = {int(k): v for k, v in (spec.get("component_colors") or {}).items()}
     comp_alpha = float(spec.get("component_alpha", 0.35))
     show_total = spec.get("show_total", True)
     show_exp = spec.get("show_experiment", True)
@@ -788,24 +862,40 @@ def render_batch_grid(spec: dict) -> Figure:
             src = recipe.source_path if recipe is not None else p.get("data_path", "")
             if show_exp and src:
                 try:
-                    ex, ey, _ = load_trace({"path": src})
+                    if recipe is not None:
+                        ex, ey = load_recipe_experiment(recipe)
+                    else:
+                        ex, ey, _ = load_trace({"path": src})
                     ax.plot(ex, ey, color="#222", lw=0.9, label="_experiment")
                 except Exception:
                     ex = ey = None
 
             if recipe is not None and comp_mode != "hidden":
+                from larmor.batchfit import is_zeroed_out
+
                 for i, site in enumerate(recipe.sites):
                     if shade_only and i not in shade_only:
                         continue
+                    if i in hide_components:
+                        continue
+                    if is_zeroed_out(site.params.get("amplitude")):
+                        # "Exclude component" (batch fit): a real saved
+                        # recipe still carries this site (zeroed, not
+                        # deleted) for full-fidelity reproducibility, but it
+                        # was explicitly excluded from THIS spectrum's model
+                        # -- never drawn or legend-listed, same as it being
+                        # simply absent from a CSV-reconstructed recipe
+                        continue
                     xi, yi, _ = load_trace({"recipe": p["recipe"], "part": "site",
                                             "site": i})
-                    col = site_color(i)
+                    col = component_colors.get(i) or site_color(i)
                     if comp_mode == "fill":
                         ax.fill_between(xi, yi, color=col, alpha=comp_alpha, lw=0)
                         (line,) = ax.plot(xi, yi, color=col, lw=0.8)
                     else:
                         (line,) = ax.plot(xi, yi, color=col, lw=1.0, ls="--")
-                    legend_handles.setdefault(i, (line, site.label or f"s{i}"))
+                    if i not in legend_hide:
+                        legend_handles.setdefault(i, (line, site.label or f"s{i}"))
                     if peak_labels:
                         pos = site.params.get("isotropic_chemical_shift_ppm")
                         if pos is None:
@@ -858,9 +948,18 @@ def render_batch_grid(spec: dict) -> Figure:
         if spec.get("legend", True) and legend_handles:
             handles = [h for h, _ in legend_handles.values()]
             labels = [lbl for _, lbl in legend_handles.values()]
-            fig.legend(handles, labels, loc="lower center",
-                      ncol=min(len(handles), 8), bbox_to_anchor=(0.5, -0.02),
-                      frameon=False, fontsize=max(fsz - 1, 5))
+            loc = spec.get("legend_loc")
+            if loc and loc != "best":
+                # an explicit placement from the Studio's common Legend
+                # control -- honour it plainly (figure-relative), rather
+                # than always forcing the "row below the whole grid" default
+                fig.legend(handles, labels, loc=loc,
+                          ncol=min(len(handles), spec.get("legend_ncol") or 8),
+                          frameon=False, fontsize=max(fsz - 1, 5))
+            else:
+                fig.legend(handles, labels, loc="lower center",
+                          ncol=min(len(handles), 8), bbox_to_anchor=(0.5, -0.02),
+                          frameon=False, fontsize=max(fsz - 1, 5))
         if spec.get("suptitle"):
             fig.suptitle(spec["suptitle"])
         fig.tight_layout()

@@ -5,7 +5,7 @@ import pytest
 
 from larmor import figures
 
-from conftest import CAALGLASS, EXPNO_1901, NMRVEW_2D, require
+from conftest import BRUKER_2RR_MQMAS, CAALGLASS, EXPNO_1901, NMRVEW_2D, require
 
 
 def test_styles_complete():
@@ -64,6 +64,59 @@ def test_render_2d_nmrvew():
             "levels": {"n": 8}, "slopes": [{"slope": 1.0, "intercept": 0.0}]}
     png = figures.render_png_bytes(spec)
     assert len(png) > 10_000
+
+
+def test_render_2d_nucleus_labels_when_given():
+    import matplotlib.pyplot as plt
+    require(NMRVEW_2D)
+    fig = figures.render({"kind": "2d", "path": str(NMRVEW_2D), "nucleus": "17O"})
+    ax = fig.axes[0]
+    assert "17" in ax.get_xlabel() and "O" in ax.get_xlabel()
+    assert r"\delta_1" in ax.get_ylabel()
+    plt.close(fig)
+    # unset -> the original generic defaults (no regression for existing specs)
+    fig2 = figures.render({"kind": "2d", "path": str(NMRVEW_2D)})
+    assert fig2.axes[0].get_xlabel() == "F2 shift (ppm)"
+    plt.close(fig2)
+
+
+@pytest.mark.slow
+def test_render_2d_overlays_a_real_mqmas_fit(tmp_path):
+    """B1: a fitted 2D recipe overlays as a dashed contour on the real
+    experimental map it was fit against -- the missing piece render_2d had
+    for a genuinely publication-ready MQMAS figure (previously: raw contour
+    only, no way to show the fit)."""
+    require(BRUKER_2RR_MQMAS)
+    from larmor import twod
+    from larmor.recipe import Recipe, SiteModel, Param
+
+    data = twod.read_bruker_2d(str(BRUKER_2RR_MQMAS)).region(
+        f2_range=(-50, 150), f1_range=(-20, 150)).normalized()
+    k = twod.build_mqmas_kernel(
+        data.nucleus, data.larmor_MHz, f2_window=(150.0, -50.0),
+        f1_window=(150.0, -20.0), n2=96, n1=64, n_cq=12, n_eta=4,
+        cq_max_MHz=14.0)
+    rec = Recipe(nucleus=data.nucleus, larmor_frequency_MHz=data.larmor_MHz,
+                spin_rate_Hz=data.spin_rate_Hz, sites=[
+        SiteModel(model="czjzek", label="Al", params={
+            "isotropic_chemical_shift_ppm": Param(65.0, min=30, max=100),
+            "sigma_Cq_MHz": Param(3.0, min=0.2, max=8.0),
+            "shift_fwhm_ppm": Param(6.0, min=1.0, max=25.0),
+            "amplitude": Param(1.0, min=0.0)})])
+    twod.fit_2d(rec, data, kernel=k)
+    recipe_path = tmp_path / "mqmas_fit.recipe.json"
+    rec.save(recipe_path)
+
+    expno = BRUKER_2RR_MQMAS.parents[2]     # .../35/pdata/1/2rr -> .../35
+    import matplotlib.pyplot as plt
+    fig_plain = figures.render({"kind": "2d", "path": str(expno)})
+    fig_fit = figures.render({"kind": "2d", "path": str(expno),
+                              "fit_recipe": str(recipe_path)})
+    ax_plain, ax_fit = fig_plain.axes[0], fig_fit.axes[0]
+    # the overlay adds contour line collections beyond the plain experimental figure
+    assert len(ax_fit.collections) > len(ax_plain.collections)
+    assert "27" in ax_fit.get_xlabel() and "Al" in ax_fit.get_xlabel()
+    plt.close(fig_plain); plt.close(fig_fit)
 
 
 def test_render_series_satrec_and_redor():
@@ -173,6 +226,81 @@ def test_render_batch_grid_hidden_components_shows_no_legend():
                           "component_mode": "hidden"})
     assert not fig.legends
     import matplotlib.pyplot as plt
+    plt.close(fig)
+
+
+def test_render_batch_grid_component_colors_override_the_palette(tmp_path):
+    import matplotlib.pyplot as plt
+    p = _saved_fit(tmp_path, "g0", [10.0, -5.0], [80.0, 40.0], 0)
+    fig = figures.render({"kind": "batch_grid", "panels": [{"recipe": p}],
+                          "component_colors": {1: "#ff00ff"}})
+    ax = fig.axes[0]
+    colors = {tuple(ln.get_color() if isinstance(ln.get_color(), tuple)
+                    else plt.matplotlib.colors.to_rgb(ln.get_color()))
+             for ln in ax.lines if ln.get_label() not in ("_experiment", "_fit")}
+    assert plt.matplotlib.colors.to_rgb("#ff00ff") in colors
+    assert figures.site_color(0) not in ("#ff00ff",)   # site 0 kept its default
+    plt.close(fig)
+
+
+def test_render_batch_grid_hide_components_drops_line_and_legend(tmp_path):
+    import matplotlib.pyplot as plt
+    p = _saved_fit(tmp_path, "g0", [10.0, -5.0], [80.0, 40.0], 0)
+    fig = figures.render({"kind": "batch_grid", "panels": [{"recipe": p}],
+                          "hide_components": [1]})
+    assert {t.get_text() for t in fig.legends[0].get_texts()} == {"A"}
+    plt.close(fig)
+
+
+def test_render_batch_grid_legend_hide_keeps_line_drops_label_only(tmp_path):
+    import matplotlib.pyplot as plt
+    p = _saved_fit(tmp_path, "g0", [10.0, -5.0], [80.0, 40.0], 0)
+    fig = figures.render({"kind": "batch_grid", "panels": [{"recipe": p}],
+                          "legend_hide": [1]})
+    ax = fig.axes[0]
+    # both components still drew (2 component lines + total + experiment)
+    assert len(ax.lines) == 4
+    assert {t.get_text() for t in fig.legends[0].get_texts()} == {"A"}
+    plt.close(fig)
+
+
+def test_render_batch_grid_explicit_legend_loc_is_honoured(tmp_path):
+    import matplotlib.pyplot as plt
+    from matplotlib.legend import Legend
+    p = _saved_fit(tmp_path, "g0", [10.0], [80.0], 0)
+    fig = figures.render({"kind": "batch_grid", "panels": [{"recipe": p}],
+                          "legend_loc": "upper right"})
+    assert fig.legends[0]._loc == Legend.codes["upper right"]
+    plt.close(fig)
+
+
+def test_render_batch_grid_excluded_site_never_drawn_even_in_a_real_recipe(tmp_path):
+    """A saved recipe can carry a site explicitly zero-locked (batch fit's
+    "Exclude component") -- it must never draw a line or a legend entry,
+    even though the recipe file itself still lists it (full fidelity)."""
+    import matplotlib.pyplot as plt
+    from larmor.recipe import Recipe, SiteModel, Param
+    from larmor import engine
+
+    x = np.linspace(-30, 30, 300)
+    sites = [SiteModel(model="gauss_lor", label="A", params={
+                "isotropic_chemical_shift_ppm": Param(10.0), "shift_fwhm_ppm": Param(5.0),
+                "amplitude": Param(80.0), "gl": Param(1.0, vary=False)}),
+            SiteModel(model="gauss_lor", label="B", params={
+                "isotropic_chemical_shift_ppm": Param(-8.0), "shift_fwhm_ppm": Param(3.0),
+                "amplitude": Param(0.0, vary=False, min=0.0, max=0.0),
+                "gl": Param(1.0, vary=False)})]
+    rec = Recipe(nucleus="11B", larmor_frequency_MHz=160.0, sample="g0", sites=sites)
+    _, y, _ = engine.simulate(rec, exp_ppm=x)
+    raw = tmp_path / "g0_raw.csv"
+    raw.write_text("# nucleus = 11B\n# larmor_MHz = 160\n" +
+                   "\n".join(f"{xi:.4f} {yi:.4f}" for xi, yi in zip(x, y)))
+    rec.source_path = str(raw)
+    p = tmp_path / "g0.recipe.json"
+    rec.save(p)
+
+    fig = figures.render({"kind": "batch_grid", "panels": [{"recipe": str(p)}]})
+    assert fig.legends and {t.get_text() for t in fig.legends[0].get_texts()} == {"A"}
     plt.close(fig)
 
 

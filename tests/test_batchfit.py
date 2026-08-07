@@ -344,6 +344,76 @@ def test_batch_fit_is_independent_per_spectrum_not_a_joint_optimisation():
     assert res.rmsd[1] == pytest.approx(solo.fit_rmsd, rel=1e-6)
 
 
+def test_is_zeroed_out_requires_the_full_lock_signature():
+    assert batchfit.is_zeroed_out(Param(0.0, vary=False, min=0.0, max=0.0))
+    assert not batchfit.is_zeroed_out(Param(0.0, vary=True, min=0.0, max=0.0))
+    assert not batchfit.is_zeroed_out(Param(0.0, vary=False, min=0.0, max=None))
+    assert not batchfit.is_zeroed_out(Param(1e-9, vary=False, min=0.0, max=0.0))
+    assert not batchfit.is_zeroed_out(None)
+
+
+def test_free_amplitudes_preserves_an_explicit_zero_lock():
+    r = _start("s")
+    r.sites[1].params["amplitude"] = Param(0.0, vary=False, min=0.0, max=0.0)
+    batchfit.free_amplitudes([r])
+    amp = r.sites[1].params["amplitude"]
+    assert amp.vary is False and amp.value == 0.0     # left locked...
+    other = r.sites[0].params["amplitude"]
+    assert other.vary is True and other.min == 0.0    # ...unlike a normal site
+
+
+def test_batch_fit_respects_a_per_spectrum_zero_exclusion():
+    """"Exclude component": one spectrum's site B is locked to zero BEFORE
+    batch_fit runs -- it must stay exactly zero after fitting, while every
+    OTHER spectrum's site B fits normally (the exclusion is per-spectrum,
+    not global)."""
+    entries = _entries()
+    entries[1][0].sites[1].params["amplitude"] = Param(
+        0.0, vary=False, min=0.0, max=0.0)
+    res = batchfit.batch_fit(entries)
+    ampB = [r.sites[1].params["amplitude"].value for r in res.recipes]
+    assert ampB[1] == 0.0
+    assert not res.recipes[1].sites[1].params["amplitude"].vary
+    assert ampB[0] > 1.0 and ampB[2] > 1.0            # the other two fit normally
+
+
+def test_shared_and_error_table_omit_excluded_sites_and_add_population_pct():
+    entries = _entries()
+    entries[1][0].sites[1].params["amplitude"] = Param(
+        0.0, vary=False, min=0.0, max=0.0)
+    res = batchfit.batch_fit(entries)
+
+    shared_rows = batchfit.shared_table(res)
+    g1_sites = {r["site"] for r in shared_rows if r["scope"] == "g1"}
+    g0_sites = {r["site"] for r in shared_rows if r["scope"] == "g0"}
+    assert "s1" not in g1_sites                       # excluded for g1...
+    assert "s1" in g0_sites                            # ...but present for g0
+
+    pop = [r for r in shared_rows if r["param"] == "population_pct"]
+    assert pop                                          # rows were added
+    g0_pop = {r["site"]: r["value"] for r in pop if r["scope"] == "g0"}
+    assert set(g0_pop) == {"s0", "s1"}
+    assert sum(g0_pop.values()) == pytest.approx(100.0, abs=0.5)
+    g1_pop = {r["site"]: r["value"] for r in pop if r["scope"] == "g1"}
+    assert set(g1_pop) == {"s0"}                        # excluded site has no population row
+    assert g1_pop["s0"] == pytest.approx(100.0, abs=0.5)  # the only site left = 100%
+
+    batchfit.batch_error_analysis(res, _data_for(entries), method="covariance")
+    err_rows = batchfit.error_table(res, method="covariance")
+    err_pop = [r for r in err_rows if r["param"] == "population_pct"]
+    assert err_pop and all(r["error_method"] == "covariance" for r in err_pop)
+    assert not any(r["scope"] == "g1" and r["site"] == "s1" for r in err_pop)
+    # error-method consistency: population stderr differs from a naive
+    # "whatever stderr happened to be on the recipe" snapshot once a
+    # DIFFERENT method is requested
+    batchfit.batch_error_analysis(res, _data_for(entries), method="montecarlo",
+                                  n_trials=30, seed=3)
+    mc_rows = batchfit.error_table(res, method="montecarlo")
+    mc_pop = {(r["scope"], r["site"]): r["stderr"]
+             for r in mc_rows if r["param"] == "population_pct"}
+    assert all(v is not None and v >= 0 for v in mc_pop.values())
+
+
 def test_batch_fit_should_stop_gives_every_entry_a_result():
     """A Stop mid-batch must not misalign indices: every entry (fit or not)
     gets a recipe/rmsd/label/per_dataset entry, in order, so the dialog's

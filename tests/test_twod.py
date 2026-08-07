@@ -5,7 +5,7 @@ import pytest
 from larmor import twod
 from larmor.recipe import Param, Recipe, SiteModel
 
-from conftest import CAALGLASS_MQ, require
+from conftest import BRUKER_2RR_MQMAS, CAALGLASS_MQ, require
 
 
 def test_hypercomplex_phasing_is_exact():
@@ -297,6 +297,42 @@ def test_caalglass_mq_parses_as_2d():
     recipe, warnings = fxmla.to_recipe(dm)
     assert [s.model for s in recipe.sites] == ["czjzek", "czjzek"]
     assert any("MQMAS" in w for w in warnings)
+
+
+@pytest.mark.slow
+def test_fit_2d_on_real_mqmas_data_gives_a_sane_fit():
+    """Closes a real gap found in a code-generality survey: every existing
+    fit_2d test (above) fits a SELF-GENERATED synthetic "experiment" (a pure
+    round-trip on data twod.simulate_2d itself produced) -- 2D MQMAS fitting
+    had never actually been run against a real experimental dataset in the
+    suite. This fits a real 27Al 3QMAS 2rr (neg8A2O-0F/35) with one czjzek
+    site and checks for a genuinely converged, physically sane result (not
+    exact literature agreement -- an unknown real glass, one site is a
+    simplification) so a real regression here would actually be caught."""
+    require(BRUKER_2RR_MQMAS)
+    data = twod.read_bruker_2d(str(BRUKER_2RR_MQMAS)).region(
+        f2_range=(-50, 150), f1_range=(-20, 150)).normalized()
+    # a modest kernel (not twod.MQMAS_SETTINGS' full-size default) -- plenty
+    # for one site on a real spectrum, keeps this fast (~2 s total)
+    k = twod.build_mqmas_kernel(
+        data.nucleus, data.larmor_MHz, f2_window=(150.0, -50.0),
+        f1_window=(150.0, -20.0), n2=96, n1=64, n_cq=12, n_eta=4,
+        cq_max_MHz=14.0)
+    rec = Recipe(nucleus=data.nucleus, larmor_frequency_MHz=data.larmor_MHz,
+                spin_rate_Hz=data.spin_rate_Hz, sites=[
+        SiteModel(model="czjzek", label="Al", params={
+            "isotropic_chemical_shift_ppm": Param(65.0, min=30, max=100),
+            "sigma_Cq_MHz": Param(3.0, min=0.2, max=8.0),
+            "shift_fwhm_ppm": Param(6.0, min=1.0, max=25.0),
+            "amplitude": Param(1.0, min=0.0)})])
+    res = twod.fit_2d(rec, data, kernel=k)
+    assert res.z_fit.shape == k.shape and len(res.per_site) == 1
+    assert res.rmsd < 0.35                 # real spectrum: noise + unmodelled detail
+    assert res.lmfit_result.errorbars      # real uncertainties, not just a point value
+    p = rec.sites[0].params
+    assert 40.0 < p["isotropic_chemical_shift_ppm"].value < 90.0
+    assert 0.5 < p["sigma_Cq_MHz"].value < 6.0
+    assert p["sigma_Cq_MHz"].stderr is not None and p["sigma_Cq_MHz"].stderr > 0
 
 
 def test_2d_operations():

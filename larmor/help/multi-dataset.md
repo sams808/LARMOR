@@ -162,6 +162,15 @@ populations change. **Ctrl/Shift-click** the spectra in the Explorer and press
    reproduces the exact corrected spectrum — re-running the global **Fit
    baseline…** afterward recomputes from raw and clears any per-spectrum
    corrections layered on top.
+   The same right-click menu has **Exclude component ▸**, for a line that
+   only belongs in *some* of the spectra (e.g. a Bi-contact line only real
+   for Bi-loaded glasses): pick it for the spectra where it doesn't apply,
+   and its amplitude is **locked to exactly zero for that spectrum only**,
+   instead of fit. An excluded component never draws, never gets a legend entry, and is
+   **left out of the exported table/CSV and any plot built from it**
+   entirely — not reported as "a fitted zero". The panel title grows an
+   "(excluded: …)" note so it's never mistaken for a fit that simply found
+   nothing there.
 4. **One Fit button; choose what may move.** **Fit** refines **only the
    amplitudes** per spectrum — everything else is held at the recipe. Whichever
    parameters you tick under **Release per spectrum** are additionally fit,
@@ -196,8 +205,17 @@ populations change. **Ctrl/Shift-click** the spectra in the Explorer and press
    each**
    (it prompts in turn, showing the sample and proc number) — each carries the
    errors from the last error-calculation you ran. **Save table…**
-   writes a `batch_table.csv` of the shared and per-spectrum values. **Series
-   plot…** charts how any parameter (δ_iso, width, C_Q, η, or population %)
+   writes a `batch_table.csv` of the shared and per-spectrum values, **plus
+   each site's integrated population %** (a `population_pct` row per site,
+   same integral-over-the-window quantification as Report/§5) — the exact
+   column the Plotting studio's species-distribution chart wants, without a
+   separate export step. An excluded component (above) is left out entirely,
+   not reported at 0%. The "also save individual fits… next to the CSV"
+   checkbox (on by default) auto-writes each spectrum's `.recipe.json`
+   alongside the table too, so the Plotting studio's batch-grid finds the
+   real saved fits automatically (bounds, `vary`, baseline processing
+   included) instead of only having the CSV's bare values to work from.
+   **Series plot…** charts how any parameter (δ_iso, width, C_Q, η, or population %)
    evolves along the series. Its **Error bars** menu chooses which computed error
    to draw and export — *covariance*, *Monte-Carlo*, or *χ² profile* (whichever
    you ran in step 5), or *none*. The **integrated population %** carries an
@@ -249,11 +267,44 @@ figure without hand-assembling panels:
      folder (a Bruker `1r`). Double-click the row any time afterward to try
      again if you cancelled, and double-click a resolved row to rename its
      panel title.
+   - **CSV-only reconstruction.** When no saved `.recipe.json` matches, the
+     studio rebuilds a full fit straight from the CSV's own rows (needs the
+     `model` column, on every export since §6) — a site the CSV never gave
+     every parameter for (an unreleased/held one, or one a model defaults
+     when omitted) fills in from that model's own registry default, the same
+     value a freshly-added site of it would start from. Works across mixed
+     models in one recipe (e.g. a Gauss/Lorentz line next to a Czjzek site)
+     — each site keeps its own model and parameter set. An excluded
+     component (§6) is simply absent from the reconstructed recipe, exactly
+     as if it were never part of that spectrum's model.
+   - **Component colors / legend…** — a color swatch and an "in legend"
+     checkbox per detected component (from the first resolved panel's fit).
+     **Hide** (next to **Shade only**) drops a component entirely — no line,
+     fill, or legend entry, in every panel — while an unchecked legend box
+     keeps the line but drops just its label (for a component that's obvious
+     from position/color and doesn't need one competing for space).
 3. **Species distribution** — a 100%-stacked bar of species/oxygen population
    vs. composition. Type the category × species table directly, or **Load
    from batch CSV…** to pivot one parameter (e.g. `amplitude`) out of a
    `batch_table*.csv` automatically, one row per sample — each bar normalizes
    to 100% on its own, so raw amplitudes work without pre-converting to %.
+4. **Auto update / Preview.** Auto update is **off by default** — a batch
+   grid with many panels (each a full reconstruction + population-%
+   integral) can be slow to redo on every tweak. **Preview** renders on
+   demand regardless of the toggle; turning Auto update on immediately
+   re-renders once so it never shows a stale preview.
+5. **2D publication figures** (the "2D contour" kind). **Nucleus** and
+   **Larmor (MHz)** drive axis labels *and* the computed reference lines
+   below. **Fit overlay** takes a saved 2D fit (`Decomposition ▸ Fit` on an
+   MQMAS map, then save the recipe) and draws it as a dashed contour over the
+   experimental one, at the **MQMAS method** you fit it with (not stored on
+   the recipe itself — pick the one you used). **Add iso/quad line…** now
+   offers **Compute** for the two lines an MQMAS figure actually needs: the
+   **CS axis** (the diagonal a pure-chemical-shift site would sit on) and the
+   **QIS axis** (the direction a site moves as C_Q grows, drawn from its own
+   δ_iso) — both use `larmor.twod`'s own physics for the chosen
+   nucleus/method rather than a hand-typed slope, and stay fully editable
+   afterward.
 
 ## 8 · Sequential fit — forward / backward series sweep (1D)
 

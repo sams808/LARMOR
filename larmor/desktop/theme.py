@@ -80,6 +80,11 @@ class Theme:
     accent: str          # highlight / selection / default button
     plot_bg: str
     series: list[str] = field(default_factory=list)
+    #: extra QSS appended after the normal parametric stylesheet -- empty for
+    #: every normal theme (zero behaviour change); a hidden "aesthetic" theme
+    #: (see AESTHETIC_THEMES) uses this for a decorative flourish (gradients,
+    #: glow) beyond what the flat primitive-colour system expresses
+    flourish_qss: str = ""
 
     # ---- derived roles (consistent by construction) ----
     @property
@@ -160,10 +165,12 @@ class Theme:
         return self._signal["measure"]
 
 
-def _theme(name, is_dark, window, base, text, text_dim, border, accent, plot_bg):
+def _theme(name, is_dark, window, base, text, text_dim, border, accent, plot_bg,
+          flourish_qss=""):
     return Theme(name=name, is_dark=is_dark, window=window, base=base, text=text,
                  text_dim=text_dim, border=border, accent=accent, plot_bg=plot_bg,
-                 series=(DARK_SERIES if is_dark else LIGHT_SERIES))
+                 series=(DARK_SERIES if is_dark else LIGHT_SERIES),
+                 flourish_qss=flourish_qss)
 
 
 # ---- the ten presets ------------------------------------------------------
@@ -194,8 +201,57 @@ DEFAULT = "Light"
 _ACTIVE = THEMES[DEFAULT]
 
 
+# ---- hidden "aesthetic" themes ---------------------------------------------
+# A just-for-fun easter egg (View ▸ Theme ▸ More styles…, restart required —
+# see app.py) — deliberately NOT in THEMES/names() so the normal Theme menu
+# stays exactly the 10 presets above. Same Theme dataclass, same derived
+# roles, same contrast floor as every other theme (see test_theme.py) — a
+# "fun" theme that's illegible isn't worth shipping — plus a `flourish_qss`
+# snippet for the bit of personality flat primitive colours can't express.
+_Y2K_QSS = """
+QPushButton { border: 1px solid #4a5a54; border-radius: 7px;
+  background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #34423c, stop:1 #1b2224); }
+QPushButton:hover { border-color: #39ff8f; }
+QPushButton:pressed { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #1b2224, stop:1 #263029); }
+QGroupBox, QTabWidget::pane { border: 1px solid #33403c; border-radius: 6px; }
+"""
+_VAPORWAVE_QSS = """
+QPushButton { border: 1px solid #ff2fd6; border-radius: 4px;
+  background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #241238, stop:1 #2e1648); }
+QPushButton:hover { border-color: #4be8ff; }
+QMenuBar { border-bottom: 1px solid #ff2fd6; }
+"""
+_SOFT_QSS = """
+QPushButton { border: 1px solid #cfe8de; border-radius: 10px;
+  background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #f8fdfb, stop:1 #e9f6f0); }
+QPushButton:hover { border-color: #3f9d7a; }
+"""
+_DREAMCORE_QSS = """
+QPushButton { border: 1px solid #e6d5e8; border-radius: 10px;
+  background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #faf5f8, stop:1 #f3e8f0); }
+QPushButton:hover { border-color: #9b6bb3; }
+"""
+
+AESTHETIC_THEMES: dict[str, Theme] = {t.name: t for t in [
+    _theme("Y2K", True, "#14181a", "#1b2224", "#e8fff2", "#7fd9a8",
+          "#33403c", "#39ff8f", "#101314", flourish_qss=_Y2K_QSS),
+    _theme("Dreamcore", False, "#f3ecf0", "#faf5f8", "#4a3b52", "#8a7a92",
+          "#e6d5e8", "#9b6bb3", "#fbf7fa", flourish_qss=_DREAMCORE_QSS),
+    _theme("Gen X Soft Club", False, "#eef6f2", "#f8fdfb", "#2f4d43",
+          "#6b9686", "#cfe8de", "#3f9d7a", "#fbfefc", flourish_qss=_SOFT_QSS),
+    _theme("Vaporwave", True, "#1a0b2e", "#241238", "#f2e6ff", "#c9a0e8",
+          "#3d1f57", "#ff2fd6", "#160a26", flourish_qss=_VAPORWAVE_QSS),
+]}
+
+
 def names() -> list[str]:
     return list(THEMES)
+
+
+def aesthetic_names() -> list[str]:
+    """The hidden, just-for-fun styles (View ▸ Theme ▸ More styles…) —
+    kept out of names()/THEMES so the normal Theme menu is unaffected."""
+    return list(AESTHETIC_THEMES)
 
 
 def active() -> Theme:
@@ -203,7 +259,7 @@ def active() -> Theme:
 
 
 def get(name: str) -> Theme:
-    return THEMES.get(name, THEMES[DEFAULT])
+    return THEMES.get(name) or AESTHETIC_THEMES.get(name) or THEMES[DEFAULT]
 
 
 def set_active(name: str) -> Theme:
@@ -272,7 +328,7 @@ QScrollBar::handle:vertical {{ background: {t.border}; border-radius: 5px; min-h
 QScrollBar:horizontal {{ background: {t.header}; height: 12px; }}
 QScrollBar::handle:horizontal {{ background: {t.border}; border-radius: 5px; min-width: 30px; }}
 QDialog {{ background: {t.window}; }}
-"""
+""" + t.flourish_qss
 
 
 def palette(t: Theme):

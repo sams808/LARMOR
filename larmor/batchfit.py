@@ -29,6 +29,18 @@ from larmor import fit as fitmod
 from larmor.recipe import Recipe
 
 
+def is_zeroed_out(amp) -> bool:
+    """True for a site's amplitude explicitly locked at exactly zero — the
+    "Exclude component" signature the batch-fit dialog writes onto a
+    spectrum's starting recipe before fitting (site doesn't belong in THIS
+    spectrum's model at all, e.g. a Bi-contact line for a Bi-free glass).
+    Distinguished from a site that simply happens to fit to ~0 amplitude
+    (which stays ``vary=True``, min=0 as usual) by requiring the box itself
+    is the point value: ``vary=False`` AND ``value == min == max == 0``."""
+    return bool(amp is not None and not amp.vary and amp.value == 0.0
+                and amp.min == 0.0 and amp.max == 0.0)
+
+
 def free_amplitudes(recipes: list[Recipe]) -> None:
     """Make every site's amplitude free and allow it to reach zero, in place.
 
@@ -36,11 +48,15 @@ def free_amplitudes(recipes: list[Recipe]) -> None:
     amplitude (``vary=False``) or bounded it above zero (``min>0``) must be
     overridden — otherwise a component can neither adapt per spectrum nor vanish
     where it is absent. Linked amplitudes (``expr``) are left alone (they follow
-    their master)."""
+    their master). A site explicitly excluded for this spectrum (see
+    ``is_zeroed_out``) is left locked at exactly zero instead — it isn't
+    "an amplitude that fit near zero", it's "not part of this spectrum"."""
     for r in recipes:
         for s in r.sites:
             amp = s.params.get("amplitude")
             if amp is None or getattr(amp, "expr", None):
+                continue
+            if is_zeroed_out(amp):
                 continue
             amp.vary = True
             if amp.min is None or amp.min > 0:
@@ -372,6 +388,8 @@ def error_table(result: BatchFitResult, method: str | None = None) -> list[dict]
     for k, rec in enumerate(result.recipes):       # per-spectrum free params
         d = detail[k] if k < len(detail) else {}
         for i, site in enumerate(rec.sites):
+            if is_zeroed_out(site.params.get("amplitude")):
+                continue    # "Exclude component" -- not part of this spectrum
             for pn, p in site.params.items():
                 if pn == "amplitude" or pn in result.released:
                     pe = d.get((i, pn))
@@ -386,6 +404,53 @@ def error_table(result: BatchFitResult, method: str | None = None) -> list[dict]
                                  "sigma_pct": pct, "ci68_lo": lo, "ci68_hi": hi,
                                  "error_method": method, "model": site.model,
                                  "source_path": rec.source_path or ""})
+        rows.extend(_population_rows(rec, result.labels[k], method,
+                                     {i: d.get((i, "amplitude")) for i in range(len(rec.sites))}))
+    return rows
+
+
+def _population_rows(rec: Recipe, scope: str, method: str | None,
+                     amp_errors: dict | None = None) -> list[dict]:
+    """Integrated population % rows (one per site) for a single fitted
+    recipe, via ``larmor.quantify`` -- the same integral-over-the-window
+    computation the Report tool (F6) and Batch fit report use. Excluded
+    (zero-locked) sites are skipped, same as their other rows. When
+    ``amp_errors`` maps site index -> a ParamError from a specific error
+    method, the population error reported matches THAT method rather than
+    whatever stderr happens to already be on the recipe, so it's consistent
+    with the rest of an error_table export. Never raises: a model missing a
+    param quantify() needs (e.g. an external "spectrum" background site)
+    just means no population rows for this spectrum, not a failed export."""
+    from copy import deepcopy
+    from larmor.quantify import quantify
+
+    try:
+        rec_q = deepcopy(rec) if amp_errors else rec
+        if amp_errors:
+            for i, site in enumerate(rec_q.sites):
+                pe = amp_errors.get(i)
+                if pe is not None and getattr(pe, "stderr", None) is not None:
+                    amp = site.params.get("amplitude")
+                    if amp is not None:
+                        amp.stderr = pe.stderr
+        q = quantify(rec_q)
+    except Exception:
+        return []
+
+    rows = []
+    for row in q["rows"]:
+        i = int(row["site"][1:])
+        if i >= len(rec.sites) or is_zeroed_out(rec.sites[i].params.get("amplitude")):
+            continue
+        site = rec.sites[i]
+        entry = {"scope": scope, "site": row["site"],
+                "label": site.label or site.model, "param": "population_pct",
+                "value": row["fraction_pct"], "stderr": row["fraction_err_pct"],
+                "model": site.model, "source_path": rec.source_path or ""}
+        if method is not None:      # error_table's richer schema
+            entry.update(sigma_pct=None, ci68_lo=None, ci68_hi=None,
+                        error_method=method)
+        rows.append(entry)
     return rows
 
 
@@ -406,6 +471,8 @@ def shared_table(result: BatchFitResult) -> list[dict]:
                              "model": site.model, "source_path": ""})
     for k, rec in enumerate(result.recipes):
         for i, site in enumerate(rec.sites):
+            if is_zeroed_out(site.params.get("amplitude")):
+                continue    # "Exclude component" -- not part of this spectrum
             for pn, p in site.params.items():
                 if pn == "amplitude" or pn in result.released:
                     rows.append({"scope": result.labels[k], "site": f"s{i}",
@@ -413,4 +480,5 @@ def shared_table(result: BatchFitResult) -> list[dict]:
                                  "value": p.value, "stderr": p.stderr,
                                  "model": site.model,
                                  "source_path": rec.source_path or ""})
+        rows.extend(_population_rows(rec, result.labels[k], None))
     return rows

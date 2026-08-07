@@ -113,8 +113,22 @@ def recipe_from_csv_rows(shared_rows: list[dict], scope_rows: list[dict],
     shell -- exactly what render_batch_grid needs to draw experiment+fit
     together like any other saved fit.
     """
+    # a site only belongs to THIS scope if it has at least one row of its
+    # own -- a site that appears only under "shared" (e.g. deliberately
+    # excluded/zeroed for this sample, or simply not part of this scope's
+    # ladder) must not be synthesised here just because some OTHER scope
+    # uses it; that would wrongly report it "incomplete" below instead of
+    # correctly absent (see batchfit.is_zeroed_out / "Exclude component")
+    present_sites = {r["site"] for r in scope_rows if r.get("param") != "population_pct"}
+
     by_site: dict[str, dict] = {}
     for r in list(shared_rows) + list(scope_rows):
+        # a derived, non-model value (batchfit's population-% export column)
+        # -- never part of a site's fittable Param set
+        if r.get("param") == "population_pct":
+            continue
+        if r["site"] not in present_sites:
+            continue
         model = (r.get("model") or "").strip()
         if not model:
             raise ValueError(
@@ -148,14 +162,17 @@ def recipe_from_csv_rows(shared_rows: list[dict], scope_rows: list[dict],
     for k in sorted(by_site, key=_site_key):
         s = by_site[k]
         try:
-            needed = models.get(s["model"]).param_names
+            model_obj = models.get(s["model"])
         except KeyError:
             raise ValueError(f"unknown model {s['model']!r} for site {k}") from None
-        missing = [n for n in needed if n not in s["params"]]
-        if missing:
-            raise ValueError(
-                f"site {k} ({s['label'] or k}) is missing {', '.join(missing)} "
-                "in this CSV -- can't rebuild a complete fit from it")
+        # a param the CSV never had a row for (e.g. czjzek's line_fwhm_ppm,
+        # which the render function itself defaults to 0.0 when absent from
+        # a recipe) gets the model's own registry default -- the same value
+        # a freshly-added site of this model would start from, and exactly
+        # what the ORIGINAL recipe's simulate() used when it too omitted the
+        # param. Not an error: only a genuinely unknown MODEL name is.
+        for pd in model_obj.params:
+            s["params"].setdefault(pd.name, Param(pd.default))
         sites.append(SiteModel(model=s["model"], label=s["label"], params=s["params"]))
 
     nucleus, larmor_MHz, spin_rate_Hz = "", 0.0, 0.0

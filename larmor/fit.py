@@ -113,6 +113,14 @@ def _make_params(recipe: Recipe) -> lmfit.Parameters:
             pd = pdefs.get(pname)
             pmin = p.min if p.min is not None else (pd.min if pd else None)
             pmax = p.max if p.max is not None else (pd.max if pd else None)
+            # bounds are meaningless for a FIXED parameter (lmfit never moves
+            # it) but lmfit's own Parameter still validates min != max
+            # unconditionally -- widen to unbounded rather than crash on a
+            # degenerate recipe bound like min=max=0 (the "exclude this
+            # component" signature batch fit writes onto a locked amplitude,
+            # or simply an old recipe with an accidental min==max)
+            if not p.vary:
+                pmin, pmax = None, None
             params.add(
                 _lmfit_name(i, site, pname),
                 value=p.value,

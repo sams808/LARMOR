@@ -250,9 +250,23 @@ def op_iterbaseline(s: Spectrum1D, dead_time_pts: int = 0,
     from larmor.baseline import iterative_baseline
 
     res = iterative_baseline(
-        s.y.real, dead_time_pts=int(dead_time_pts), smoothness=float(smoothness),
-        threshold_factor=float(threshold_factor), max_iter=int(max_iter))
+        s.y.real, x=s.x_ppm, dead_time_pts=int(dead_time_pts),
+        smoothness=float(smoothness), threshold_factor=float(threshold_factor),
+        max_iter=int(max_iter))
     s.y = res.corrected + 1j * s.y.imag
+    return s
+
+
+def op_flat_baseline(s: Spectrum1D, edge_frac: float = 0.05) -> Spectrum1D:
+    """Flat baseline: subtract the median of the two spectrum edges (a quick
+    DC-offset correction when the baseline is genuinely flat, not rolling).
+    `edge_frac` of the points at each end are pooled for the median."""
+    if s.domain != "freq":
+        raise ValueError("baseline correction needs frequency-domain data")
+    y = s.y.real
+    n = max(3, int(y.size * edge_frac))
+    level = float(np.median(np.concatenate([y[:n], y[-n:]])))
+    s.y = (y - level) + 1j * s.y.imag
     return s
 
 
@@ -580,6 +594,7 @@ OPS = {
     "autophase": op_autophase,
     "baseline": op_baseline,
     "iterbaseline": op_iterbaseline,
+    "flat_baseline": op_flat_baseline,
     "twopoint_bg": op_twopoint_bg,
     "sr": op_sr,
     "magnitude": op_magnitude,

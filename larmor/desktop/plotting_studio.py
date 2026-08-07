@@ -23,8 +23,8 @@ from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QColorDialog, QComboBox, QDialog,
     QDialogButtonBox, QDoubleSpinBox, QFileDialog, QFormLayout, QHBoxLayout,
     QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu,
-    QPushButton, QSpinBox, QTableWidget, QTableWidgetItem, QToolButton,
-    QVBoxLayout, QWidget,
+    QMessageBox, QPushButton, QSpinBox, QTableWidget, QTableWidgetItem,
+    QToolButton, QVBoxLayout, QWidget,
 )
 
 from larmor import figures, series_grid
@@ -119,6 +119,92 @@ class _TraceEditor(QDialog):
         return t
 
 
+class _ReferenceLineDialog(QDialog):
+    """A 2D reference line for an MQMAS/correlation figure: either typed by
+    hand, or "Compute"d from larmor.twod's own physics (f1_cs_scale for the
+    chemical-shift/diagonal axis, qis_slope for the quadrupolar-induced-shift
+    axis) for a given nucleus/Larmor frequency/method — always still
+    editable afterward, never silently overriding a hand-tuned line."""
+
+    def __init__(self, parent, nucleus: str = "", larmor_MHz: float = 0.0):
+        super().__init__(parent)
+        self.setWindowTitle("Reference line")
+        form = QFormLayout(self)
+        self.kind = QComboBox()
+        self.kind.addItems(["Manual", "CS axis (computed)", "QIS axis (computed)"])
+        self.kind.currentIndexChanged.connect(self._kind_changed)
+        form.addRow("Kind", self.kind)
+        self.nucleus = QLineEdit(nucleus)
+        form.addRow("Nucleus", self.nucleus)
+        self.larmor = QDoubleSpinBox(); self.larmor.setRange(0, 2000)
+        self.larmor.setDecimals(3); self.larmor.setValue(larmor_MHz)
+        form.addRow("Larmor (MHz)", self.larmor)
+        self.method = QComboBox(); self.method.addItems(["3QMAS", "5QMAS", "ST1"])
+        form.addRow("Method", self.method)
+        self.anchor = QDoubleSpinBox(); self.anchor.setRange(-1e4, 1e4)
+        self.anchor.setDecimals(2)
+        self.anchor.setToolTip(
+            "the site's own isotropic shift (ppm) — the QIS axis is drawn "
+            "starting from this point on the CS axis, moving away as Cq grows")
+        form.addRow("Anchor δiso (ppm, QIS only)", self.anchor)
+        b_compute = QPushButton("Compute")
+        b_compute.setToolTip(
+            "runs a reference mrsimulator simulation for this nucleus/method "
+            "(cached) — a few seconds the first time")
+        b_compute.clicked.connect(self._compute)
+        form.addRow(b_compute)
+        self.slope = QDoubleSpinBox(); self.slope.setRange(-20, 20)
+        self.slope.setDecimals(4); self.slope.setValue(1.0)
+        form.addRow("Slope (F1 per F2)", self.slope)
+        self.intercept = QDoubleSpinBox(); self.intercept.setRange(-1e5, 1e5)
+        self.intercept.setDecimals(3)
+        form.addRow("Intercept (ppm)", self.intercept)
+        self.labelEdit = QLineEdit()
+        form.addRow("Label", self.labelEdit)
+        self._kind_changed()
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.accepted.connect(self.accept); bb.rejected.connect(self.reject)
+        form.addRow(bb)
+
+    def _kind_changed(self):
+        manual = self.kind.currentIndex() == 0
+        for w in (self.nucleus, self.larmor, self.method):
+            w.setEnabled(not manual)
+        self.anchor.setEnabled(self.kind.currentIndex() == 2)   # QIS only
+
+    def _compute(self):
+        nucleus = self.nucleus.text().strip()
+        larmor = self.larmor.value()
+        if self.kind.currentIndex() == 0:
+            return
+        if not nucleus or not larmor:
+            QMessageBox.warning(self, "Reference line",
+                                "enter a nucleus and Larmor frequency first")
+            return
+        method = self.method.currentText()
+        try:
+            from larmor.twod import f1_cs_scale, qis_slope
+            cs = f1_cs_scale(nucleus, larmor, method)
+            if self.kind.currentIndex() == 1:                    # CS axis
+                self.slope.setValue(cs)
+                self.intercept.setValue(0.0)
+                if not self.labelEdit.text():
+                    self.labelEdit.setText("CS axis")
+            else:                                                 # QIS axis
+                raw_slope = qis_slope(nucleus, larmor, method) * cs
+                anchor = self.anchor.value()
+                self.slope.setValue(raw_slope)
+                self.intercept.setValue(cs * anchor - raw_slope * anchor)
+                if not self.labelEdit.text():
+                    self.labelEdit.setText("QIS axis")
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.warning(self, "Reference line", f"couldn't compute: {exc}")
+
+    def values(self) -> dict:
+        return {"slope": self.slope.value(), "intercept": self.intercept.value(),
+                "label": self.labelEdit.text() or None, "linestyle": "--"}
+
+
 class PlottingStudio(QDialog):
     def __init__(self, parent=None, spec: dict | None = None):
         super().__init__(parent)
@@ -128,6 +214,8 @@ class PlottingStudio(QDialog):
         self._iso: list[dict] = []
         self._panels: list[dict] = []       # batch-grid: [{"path","sample","include"}]
         self._trace_defaults: dict = {}     # from the selected template, applied to new traces
+        self._component_colors: dict[int, str] = {}   # batch-grid: site index -> "#hex"
+        self._legend_hide: set[int] = set()            # batch-grid: site indices, legend only
 
         from PySide6.QtWidgets import QSplitter
         root = QHBoxLayout(self)
@@ -207,6 +295,14 @@ class PlottingStudio(QDialog):
         b_pick2 = QPushButton("EXPNO…"); b_pick2.clicked.connect(self._pick_2d)
         p2l.addWidget(self.path2d, 1); p2l.addWidget(b_pick2)
         b2.addRow("2D path", p2row)
+        self.nuc2d = QLineEdit()
+        self.nuc2d.setPlaceholderText("e.g. 27Al — for axis labels + computed lines")
+        b2.addRow("Nucleus", self.nuc2d)
+        self.larmor2d = QDoubleSpinBox()
+        self.larmor2d.setRange(0, 2000); self.larmor2d.setDecimals(3)
+        self.larmor2d.setToolTip("¹H Larmor frequency (MHz) — needed for "
+                                 "computed reference lines (Add iso/quad line…)")
+        b2.addRow("Larmor (MHz)", self.larmor2d)
         self.cmode = QComboBox()
         self.cmode.addItems(["contour", "density", "filled", "both"])
         b2.addRow("Contour mode", self.cmode)
@@ -226,6 +322,21 @@ class PlottingStudio(QDialog):
         b_iso = QPushButton("Add iso / quad line…"); b_iso.clicked.connect(self._add_iso)
         self.isoLabel = QLabel("0 lines")
         b2.addRow(b_iso, self.isoLabel)
+        self.fitRecipe2d = QLineEdit()
+        fr2row = QWidget(); fr2l = QHBoxLayout(fr2row); fr2l.setContentsMargins(0, 0, 0, 0)
+        b_pickfit2 = QPushButton("Recipe…"); b_pickfit2.clicked.connect(self._pick_fit_2d)
+        fr2l.addWidget(self.fitRecipe2d, 1); fr2l.addWidget(b_pickfit2)
+        b2.addRow("Fit overlay", fr2row)
+        self.fitRecipe2d.setToolTip(
+            "a saved 2D fit (.recipe.json from Decomposition ▸ Fit on a 2D "
+            "map) — overlays it as a dashed contour on the experimental map, "
+            "for a publication figure that shows both")
+        self.mqmasMethod = QComboBox()
+        self.mqmasMethod.addItems(["3QMAS", "5QMAS", "ST1"])
+        self.mqmasMethod.setToolTip(
+            "the MQMAS method the fit overlay was actually fit with — not "
+            "stored on the recipe itself, so specify it here")
+        b2.addRow("MQMAS method", self.mqmasMethod)
         cv.addWidget(self.box2d)
 
         # series controls
@@ -307,6 +418,13 @@ class PlottingStudio(QDialog):
                                   "one component per panel (a composition-"
                                   "series style)")
         gf.addRow("Shade only", self.gridShade)
+        self.gridHide = QLineEdit()
+        self.gridHide.setPlaceholderText("empty = hide none")
+        self.gridHide.setToolTip("site indices to drop ENTIRELY (0-based, "
+                                 "comma-separated) — no line, fill, or "
+                                 "legend entry in any panel, unlike 'Shade "
+                                 "only' this doesn't affect other sites")
+        gf.addRow("Hide", self.gridHide)
         self.gridLabels = QComboBox()
         self.gridLabels.addItems(["none", "position", "label", "position+pct"])
         self.gridLabels.setToolTip("label each shown component with its "
@@ -317,6 +435,12 @@ class PlottingStudio(QDialog):
         self.gridExp = QCheckBox("experiment"); self.gridExp.setChecked(True)
         gtrow = QHBoxLayout(); gtrow.addWidget(self.gridTotal); gtrow.addWidget(self.gridExp)
         gf.addRow("Show", gtrow)
+        b_comps = QPushButton("Component colors / legend…")
+        b_comps.setToolTip("per-component color override and legend "
+                           "visibility (detected from the first resolved "
+                           "panel's fit)")
+        b_comps.clicked.connect(self._grid_edit_components)
+        gf.addRow(b_comps)
         bg.addLayout(gf)
         self.gridMsg = QLabel(""); self.gridMsg.setWordWrap(True)
         self.gridMsg.setStyleSheet("color:#888; font-size:10px;")
@@ -447,6 +571,22 @@ class PlottingStudio(QDialog):
         self._canvas = FigureCanvasQTAgg(Figure(figsize=(5, 4)))
         self._canvas.setMinimumSize(560, 460)
         rv.addWidget(self._canvas, 1)
+        prow = QHBoxLayout()
+        self.chkAuto = QCheckBox("Auto update")
+        self.chkAuto.setToolTip(
+            "re-render on every control change — off by default since a "
+            "batch grid with many panels (each a full fit reconstruction + "
+            "population-% integral) can be slow to redo on every tweak; use "
+            "Preview to render on demand, or turn this on for cheap plots")
+        self.chkAuto.toggled.connect(self._auto_toggled)
+        b_preview = QPushButton("Preview")
+        b_preview.setToolTip("render now, regardless of Auto update")
+        b_preview.clicked.connect(self._refresh)
+        prow.addWidget(self.chkAuto)
+        prow.addWidget(b_preview)
+        prow.addStretch(1)
+        rv.addLayout(prow)
+
         arow = QHBoxLayout()
         b_exp = QPushButton("Export…"); b_exp.clicked.connect(self._export)
         b_save = QPushButton("Save spec…"); b_save.clicked.connect(self._save_spec)
@@ -458,8 +598,10 @@ class PlottingStudio(QDialog):
         self.msg = QLabel(""); self.msg.setWordWrap(True)
         rv.addWidget(self.msg)
 
-        # auto-update: a short debounce so the preview follows every control change
-        # without re-rendering on each keystroke
+        # auto-update: OFF by default (see chkAuto above) -- when on, a short
+        # debounce follows every control change without re-rendering on each
+        # keystroke; when off, _schedule() is a no-op and only Preview (or an
+        # explicit action like loading a CSV) renders
         from PySide6.QtCore import QTimer
         self._debounce = QTimer(self); self._debounce.setSingleShot(True)
         self._debounce.setInterval(180)
@@ -481,6 +623,11 @@ class PlottingStudio(QDialog):
             w.currentIndexChanged.connect(self._schedule)
         self.gridCols.valueChanged.connect(self._schedule)
         self.gridShade.textChanged.connect(self._schedule)
+        self.gridHide.textChanged.connect(self._schedule)
+        self.nuc2d.textChanged.connect(self._schedule)
+        self.larmor2d.valueChanged.connect(self._schedule)
+        self.fitRecipe2d.textChanged.connect(self._schedule)
+        self.mqmasMethod.currentIndexChanged.connect(self._schedule)
         for w in (self.gridTotal, self.gridExp):
             w.toggled.connect(self._schedule)
         self.barTable.itemChanged.connect(self._schedule)
@@ -491,7 +638,12 @@ class PlottingStudio(QDialog):
         self._kind_changed()
 
     def _schedule(self, *a):
-        self._debounce.start()
+        if self.chkAuto.isChecked():
+            self._debounce.start()
+
+    def _auto_toggled(self, on: bool):
+        if on:
+            self._refresh()   # don't leave a stale preview when turning it on
 
     # ------------------------------------------------------------------ traces
     def _add_trace_menu(self):
@@ -568,17 +720,10 @@ class PlottingStudio(QDialog):
             self._refresh()
 
     def _add_iso(self):
-        slope, ok = QInputDialog.getDouble(self, "Reference line",
-                                           "Slope (F1 per F2):", 1.0, -20, 20, 4)
-        if not ok:
+        dlg = _ReferenceLineDialog(self, self.nuc2d.text(), self.larmor2d.value())
+        if dlg.exec() != QDialog.Accepted:
             return
-        inter, ok = QInputDialog.getDouble(self, "Reference line",
-                                           "Intercept (ppm):", 0.0, -1e5, 1e5, 3)
-        if not ok:
-            return
-        label, _ = QInputDialog.getText(self, "Reference line", "Label:")
-        self._iso.append({"slope": slope, "intercept": inter,
-                          "label": label or None, "linestyle": "--"})
+        self._iso.append(dlg.values())
         self.isoLabel.setText(f"{len(self._iso)} line(s)")
         self._refresh()
 
@@ -729,6 +874,75 @@ class PlottingStudio(QDialog):
             self._grid_refresh_list()
             self._refresh()
 
+    def _grid_detect_sites(self) -> list[tuple[int, str]]:
+        """(index, label) for the first loaded panel with a resolvable fit --
+        used to populate the component colors/legend editor. Any panel works
+        since the shared model's site count/labels are the same across a
+        batch (an excluded/zeroed site is still listed here — it just won't
+        draw or need a color, per render_batch_grid's own handling)."""
+        from larmor.recipe import Recipe
+        for p in self._panels:
+            if not p.get("path"):
+                continue
+            try:
+                rec = Recipe.load(p["path"])
+            except Exception:
+                continue
+            if rec.sites:
+                return [(i, s.label or f"s{i}") for i, s in enumerate(rec.sites)]
+        return []
+
+    def _grid_edit_components(self):
+        sites = self._grid_detect_sites()
+        if not sites:
+            self.gridMsg.setText(
+                "load panels with at least one resolvable fit first to edit "
+                "component colors/legend")
+            return
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Component colors / legend")
+        lay = QVBoxLayout(dlg)
+        form = QFormLayout()
+        rows: dict[int, tuple] = {}
+        for i, label in sites:
+            row = QWidget(); rl = QHBoxLayout(row); rl.setContentsMargins(0, 0, 0, 0)
+            color = self._component_colors.get(i) or figures.site_color(i)
+            btn = QPushButton(color)
+            btn.setStyleSheet(f"background:{color};")
+
+            def pick(_checked=False, ii=i, b=btn):
+                c = QColorDialog.getColor()
+                if c.isValid():
+                    self._component_colors[ii] = c.name()
+                    b.setText(c.name()); b.setStyleSheet(f"background:{c.name()};")
+            btn.clicked.connect(pick)
+            chk = QCheckBox("in legend")
+            chk.setChecked(i not in self._legend_hide)
+            rl.addWidget(btn, 1); rl.addWidget(chk)
+            form.addRow(label, row)
+            rows[i] = (btn, chk)
+        lay.addLayout(form)
+        b_reset = QPushButton("Reset colors/legend to defaults")
+        b_reset.clicked.connect(lambda: self._grid_reset_components(dlg))
+        lay.addWidget(b_reset)
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.accepted.connect(dlg.accept); bb.rejected.connect(dlg.reject)
+        lay.addWidget(bb)
+        if dlg.exec() != QDialog.Accepted:
+            return
+        for i, (_btn, chk) in rows.items():
+            if chk.isChecked():
+                self._legend_hide.discard(i)
+            else:
+                self._legend_hide.add(i)
+        self._refresh()
+
+    def _grid_reset_components(self, dlg):
+        self._component_colors.clear()
+        self._legend_hide.clear()
+        dlg.reject()
+        self._refresh()
+
     # ------------------------------------------------------------------ species bar
     def _bar_load_csv(self):
         """Pivot one parameter (e.g. amplitude) out of a batch_table*.csv into
@@ -819,6 +1033,23 @@ class PlottingStudio(QDialog):
         if folder:
             self.path2d.setText(folder); self._refresh()
 
+    def _pick_fit_2d(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "2D fit recipe", "", "LARMOR recipe (*.json);;All (*)")
+        if not path:
+            return
+        self.fitRecipe2d.setText(path)
+        try:
+            from larmor.recipe import Recipe
+            rec = Recipe.load(path)
+            if rec.nucleus and not self.nuc2d.text():
+                self.nuc2d.setText(rec.nucleus)
+            if rec.larmor_frequency_MHz and not self.larmor2d.value():
+                self.larmor2d.setValue(rec.larmor_frequency_MHz)
+        except Exception:
+            pass
+        self._refresh()
+
     def _pick_series(self):
         folder = QFileDialog.getExistingDirectory(self, "Series EXPNO folder")
         if folder:
@@ -901,7 +1132,7 @@ class PlottingStudio(QDialog):
                 spec["xtick_rotation"] = 45
             return spec
         if k == 1:
-            return {"kind": "2d", "path": self.path2d.text(),
+            spec = {"kind": "2d", "path": self.path2d.text(),
                     "contour_mode": self.cmode.currentText(),
                     "cmap": self.cmap.currentText(),
                     "levels": {"n": self.nlev.value(),
@@ -911,6 +1142,12 @@ class PlottingStudio(QDialog):
                     "proj_right": self.chkRight.isChecked(),
                     "negative": self.chkNeg.isChecked(),
                     "iso_lines": self._iso, **common}
+            if self.nuc2d.text().strip():
+                spec["nucleus"] = self.nuc2d.text().strip()
+            if self.fitRecipe2d.text().strip():
+                spec["fit_recipe"] = self.fitRecipe2d.text().strip()
+                spec["mqmas_method"] = self.mqmasMethod.currentText()
+            return spec
         if k == 2:
             return {"kind": "series", "path": self.pathSer.text(),
                     "mode": self.serMode.currentText(),
@@ -965,6 +1202,20 @@ class PlottingStudio(QDialog):
                         pass
             if shade:
                 spec["shade_only"] = shade
+            hide = []
+            for tok in self.gridHide.text().split(","):
+                tok = tok.strip()
+                if tok:
+                    try:
+                        hide.append(int(tok))
+                    except ValueError:
+                        pass
+            if hide:
+                spec["hide_components"] = hide
+            if self._legend_hide:
+                spec["legend_hide"] = sorted(self._legend_hide)
+            if self._component_colors:
+                spec["component_colors"] = dict(self._component_colors)
             return spec
         # k == 4: species distribution
         nrows, ncols = self.barTable.rowCount(), self.barTable.columnCount()
@@ -1063,6 +1314,9 @@ class PlottingStudio(QDialog):
             self.cmap.setCurrentText(spec.get("cmap", "viridis"))
             self._iso = list(spec.get("iso_lines", []))
             self.isoLabel.setText(f"{len(self._iso)} line(s)")
+            self.nuc2d.setText(spec.get("nucleus", ""))
+            self.fitRecipe2d.setText(spec.get("fit_recipe", ""))
+            self.mqmasMethod.setCurrentText(spec.get("mqmas_method", "3QMAS"))
         elif kind == 2:
             self.pathSer.setText(spec.get("path", ""))
             self.serMode.setCurrentText(spec.get("mode", "satrec"))
@@ -1083,9 +1337,13 @@ class PlottingStudio(QDialog):
             self.gridCols.setValue(int(spec.get("cols") or 0))
             self.gridComp.setCurrentText(spec.get("component_mode", "fill"))
             self.gridShade.setText(",".join(str(i) for i in spec.get("shade_only", [])))
+            self.gridHide.setText(",".join(str(i) for i in spec.get("hide_components", [])))
             self.gridLabels.setCurrentText(spec.get("peak_labels") or "none")
             self.gridTotal.setChecked(spec.get("show_total", True))
             self.gridExp.setChecked(spec.get("show_experiment", True))
+            self._legend_hide = set(spec.get("legend_hide", []))
+            self._component_colors = {int(k): v for k, v in
+                                      (spec.get("component_colors") or {}).items()}
         elif kind == 4:
             cats = spec.get("categories", [])
             series = spec.get("series", [])

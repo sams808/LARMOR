@@ -89,9 +89,56 @@ def test_no_hardcoded_light_surfaces_in_desktop():
         "; ".join(offenders)
 
 
+def test_aesthetic_themes_hidden_from_the_normal_menu():
+    """The 4 just-for-fun styles (Y2K/Dreamcore/Gen X Soft Club/Vaporwave)
+    must not appear in names()/THEMES -- the normal View ▸ Theme list (and
+    the "10 presets" contract above) stays exactly as it was."""
+    assert len(T.AESTHETIC_THEMES) == 4
+    assert set(T.aesthetic_names()) == {
+        "Y2K", "Dreamcore", "Gen X Soft Club", "Vaporwave"}
+    assert not set(T.aesthetic_names()) & set(T.names())
+
+
+@pytest.mark.parametrize("name", list(T.AESTHETIC_THEMES))
+def test_aesthetic_theme_contrast_floors(name):
+    """A "fun" theme that's illegible isn't worth shipping -- same floor as
+    the 10 normal presets (test_contrast_floors above), same reasoning."""
+    t = T.AESTHETIC_THEMES[name]
+    C = T.contrast
+    for role, bg in (("window", t.window), ("base", t.base), ("alt_base", t.alt_base),
+                     ("hover", t.hover), ("surface", t.surface)):
+        assert C(t.text, bg) >= 4.5, (name, "text/" + role, round(C(t.text, bg), 2))
+    assert C(t.text, t.header) >= 4.0, (name, "text/header")
+    assert C(t.text_dim, t.window) >= 3.0, (name, "text_dim/window")
+    assert C(t.accent_text, t.accent) >= 4.5, (name, "accent_text/accent")
+    assert C(t.accent, t.base) >= 3.0, (name, "accent/base")
+    assert C(t.experiment, t.plot_bg) >= 4.5, (name, "experiment/plot")
+    for role in ("model", "baseline", "pivot", "measure"):
+        v = C(getattr(t, role), t.plot_bg)
+        assert v >= 3.0, (name, role + "/plot", round(v, 2))
+    for i, s in enumerate(t.series):
+        v = C(s, t.plot_bg)
+        assert v >= 3.0, (name, f"series[{i}]={s}", round(v, 2))
+
+
+def test_aesthetic_theme_qss_carries_its_flourish():
+    for name, t in T.AESTHETIC_THEMES.items():
+        assert t.flourish_qss.strip(), name
+        css = T.qss(t)
+        assert t.flourish_qss.strip() in css
+    # the 10 normal themes are byte-for-byte unaffected (empty flourish)
+    for name, t in T.THEMES.items():
+        assert t.flourish_qss == ""
+
+
+def test_get_resolves_aesthetic_theme_names_too():
+    assert T.get("Vaporwave").name == "Vaporwave"
+    assert T.get("nonsense-name").name == T.DEFAULT
+
+
 def test_palette_builds_for_every_theme():
     from PySide6.QtWidgets import QApplication
     app = QApplication.instance() or QApplication([])   # noqa: F841
-    for name in T.names():
+    for name in list(T.names()) + T.aesthetic_names():
         pal = T.palette(T.get(name))
         assert pal is not None
