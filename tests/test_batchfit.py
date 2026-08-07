@@ -377,6 +377,51 @@ def test_batch_fit_respects_a_per_spectrum_zero_exclusion():
     assert ampB[0] > 1.0 and ampB[2] > 1.0            # the other two fit normally
 
 
+def test_excluded_site_params_stay_fixed_even_when_that_param_is_released():
+    """Regression: excluding site B on one spectrum while ALSO releasing
+    'isotropic_chemical_shift_ppm'/'shift_fwhm_ppm' globally (the real-world
+    combination that triggered this bug — "release per spectrum" ticked
+    alongside an excluded component) must NOT leave site B's position/width
+    varying on the excluded spectrum. A zero-amplitude site contributes
+    nothing to the residual, so those would be dead-gradient free parameters:
+    pure optimiser waste at best, degraded convergence for the real
+    parameters at worst — exactly the "worse RMSD, slower fit" symptom
+    reported against a live 8-line/17-spectrum batch fit."""
+    entries = _entries()
+    entries[1][0].sites[1].params["amplitude"] = Param(
+        0.0, vary=False, min=0.0, max=0.0)
+    res = batchfit.batch_fit(
+        entries, release=("isotropic_chemical_shift_ppm", "shift_fwhm_ppm"))
+
+    excluded_site = res.recipes[1].sites[1]
+    assert excluded_site.params["amplitude"].value == 0.0
+    assert not excluded_site.params["isotropic_chemical_shift_ppm"].vary
+    assert not excluded_site.params["shift_fwhm_ppm"].vary
+
+    # the same site on the OTHER (non-excluded) spectra is still released
+    for k in (0, 2):
+        site = res.recipes[k].sites[1]
+        assert site.params["isotropic_chemical_shift_ppm"].vary
+        assert site.params["shift_fwhm_ppm"].vary
+    # and site A (never excluded, anywhere) is released on every spectrum,
+    # including the one where site B was excluded
+    for r in res.recipes:
+        assert r.sites[0].params["isotropic_chemical_shift_ppm"].vary
+        assert r.sites[0].params["shift_fwhm_ppm"].vary
+
+    # quality check: fitting fewer (real) free parameters for the excluded
+    # spectrum should not produce a worse fit than fitting it with the SAME
+    # exclusion but WITHOUT the (harmless-in-theory, harmful-in-practice)
+    # dead columns -- i.e. RMSD should match a control run that never had
+    # site B in the model to begin with.
+    control = _entries()[1]
+    control[0].sites.pop(1)                 # site B never existed at all
+    control_res = batchfit.batch_fit(
+        [control, _entries()[0], _entries()[2]],
+        release=("isotropic_chemical_shift_ppm", "shift_fwhm_ppm"))
+    assert res.rmsd[1] == pytest.approx(control_res.rmsd[0], abs=1e-6)
+
+
 def test_shared_and_error_table_omit_excluded_sites_and_add_population_pct():
     entries = _entries()
     entries[1][0].sites[1].params["amplitude"] = Param(

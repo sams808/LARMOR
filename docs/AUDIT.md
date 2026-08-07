@@ -237,9 +237,43 @@ gap for "any technique" was on the **2D side**, addressed this pass:
   multi-experiment correlation engine remain roadmap items, not attempted
   in this pass).
 - Also shipped: 4 hidden "aesthetic" themes (Y2K/Dreamcore/Gen X Soft
-  Club/Vaporwave — `theme.AESTHETIC_THEMES`, restart-required, View ▸ Theme
-  ▸ More styles…) — a just-for-fun addon, same contrast-floor tests as the
+  Club/Vaporwave — `theme.AESTHETIC_THEMES`, applied live, View ▸ Theme ▸
+  More styles…) — a just-for-fun addon, same contrast-floor tests as the
   10 normal presets, kept out of the normal Theme menu.
+
+## 8 · 2026-08-07: exclude-component regression (real-data catch)
+
+Reported against a live 17-spectrum/8-line batch fit (PBi 31P): spectra with
+a component excluded ("P0/P1(Bi contact)") showed markedly worse RMSD than
+the rest, and the whole batch fit was slower than before the exclude feature
+existed — both symptoms traced to one bug in `batchfit.batch_fit()`.
+
+- **Root cause**: the "Exclude component" feature (§7, A1) locks only the
+  excluded site's *amplitude* to zero for that spectrum. `batch_fit()`'s
+  per-parameter release loop, though, decides `vary` **by parameter name
+  across the whole model**, uniformly for every site — it never checked
+  whether a given site was excluded before honouring "Release per spectrum"
+  for that site's position/width. With δiso and FWHM released (the reported
+  configuration), an excluded site's position/width were *still* set
+  `vary=True` with relaxed bounds, even though amplitude=0 makes them
+  provably inert (zero gradient w.r.t. the residual). Two dead-gradient free
+  parameters per excluded spectrum is wasted work at best (slower fits) and,
+  in practice, degraded the optimiser's convergence on the real parameters
+  too (worse RMSD) — exactly the two symptoms reported.
+- **Fix** (`larmor/batchfit.py`, `batch_fit()`): a site whose amplitude is
+  `is_zeroed_out` now has *every* one of its other parameters forced
+  `vary=False` for that spectrum, unconditionally — before the `released`
+  check runs, not after. An excluded site is now fully inert everywhere,
+  not just in amplitude.
+- **New regression test**
+  (`test_batchfit.py::test_excluded_site_params_stay_fixed_even_when_that_param_is_released`):
+  reproduces the exact real-world combination (exclusion + a globally
+  released position/width), asserts the excluded site's params stay fixed
+  while the same params stay released on every other spectrum and on every
+  other (non-excluded) site, and asserts the excluded spectrum's RMSD
+  exactly matches a control fit where that site never existed in the model
+  at all — proving the extra dead parameters were the entire discrepancy.
+- Full suite green after the fix (`pytest tests/ -q`).
 
 ## Verdict
 

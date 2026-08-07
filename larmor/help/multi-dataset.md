@@ -170,7 +170,10 @@ populations change. **Ctrl/Shift-click** the spectra in the Explorer and press
    **left out of the exported table/CSV and any plot built from it**
    entirely — not reported as "a fitted zero". The panel title grows an
    "(excluded: …)" note so it's never mistaken for a fit that simply found
-   nothing there.
+   nothing there. An excluded component's position/width/shape are also held
+   fixed for that spectrum, even if "Release per spectrum" is ticked for
+   them elsewhere — a line that isn't there has nothing to release, and
+   letting it drift would only hand the fit useless free parameters.
 4. **One Fit button; choose what may move.** **Fit** refines **only the
    amplitudes** per spectrum — everything else is held at the recipe. Whichever
    parameters you tick under **Release per spectrum** are additionally fit,

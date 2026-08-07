@@ -844,26 +844,25 @@ def test_theme_menu_has_a_hidden_aesthetic_submenu(win):
     assert {a.text() for a in win._theme_group.actions()} == set(theme.names())
 
 
-def test_set_aesthetic_override_persists_for_next_launch_only(win, monkeypatch):
-    """Choosing a hidden style writes the setting and prompts for a restart
-    -- it must NOT apply live (theme.apply is never called here)."""
+def test_set_aesthetic_override_applies_live_and_normal_restores_it(win):
+    """Choosing a hidden style writes the setting AND applies it immediately
+    (no restart needed); choosing "Normal" restores whichever normal theme
+    was active before, also live."""
     from PySide6.QtCore import QSettings
     from larmor.desktop import theme
 
     settings = QSettings("LARMOR", "app")
-    original = settings.value("appearanceOverride", "")
-    prompts = []
-    monkeypatch.setattr("PySide6.QtWidgets.QMessageBox.information",
-                        staticmethod(lambda *a, **k: prompts.append(a)))
-    before = theme.active().name
+    original_override = settings.value("appearanceOverride", "")
+    original_theme = settings.value("theme", theme.DEFAULT)
     try:
+        win._set_theme(original_theme)                 # known starting point
         win._set_aesthetic_override("Vaporwave")
         assert settings.value("appearanceOverride", "") == "Vaporwave"
-        assert prompts and "Vaporwave" in prompts[-1][-1]
-        assert theme.active().name == before          # NOT applied live
+        assert theme.active().name == "Vaporwave"       # applied live
 
-        win._set_aesthetic_override("")                # back to Normal
+        win._set_aesthetic_override("")                 # back to Normal
         assert settings.value("appearanceOverride", "") == ""
-        assert len(prompts) == 2
+        assert theme.active().name == original_theme    # restored live
     finally:
-        settings.setValue("appearanceOverride", original)
+        settings.setValue("appearanceOverride", original_override)
+        win._set_theme(original_theme)

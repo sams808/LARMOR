@@ -169,9 +169,18 @@ def batch_fit(entries: list[tuple], *, share: tuple[str, ...] | None = None,
     # released (which are fit per spectrum within ±release_frac of the recipe value)
     for r in recipes:
         for s in r.sites:
+            excluded_site = is_zeroed_out(s.params.get("amplitude"))
             for pn, p in s.params.items():
                 if pn == "amplitude" or getattr(p, "expr", None):
                     continue                     # amplitude free; links follow master
+                if excluded_site:
+                    # a site excluded for THIS spectrum contributes nothing
+                    # (amplitude locked at 0) — its position/width/etc. have no
+                    # effect on the residual, so releasing them only hands the
+                    # optimiser dead-gradient columns: pure waste at best, and
+                    # at worst noise that degrades the real fit's convergence.
+                    p.vary = False
+                    continue
                 if pn in released:
                     p.vary = True
                     p.min, p.max = _relax_bounds(float(p.value), release_frac,

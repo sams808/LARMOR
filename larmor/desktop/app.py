@@ -1487,11 +1487,12 @@ class MainWindow(QMainWindow):
             self._theme_group.addAction(act)
 
         # hidden, just-for-fun styles — tucked into a submenu (not a sibling
-        # of the 10 normal presets) and restart-required rather than live, so
-        # this never affects the everyday, professional-looking Theme list
+        # of the 10 normal presets) so they never clutter the everyday,
+        # professional-looking Theme list, but applied live just like any
+        # other theme once picked.
         m.addSeparator()
         more = m.addMenu("More styles…")
-        more.setToolTip("experimental — applies the next time LARMOR starts")
+        more.setToolTip("just-for-fun styles, applied immediately")
         self._aesthetic_group = QActionGroup(self)
         self._aesthetic_group.setExclusive(True)
         current_override = QSettings("LARMOR", "app").value("appearanceOverride", "")
@@ -1509,17 +1510,21 @@ class MainWindow(QMainWindow):
             self._aesthetic_group.addAction(act)
 
     def _set_aesthetic_override(self, name: str):
-        """Persist a hidden "aesthetic" style choice (or "" to go back to
-        Normal) for the NEXT launch only — see main()'s startup theme code.
-        Not applied live: these lean on decorative QSS flourishes on top of
-        the normal role system, and a full restart is the simplest way to
-        guarantee every already-built widget picks it up consistently."""
-        from PySide6.QtWidgets import QMessageBox
-
-        QSettings("LARMOR", "app").setValue("appearanceOverride", name)
-        msg = (f"“{name}” will apply the next time you start LARMOR."
-              if name else "Back to Normal — restart LARMOR to apply.")
-        QMessageBox.information(self, "Style", msg)
+        """Switch to a hidden "aesthetic" style (or back to "Normal", which
+        restores whichever normal theme was last active) — applied live, the
+        same as picking any theme from the main list. Kept as a *separate*
+        settings key (``appearanceOverride``) from the main list's ``theme``
+        key so "Normal" always knows what to restore, and so picking a
+        normal theme later cleanly drops any aesthetic override."""
+        settings = QSettings("LARMOR", "app")
+        settings.setValue("appearanceOverride", name)
+        effective = name or settings.value("theme", theme.DEFAULT)
+        self._apply_theme_live(effective)
+        # reflect the switch in the main list's checkmarks too: none checked
+        # while a genuine aesthetic is active, the matching entry when "Normal"
+        for act in self._theme_group.actions():
+            act.setChecked((not name) and act.text() == effective)
+        self.statusBar().showMessage(f"style: {name or effective}")
 
     def _build_textsize_menu(self, parent):
         from PySide6.QtGui import QActionGroup
@@ -1548,12 +1553,14 @@ class MainWindow(QMainWindow):
         QSettings("LARMOR", "app").setValue("fontPt", int(pt))
         self.statusBar().showMessage(f"text size: {pt} pt")
 
-    def _set_theme(self, name: str):
-        """Switch the colour theme live and remember it."""
+    def _apply_theme_live(self, name: str):
+        """Apply a theme (normal or hidden aesthetic) to the running app and
+        every already-built widget — shared by both the main Theme list and
+        the hidden "More styles…" submenu, which differ only in what they
+        persist to QSettings."""
         from PySide6.QtWidgets import QApplication
 
         theme.apply(QApplication.instance(), name)
-        QSettings("LARMOR", "app").setValue("theme", name)
         # persistent hand-coloured label + the status-bar progress bar
         self.exp_label.setStyleSheet(
             f"color: {theme.active().accent}; font-weight: 600;")
@@ -1571,6 +1578,19 @@ class MainWindow(QMainWindow):
                 pass
             self.request_simulation()
             self._update_paddles()
+
+    def _set_theme(self, name: str):
+        """Switch to a normal theme live, remember it, and drop any hidden
+        aesthetic override (picking from the visible list is an explicit
+        "no, use THIS one" that should always win)."""
+        settings = QSettings("LARMOR", "app")
+        settings.setValue("theme", name)
+        if settings.value("appearanceOverride", ""):
+            settings.setValue("appearanceOverride", "")
+            if hasattr(self, "_aesthetic_group"):
+                for act in self._aesthetic_group.actions():
+                    act.setChecked(act.text() == "Normal")
+        self._apply_theme_live(name)
         self.statusBar().showMessage(f"theme: {name}")
 
     def _maybe_show_welcome(self):
@@ -4356,9 +4376,8 @@ def main() -> int:
             break
     # apply the saved colour theme (palette + stylesheet + pyqtgraph config).
     # A hidden "aesthetic" override (View ▸ Theme ▸ More styles…) takes
-    # precedence when set — it's deliberately NOT applied live when chosen
-    # (see _set_aesthetic_override), only here at the next launch, so
-    # "restart LARMOR to see the new style" is literally true.
+    # precedence when set, so the app opens back into whichever style —
+    # normal or aesthetic — was live when it last closed.
     settings = QSettings("LARMOR", "app")
     override = settings.value("appearanceOverride", "")
     if override and override in theme.AESTHETIC_THEMES:
