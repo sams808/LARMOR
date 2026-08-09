@@ -666,6 +666,24 @@ def fit_2d(recipe, data: Data2D, kernel: Kernel2D | None = None,
     # amplitude pre-scale so the optimizer starts on-scale
     recipe.mqmas_f1_ref_ppm = b0
     total0, _ = simulate_2d(recipe, kernel)
+    if not np.any(total0):
+        # Without this guard the fit "succeeds" silently: an all-zero model
+        # gives an all-zero gradient, the amplitude pre-scale below zeroes
+        # every amplitude, and lmfit converges instantly to a perfect-looking
+        # rmsd≈0 fit of nothing (with β usually pinned at a search bound).
+        # The usual cause is a kernel window cropped tightly around the DATA
+        # ridge: the kernel simulates its (Cq, eta) basis at δiso = 0 and
+        # translates, so the window must also contain the δiso=0 basis
+        # patterns (F2 around the second-order shift δ2 < 0, F1 around the
+        # small QIS offset), not just where the shifted peaks end up.
+        # Found fitting real 11B 3QMAS data (validation §5.8).
+        raise ValueError(
+            "the model simulates to all zeros inside this kernel window — "
+            "no fit is possible. Widen the kernel's f2/f1 windows: they must "
+            "contain the (Cq, η) basis patterns at δiso = 0 (F2 near δ₂ ≤ 0, "
+            "F1 near 0), not only the region where the shifted sites appear. "
+            "Cropping to the data ridge is fine for the DATA (out-of-region "
+            "experiment samples as zero), but not for the kernel.")
     e0 = sample_exp(b0)
     denom = float((total0 * total0).sum())
     if denom > 0:

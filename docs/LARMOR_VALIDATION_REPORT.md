@@ -63,7 +63,12 @@ dmfit fits** from an actual peer-reviewed paper (Soudani *et al.* 2024,
 $^{11}$B pressure series) with zero warnings and exact parameter agreement —
 closing the "many real files" gap this report previously left open — and, in
 the process, found and fixed a real crash bug in the Lorentzian-broadening
-code path.
+code path. A fourth ([§5.8](#fig8)) fits the same paper's **8 real
+$^{11}$B 3QMAS datasets** with LARMOR's own 2D engine: seeded at the
+published BO₃ parameters, every fit stays there (mean |ΔC_Q| = 0.008 MHz
+across 16 sites) — the published values confirmed against the raw 2D data
+through a fully independent engine, which also surfaced (and fixed) a
+silent-degenerate-fit trap in `twod.fit_2d`.
 
 The $\delta_2$ formula validated in Fig. 1 is the single most publication-critical
 equation in the program — it sets the isotropic shift and quadrupolar product
@@ -315,6 +320,57 @@ gap with a fit-quality question. Closing this fully needs either the
 original `.fxmla` (which embeds the exact spectrum dmfit fit) or the
 original processing parameters, neither of which was available for this
 dataset; noted here as a real gap rather than papered over.
+
+### 5.8 · Real <sup>11</sup>B 3QMAS: LARMOR's 2D engine vs the published BO₃ parameters <a name="fig8"></a>
+
+The same dataset (§5.7) carries **8 real <sup>11</sup>B 3QMAS experiments**
+(`mp3qdfsz`, the 0 and 2 GPa endpoints of each of the four series), each with
+a processed `2rr` and the dmfit fit stored beside it. Two findings:
+
+**The "2D" dmfit fits are actually 1D projections.** All 8 `MP_lebon.fxml`
+files in the MQMAS folders parse cleanly through `larmor.io.fxmla` — but each
+carries a single F2 dimension with two "Amorphous" BO₃ lines and no F1, i.e.
+dmfit was used on a 1D projection/slice of the MQMAS to pin the BO₃
+parameters (δiso, C<sub>Q</sub>, η, widths) that the paper's 1D MAS fits then
+held fixed. Their parameter values match Table 2's BO3-1/BO3-2 columns
+exactly, so import fidelity extends to these files too (28 total dmfit files
+now round-trip from this one paper).
+
+**LARMOR's own 2D engine confirms the published BO₃ parameters against the
+raw 3QMAS data** — the first use of `larmor.twod` on <sup>11</sup>B (every
+prior 2D fit, synthetic or real, was <sup>27</sup>Al). All 8 `2rr` datasets
+were fit with two discrete `quad_ct` sites over the BO₃ ridge (kernel:
+0.1 MHz C<sub>Q</sub> steps; data cropped to F2 ∈ [2, 26], F1 ∈ [15, 29] ppm
+to exclude the dominant, unmodelled BO₄ peak):
+
+- Seeded **at the published values**, every fit stays there: across all 16
+  sites, mean |Δδiso| = 0.54 ppm and mean |ΔC<sub>Q</sub>| = **0.008 MHz**
+  (max 0.086), with the fitted F1 reference offset |β| ≤ 0.6 ppm — i.e. the
+  published parameters sit at (or within noise of) a local optimum of
+  LARMOR's completely independent mrsimulator-based residual, with
+  peak-normalised RMSD 0.011–0.043.
+- Seeded **±0.2 MHz / ±1 ppm off** the published values (0.2 MHz = the
+  paper's own stated C<sub>Q</sub> uncertainty), δiso converges back to
+  within ≈1 ppm but C<sub>Q</sub> largely stays within ±0.2 MHz of wherever
+  it started — an honest measure of how strongly this data constrains
+  C<sub>Q</sub> for two overlapping BO₃ distributions: to about ±200 kHz,
+  which is **exactly the uncertainty the paper itself quotes**. The two
+  analyses agree not just on the values but on how well-determined they are.
+
+**A real usability trap, found and fixed.** The first attempts silently
+"converged" to a perfect-looking rmsd ≈ 0 fit of *nothing*: a kernel window
+cropped tightly around the data ridge excludes the kernel's own δiso = 0
+basis patterns (simulated near F2 = δ₂ ≤ 0 and translated), so the model
+simulates to all zeros, the amplitude pre-scale then zeroes every site, and
+the optimizer exits immediately with β pinned at a search bound.
+`twod.fit_2d` now detects an all-zero initial model and **raises** with an
+explanation of the windowing rule instead of returning a degenerate success
+(`test_twod.py::test_fit_2d_refuses_a_kernel_window_that_zeroes_the_basis`).
+Related workflow note, documented rather than papered over: with an
+unmodelled dominant peak (here BO₄) inside the fitted region, the coarse
+F1-reference search can lock onto it — crop the data region to the sites
+actually being modelled (out-of-region experiment samples as zero by
+design).
 
 ---
 

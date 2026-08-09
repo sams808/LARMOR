@@ -366,3 +366,32 @@ def test_qis_slope_is_spin_dependent():
     assert s_al == pytest.approx(-0.58, abs=0.05)
     assert c_al == pytest.approx(-17 / 31, abs=0.02)
     assert twod.f1_cs_scale("11B", 160.0) != pytest.approx(c_al, abs=0.1)
+
+
+def test_fit_2d_refuses_a_kernel_window_that_zeroes_the_basis():
+    """Regression: a kernel window cropped tightly around the DATA ridge
+    excludes the kernel's own deltaiso=0 basis patterns (simulated near
+    F2 = delta2 <= 0 / F1 near 0, then translated) -- the model then
+    simulates to all zeros, the amplitude pre-scale zeroes every site, and
+    fit_2d used to "converge" instantly to a perfect-looking rmsd~0 fit of
+    nothing, with the F1 reference pinned at a search bound. Found fitting
+    real 11B 3QMAS data (validation section 5.8). It must refuse loudly."""
+    f2 = np.linspace(2.0, 26.0, 40)
+    f1 = np.linspace(15.0, 29.0, 20)
+    Z = (np.exp(-((f2[None, :] - 14.0) / 4.0) ** 2)
+         * np.exp(-((f1[:, None] - 22.0) / 2.0) ** 2))
+    data = twod.Data2D(f2_ppm=f2, f1_ppm=f1, z=Z, nucleus="11B",
+                       larmor_MHz=160.46)
+    # the trap: windows that contain the data ridge but NOT deltaiso=0
+    k = twod.build_mqmas_kernel(
+        "11B", 160.46, f2_window=(26.0, 2.0), f1_window=(29.0, 15.0),
+        n2=32, n1=16, n_cq=8, n_eta=3, cq_max_MHz=4.0)
+    rec = Recipe(nucleus="11B", larmor_frequency_MHz=160.46, sites=[
+        SiteModel(model="quad_ct", label="B", params={
+            "isotropic_chemical_shift_ppm": Param(18.0, min=12, max=24),
+            "Cq_MHz": Param(2.5, min=1.8, max=3.4),
+            "eta": Param(0.2, min=0.0, max=1.0),
+            "shift_fwhm_ppm": Param(3.0, min=0.5, max=8.0),
+            "amplitude": Param(1.0, min=0.0)})])
+    with pytest.raises(ValueError, match="all zeros.*kernel window"):
+        twod.fit_2d(rec, data, kernel=k)
