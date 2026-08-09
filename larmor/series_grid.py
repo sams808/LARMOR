@@ -116,10 +116,26 @@ def recipe_from_csv_rows(shared_rows: list[dict], scope_rows: list[dict],
     # a site only belongs to THIS scope if it has at least one row of its
     # own -- a site that appears only under "shared" (e.g. deliberately
     # excluded/zeroed for this sample, or simply not part of this scope's
-    # ladder) must not be synthesised here just because some OTHER scope
-    # uses it; that would wrongly report it "incomplete" below instead of
-    # correctly absent (see batchfit.is_zeroed_out / "Exclude component")
+    # ladder) has no per-spectrum data to reconstruct from HERE.
     present_sites = {r["site"] for r in scope_rows if r.get("param") != "population_pct"}
+    # ...but it must NOT be dropped from the reconstructed Recipe entirely:
+    # every OTHER scope's site list still includes it (a real saved fit
+    # keeps an excluded site too, zeroed rather than deleted -- see
+    # batchfit.is_zeroed_out), so simply omitting it here would shift every
+    # LATER site's list position/index on this one panel only. Any spec that
+    # refers to a site "by index" (render_batch_grid's component_colors,
+    # shade_only, hide_components, legend_hide -- and the Plotting studio's
+    # component/legend editor, which detects sites from whichever panel
+    # happens to be checked first) would then silently point at the WRONG
+    # physical site whenever it's applied to an excluded panel. Reconstruct
+    # it too, as a zeroed-out placeholder at its normal position -- the
+    # SAME site list, in the SAME order, on every panel of a batch, exactly
+    # like a real saved fit -- and let render_batch_grid's existing
+    # is_zeroed_out check (already there for real fits) hide it for this
+    # one panel exactly as it does today.
+    shared_sites = {r["site"] for r in shared_rows if r.get("param") != "population_pct"}
+    excluded_sites = shared_sites - present_sites
+    all_sites = present_sites | excluded_sites
 
     by_site: dict[str, dict] = {}
     for r in list(shared_rows) + list(scope_rows):
@@ -127,7 +143,7 @@ def recipe_from_csv_rows(shared_rows: list[dict], scope_rows: list[dict],
         # -- never part of a site's fittable Param set
         if r.get("param") == "population_pct":
             continue
-        if r["site"] not in present_sites:
+        if r["site"] not in all_sites:
             continue
         model = (r.get("model") or "").strip()
         if not model:
@@ -173,6 +189,13 @@ def recipe_from_csv_rows(shared_rows: list[dict], scope_rows: list[dict],
         # param. Not an error: only a genuinely unknown MODEL name is.
         for pd in model_obj.params:
             s["params"].setdefault(pd.name, Param(pd.default))
+        if k in excluded_sites:
+            # match batchfit.is_zeroed_out's exact signature -- an excluded
+            # site never had an amplitude row anywhere (not even "shared"),
+            # so its registry default just got filled in above; overriding
+            # it here is what makes render_batch_grid skip drawing/legending
+            # this site for this ONE panel, same as a real saved fit
+            s["params"]["amplitude"] = Param(0.0, vary=False, min=0.0, max=0.0)
         sites.append(SiteModel(model=s["model"], label=s["label"], params=s["params"]))
 
     nucleus, larmor_MHz, spin_rate_Hz = "", 0.0, 0.0

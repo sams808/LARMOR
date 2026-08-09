@@ -362,6 +362,57 @@ tensor op the small array sizes here would ever saturate). User chose
   design — a process pool of `lmfit` calls doesn't partially become "a GPU
   version," they're different architectures end to end.
 
+## 10 · 2026-08-07: batch-grid component list undercounted on an excluded panel
+
+Real-data catch (user report + screenshot): the Plotting Studio's "Component
+colors / legend" dialog listed 7 of a real 8-site model's components while
+the ACTUAL rendered panel correctly drew all 8. Traced to two compounding
+issues, both fixed:
+
+- **Root cause, in `series_grid.recipe_from_csv_rows`**: a site excluded for
+  one spectrum (batch fit's "Exclude component") was being DROPPED from
+  that panel's reconstructed `Recipe.sites` entirely, rather than kept
+  present with amplitude locked to zero — unlike a real saved `.recipe.json`
+  fit, where an excluded site always stays in the list (that asymmetry was
+  introduced two sessions ago while fixing a DIFFERENT bug — "don't treat
+  an excluded site as incomplete" — and the chosen fix, silently omitting
+  it, created this one). Dropping it doesn't just shrink that one panel's
+  count: it shifts every LATER site's **list index** on that panel only,
+  while every other (non-excluded) panel keeps the original alignment. Any
+  spec keyed by index — `component_colors`, `shade_only`,
+  `hide_components`, `legend_hide` — silently means a DIFFERENT physical
+  site depending on which panel it's applied to. This is a strictly worse
+  failure mode than the visible symptom (an undercounted legend): a color
+  picked for "row 5" in the dialog could paint the wrong component once
+  applied to any excluded panel. Fixed by reconstructing an excluded site
+  as a present-but-zeroed placeholder at its normal sorted position
+  (matching `batchfit.is_zeroed_out`'s exact signature), so every panel of
+  a batch keeps the identical site list/order regardless of exclusions —
+  `render_batch_grid`'s existing `is_zeroed_out` check (already there for
+  real saved fits) then hides it for that one panel exactly as before, no
+  change needed in the renderer itself.
+- **Second layer, in `plotting_studio._grid_detect_sites`**: it only ever
+  looked at the FIRST resolvable panel to populate the color/legend dialog,
+  on the (now only conditionally true) assumption that any panel's site
+  list represents the whole model. Made it union the site list across
+  EVERY resolvable panel instead — defense in depth for any other source of
+  a genuinely shorter list (e.g. a hand-built/legacy recipe missing a
+  TRAILING site), independent of the `series_grid` fix above.
+- Both fixed at the correct layer rather than patched at the symptom: the
+  studio's own component/legend detection is defense-in-depth, but the
+  index-alignment guarantee had to be restored at the reconstruction
+  source, since that's the only place that can actually keep every panel's
+  site list in sync.
+- **New/updated tests**: `test_series_grid.py`'s
+  `test_recipe_from_csv_rows_drops_a_site_absent_from_this_scope` renamed
+  to `..._zeroes_rather_than_drops_...` and rewritten to assert the site is
+  present-and-zeroed, not absent; `test_load_panels_via_csv_with_excluded_
+  site_reconstructs_the_rest` extended to assert BOTH panels keep the same
+  2-site list and to render the actual batch-grid figure from both;
+  `test_plotting_studio.py` gained
+  `test_grid_detect_sites_unions_across_panels_not_just_the_first`. 521
+  passed, 16 skipped, full suite green.
+
 ## Verdict
 
 LARMOR is a broad, coherent, well-tested application: a clean Qt-free core, one

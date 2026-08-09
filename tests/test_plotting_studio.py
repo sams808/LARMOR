@@ -349,6 +349,44 @@ def _fit2(tmp_path, sample):
     return path
 
 
+def test_grid_detect_sites_unions_across_panels_not_just_the_first(qapp, tmp_path):
+    """Defense in depth for _grid_detect_sites: if the FIRST resolvable
+    panel's Recipe happens to be missing a site that a LATER panel has
+    (e.g. a legacy/hand-built recipe from before a line was added to the
+    model, or any other source of a genuinely shorter site list), the
+    color/legend editor must still list every site the batch actually
+    uses, not just whichever subset panel 0 happens to have. This is on
+    top of (not a substitute for) series_grid.recipe_from_csv_rows keeping
+    an EXCLUDED site present-but-zeroed at its normal index rather than
+    dropping it -- the fix for the actually-reported bug (see
+    test_series_grid.py) -- so a trailing site missing here doesn't shift
+    any earlier index."""
+    from larmor.desktop.plotting_studio import PlottingStudio
+    from larmor.recipe import Recipe, SiteModel, Param
+
+    def _site(label, pos):
+        return SiteModel(model="gauss_lor", label=label, params={
+            "isotropic_chemical_shift_ppm": Param(pos), "shift_fwhm_ppm": Param(5.0),
+            "amplitude": Param(80.0), "gl": Param(1.0, vary=False)})
+
+    # panel 0: only the first two sites (A, B) -- C doesn't exist here at all
+    incomplete = Recipe(nucleus="31P", larmor_frequency_MHz=160.0, sample="short",
+                        sites=[_site("A", 10.0), _site("B", 2.0)])
+    p0 = tmp_path / "short.recipe.json"
+    incomplete.save(p0)
+
+    # panel 1: the full 3-site model
+    complete = Recipe(nucleus="31P", larmor_frequency_MHz=160.0, sample="full",
+                      sites=[_site("A", 10.0), _site("B", 2.0), _site("C", -5.0)])
+    p1 = tmp_path / "full.recipe.json"
+    complete.save(p1)
+
+    st = PlottingStudio(None)
+    st._panels = [{"path": str(p0)}, {"path": str(p1)}]
+    sites = st._grid_detect_sites()
+    assert [label for _, label in sites] == ["A", "B", "C"]  # NOT just A, B
+
+
 def test_studio_grid_component_dialog_sets_colors_and_legend_visibility(qapp, tmp_path):
     from larmor.desktop.plotting_studio import PlottingStudio
     _fit2(tmp_path, "g0")

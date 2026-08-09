@@ -218,10 +218,18 @@ def test_resolve_manual_clears_needs_manual(tmp_path):
     assert panel.needs_manual   # original untouched (dataclasses.replace copies)
 
 
-def test_recipe_from_csv_rows_drops_a_site_absent_from_this_scope():
+def test_recipe_from_csv_rows_zeroes_rather_than_drops_an_excluded_site():
     """A site that only exists under "shared" (e.g. excluded/zeroed for this
-    sample via batch fit's "Exclude component") must be OMITTED from the
-    reconstructed recipe, not treated as an incomplete/broken site."""
+    sample via batch fit's "Exclude component") must be RECONSTRUCTED as a
+    present-but-zeroed-amplitude placeholder AT ITS NORMAL POSITION, not
+    omitted -- omitting it would shift every later site's list index on
+    this ONE scope only, silently misaligning any per-index spec
+    (component_colors, shade_only, hide_components, legend_hide) between
+    this panel and every OTHER (non-excluded) panel of the same batch. This
+    is exactly how a real saved fit already represents an excluded site
+    (batchfit.is_zeroed_out), and render_batch_grid's existing check for it
+    already hides it from drawing/legend -- reconstruction just needs to
+    match that shape instead of inventing a different one."""
     shared = [
         {"scope": "shared", "site": "s0", "label": "A", "param": "gl",
          "value": "1", "stderr": "", "model": "gauss_lor"},
@@ -239,7 +247,12 @@ def test_recipe_from_csv_rows_drops_a_site_absent_from_this_scope():
          "value": "100.0", "stderr": "", "model": "gauss_lor"},
     ]
     rec = series_grid.recipe_from_csv_rows(shared, scope_rows_g1)
-    assert len(rec.sites) == 1 and rec.sites[0].label == "A"
+    from larmor.batchfit import is_zeroed_out
+    assert len(rec.sites) == 2                          # NOT dropped
+    assert rec.sites[0].label == "A" and not is_zeroed_out(
+        rec.sites[0].params.get("amplitude"))
+    assert rec.sites[1].label == "B" and is_zeroed_out(
+        rec.sites[1].params.get("amplitude"))            # present, but inert
 
 
 def test_recipe_from_csv_rows_ignores_population_pct_rows():
@@ -267,7 +280,10 @@ def test_recipe_from_csv_rows_ignores_population_pct_rows():
 def test_load_panels_via_csv_with_excluded_site_reconstructs_the_rest(tmp_path):
     """End-to-end: a real batch-fit CSV export (via batchfit's own table
     builders) with one scope excluding a site reconstructs correctly through
-    load_panels -- the excluded site simply isn't part of that scope's panel."""
+    load_panels -- with BOTH panels keeping the same 2-site list (the
+    excluded one zeroed at its normal position, not removed), so a
+    component-color/legend spec built from EITHER panel means the same
+    physical site on both."""
     from larmor import engine, batchfit
     from larmor.recipe import Recipe, SiteModel, Param
 
@@ -318,9 +334,25 @@ def test_load_panels_via_csv_with_excluded_site_reconstructs_the_rest(tmp_path):
     panels, warnings = series_grid.load_panels(str(csv_path))
     by_sample = {p.sample: p for p in panels}
     assert by_sample["g0"].n_sites == 2 and by_sample["g0"].reconstructed
-    assert by_sample["g1"].n_sites == 1 and by_sample["g1"].reconstructed
+    # g1: still 2 sites (NOT 1) -- site B is zeroed at index 1, not dropped
+    assert by_sample["g1"].n_sites == 2 and by_sample["g1"].reconstructed
+    from larmor.batchfit import is_zeroed_out
     rec_g1 = Recipe.load(by_sample["g1"].path)
-    assert rec_g1.sites[0].label == "A"
+    assert rec_g1.sites[0].label == "A" and not is_zeroed_out(
+        rec_g1.sites[0].params.get("amplitude"))
+    assert rec_g1.sites[1].label == "B" and is_zeroed_out(
+        rec_g1.sites[1].params.get("amplitude"))
+
+    from larmor import figures
+    fig = figures.render({"kind": "batch_grid",
+                          "panels": [{"recipe": by_sample["g0"].path},
+                                     {"recipe": by_sample["g1"].path}]})
+    import matplotlib.pyplot as plt
+    # both panels resolve their FULL 2-site legend from either one now --
+    # the actual regression reported against real data (a color/legend
+    # dialog built from an excluded panel undercounted the model)
+    assert len(fig.axes) >= 2
+    plt.close(fig)
 
 
 def test_csv_rows_by_scope_groups_correctly(tmp_path):

@@ -875,12 +875,25 @@ class PlottingStudio(QDialog):
             self._refresh()
 
     def _grid_detect_sites(self) -> list[tuple[int, str]]:
-        """(index, label) for the first loaded panel with a resolvable fit --
-        used to populate the component colors/legend editor. Any panel works
-        since the shared model's site count/labels are the same across a
-        batch (an excluded/zeroed site is still listed here — it just won't
-        draw or need a color, per render_batch_grid's own handling)."""
+        """(index, label) for EVERY site appearing in ANY loaded panel's
+        resolvable fit -- the UNION, not just the first panel's -- used to
+        populate the component colors/legend editor.
+
+        For a REAL saved .recipe.json, an excluded/zeroed site is still
+        present (amplitude locked to zero) so "just look at one panel" would
+        have been fine. It is NOT fine for a CSV-only reconstruction
+        (Panel.reconstructed): recipe_from_csv_rows only ever synthesizes a
+        site from the rows that exist for THAT panel's scope, and an
+        excluded site has none there -- it is simply absent from that one
+        panel's Recipe entirely, not "present with amplitude 0". Stopping at
+        the first resolvable panel then silently undercounts the model
+        whenever that panel happens to be the one with an exclusion (e.g. a
+        Bi-free parent sample sorted first in the list) -- exactly the bug
+        this fixes: the dialog listed 7 of 8 real components because panel
+        0's reconstruction was missing the excluded one, even though every
+        OTHER panel (and the actual rendered figure) had all 8."""
         from larmor.recipe import Recipe
+        found: dict[int, str] = {}
         for p in self._panels:
             if not p.get("path"):
                 continue
@@ -888,9 +901,9 @@ class PlottingStudio(QDialog):
                 rec = Recipe.load(p["path"])
             except Exception:
                 continue
-            if rec.sites:
-                return [(i, s.label or f"s{i}") for i, s in enumerate(rec.sites)]
-        return []
+            for i, s in enumerate(rec.sites):
+                found.setdefault(i, s.label or f"s{i}")
+        return sorted(found.items())
 
     def _grid_edit_components(self):
         sites = self._grid_detect_sites()
