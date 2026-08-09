@@ -58,6 +58,13 @@ and, on **real data**, LARMOR's fitted MQMAS $\delta_\text{iso}$ reproduced dmfi
 to **~0.5 ppm** (pCABS glasses, $^{27}$Al 3QMAS: 62.2 / 29.7 / −1.1 ppm vs dmfit
 62.7 / 30 / −0.35 ppm for the AlIV/AlV/AlVI sites).
 
+A third, broader real-data check ([§5.7](#fig7)) imports **20 published
+dmfit fits** from an actual peer-reviewed paper (Soudani *et al.* 2024,
+$^{11}$B pressure series) with zero warnings and exact parameter agreement —
+closing the "many real files" gap this report previously left open — and, in
+the process, found and fixed a real crash bug in the Lorentzian-broadening
+code path.
+
 The $\delta_2$ formula validated in Fig. 1 is the single most publication-critical
 equation in the program — it sets the isotropic shift and quadrupolar product
 extracted from **both** MQMAS and the two-field QCPMG extrapolation. It is
@@ -232,6 +239,82 @@ The **true Voigt** (the Gaussian⊗Lorentzian convolution via
 `scipy.special.voigt_profile`), with independent Gaussian and Lorentzian widths —
 the physically correct profile when both a disorder (Gaussian) and a lifetime
 (Lorentzian) broadening are present.
+
+### 5.7 · Multi-sample real-data validation: a published <sup>11</sup>B pressure series <a name="fig7"></a>
+
+Every check above validates one file or one synthetic case. This one closes
+the gap the rest of this report flagged as open: **many real dmfit fits**,
+tied to an actual peer-reviewed publication, not the author's own working
+files.
+
+**Dataset.** Soudani, Paris & Morizet, *"Influence of high-pressure on the
+short-range structure of Ca or Na aluminoborosilicate glasses from <sup>11</sup>B
+and <sup>27</sup>Al solid-state NMR,"* *J. Non-Cryst. Solids* **638**, 123085
+(2024) — 20 real <sup>11</sup>B MAS fits (4 compositions × 5 pressures, 0–2 GPa),
+each a dmfit `.fxml` export with 3–4 lines (two Czjzek-family "Amorphous" BO₃
+sites + one or two Gauss/Lor BO₄ sites). The paper's own Table 2 (reproduced
+here as ground truth, not the author's internal spreadsheet) reports every
+fitted parameter plus an explicit uncertainty budget from dmfit's own
+Monte-Carlo error analysis.
+
+**Result 1 — import fidelity, 20/20, zero warnings.** Every `.fxml` parses
+cleanly through `larmor.io.fxmla` and every fitted parameter (δiso, Cq, η,
+FWHM, population %) matches the published Table 2 to the paper's own stated
+rounding, across both the "1G" (single-Gaussian BO₄) and "2G" (two-Gaussian
+BO₄) model variants dmfit used for different compositions. This is the "many
+real files" check this report previously lacked — 20 published fits, not one.
+
+**Result 2 — a real crash, found and fixed.** Running LARMOR's own errorbar
+analysis on these real fits crashed one sample
+(`Ca33B11`/pCABS2, ambient pressure) with `ValueError: fp and xp are not the
+same length`. Root cause: `_lorentz_convolve` (`larmor/models/quadrupolar.py`)
+built its Lorentzian kernel from the fitted FWHM with no upper bound; when
+lmfit's errorbar-rescue retry probed a poorly-determined FWHM parameter far
+outside typical values, the kernel came out *longer* than the signal, and
+`np.convolve(..., mode="same")` silently returns `max(len(signal), len(kernel))`
+rather than `len(signal)` — breaking every downstream assumption that
+broadening preserves array length. **Fixed**: the kernel is now clamped to
+never exceed the signal length (`tests/test_amorphous.py`, two new
+regression tests). This is exactly the value of testing against real,
+previously-unseen fits rather than only self-generated synthetic ones.
+
+**Result 3 — refitting an already-published multi-Czjzek decomposition is
+genuinely hard, and LARMOR says so honestly.** Re-optimising each fit from
+its own published starting point (all shape parameters free) reproduces the
+published values closely for well-separated sites (the two `Na22B23`/pNABS1
+BO₃ sites, 2.3 ppm apart: converges to within < 0.1 ppm / < 0.02 MHz of
+Table 2). For the more overlapping compositions (`Ca21B18`/`Ca33B11`, pCABS),
+a one-shot refit can instead settle into a different, comparably-good
+solution for the less-resolved BO₃ site — e.g. for `Ca33B11` ambient
+pressure, LARMOR's refit actually reaches a **lower** RMSD than the
+as-published parameters, but with that site's Cq collapsed toward 0 and its
+δiso shifted several ppm. Running LARMOR's own Monte-Carlo on that result
+confirms this immediately and quantitatively: the affected site's Cq and η
+carry **190–300 % relative uncertainty** (essentially undetermined by this
+1D spectrum alone), while the well-resolved site's Cq is good to 3 %. This
+is not a LARMOR defect — the paper's own overlapping BO₃ decomposition is
+genuinely underdetermined by a one-shot fit from *any* starting point, which
+is precisely what dmfit's own quoted per-parameter uncertainty (§ Table 2
+footnote) is also a symptom of. It **is** a direct illustration of this
+report's headline claim ("an uncertainty on every fitted number"): LARMOR's
+own error tools catch a degenerate multi-component decomposition
+immediately, rather than silently reporting confident-looking numbers.
+Practically, refitting a whole pressure series like this should use
+`larmor seqfit` (forward/backward warm-starting from the neighbouring
+pressure point), not a cold one-shot refit of each spectrum independently —
+exactly the tool this dataset's structure calls for.
+
+**Explicitly not concluded here**: an absolute RMSD comparison between
+LARMOR's simulation (at the exact published parameters) and the raw Bruker
+`1r` files. The flat `.fxml` export does not carry the fit window or the
+processing (phase/baseline) dmfit actually fit against, and the raw `1r`
+files inspected here carry large out-of-window artifacts (a transmitter-
+offset spike, edge effects consistent with an unphased/preview processing
+state) — comparing against them directly would conflate a data-provenance
+gap with a fit-quality question. Closing this fully needs either the
+original `.fxmla` (which embeds the exact spectrum dmfit fit) or the
+original processing parameters, neither of which was available for this
+dataset; noted here as a real gap rather than papered over.
 
 ---
 
@@ -483,6 +566,13 @@ field-independent chemical-shift-distribution contributions (Sandland Eq. 2)."*
   **87**, 359 (2002).**
 - H. Y. Carr, E. M. Purcell, *Phys. Rev.* **94**, 630 (1954); S. Meiboom, D. Gill,
   *Rev. Sci. Instrum.* **29**, 688 (1958). *(CPMG)*
+
+**Real-data multi-sample validation (§5.7)**
+
+- **S. Soudani, M. Paris, Y. Morizet, "Influence of high-pressure on the
+  short-range structure of Ca or Na aluminoborosilicate glasses from
+  $^{11}$B and $^{27}$Al solid-state NMR," *J. Non-Cryst. Solids* **638**,
+  123085 (2024).** *(20-fit real-data validation set, §5.7)*
 
 **Processing, phasing & general**
 

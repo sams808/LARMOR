@@ -25,21 +25,19 @@ some things it assumed were fine have not been touched since).
 
 ### A. Trust & validation
 
-- ✅ **Validation report exists**: `docs/LARMOR_VALIDATION_REPORT.md` (502
-  lines) + `docs/PHYSICS_AUDIT.md`, with regenerable figures
-  (`docs/figures/make_report_figures.py`). Two decisive synthetic
-  cross-checks (δ₂ formula vs analytic theory, Czjzek kernel reweighting vs
-  direct ensemble simulation) plus **one real-data dmfit comparison**
-  (pCABS glass MQMAS δiso, ~0.5 ppm agreement, 3 sites).
-  **Gap**: one real-data comparison is not "a set of published/known fits."
-  Written 2026-08-01 — predates 2y-2ak entirely (batch fit, sequential fit,
-  exclusion, population%, CPU-parallel error analysis are never mentioned or
-  validated here).
-- 🟡 **dmfit round-trip**: `.fxmla` import/export is tested
-  (`test_fxmla.py` + 9 other files reference it), but against essentially
-  **one reference file family** (`CaAlGlass.fxmla`/`CaAlGlassMQ.fxmla`, both
-  from the author's own Desktop, not shipped in the repo) — "many real
-  `.fxmla` files" per the original ask hasn't happened.
+- ✅ **Validation report, now with a real multi-sample check** (2026-08-09):
+  `docs/LARMOR_VALIDATION_REPORT.md` §5.7 imports **20 real dmfit fits** from
+  an actual peer-reviewed paper (Soudani *et al.* 2024, $^{11}$B pressure
+  series) — zero warnings, exact parameter agreement against the paper's own
+  published Table 2 — closing the "one real-data comparison isn't many
+  published fits" gap flagged below. Found and fixed a real crash
+  (`_lorentz_convolve` kernel-length bug) in the process. Still predates
+  batch fit/sequential fit/exclusion/population%/CPU-parallel error analysis
+  validation-wise (those remain un-cross-checked against any real published
+  dataset).
+- ✅ **dmfit round-trip against many real files**: as of the §5.7 pass, 20
+  real `.fxml` files (not just `CaAlGlass.fxmla`) parse and reproduce their
+  source paper's values — the specific gap this line used to describe.
 - ✅ **Uncertainties**: covariance / Monte-Carlo / χ² profile all present,
   now CPU-parallelized (phase 2aj), propagated into `quantify()` populations
   and batch CSV exports (phase 2ah's `population_pct` rows). This pillar's
@@ -180,9 +178,10 @@ either — they're genuine "nice to have," not "can't trust the numbers."
 The original three (validation report, project bundles, split app.py + CI)
 are **still** the right three — re-confirmed, not superseded, by this pass:
 
-1. **A real validation report** — 🟡 exists but thin (one real-data
-   comparison). Needs more real datasets, ideally spanning the features
-   added since 2026-08-01 (batch fit, exclusion, population%).
+1. **A real validation report** — ✅ substantially strengthened 2026-08-09
+   (20-fit real published-paper cross-check, §5.7). Remaining gap: the
+   features added since 2026-08-01 (batch fit, exclusion, population%,
+   sequential fit) still have no real-dataset cross-check of their own.
 2. **Project bundles + format versioning** — ❌ genuinely not started; the
    `.larproj` extension in file dialogs is a false signal that this exists.
 3. **Split `app.py` + CI** — ❌ neither started; `app.py` has grown since

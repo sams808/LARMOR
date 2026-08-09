@@ -101,3 +101,39 @@ def test_fxml_import_maps_amorphous(tmp_path):
     assert s.params["amplitude"].value != pytest.approx(353.65, abs=1.0)
     assert s.params["amplitude"].value > 0
     assert any("area" in n.lower() and "peak" in n.lower() for n in recipe.notes)
+
+
+def test_lorentz_convolve_never_grows_past_the_signal_length():
+    """Regression: np.convolve(a, v, mode="same") returns length
+    max(len(a), len(v)), NOT len(a) -- if the Lorentzian kernel (sized off
+    the FWHM, previously unbounded) ever came out longer than the signal,
+    the "broadened" array silently grew past the signal's length, which
+    crashed the caller's final np.interp(ctx.x_ppm, kernel.x_ppm, y, ...)
+    with "fp and xp are not of the same length". Found fitting a real 11B
+    glass dataset (LARMOR validation, 2026-08): an lmfit errorbar-rescue
+    retry step pushed a poorly-determined FWHM parameter far outside typical
+    values while probing the Jacobian."""
+    from larmor.models.quadrupolar import _lorentz_convolve
+
+    y = np.zeros(50)
+    for fwhm_pts in (0.0, 1.0, 40.0, 400.0, 4000.0):
+        out = _lorentz_convolve(y, fwhm_pts)
+        assert len(out) == len(y)
+    # a single-point signal is the tightest edge case (half must clamp to 0)
+    assert len(_lorentz_convolve(np.zeros(1), 100.0)) == 1
+    assert len(_lorentz_convolve(np.zeros(0), 100.0)) == 0
+
+
+def test_amorphous_renders_without_crashing_at_an_extreme_lorentzian_fwhm():
+    """Integration-level guard for the same bug: the full amorphous render
+    path (kernel reweight -> broaden -> interp back onto ctx.x_ppm) must not
+    crash even when line_fwhm_ppm is driven far outside sane bounds relative
+    to a short experimental grid -- exactly the scenario that crashed a real
+    batch fit's errorbar-rescue retry."""
+    x, y = _render("amorphous", dict(
+        isotropic_chemical_shift_ppm=0.0, Cq_MHz=2.6, eta=0.2,
+        Cq_fwhm_MHz=0.3, eta_fwhm=0.1, shift_fwhm_ppm=3.0,
+        line_fwhm_ppm=500.0, gl=0.0, amplitude=100.0),
+        x=np.linspace(-60, 60, 50))          # a short grid, like the real case
+    assert len(y) == 50
+    assert np.all(np.isfinite(y))

@@ -35,11 +35,26 @@ def _czjzek_fwhm(v: dict) -> float:
 
 
 def _lorentz_convolve(y: np.ndarray, fwhm_pts: float) -> np.ndarray:
-    """Convolve with a normalised Lorentzian of the given FWHM (in points)."""
+    """Convolve with a normalised Lorentzian of the given FWHM (in points).
+
+    ``np.convolve(a, v, mode="same")`` returns length ``max(len(a), len(v))``,
+    NOT ``len(a)`` -- if the kernel `k` (sized off `fwhm_pts`, unbounded) ever
+    comes out longer than `y`, the result silently grows past `y`'s length,
+    which breaks every caller's assumption that broadening preserves the
+    array length (crashing downstream, e.g. `_render_amorphous`'s final
+    `np.interp(ctx.x_ppm, kernel.x_ppm, y, ...)` with "fp and xp are not of
+    the same length"). Real trigger: an lmfit errorbar-rescue retry step can
+    push a poorly-determined FWHM parameter far outside typical values while
+    probing the Jacobian -- caught fitting real 11B glass data (LARMOR
+    validation pass, 2026-08). Clamp the kernel to never exceed `y`'s length;
+    a Lorentzian that wide relative to the data is already a bad fit the
+    optimiser should reject via the residual, not something worth crashing
+    over."""
     hwhm = fwhm_pts / 2.0
-    if hwhm <= 0.0:
+    if hwhm <= 0.0 or y.size == 0:
         return y
     half = int(np.ceil(hwhm * 20.0))
+    half = min(half, max(0, (y.size - 1) // 2))
     t = np.arange(-half, half + 1)
     k = 1.0 / (1.0 + (t / hwhm) ** 2)
     k /= k.sum()
