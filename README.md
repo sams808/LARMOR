@@ -124,8 +124,8 @@ dmfit is the tool this project is modeled on and still cites throughout (docs, M
 direct ensemble simulation, and **real published data** — including reproducing 20 fits from a
 peer-reviewed paper (Soudani *et al.*, *J. Non-Cryst. Solids* **638**, 123085 (2024)) with exact
 parameter agreement. `docs/ROADMAP_v1.md` tracks, honestly, what's still needed before a 1.0
-sign-off (a real project-bundle file format and splitting the 4000+-line main window module are
-the two biggest open items — neither affects the correctness of a fit today).
+sign-off (splitting the 4000+-line main window module and setting up CI are the biggest open
+items — neither affects the correctness of a fit today).
 
 ## Status
 

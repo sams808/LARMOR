@@ -46,13 +46,59 @@ class FitEntry:
         return tuple(s.get("model", "?") for s in self.recipe.get("sites", []))
 
 
+def _fit_entry(path: str, rec: dict, ppm, amp, warns=()) -> FitEntry:
+    sample = rec.get("sample") or Path(path).stem
+    return FitEntry(
+        path=path, sample=sample, nucleus=rec.get("nucleus", ""),
+        larmor_MHz=float(rec.get("larmor_frequency_MHz", 0.0) or 0.0),
+        spin_rate_Hz=float(rec.get("spin_rate_Hz", 0.0) or 0.0),
+        recipe=rec, ppm=np.asarray(ppm, float), amp=np.asarray(amp, float),
+        window=tuple(rec["fit_window_ppm"]) if rec.get("fit_window_ppm")
+        else None, warnings=list(warns or []))
+
+
+def _larproj_workspaces(path: str) -> list[dict] | None:
+    """The saved workspaces of a LARMOR project bundle (app.py's
+    save_project/open_project -- ppm/amp/recipe embedded directly, no
+    separate data load needed), or None if `path` isn't one -- callers fall
+    back to the normal single-fit load_any path for anything else."""
+    import json
+
+    try:
+        d = json.loads(Path(path).read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    if not isinstance(d, dict) or "workspaces" not in d:
+        return None
+    return d.get("workspaces") or []
+
+
 def load_entries(paths) -> tuple[list[FitEntry], list[str]]:
-    """Load each fit file with its source data. Returns (entries, warnings)."""
+    """Load each fit file with its source data. Returns (entries, warnings).
+
+    A LARMOR project bundle (`.larproj.json`, several spectra saved as one
+    file) expands into one entry per workspace that carries a fit -- it
+    isn't itself a single Recipe, so load_any's plain `.json` branch can't
+    read it (previously: silently skipped with "could not load", the project
+    file's own source_path-less shape never matching a Recipe well enough to
+    find real data -- this is what the docs already claimed worked)."""
     from larmor.loader import load_any
 
     entries, warnings = [], []
     for p in paths:
         p = str(p)
+        workspaces = _larproj_workspaces(p)
+        if workspaces is not None:
+            if not workspaces:
+                warnings.append(f"{Path(p).name}: no spectra in this project — skipped")
+                continue
+            for w in workspaces:
+                rec = w.get("recipe")
+                ppm = w.get("exp_ppm")
+                if not rec or not rec.get("sites") or not ppm:
+                    continue
+                entries.append(_fit_entry(p, rec, ppm, w.get("exp_amp", [])))
+            continue
         try:
             ppm, amp, rec, meta, warns = load_any(p)
         except Exception as exc:  # noqa: BLE001
@@ -61,14 +107,7 @@ def load_entries(paths) -> tuple[list[FitEntry], list[str]]:
         if not rec.get("sites"):
             warnings.append(f"{Path(p).name}: no fitted sites — skipped")
             continue
-        sample = rec.get("sample") or Path(p).stem
-        entries.append(FitEntry(
-            path=p, sample=sample, nucleus=rec.get("nucleus", ""),
-            larmor_MHz=float(rec.get("larmor_frequency_MHz", 0.0) or 0.0),
-            spin_rate_Hz=float(rec.get("spin_rate_Hz", 0.0) or 0.0),
-            recipe=rec, ppm=np.asarray(ppm, float), amp=np.asarray(amp, float),
-            window=tuple(rec["fit_window_ppm"]) if rec.get("fit_window_ppm")
-            else None, warnings=list(warns or [])))
+        entries.append(_fit_entry(p, rec, ppm, amp, warns))
     return entries, warnings
 
 

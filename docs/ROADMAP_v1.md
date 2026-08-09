@@ -52,15 +52,35 @@ some things it assumed were fine have not been touched since).
 
 ### B. Robustness & data safety
 
-- ❌ **Project bundles (`.larproj`)**: this is the single most overstated
-  item in the previous version of this doc. `.larproj.json` exists **only
-  as a file-extension string** in a few `QFileDialog` filters
-  (`app.py`, `batch_dialog.py`) — opening one just loads it as an ordinary
-  single-fit recipe. There is no bundle format, no multi-fit/session
-  container, no round-trip of "data refs + fits + processing + baselines +
-  batches + figures" as one file. A session today is reconstructed from
-  scattered `.recipe.json` files + QSettings-remembered paths, not a single
-  portable file.
+- 🟡 **Project bundles (`.larproj`) — correction, 2026-08-09: this item was
+  WRONG in the previous version of this doc.** A real, working, versioned
+  bundle format already existed (`app.py::save_project`/`open_project`,
+  `"larmor_project_version": 1`, `tests/test_project.py`) — every open 1D
+  workspace's recipe + processed spectrum round-trips through one file. The
+  earlier audit pass concluded "doesn't exist" from seeing `.larproj.json`
+  only as a `QFileDialog` filter string, without reading the functions
+  behind it — a real methodology gap in that pass, corrected here.
+  **Genuine remaining gaps**, found and partly fixed this session:
+  - ✅ **Fixed**: overlays (comparison spectra) were tracked in the live
+    snapshot but never written into the saved file — silently dropped on
+    every reopen. Also fixed, in the same code path: `add_overlay_dialog`
+    unpacked `load_any()`'s return tuple in the wrong order, so adding a
+    `.recipe.json`/`.fxmla`/`.csv` file as an overlay always failed (only a
+    raw Bruker path worked, "by accident", via the fallback branch).
+  - ✅ **Fixed**: `larmor.batch.load_entries` (the batch-report tool) claimed
+    in its own docstring/help text to accept `.larproj` files but had no
+    code path for their actual multi-workspace shape — every project file
+    silently failed to load with "could not load" and was skipped. Now
+    expands one entry per workspace.
+  - ❌ **Still not done**: 2D workspaces are explicitly excluded from
+    `save_project` (`Data2D`/view state isn't JSON-serializable as-is —
+    real, non-trivial engineering, not attempted this pass). Figures and
+    live batch-fit-dialog sessions are still not part of a project bundle.
+  - **Known, accepted design tradeoff** (not a bug): a saved project embeds
+    the processed `exp_ppm`/`exp_amp` arrays directly rather than only a
+    `source_path` reference + replayed processing — unlike `Recipe`'s own
+    "never embed" convention. Keeps a project openable even if the source
+    file moves, at the cost of file size; not changed this pass.
 - 🟡 **File-format versioning**: `Recipe.from_dict` is forward-compatible in
   practice (new optional fields default sanely, old files still load — this
   was exercised repeatedly this session, e.g. `recipe_from_csv_rows`'s
@@ -173,31 +193,37 @@ Everything the *previous* version of this roadmap listed as "still open" —
 None of these are small effort individually, but none of them are blocking
 either — they're genuine "nice to have," not "can't trust the numbers."
 
-## If only three things before 1.0 (revised)
+## If only three things before 1.0 (revised 2026-08-09)
 
-The original three (validation report, project bundles, split app.py + CI)
-are **still** the right three — re-confirmed, not superseded, by this pass:
-
-1. **A real validation report** — ✅ substantially strengthened 2026-08-09
+1. ✅ **A real validation report** — substantially strengthened 2026-08-09
    (20-fit real published-paper cross-check, §5.7). Remaining gap: the
    features added since 2026-08-01 (batch fit, exclusion, population%,
    sequential fit) still have no real-dataset cross-check of their own.
-2. **Project bundles + format versioning** — ❌ genuinely not started; the
-   `.larproj` extension in file dialogs is a false signal that this exists.
-3. **Split `app.py` + CI** — ❌ neither started; `app.py` has grown since
+2. 🟡 **Project bundles** — turned out to already exist (`save_project`/
+   `open_project`, corrected above); its two concrete bugs (overlays
+   dropped, `add_overlay_dialog` mis-reading its loader's return tuple)
+   are fixed 2026-08-09. Still missing 2D workspaces/figures/batch state —
+   real remaining work, just narrower than previously described.
+3. ❌ **Split `app.py` + CI** — neither started; `app.py` has grown since
    this was first flagged, not shrunk, and there is no automated test gate
-   on push at all.
+   on push at all. **This is now the single largest genuinely-untouched
+   item on this whole roadmap.**
 
-**New fourth item, found by this pass, arguably higher priority than any
-single item above because it costs almost nothing to fix and actively
-misleads anyone who looks**: **fix `README.md`.** It describes a different,
-much earlier program than the one in this repository, links to a file that
-doesn't exist, and recommends a component (`larmor/app.py`, the web app)
-that's been dormant and untested for three weeks. A colleague opening this
-repo today would be actively misinformed about what LARMOR is before they
-even install it — this is the fastest, cheapest fix on this entire list
-relative to its impact on Pillar E ("a colleague can install and learn it
-without you").
+Already done as of this pass: **`README.md` rewritten** (2026-08-09) — was
+describing a different, much earlier program, linked to a file that didn't
+exist, and recommended a dormant, untested component as if current.
+
+**Process note for future roadmap passes**: the project-bundle correction
+above happened because a *test file* (`tests/test_project.py`) was noticed
+in passing and read fully, not because the earlier grep-based audit found
+it — that audit searched for the string `"larproj"` and stopped once it
+found file-dialog filter strings, without checking whether the FUNCTIONS
+behind those dialogs (`save_project`/`open_project`) actually did anything.
+Grepping for a feature's *name* finds where it's mentioned; it does not
+confirm whether it's implemented — checking the actual function bodies
+(or the test suite, which will not pass for a feature that doesn't exist)
+is the only reliable way to answer "does X exist," and is worth doing
+before writing "not started" into a doc like this one again.
 
 *LARMOR — Sam Soudani, McCloy group, Washington State University.*
 *Last audited: 2026-08-07 (v0.7.1), against the actual repo state, not the

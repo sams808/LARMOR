@@ -18,6 +18,13 @@ colour with per-overlay **visible / colour / remove** controls and a global
 and the previous active demotes back to an overlay. The active spectrum is always
 the single object the 1D fitter works on, so overlays never disturb a fit.
 
+**File ▸ Save project…** captures every open 1D workspace — spectrum,
+processing, fit, *and its overlays* — as one reopenable `.larproj.json`
+file; **File ▸ Open project…** restores it all, relocating each overlay
+from its saved source path (an overlay whose file has moved is reported,
+not silently dropped). 2D workspaces are not yet included in a project —
+reopen those from their source.
+
 ## 2 · Background subtraction (a related but different tool)
 
 **Process ▸ Subtract a spectrum (background)** removes a *measured* background

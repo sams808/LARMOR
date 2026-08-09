@@ -1722,6 +1722,17 @@ class MainWindow(QMainWindow):
             if snap.get("kind") != "1d" or snap.get("exp_ppm") is None:
                 n2d += 1
                 continue
+            # overlays are saved by REFERENCE (label/color/visible/source),
+            # not their embedded arrays -- same "never embed what you can
+            # reload" principle as everything else in this codebase (Recipe,
+            # batch CSVs, ...); an overlay with no source (e.g. one hand-typed
+            # from an in-memory array with nothing on disk) can't be restored
+            # and is dropped, same as the pre-existing 2D-workspace handling
+            # below drops what it can't serialize, rather than erroring.
+            overlays = [{"label": o.get("label", ""), "color": o.get("color", ""),
+                        "visible": bool(o.get("visible", True)),
+                        "source": o.get("source", "")}
+                       for o in snap.get("overlays", []) if o.get("source")]
             out["workspaces"].append({
                 "title": ws.get("title", ""),
                 "source_path": snap.get("source_path"),
@@ -1729,6 +1740,7 @@ class MainWindow(QMainWindow):
                 "hidden": sorted(snap.get("hidden", set())),
                 "exp_ppm": np.asarray(snap["exp_ppm"], float).tolist(),
                 "exp_amp": np.asarray(snap["exp_amp"], float).tolist(),
+                "overlays": overlays,
             })
         Path(path).write_text(json.dumps(out), encoding="utf-8")
         msg = f"project saved — {len(out['workspaces'])} spectra"
@@ -1768,6 +1780,25 @@ class MainWindow(QMainWindow):
             self.lines_table.rebuild(self.recipe, self.hidden)
             if self.recipe and self.recipe.get("sites"):
                 self.request_simulation()
+            missing_overlays = []
+            for ov in w.get("overlays", []):
+                src = ov.get("source", "")
+                try:
+                    label, ppm, amp = self._read_overlay_source(src)
+                except Exception:
+                    missing_overlays.append(ov.get("label") or src)
+                    continue
+                self._add_overlay(ov.get("label") or label, ppm, amp, src)
+                new = self._overlays[-1]
+                new["visible"] = bool(ov.get("visible", True))
+                if ov.get("color"):
+                    new["color"] = ov["color"]
+            if w.get("overlays"):
+                self._refresh_overlays()          # reflect restored visible/color
+            if missing_overlays:
+                self.statusBar().showMessage(
+                    "some overlays could not be relocated: "
+                    + ", ".join(missing_overlays))
             self._ws_mode = "new"
             self._register_ws("1d")
             self._update_paddles(); self._update_exp_label(); self._update_enabled()
@@ -2148,21 +2179,39 @@ class MainWindow(QMainWindow):
         if not path:
             return
         try:
-            recipe, ppm, amp, *_ = _load_any(path)
-            label = recipe.get("sample") or Path(path).name
-        except Exception:
-            try:
-                from larmor.io import bruker
+            label, ppm, amp = self._read_overlay_source(path)
+        except Exception as exc:
+            QMessageBox.warning(self, "Add overlay", f"cannot read: {exc}")
+            return
+        self._add_overlay(label, ppm, amp, path)
 
-                d = bruker.read(path)
-                if d.ndim != 1 or d.domain != "freq":
-                    raise ValueError("not a 1D spectrum")
-                ppm, amp = np.asarray(d.axes[0].values), np.asarray(d.data, float)
-                label = Path(path).name
-            except Exception as exc:
-                QMessageBox.warning(self, "Add overlay", f"cannot read: {exc}")
-                return
-        self._add_overlay(label, np.asarray(ppm), np.asarray(amp), path)
+    @staticmethod
+    def _read_overlay_source(path: str):
+        """(label, ppm, amp) for any of the overlay-file-picker's supported
+        sources -- shared by add_overlay_dialog and open_project (restoring
+        saved overlays), so both go through the exact same, exactly-once-
+        fixed loading logic."""
+        try:
+            # load_any's real return order is (ppm, amp, recipe, meta, warnings)
+            # -- this used to be unpacked as (recipe, ppm, amp, ...) here,
+            # silently mis-assigning `recipe` to the ppm array; recipe.get(...)
+            # then always raised AttributeError, so EVERY overlay source
+            # _load_any actually supports (.recipe.json, .fxmla,
+            # .csv/.txt/.dat) fell through to the Bruker-only fallback below
+            # and failed there too -- only a raw Bruker 1r/2rr path ever
+            # worked, "by accident", via that fallback. Found while wiring
+            # overlay restoration into save_project/open_project.
+            ppm, amp, recipe, *_ = _load_any(path)
+            label = recipe.get("sample") or Path(path).name
+            return label, np.asarray(ppm), np.asarray(amp)
+        except Exception:
+            from larmor.io import bruker
+
+            d = bruker.read(path)
+            if d.ndim != 1 or d.domain != "freq":
+                raise ValueError("not a 1D spectrum") from None
+            return (Path(path).name, np.asarray(d.axes[0].values),
+                    np.asarray(d.data, float))
 
     def _add_overlay(self, label, ppm, amp, source=""):
         from larmor.desktop.datasets import overlay_color

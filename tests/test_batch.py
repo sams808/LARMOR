@@ -96,3 +96,47 @@ def test_homogeneity_flags_mixed_nuclei(tmp_path):
     entries, _ = batch.load_entries([a, b])
     notes = batch.homogeneity(entries)
     assert any("mixed nuclei" in n for n in notes)
+
+
+def _make_larproj(tmp_path, samples: list[tuple[str, float]]) -> str:
+    """A minimal stand-in for app.py's save_project() output: workspaces
+    with an embedded recipe + exp_ppm/exp_amp, no data on disk needed."""
+    x = np.linspace(-20, 60, 200)
+    workspaces = []
+    for name, pos in samples:
+        r = Recipe(nucleus="11B", larmor_frequency_MHz=160.0, sample=name,
+                  sites=[SiteModel(model="gauss_lor", label="A", params={
+                      "isotropic_chemical_shift_ppm": Param(pos),
+                      "shift_fwhm_ppm": Param(6.0), "amplitude": Param(80.0),
+                      "gl": Param(1.0, vary=False)})])
+        _, y, _ = engine.simulate(r, exp_ppm=x)
+        workspaces.append({"title": name, "source_path": f"src_{name}",
+                           "recipe": r.to_dict(), "hidden": [],
+                           "exp_ppm": x.tolist(), "exp_amp": y.tolist()})
+    proj = tmp_path / "session.larproj.json"
+    proj.write_text(json.dumps({"larmor_project_version": 1, "active": 0,
+                                "workspaces": workspaces}), encoding="utf-8")
+    return str(proj)
+
+
+def test_load_entries_expands_a_project_bundle_into_one_entry_per_workspace(tmp_path):
+    """A .larproj.json (app.py's save_project, multiple spectra in one file)
+    is not itself a single Recipe -- load_any's plain .json branch can't read
+    it (previously: silently skipped with "could not load", despite the
+    batch-report help text claiming .larproj was a supported input)."""
+    proj = _make_larproj(tmp_path, [("glassA", 15.0), ("glassB", 20.0)])
+    entries, warnings = batch.load_entries([proj])
+    assert not warnings
+    assert len(entries) == 2
+    assert {e.sample for e in entries} == {"glassA", "glassB"}
+    for e in entries:
+        assert e.nucleus == "11B" and e.ppm.size == 200 and e.amp.size == 200
+
+
+def test_load_entries_skips_an_empty_project_with_a_warning(tmp_path):
+    proj = tmp_path / "empty.larproj.json"
+    proj.write_text(json.dumps({"larmor_project_version": 1, "workspaces": []}),
+                    encoding="utf-8")
+    entries, warnings = batch.load_entries([str(proj)])
+    assert not entries
+    assert any("no spectra in this project" in w for w in warnings)
