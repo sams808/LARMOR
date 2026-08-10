@@ -83,11 +83,39 @@ class DmfitFile:
 
 # --------------------------------------------------------------------------
 def read(path: str | Path) -> DmfitFile:
-    """Parse a dmfit .fxmla file. Read-only; never modifies the source."""
+    """Parse a dmfit .fxmla file. Read-only; never modifies the source.
+
+    Handles both generations of the format: the classic all-XML file (SIMP
+    ASCII spectrum in ``<ExpData><Data>``), and the newer dmfit export
+    (seen from dmfit #20230120) whose ``<ExpData><Data>`` holds a **CSDM
+    JSON** block instead — base64 float32 spectrum plus the full Bruker
+    metadata verbatim. That metadata (audit trails, acqus) is full of raw
+    unescaped ``<...>`` tokens, so the newer files are NOT well-formed XML
+    and a strict parse raises ParseError; ``_read_lenient`` then extracts
+    the (well-formed) ``<FitParameters>`` island and the JSON payload
+    separately, so a fit dmfit itself wrote today still imports."""
     path = Path(path)
-    root = ET.fromstring(path.read_text(encoding="utf-8", errors="replace"))
+    text = path.read_text(encoding="utf-8", errors="replace")
+    try:
+        root = ET.fromstring(text)
+    except ET.ParseError:
+        return _read_lenient(path, text)
 
     fitparams = root.find("FitParameters")
+    version, fit_mode, dimensions = _parse_fitparameters(fitparams)
+
+    spectrum = _parse_simp_block(root)
+    comment = spectrum.header.pop("_comment", "") if spectrum else ""
+
+    return DmfitFile(
+        path=str(path), version=version, fit_mode=fit_mode,
+        dimensions=dimensions, spectrum=spectrum, comment=str(comment),
+    )
+
+
+def _parse_fitparameters(fitparams: ET.Element):
+    """(version, fit_mode, dimensions) from a parsed <FitParameters> element —
+    shared by the strict and lenient read paths."""
     version = fitparams.findtext("DMFitVersion", default="")
     fit_mode = fitparams.findtext("FitModeAsc", default="")
 
@@ -136,13 +164,71 @@ def read(path: str | Path) -> DmfitFile:
             dim.lines.append(line)
         dimensions.append(dim)
 
-    spectrum = _parse_simp_block(root)
-    comment = spectrum.header.pop("_comment", "") if spectrum else ""
+    return version, fit_mode, dimensions
+
+
+def _read_lenient(path: Path, text: str) -> DmfitFile:
+    """Fallback for a dmfit file that is not well-formed XML as a whole (the
+    newer CSDM-JSON ``<ExpData>`` embeds raw Bruker audit text with bare
+    ``<``/``>``): parse the two islands separately — ``<FitParameters>`` is
+    always clean XML, and the ``<Data>`` payload is valid JSON (JSON strings
+    are perfectly happy holding '<'; only the XML wrapper ever chokes)."""
+    import json as _json
+    import re as _re
+
+    m = _re.search(r"<FitParameters>.*?</FitParameters>", text, _re.DOTALL)
+    if not m:
+        raise ValueError(f"{path.name}: no <FitParameters> block found")
+    version, fit_mode, dimensions = _parse_fitparameters(ET.fromstring(m.group(0)))
+
+    spectrum, comment = None, ""
+    md = _re.search(r"<Data>\s*(\{.*\})\s*</Data>", text, _re.DOTALL)
+    if md:
+        try:
+            spectrum, comment = _spectrum_from_csdm(_json.loads(md.group(1)))
+        except Exception:
+            spectrum = None                # fit params still usable without it
 
     return DmfitFile(
         path=str(path), version=version, fit_mode=fit_mode,
-        dimensions=dimensions, spectrum=spectrum, comment=str(comment),
+        dimensions=dimensions, spectrum=spectrum, comment=comment,
     )
+
+
+def _spectrum_from_csdm(payload: dict) -> tuple[DmfitSpectrum, str]:
+    """A DmfitSpectrum from dmfit's CSDM-JSON <Data> payload (1D linear
+    frequency dimension, base64 float32 components). The ppm axis maps onto
+    the existing SIMP header convention ((X0 + i*dX - Sr)/Sf) by storing
+    X0 = coordinates_offset [Hz], dX = increment [Hz], Sf = origin_offset
+    [MHz], Sr = 0 — Hz/MHz = ppm relative to the origin offset, exactly how
+    TopSpin's own axis is defined."""
+    import base64
+
+    cs = payload["csdm"]
+    dim = cs["dimensions"][0]
+    dv = cs["dependent_variables"][0]
+
+    def _qty(s: str, unit: str) -> float:
+        v, u = s.split()
+        if u.lower() != unit.lower():
+            raise ValueError(f"unexpected unit {u!r} (wanted {unit})")
+        return float(v)
+
+    n = int(dim["count"])
+    x0 = _qty(dim["coordinates_offset"], "Hz")
+    dx = _qty(dim["increment"], "Hz")
+    sf = _qty(dim["origin_offset"], "MHz")
+    if dv.get("encoding") != "base64":
+        raise ValueError(f"unsupported CSDM encoding {dv.get('encoding')!r}")
+    dtype = {"float32": "<f4", "float64": "<f8"}[dv.get("numeric_type", "float32")]
+    comp = dv["components"][0]
+    amp = np.frombuffer(base64.b64decode(comp), dtype=dtype).astype(float)
+    if amp.size != n:
+        raise ValueError(f"CSDM component length {amp.size} != count {n}")
+    header = {"NP": float(n), "X0": x0, "dX": dx, "Sf": sf, "Sr": 0.0}
+    return (DmfitSpectrum(header=header, amplitude=amp,
+                          imaginary=np.zeros(n)),
+            str(cs.get("description", "")))
 
 
 def _parse_simp_block(root: ET.Element) -> DmfitSpectrum | None:
