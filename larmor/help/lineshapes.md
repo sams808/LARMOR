@@ -278,10 +278,10 @@ contributors for the CLT to hold).
 **How it's used in LARMOR.** The Czjzek line has four parameters:
 
 - **pos** — isotropic chemical shift δ_iso (ppm);
-- **σ (sigma)** — the Czjzek width (LARMOR's `sigma_Cq_MHz`). Relation to dmfit:
-  dmfit's *sCZ_CQ* ≈ 2σ; the mode of |C_Q| ≈ 2σ. The fit table shows, next to σ,
-  the derived **C_Q (= 2σ)** and **νQ = 3C_Q/[2I(2I−1)]** so you read the
-  quadrupolar coupling directly, not just its width;
+- **σ (sigma)** — the Czjzek width (LARMOR's `sigma_Cq_MHz`). One fitted number,
+  **four literature conventions** — see the dedicated section just below,
+  *"Czjzek width conventions — σ, C_Q, dmfit's CQ, P_Q"*, before comparing any
+  value with dmfit or a paper;
 - **dCS** — an *independent* Gaussian width of the isotropic-**chemical-shift**
   distribution (dmfit's *FWHM CS*). Glasses disorder the shift as well as the EFG,
   and the two are separate physical effects — so LARMOR fits them separately. In a
@@ -291,6 +291,41 @@ contributors for the CLT to hold).
 
 The (C_Q, η) basis is simulated once by mrsimulator and re-weighted by the Czjzek
 p(ν_Q, η) on every fit iteration, so the fit is fast.
+
+#### Czjzek width conventions — σ, C_Q, dmfit's CQ, P_Q ⚠ read before comparing with the literature
+
+The same fitted Czjzek distribution is quoted **four different ways** across
+programs and papers, differing by up to a factor of 4 — a real and recurring
+source of cross-paper confusion. All four are pure rescalings of the ONE
+fitted parameter σ; none adds information:
+
+| Quantity | = | Who uses it | Example (σ = 1.18 MHz) |
+|---|---|---|---|
+| **σ** | σ | mrsimulator, ssNake, LARMOR's stored value, part of the literature | 1.18 MHz |
+| **C_Q ≈ 2σ** | 2σ | dmfit's *sCZ_CQ* box; ≈ the mode of the \|C_Q\| distribution | 2.36 MHz |
+| **CQ (dmfit)** | 4σ | **what dmfit's `CQ` box displays** (mechanically 2 × sCZ_CQ) — and therefore what many dmfit-based papers report as "C_Q" | 4.73 MHz |
+| **P_Q = √5·σ** | √5·σ ≈ 2.24σ | the rms quadrupolar product √⟨P_Q²⟩ ≡ C̄_Qη — the field-independent invariant Edén's 2023 review compiles in its tables (his Eq. 45) | 2.64 MHz |
+
+Practical rules:
+
+- **In LARMOR**, pick which of the four the fit table displays via
+  **View ▸ Czjzek width display** (typed values and bounds are then read in
+  that convention too). Saved recipes, CSV exports and the fit engine
+  **always store σ** regardless of the display, so files never become
+  convention-ambiguous.
+- **Comparing with a dmfit fit or a dmfit-based paper**: their "CQ" ÷ 4 = σ;
+  their *sCZ_CQ* ÷ 2 = σ. (Empirically validated: refitting the same real
+  spectrum in both programs gives identical residuals with exactly these
+  factors — see `docs/LARMOR_VALIDATION_REPORT.md`.)
+- **What to put in a paper**: report **σ (state the convention explicitly!)
+  and/or P_Q = √5·σ**, never a bare "C_Q" — a Czjzek site has no single C_Q,
+  and an unlabeled number is unusable by the next reader. P_Q is the safest
+  currency: it is a rotational invariant, field-independent, directly
+  comparable across studies whatever model they fit, and it is the quantity
+  a 3QMAS graphical analysis measures. A Methods sentence like
+  *"Czjzek (d = 5) fits; we report the distribution width σ and the rms
+  quadrupolar product P_Q = √5·σ (dmfit's displayed CQ corresponds to 4σ)"*
+  removes all ambiguity for one sentence of cost.
 
 **Literature.**
 - G. Czjzek, J. Fink, F. Götz, H. Schmidt, J. M. D. Coey, J.-P. Rebouillat, A.
@@ -302,6 +337,11 @@ p(ν_Q, η) on every fit iteration, so the fit is fast.
   derivation, validity assumptions, and worked ²⁷Al examples used above.
 - Application to aluminosilicate glasses: e.g. Neuville, Cormier, Massiot,
   *Geochim. Cosmochim. Acta* **68**, 5071 (2004).
+- M. Edén, "Probing oxide-based glass structures by solid-state NMR:
+  Opportunities and limitations", *J. Magn. Reson. Open* **16–17**, 100112
+  (2023) — the review whose Eq. 45 defines the rms quadrupolar product
+  C̄_Qη (= P_Q) used in the conventions table above, and whose Tables 4–5
+  compile literature P_Q values to compare against.
 
 **Limitations.** Reports only the *invariants* (δ_iso, √⟨P_Q²⟩ via σ) — individual
 C_Q and η are, by construction, not defined for a distribution. Fails when its

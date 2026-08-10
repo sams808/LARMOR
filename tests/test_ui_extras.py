@@ -697,3 +697,63 @@ def test_proc_without_fits_not_expandable(qapp, tmp_path):
     proc2 = next(c for c in kids if "proc 2" in c.text(0))
     assert proc1.childCount() == 0                      # no fits → not expandable
     assert proc2.childCount() == 1                      # has a fit → expandable
+
+
+def _czjzek_recipe_dict(sigma=1.1815):
+    return {"nucleus": "27Al", "larmor_frequency_MHz": 156.28,
+            "spin_rate_Hz": 35714.0, "sites": [
+                {"model": "czjzek", "label": "Al", "params": {
+                    "isotropic_chemical_shift_ppm": {"value": 64.5},
+                    "sigma_Cq_MHz": {"value": sigma, "min": 0.1, "max": 4.0},
+                    "shift_fwhm_ppm": {"value": 9.6},
+                    "line_fwhm_ppm": {"value": 0.5},
+                    "amplitude": {"value": 100.0}}}]}
+
+
+def test_czjzek_display_convention_rescales_cell_and_header(qapp):
+    """One fitted sigma, four literature conventions (sigma / 2sigma dmfit
+    sCZ_CQ / 4sigma dmfit CQ box / sqrt5 sigma P_Q): the fit table's sigma
+    column can display any of them, converts typed values AND bounds back to
+    the stored sigma, and the column header names the active convention --
+    the stored recipe value must never change with the display mode."""
+    from larmor.desktop import table
+    from larmor.desktop.table import LinesTable
+
+    assert table.czjzek_display_mode() == "sigma"        # default unchanged
+    t = LinesTable()
+    try:
+        rec = _czjzek_recipe_dict(sigma=1.0)
+        for mode, k in [("sigma", 1.0), ("cq2", 2.0), ("dmfit", 4.0),
+                        ("pq", 5.0 ** 0.5)]:
+            table.set_czjzek_display(mode)
+            t.rebuild(rec, set())
+            col = 2 + t._used_keys.index("sigma_Cq_MHz")
+            cell = t.table.cellWidget(0, col)
+            shown = float(cell.edit.text())
+            # rel=1e-4: the cell renders with "%.5g"
+            assert shown == pytest.approx(1.0 * k, rel=1e-4), mode
+            # the header names the convention
+            head = t.table.horizontalHeaderItem(col).text()
+            assert table.CZJZEK_DISPLAYS[mode][0] in head
+            # stored value untouched by the display mode
+            assert rec["sites"][0]["params"]["sigma_Cq_MHz"]["value"] == 1.0
+
+        # typing a value in dmfit-CQ mode stores sigma = value / 4
+        table.set_czjzek_display("dmfit")
+        t.rebuild(rec, set())
+        col = 2 + t._used_keys.index("sigma_Cq_MHz")
+        cell = t.table.cellWidget(0, col)
+        cell.edit.setText("4.7")
+        cell._on_edit()
+        assert rec["sites"][0]["params"]["sigma_Cq_MHz"]["value"] == \
+            pytest.approx(4.7 / 4.0)
+        # bounds typed in display units land in sigma units too
+        cell.edit.setText("[0..8]")
+        cell._on_edit()
+        p = rec["sites"][0]["params"]["sigma_Cq_MHz"]
+        assert p["min"] == pytest.approx(0.0)
+        assert p["max"] == pytest.approx(2.0)
+        # and the derived side-label shows sigma when sigma is hidden
+        assert "σ" in cell.derived.text()
+    finally:
+        table.set_czjzek_display("sigma")                # never leak the mode

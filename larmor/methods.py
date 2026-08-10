@@ -96,11 +96,24 @@ def methods_sentence(recipe: dict, error_method: str = "covariance") -> str:
     err_txt = ("the least-squares covariance" if error_method == "covariance"
                else "a Monte-Carlo (parametric bootstrap) analysis")
     field_txt = f" (Larmor frequency {field:.1f} MHz)" if field else ""
+    # a Czjzek width is quoted in four incompatible conventions across the
+    # literature (σ / 2σ / dmfit's displayed CQ = 4σ / P_Q = √5σ) — a paper
+    # that names its convention costs one sentence and saves every reader
+    # a factor-of-4 ambiguity, so the generated Methods text always does
+    czjzek_txt = ""
+    if any(s.get("model") in ("czjzek", "ext_czjzek", "csa_czjzek")
+           for s in sites):
+        czjzek_txt = (
+            " Czjzek widths are reported as the distribution parameter σ "
+            "(mrsimulator convention) together with the rms quadrupolar "
+            "product P_Q = √5·σ; for comparison, dmfit's displayed CQ for "
+            "the same fit corresponds to 4σ (2 × sCZ_CQ)."
+        )
     return (
         f"The {nucleus} MAS NMR spectra{field_txt} were deconvoluted into "
         f"{len(sites)} site{'s' if len(sites) != 1 else ''} using {model_txt} in "
         f"LARMOR (an open dmfit-successor built on mrsimulator and lmfit). "
         f"Isotropic chemical shifts, quadrupolar parameters and relative "
         f"populations (integrated over the fit window) are reported with "
-        f"uncertainties from {err_txt}."
+        f"uncertainties from {err_txt}." + czjzek_txt
     )

@@ -63,6 +63,42 @@ def _czjzek_derived(sigma_MHz: float, spin: float) -> tuple[float, float]:
     cq = 2.0 * sigma_MHz
     return cq, nu_q(cq, spin)
 
+
+# ---- Czjzek width display convention -----------------------------------
+# One fitted parameter, FOUR ways the literature quotes it — a real source of
+# cross-paper confusion (some report σ, dmfit users report dmfit's CQ box,
+# Edén-style reviews compile the rms quadrupolar product P_Q). The recipe,
+# saved fits, CSV exports and the fit engine ALWAYS store σ; this setting
+# changes only what the fit table DISPLAYS (and accepts as typed input).
+#: key -> (short header line, factor k such that shown = k·σ, description)
+CZJZEK_DISPLAYS = {
+    "sigma":  ("σ(Cq)", 1.0,
+               "the fitted Czjzek distribution width (mrsimulator σ)"),
+    "cq2":    ("Cq ≈ 2σ", 2.0,
+               "dmfit's sCZ_CQ; ≈ the mode of the |Cq| distribution"),
+    "dmfit":  ("CQ (dmfit) = 4σ", 4.0,
+               "what dmfit's CQ box displays (2×sCZ_CQ)"),
+    "pq":     ("P_Q = √5·σ", 5.0 ** 0.5,
+               "rms quadrupolar product √⟨P_Q²⟩ — field-independent "
+               "invariant (Edén 2023 Eq. 45)"),
+}
+_CZJZEK_MODE = "sigma"
+
+
+def set_czjzek_display(mode: str) -> None:
+    global _CZJZEK_MODE
+    if mode not in CZJZEK_DISPLAYS:
+        mode = "sigma"
+    _CZJZEK_MODE = mode
+
+
+def czjzek_display_mode() -> str:
+    return _CZJZEK_MODE
+
+
+def czjzek_display_factor() -> float:
+    return CZJZEK_DISPLAYS[_CZJZEK_MODE][1]
+
 #: column order and short headers, dmfit-style
 PARAM_COLUMNS = [
     ("amplitude", "Amplitude"),
@@ -124,6 +160,11 @@ class _Cell(QWidget):
         self.customContextMenuRequested.connect(
             lambda pos: self.menu_requested.emit(self.mapToGlobal(pos)))
 
+    def _czjzek_factor(self) -> float:
+        """k such that this cell SHOWS k·σ — 1.0 for every non-Czjzek cell."""
+        return (czjzek_display_factor()
+                if self.ctx["param_name"] == "sigma_Cq_MHz" else 1.0)
+
     def _update_derived(self):
         """Show the first-order νQ next to a fitted Cq (or Czjzek σ), read-only."""
         name = self.ctx["param_name"]
@@ -132,12 +173,29 @@ class _Cell(QWidget):
             return
         from larmor.convert import nu_q
         if name == "sigma_Cq_MHz":
-            cq, nuq = _czjzek_derived(float(self.p["value"]), self.spin)
-            self.derived.setText(f"Cq {cq:.3g}·νQ {nuq:.3g}")
+            sigma = float(self.p["value"])
+            cq, nuq = _czjzek_derived(sigma, self.spin)
+            mode = czjzek_display_mode()
+            # the compact side label shows whichever convention the cell is
+            # NOT already displaying, so σ and Cq are both always in view
+            if mode == "sigma":
+                self.derived.setText(f"Cq {cq:.3g}·νQ {nuq:.3g}")
+            else:
+                self.derived.setText(f"σ {sigma:.3g}·νQ {nuq:.3g}")
+            label, k, desc = CZJZEK_DISPLAYS[mode]
             self.derived.setToolTip(
-                f"σ(Cq) = {self.p['value']:.4g} MHz  (fitted)\n"
-                f"Cq ≈ 2σ = {cq:.4g} MHz  (dmfit sCZ_CQ; mode of |Cq|)\n"
-                f"νQ = 3·Cq / [2I(2I−1)] = {nuq:.4g} MHz   (I = {self.spin:g})")
+                "One fitted width, four literature conventions — the cell "
+                f"currently shows {label} (View ▸ Czjzek width display):\n"
+                f"  σ(Cq)        = {sigma:.4g} MHz  (the fitted parameter; "
+                "stored in recipes/CSVs)\n"
+                f"  Cq ≈ 2σ      = {cq:.4g} MHz  (dmfit sCZ_CQ; mode of |Cq|)\n"
+                f"  CQ (dmfit)   = {4 * sigma:.4g} MHz  (dmfit's CQ box = 4σ "
+                "— what dmfit displays!)\n"
+                f"  P_Q = √5·σ   = {5 ** 0.5 * sigma:.4g} MHz  (rms quadrupolar "
+                "product — field-independent, Edén 2023)\n"
+                f"  νQ = 3·Cq / [2I(2I−1)] = {nuq:.4g} MHz   (I = {self.spin:g})\n"
+                "Report σ or P_Q and STATE the convention — see "
+                "Help ▸ Lineshapes ▸ Czjzek width conventions.")
         elif name == "Cq_MHz":
             # Amorphous / quad_ct etc.: Cq is the mean directly. BO3 users read νQ.
             cq = float(self.p["value"])
@@ -154,7 +212,7 @@ class _Cell(QWidget):
     def _display_text(self) -> str:
         if self.p.get("expr"):
             return cellparse.format_link(self.p["expr"], self.ctx["param_name"])
-        v = self.p["value"]
+        v = self.p["value"] * self._czjzek_factor()
         return f"{v:.5g}" if abs(v) < 1e5 or v == 0 else f"{v:.6g}"
 
     def _style(self):
@@ -162,9 +220,10 @@ class _Cell(QWidget):
         tips = []
         bounded = p.get("min") is not None or p.get("max") is not None
         css = ""
+        k = self._czjzek_factor()
         if bounded:
-            lo = "−∞" if p.get("min") is None else f"{p['min']:g}"
-            hi = "+∞" if p.get("max") is None else f"{p['max']:g}"
+            lo = "−∞" if p.get("min") is None else f"{p['min'] * k:g}"
+            hi = "+∞" if p.get("max") is None else f"{p['max'] * k:g}"
             tips.append(f"constrained to [{lo}, {hi}]  ·  edit inline as [{lo}..{hi}]")
             css += f"QLineEdit {{ border-left: 3px solid {theme.active().accent}; }}"
         if p.get("expr"):
@@ -174,7 +233,7 @@ class _Cell(QWidget):
             tips.append("type a value, a link (A+20, A+20kHz, 0.5B), "
                         "or bounds [0..100]")
         if p.get("stderr"):
-            tips.append(f"± {p['stderr']:.3g}")
+            tips.append(f"± {p['stderr'] * k:.3g}")
         self.edit.setStyleSheet(css)
         self.edit.setToolTip("  ·  ".join(tips))
 
@@ -185,8 +244,13 @@ class _Cell(QWidget):
             self.error.emit(res.error)
             self.edit.setText(self._display_text())     # revert
             return
+        # a Czjzek cell showing k·σ also ACCEPTS typed values/bounds in that
+        # convention — convert back to the stored σ. Links (expr) are left
+        # untouched: a pure ratio ("0.5B") is convention-invariant, and the
+        # rare offset link is documented as σ-units in the hint below.
+        k = self._czjzek_factor()
         if res.set_value:
-            self.p["value"] = res.value
+            self.p["value"] = res.value / k
         if res.set_expr:
             from larmor.constraints_util import references_self
             if references_self(res.expr, self.ctx["this_index"],
@@ -199,9 +263,9 @@ class _Cell(QWidget):
             if res.expr:
                 self.p["vary"] = True
         if res.set_min:
-            self.p["min"] = res.min
+            self.p["min"] = res.min if res.min is None else res.min / k
         if res.set_max:
-            self.p["max"] = res.max
+            self.p["max"] = res.max if res.max is None else res.max / k
         # clamp the stored value into any new bounds
         if self.p.get("min") is not None and self.p["value"] < self.p["min"]:
             self.p["value"] = self.p["min"]
@@ -301,7 +365,12 @@ class LinesTable(QWidget):
                 if any(k in s["params"] for s in sites)]
         self._used_keys = [k for k, _ in used]
         t.setColumnCount(2 + len(used))
-        t.setHorizontalHeaderLabels(["line", "model"] + [h for _, h in used])
+        # the Czjzek width column is headed by whichever convention the user
+        # chose to display (View ▸ Czjzek width display) — never a bare
+        # ambiguous "Cq" for a distribution parameter
+        headers = [CZJZEK_DISPLAYS[czjzek_display_mode()][0] + "\n(MHz)"
+                   if key == "sigma_Cq_MHz" else h for key, h in used]
+        t.setHorizontalHeaderLabels(["line", "model"] + headers)
         t.setRowCount(len(sites))
         larmor = (recipe or {}).get("larmor_frequency_MHz", 0.0)
         spin = _spin_of((recipe or {}).get("nucleus"))

@@ -487,8 +487,14 @@ class MainWindow(QMainWindow):
                                        "stray scroll never changes a fit)")
         self.actScrollNudge.setChecked(bool(QSettings("LARMOR", "app").value(
             "scrollNudge", False, type=bool)))
+        # setChecked() above fires no signal (connect comes next), so push the
+        # saved state into the table module DIRECTLY — otherwise a remembered
+        # "on" showed checked here but didn't actually nudge until re-toggled
+        from larmor.desktop import table as _table
+        _table.set_scroll_nudge(self.actScrollNudge.isChecked())
         self.actScrollNudge.toggled.connect(self._toggle_scroll_nudge)
         m_view.addAction(self.actScrollNudge)
+        self._build_czjzek_display_menu(m_view)
         m_view.addSeparator()
         self._build_theme_menu(m_view)
         self._build_textsize_menu(m_view)
@@ -1004,6 +1010,48 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             "scroll over a fit value to nudge it: "
             + ("ON" if on else "off (default)"))
+
+    def _build_czjzek_display_menu(self, parent):
+        """View ▸ Czjzek width display — pick which of the four literature
+        conventions the fit table shows (and accepts as typed input) for a
+        Czjzek site's width. Storage/fitting/exports are always σ; this is
+        display-deep only (see larmor.desktop.table.CZJZEK_DISPLAYS)."""
+        from PySide6.QtGui import QActionGroup
+
+        from larmor.desktop import table as _table
+
+        m = parent.addMenu("Czjzek &width display")
+        m.setToolTip("how the fit table quotes a Czjzek distribution's width "
+                     "— saved fits and CSVs always store σ")
+        # restore the saved choice into the module BEFORE building the actions
+        # (setChecked below fires no signal — same init pattern as scroll-nudge)
+        saved = str(QSettings("LARMOR", "app").value("czjzekDisplay", "sigma")
+                    or "sigma")
+        _table.set_czjzek_display(saved)
+        group = QActionGroup(self)
+        group.setExclusive(True)
+        current = _table.czjzek_display_mode()
+        for key, (label, k, desc) in _table.CZJZEK_DISPLAYS.items():
+            act = QAction(f"{label}  —  {desc}", self)
+            act.setCheckable(True)
+            act.setChecked(key == current)
+            act.triggered.connect(
+                lambda _=False, kk=key: self._set_czjzek_display(kk))
+            group.addAction(act)
+            m.addAction(act)
+        self._czjzek_display_group = group
+
+    def _set_czjzek_display(self, mode: str):
+        from larmor.desktop import table as _table
+
+        _table.set_czjzek_display(mode)
+        QSettings("LARMOR", "app").setValue("czjzekDisplay", mode)
+        if getattr(self, "lines_table", None) and self.recipe:
+            self.lines_table.rebuild(self.recipe, self.hidden)
+        label = _table.CZJZEK_DISPLAYS[_table.czjzek_display_mode()][0]
+        self.statusBar().showMessage(
+            f"Czjzek width column now shows {label} — stored fits/CSVs "
+            "always keep σ")
 
     def _build_explorer_dock(self):
         from larmor.desktop.explorer import ExplorerPanel
