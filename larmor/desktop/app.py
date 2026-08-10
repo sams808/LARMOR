@@ -454,6 +454,8 @@ class MainWindow(QMainWindow):
         self._add(m_adv, "Fit completion &threshold…  (Δσ % to stop)",
                   self.edit_fit_tol)
         m_adv.addSeparator()
+        self._add(m_adv, "Restrict around current values…  (glass protocol, "
+                  "Edén 2023)", self.restrict_glass_protocol)
         self._add(m_adv, "Save &constraints as…  (reusable link/bound set)",
                   self.save_constraint_set)
         self._add(m_adv, "Apply saved co&nstraints…", self.apply_constraint_set)
@@ -545,6 +547,7 @@ class MainWindow(QMainWindow):
                 ("getting-started", "Getting started"),
                 ("spectra-1d", "1D spectra — processing & fitting"),
                 ("lineshapes", "Lineshapes — models & physics"),
+                ("glass-fitting", "Fitting glasses for publication (Edén 2023)"),
                 ("processing-reference", "Processing reference"),
                 ("2d-processing", "2D processing"),
                 ("mqmas", "MQMAS (2D)"),
@@ -1314,6 +1317,37 @@ class MainWindow(QMainWindow):
         self.lines_table.rebuild(self.recipe, self.hidden)
         self.on_structure_changed()
         self.statusBar().showMessage(f"applied “{name}” to {len(applied)} parameter(s)")
+
+    def restrict_glass_protocol(self):
+        """Decomposition ▸ Advanced ▸ Restrict around current values — apply
+        Edén 2023 §8.3's restricted-range recommendation in one step:
+        δiso ± a window around the current value for every site, a physical
+        FWHM floor for analytic (spin-½ style) peaks, amplitudes left free.
+        Restricted, never fixed — vary flags are untouched. Undoable."""
+        from PySide6.QtWidgets import QInputDialog
+        from larmor.constraints_util import restrict_glass_protocol as _restrict
+
+        if not self.recipe or not self.recipe.get("sites"):
+            self.statusBar().showMessage("open/build a model first")
+            return
+        win, ok = QInputDialog.getDouble(
+            self, "Restrict around current values (Edén 2023 §8.3)",
+            "δiso window: ± ppm around each site's CURRENT shift\n"
+            "(peak FWHM of Gauss/Lorentz-family sites also gets a ≥4 ppm\n"
+            "amorphous floor; amplitudes stay free; nothing is fixed):",
+            3.0, 0.1, 50.0, 1)
+        if not ok:
+            return
+        self.snapshot()
+        notes = _restrict(self.recipe["sites"], shift_window_ppm=float(win))
+        if not notes:
+            self.statusBar().showMessage(
+                "nothing to restrict (all shifts/widths linked or pinned)")
+            return
+        self.lines_table.rebuild(self.recipe, self.hidden)
+        self.statusBar().showMessage(
+            f"restricted {len(notes)} parameter(s) — δiso ±{win:g} ppm around "
+            "current values (Edén 2023 §8.3; Edit ▸ Undo to revert)")
 
     def edit_experiment(self):
         if self.recipe is None:

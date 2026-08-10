@@ -134,3 +134,51 @@ def remap_exprs_after_move(sites: list, old_to_new: dict) -> None:
             if isinstance(p, dict) and p.get("expr"):
                 p["expr"] = _SITE_REF.sub(_map, p["expr"])
 
+
+
+#: models whose shift_fwhm_ppm IS the peak's full FWHM — the only place
+#: Edén's ≥4 ppm amorphous-peak floor applies. On a quadrupolar/Czjzek site
+#: shift_fwhm_ppm is dCS (the shift-DISTRIBUTION width, one contribution of
+#: several to the observed peak width) and can legitimately be far narrower
+#: — e.g. published 11B BO3 fits with dCS = 2.5 ppm.
+_PEAK_FWHM_MODELS = ("gauss_lor", "gl_norm", "voigt")
+_SHIFT_KEYS = ("isotropic_chemical_shift_ppm", "position_ppm")
+
+
+def restrict_glass_protocol(sites: list, *, shift_window_ppm: float = 3.0,
+                            width_min_ppm: float = 4.0) -> list[str]:
+    """Apply Edén 2023 §8.3's restricted-range recommendation to every site,
+    in place: confine each isotropic shift to ±``shift_window_ppm`` around
+    its CURRENT value; for analytic peak models (``_PEAK_FWHM_MODELS``) give
+    the peak FWHM a physical lower bound of ``width_min_ppm`` (an
+    amorphous-phase peak narrower than ~4 ppm is not credible, per the
+    review — "regardless of the detected nuclide"); leave amplitudes/
+    populations free. Restricted, never fixed: vary flags are untouched, and
+    linked (expr) or pinned (vary=False) parameters are skipped — a
+    restriction on a value the fit can't move is noise.
+
+    Returns human-readable notes describing what was set (for the status
+    bar / a recipe note). Works on the recipe-dict shape the desktop app
+    holds (sites = list of {"params": {name: {value, min, max, ...}}}).
+    """
+    notes: list[str] = []
+    for i, site in enumerate(sites):
+        params = site.get("params", {}) or {}
+        is_peak = site.get("model") in _PEAK_FWHM_MODELS
+        for name, p in params.items():
+            if not isinstance(p, dict) or p.get("expr") or not p.get("vary", True):
+                continue
+            if name in _SHIFT_KEYS:
+                v = float(p.get("value", 0.0))
+                p["min"] = v - shift_window_ppm
+                p["max"] = v + shift_window_ppm
+                notes.append(f"s{i}.{name}: [{p['min']:g} .. {p['max']:g}]")
+            elif name == "shift_fwhm_ppm" and is_peak:
+                lo = p.get("min")
+                p["min"] = max(width_min_ppm, lo) if lo is not None else width_min_ppm
+                # clamp the current value into the new bound so the next fit
+                # starts feasible instead of erroring on value < min
+                if float(p.get("value", 0.0)) < p["min"]:
+                    p["value"] = p["min"]
+                notes.append(f"s{i}.{name}: min {p['min']:g} ppm")
+    return notes

@@ -103,3 +103,69 @@ def test_sanitize_keeps_valid_links():
 def test_site_refs():
     assert site_refs("0.5 * s0.amplitude + s2.eta") == {0, 2}
     assert site_refs("") == set()
+
+
+def test_restrict_glass_protocol_applies_eden_ranges():
+    """Eden 2023 sec 8.3 one-step restriction: diso confined to +-window
+    around the CURRENT value; peak-FWHM floor of 4 ppm ONLY for analytic
+    (spin-1/2 style) peak models -- a Czjzek site's shift_fwhm_ppm is dCS
+    (a shift-DISTRIBUTION width, legitimately < 4 ppm in published fits)
+    and must NOT be floored; linked/pinned params untouched; vary flags
+    never changed (restricted, not fixed)."""
+    from larmor.constraints_util import restrict_glass_protocol
+
+    sites = [
+        {"model": "gauss_lor", "params": {
+            "isotropic_chemical_shift_ppm": {"value": -85.0, "vary": True},
+            "shift_fwhm_ppm": {"value": 2.0, "vary": True},
+            "amplitude": {"value": 100.0, "vary": True, "min": 0.0}}},
+        {"model": "czjzek", "params": {
+            "isotropic_chemical_shift_ppm": {"value": 60.0, "vary": True},
+            "shift_fwhm_ppm": {"value": 2.5, "vary": True},   # dCS!
+            "sigma_Cq_MHz": {"value": 1.2, "vary": True},
+            "amplitude": {"value": 50.0, "vary": True, "min": 0.0}}},
+        {"model": "gauss_lor", "params": {
+            # linked shift + pinned width: both must be left alone
+            "isotropic_chemical_shift_ppm": {"value": -80.0, "vary": True,
+                                             "expr": "s0.isotropic_chemical_shift_ppm + 5"},
+            "shift_fwhm_ppm": {"value": 3.0, "vary": False}}},
+    ]
+    notes = restrict_glass_protocol(sites, shift_window_ppm=3.0)
+
+    p0 = sites[0]["params"]
+    assert p0["isotropic_chemical_shift_ppm"]["min"] == -88.0
+    assert p0["isotropic_chemical_shift_ppm"]["max"] == -82.0
+    assert p0["shift_fwhm_ppm"]["min"] == 4.0
+    assert p0["shift_fwhm_ppm"]["value"] == 4.0      # clamped into the floor
+    assert "min" not in p0["amplitude"] or p0["amplitude"]["min"] == 0.0
+
+    p1 = sites[1]["params"]
+    assert p1["isotropic_chemical_shift_ppm"]["min"] == 57.0
+    assert p1["isotropic_chemical_shift_ppm"]["max"] == 63.0
+    assert "min" not in p1["shift_fwhm_ppm"]          # dCS NOT floored
+    assert p1["shift_fwhm_ppm"]["value"] == 2.5
+    assert "min" not in p1["sigma_Cq_MHz"]            # sigma untouched
+
+    p2 = sites[2]["params"]
+    assert "min" not in p2["isotropic_chemical_shift_ppm"]   # linked: skipped
+    assert "min" not in p2["shift_fwhm_ppm"]                 # pinned: skipped
+
+    # vary flags never changed anywhere (restricted, not fixed)
+    assert p0["shift_fwhm_ppm"]["vary"] is True
+    assert p2["shift_fwhm_ppm"]["vary"] is False
+    # exactly what changed, nothing more: s0 shift + s0 width floor + s1 shift
+    # (s1's dCS/sigma untouched; s2 fully skipped)
+    assert len(notes) == 3
+
+def test_restrict_glass_protocol_note_count_matches_what_changed():
+    from larmor.constraints_util import restrict_glass_protocol
+    sites = [{"model": "gauss_lor", "params": {
+        "isotropic_chemical_shift_ppm": {"value": 0.0, "vary": True},
+        "shift_fwhm_ppm": {"value": 5.0, "vary": True}}}]
+    notes = restrict_glass_protocol(sites)
+    assert len(notes) == 2                    # one shift window + one floor
+    # existing WIDER floor is kept (max(), never loosened)
+    sites2 = [{"model": "gauss_lor", "params": {
+        "shift_fwhm_ppm": {"value": 8.0, "vary": True, "min": 6.0}}}]
+    restrict_glass_protocol(sites2)
+    assert sites2[0]["params"]["shift_fwhm_ppm"]["min"] == 6.0

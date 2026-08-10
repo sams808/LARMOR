@@ -182,7 +182,10 @@ Everything the *previous* version of this roadmap listed as "still open" —
 - ❌ **#19** dmfit amplitude-calibration UI
 - ❌ **Bootstrapped series errors**
 - ❌ **Two-way batch table** (row ↔ plot selection)
-- ❌ **Reference/literature overlays**
+- ❌ **Reference/literature overlays** — when built, seed the data from
+  Edén 2023's compiled tables (δiso ranges per coordination for ²⁷Al/¹¹B/
+  ¹⁷O/²³Na/²⁵Mg and P_Q ranges, his Tables 3–5 — PDF at `Desktop\bib\`),
+  drawn as labeled shaded δiso spans for the current nucleus
 - ❌ **Watch-folder / auto-fit**
 - 🟡 **Figure annotation layer**: a spec-level primitive exists
   (`{"x","y","text"}` → `ax.text(...)`, `render_1d` only) but there's no

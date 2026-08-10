@@ -125,6 +125,11 @@ shift of the axis; the raw data is untouched.
 4. **Report** (F6) gives the **quantification**: each site's integrated area as a
    population **% ± error**. Use the area-normalised `gl_norm` model (or a Czjzek
    site) so an amplitude *is* a population.
+   ⚠ For **quadrupolar** nuclei, integrated areas only reflect populations if
+   the *acquisition* was quantitative — CT-selective excitation, or the
+   short-pulse regime (flip angle ≤ 30°/(I+½), i.e. ≤ 10° for I = 5/2), plus
+   full relaxation. No fit can repair a non-quantitative acquisition; see
+   **Fitting glasses for publication** §6 for the exact conditions.
 
 **Zones** restrict the fit to chosen spectral regions (union of intervals) — fit
 only where the model is valid and let peaks outside float frozen. **Auto Fit**

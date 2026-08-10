@@ -153,6 +153,23 @@ in the parameter table: cap its δ_iso with a bound (`[.. 40]`) or **pin** it, a
 fix σ if the 2D tail is under-determined. Co-fitting with a clean 1D of the same
 sample also stabilises the shared shifts.
 
+### ⚠ What MQMAS numbers can and cannot be used for
+
+The 3Q excitation and the 3Q→1Q conversion efficiencies both depend on each
+site's C_Q (Edén 2023 §6.2.2/§6.3.2 and refs. therein), so:
+
+- **peak volumes in a 3QMAS map are NOT site populations** — high-C_Q sites
+  are systematically under-represented. Quantify from the fitted **1D MAS**
+  spectrum (acquired under quantitative conditions — see *Fitting glasses
+  for publication* §6) and use the 2D for what it is uniquely good at:
+  resolving sites and pinning their δ_iso / P_Q;
+- 3QMAS-derived δ_iso and P_Q values typically come out **lower** than
+  1D-fit values — don't mix the two sources in one table without saying
+  which is which;
+- quick sanity check (recommended in the same review): compare the 3QMAS
+  1Q ("MAS") projection against the quantitative single-pulse spectrum —
+  visible disagreement means the 2D is under-representing high-C_Q sites.
+
 ---
 
 ## References
