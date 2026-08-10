@@ -455,6 +455,64 @@ class SpectrumView(pg.PlotWidget):
             vals.append([max(a, b), min(a, b)])
         return vals
 
+    # ---------- literature shift-range overlay (assignment guide) ----------
+    def set_ref_ranges(self, ranges: list[dict] | None, citation: str = ""):
+        """Draw (or clear, with None/[]) labeled, NON-interactive shaded
+        δiso spans — the literature assignment guide (View ▸ Literature
+        shift ranges). Each entry: {label, lo_ppm, hi_ppm, quad, note};
+        the quadrupolar note (P_Q/C_Q — not a shift-axis quantity) goes
+        into the label's second line and the hover tooltip."""
+        for item in getattr(self, "_ref_items", []):
+            self.removeItem(item)
+        self._ref_items: list = []
+        if not ranges:
+            return
+        t = theme.active()
+        rr, rg, rb = theme._rgb(t.pivot)
+        for k, r in enumerate(ranges):
+            region = pg.LinearRegionItem(
+                values=(float(r["lo_ppm"]), float(r["hi_ppm"])),
+                movable=False,
+                brush=pg.mkBrush(rr, rg, rb, 18),
+                pen=pg.mkPen(t.pivot, width=1, style=Qt.DotLine))
+            region.setZValue(-20)                 # behind data, zones, model
+            tip = f"{r['label']}: {r['lo_ppm']:g} … {r['hi_ppm']:g} ppm"
+            if r.get("quad"):
+                tip += f"\n{r['quad']}"
+            if r.get("note"):
+                tip += f"\n{r['note']}"
+            if citation:
+                tip += f"\n[{citation}]"
+            region.setToolTip(tip)
+            label = pg.TextItem(
+                r["label"] + (f"\n{r['quad'].split(';')[0]}" if r.get("quad")
+                              else ""),
+                color=t.pivot, anchor=(0.5, 0.0))
+            label.setZValue(-19)
+            # stagger label heights so adjacent ranges don't overwrite
+            # each other; positions refresh with the view via ViewBox signal
+            self.addItem(region)
+            self.addItem(label)
+            self._ref_items += [region, label]
+            self._place_ref_label(label, r, k)
+        vb = self.getPlotItem().getViewBox()
+        vb.sigRangeChanged.connect(self._refresh_ref_labels)
+        self._ref_meta = list(ranges)
+
+    def _place_ref_label(self, label, r: dict, k: int):
+        vb = self.getPlotItem().getViewBox()
+        (_x0, _x1), (y0, y1) = vb.viewRange()
+        frac = 0.97 - 0.07 * (k % 3)              # 3-step stagger
+        label.setPos((float(r["lo_ppm"]) + float(r["hi_ppm"])) / 2.0,
+                     y0 + frac * (y1 - y0))
+
+    def _refresh_ref_labels(self, *_):
+        items = getattr(self, "_ref_items", [])
+        meta = getattr(self, "_ref_meta", [])
+        labels = [it for it in items if isinstance(it, pg.TextItem)]
+        for k, (label, r) in enumerate(zip(labels, meta)):
+            self._place_ref_label(label, r, k)
+
     # ---------- onboarding placeholder (empty canvas) ----------
     def set_placeholder(self, text: str | None):
         """Show faint centred guidance on an empty canvas, or clear it (None).

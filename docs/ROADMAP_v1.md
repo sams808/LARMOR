@@ -182,10 +182,12 @@ Everything the *previous* version of this roadmap listed as "still open" —
 - ❌ **#19** dmfit amplitude-calibration UI
 - ❌ **Bootstrapped series errors**
 - ❌ **Two-way batch table** (row ↔ plot selection)
-- ❌ **Reference/literature overlays** — when built, seed the data from
-  Edén 2023's compiled tables (δiso ranges per coordination for ²⁷Al/¹¹B/
-  ¹⁷O/²³Na/²⁵Mg and P_Q ranges, his Tables 3–5 — PDF at `Desktop\bib\`),
-  drawn as labeled shaded δiso spans for the current nucleus
+- ✅ **Reference/literature overlays** — shipped 2026-08-10 (v0.7.8):
+  View ▸ "Literature shift ranges (Edén 2023)", labeled shaded δiso spans
+  per species for the current nucleus with P_Q/C_Q ranges in the
+  labels/tooltips; data in `larmor/refranges.py`, sourced from Edén 2023
+  §5.2–5.3/Table 4/§6.3.1 (currently ²⁷Al, ¹¹B, ²⁹Si, ³¹P — ¹⁷O/²³Na/²⁵Mg
+  omitted until drawable δiso spans have a citable source)
 - ❌ **Watch-folder / auto-fit**
 - 🟡 **Figure annotation layer**: a spec-level primitive exists
   (`{"x","y","text"}` → `ax.text(...)`, `render_1d` only) but there's no

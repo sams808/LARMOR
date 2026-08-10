@@ -496,6 +496,17 @@ class MainWindow(QMainWindow):
         _table.set_scroll_nudge(self.actScrollNudge.isChecked())
         self.actScrollNudge.toggled.connect(self._toggle_scroll_nudge)
         m_view.addAction(self.actScrollNudge)
+        self.actRefRanges = QAction("&Literature shift ranges  (Edén 2023)",
+                                    self)
+        self.actRefRanges.setCheckable(True)
+        self.actRefRanges.setToolTip(
+            "shade the typical literature δiso range of each species for the "
+            "current nucleus (labels carry the P_Q/C_Q ranges) — an "
+            "assignment guide, sourced from Edén 2023")
+        self.actRefRanges.setChecked(bool(QSettings("LARMOR", "app").value(
+            "refRanges", False, type=bool)))
+        self.actRefRanges.toggled.connect(self._toggle_ref_ranges)
+        m_view.addAction(self.actRefRanges)
         self._build_czjzek_display_menu(m_view)
         m_view.addSeparator()
         self._build_theme_menu(m_view)
@@ -1013,6 +1024,31 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             "scroll over a fit value to nudge it: "
             + ("ON" if on else "off (default)"))
+
+    def _toggle_ref_ranges(self, on: bool):
+        QSettings("LARMOR", "app").setValue("refRanges", bool(on))
+        self._update_ref_ranges()
+        self.statusBar().showMessage(
+            "literature shift ranges: " + ("ON — shaded spans are typical "
+            "ranges from Edén 2023, hover a span for the P_Q/C_Q note"
+            if on else "off"))
+
+    def _update_ref_ranges(self):
+        """(Re)draw the literature-range overlay for the CURRENT nucleus —
+        called on toggle and whenever the active 1D document changes."""
+        from larmor import refranges
+
+        if not hasattr(self, "view"):
+            return
+        on = getattr(self, "actRefRanges", None) is not None and \
+            self.actRefRanges.isChecked()
+        nucleus = (self.recipe or {}).get("nucleus", "") if self.recipe else ""
+        ranges = refranges.ranges_for(nucleus) if on else []
+        self.view.set_ref_ranges(ranges, refranges.CITATION)
+        if on and nucleus and not ranges:
+            self.statusBar().showMessage(
+                f"no literature ranges compiled for {nucleus} yet "
+                "(larmor/refranges.py has 27Al, 11B, 29Si, 31P)")
 
     def _build_czjzek_display_menu(self, parent):
         """View ▸ Czjzek width display — pick which of the four literature
@@ -2252,6 +2288,11 @@ class MainWindow(QMainWindow):
         signal = float(np.max(np.abs(y - np.median(noise_region))))
         sn = signal / noise if noise > 0 else 0.0
         self.lines_table.set_sn(f"S/N {sn:,.0f}" if sn else "")
+        # _update_sn runs at every active-1D-document change (load, workspace
+        # switch, background subtraction, make-active) — exactly when the
+        # literature-range overlay must follow the nucleus, so refresh it
+        # here rather than duplicating the call at all five call sites
+        self._update_ref_ranges()
 
     # --------------------------------------------------------- overlays
     def add_overlay_dialog(self):
