@@ -481,8 +481,11 @@ class SpectrumView(pg.PlotWidget):
                 tip += f"\n{r['quad']}"
             if r.get("note"):
                 tip += f"\n{r['note']}"
-            if citation:
-                tip += f"\n[{citation}]"
+            # per-entry citation when the dataset carries one (different
+            # nuclei come from different primary papers), else the fallback
+            ref = r.get("_citation") or citation
+            if ref:
+                tip += f"\n[{ref}]"
             region.setToolTip(tip)
             label = pg.TextItem(
                 r["label"] + (f"\n{r['quad'].split(';')[0]}" if r.get("quad")

@@ -559,6 +559,7 @@ class MainWindow(QMainWindow):
                 ("spectra-1d", "1D spectra — processing & fitting"),
                 ("lineshapes", "Lineshapes — models & physics"),
                 ("glass-fitting", "Fitting glasses for publication (Edén 2023)"),
+                ("shift-ranges", "Literature shift ranges — data & sources"),
                 ("processing-reference", "Processing reference"),
                 ("2d-processing", "2D processing"),
                 ("mqmas", "MQMAS (2D)"),
@@ -1044,11 +1045,14 @@ class MainWindow(QMainWindow):
             self.actRefRanges.isChecked()
         nucleus = (self.recipe or {}).get("nucleus", "") if self.recipe else ""
         ranges = refranges.ranges_for(nucleus) if on else []
+        for r in ranges:                       # per-entry primary citation
+            r["_citation"] = refranges.citation_for(r)
         self.view.set_ref_ranges(ranges, refranges.CITATION)
         if on and nucleus and not ranges:
             self.statusBar().showMessage(
-                f"no literature ranges compiled for {nucleus} yet "
-                "(larmor/refranges.py has 27Al, 11B, 29Si, 31P)")
+                f"no literature ranges compiled for {nucleus} yet — see "
+                "Help ▸ Literature shift ranges for what is, and "
+                "larmor/refranges.py to extend")
 
     def _build_czjzek_display_menu(self, parent):
         """View ▸ Czjzek width display — pick which of the four literature

@@ -22,15 +22,17 @@ looking at fit quality. Adding a component because the residual improves is
 exactly the trend the review criticises: with enough Gaussians, any smooth
 peak fits perfectly and means nothing.
 
-**View ▸ Literature shift ranges (Edén 2023)** draws this guidance on the
-spectrum: shaded, labeled δiso spans of the typical species for the current
-nucleus (²⁷Al⁽⁴/⁵/⁶⁾, ¹¹B BO₃/BO₄, ²⁹Si Qⁿ/Si⁽⁵/⁶⁾, ³¹P Qⁿ), with each
-label/tooltip carrying the corresponding **P_Q or C_Q range** — a width is
-not a shift-axis quantity, but it is what separates e.g. BO₃
-(C_Q ≈ 2.4–2.8 MHz) from BO₄ (≈ 0.2–0.8 MHz) where their shifts approach.
-The spans are typical multi-component-oxide ranges, an assignment *guide*,
-not bounds — e.g. ²⁷Al shifts run significantly lower in aluminophosphates
-(the review's own caveat).
+**View ▸ Literature shift ranges** draws this guidance on the spectrum:
+shaded, labeled δiso spans of the typical species for the current nucleus
+(²⁷Al⁽⁴/⁵/⁶⁾, ¹¹B BO₃/BO₄, ²⁹Si Qⁿ/Si⁽⁵/⁶⁾, ³¹P Qⁿ, ¹⁷O BO/NBO, ²³Na,
+²⁵Mg, ¹⁹F species), with each label/tooltip carrying the corresponding
+**P_Q or C_Q range** — a width is not a shift-axis quantity, but it is what
+separates e.g. BO₃ (C_Q ≈ 2.4–2.8 MHz) from BO₄ (≈ 0.2–0.8 MHz) where their
+shifts approach. The spans are typical multi-component-oxide ranges, an
+assignment *guide*, not bounds — e.g. ²⁷Al shifts run significantly lower
+in aluminophosphates (the review's own caveat). Every number's source (and
+the reference-compound traps for ²³Na/¹⁹F) is documented in
+**Help ▸ Literature shift ranges — data & sources**.
 
 ## 2 · Peak shape: start free, then justify Gaussian
 

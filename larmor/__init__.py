@@ -5,6 +5,6 @@ ingestion (Bruker/TopSpin, legacy dmfit .fxmla), a diffable JSON recipe format,
 and a fast kernel-based fitting engine with real parameter uncertainties.
 """
 
-__version__ = "0.7.8"
+__version__ = "0.7.9"
 
 from larmor.recipe import Param, SiteModel, Recipe  # noqa: F401

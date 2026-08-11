@@ -10,20 +10,47 @@ from larmor import refranges
 
 
 def test_ranges_structure_and_sanity():
-    assert set(refranges.REF_RANGES) == {"27Al", "11B", "29Si", "31P"}
+    assert set(refranges.REF_RANGES) == {"27Al", "11B", "29Si", "31P",
+                                         "17O", "23Na", "25Mg", "19F"}
     for nuc, entries in refranges.REF_RANGES.items():
         assert entries, nuc
         for r in entries:
             assert r["lo_ppm"] < r["hi_ppm"], (nuc, r["label"])
             assert r["label"]
             assert "quad" in r and "note" in r
+            # every entry names its primary source, and it resolves
+            assert r["ref"] in refranges.REFS, (nuc, r["label"])
+            assert refranges.citation_for(r) == refranges.REFS[r["ref"]]
     assert "Ed\u00e9n 2023" in refranges.CITATION
+
+
+def test_new_nuclei_values_are_sourced_sanely():
+    """Spot-check the added nuclei against their primary sources."""
+    o = {r["label"]: r for r in refranges.ranges_for("17O")}
+    assert o["Si\u2013O\u2013Si (BO)"]["ref"] == "dirken1997"
+    assert o["NBO (Si\u2013O\u2013M)"]["ref"] == "du2003"
+    assert o["NBO (Si\u2013O\u2013M)"]["hi_ppm"] == 75.0        # K-NBO at 71 fits inside
+
+    na = refranges.ranges_for("23Na")
+    assert len(na) == 1 and na[0]["lo_ppm"] == -20.0 and na[0]["hi_ppm"] == 10.0
+
+    mg = {r["label"]: r for r in refranges.ranges_for("25Mg")}
+    assert mg["Mg[6]"]["ref"] == "shimoda2007"
+    assert mg["Mg[4]/Mg[5]"]["lo_ppm"] == 30.0
+
+    # 19F: spin-1/2 (no quad note), all NEGATIVE vs CFCl3, Baasner ladder
+    f = refranges.ranges_for("19F")
+    assert len(f) == 5
+    assert all(r["hi_ppm"] < 0 for r in f)
+    assert all(r["quad"] == "" for r in f)
+    centers = sorted((r["lo_ppm"] + r["hi_ppm"]) / 2 for r in f)
+    assert centers == [-225.0, -188.0, -168.0, -146.0, -113.0]
 
 
 def test_ranges_for_normalizes_and_defaults_empty():
     assert refranges.ranges_for("27Al")
     assert refranges.ranges_for(" 27Al ")          # stray whitespace tolerated
-    assert refranges.ranges_for("19F") == []       # not compiled -> empty
+    assert refranges.ranges_for("7Li") == []       # not compiled -> empty
     assert refranges.ranges_for(None) == []
     assert refranges.ranges_for("") == []
 
