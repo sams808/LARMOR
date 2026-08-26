@@ -1,4 +1,6 @@
 """QCPMG processing: period detection, spikelets, and echo coaddition."""
+import pathlib
+
 import numpy as np
 import pytest
 
@@ -47,15 +49,33 @@ def test_coadd_echoes_shape():
     assert np.abs(echo).max() > 5.0
 
 
-def test_split_trims_trailing_zeros():
+def test_split_echoes_honours_an_explicit_echo_count():
+    """The number of echoes is stated (ssNake's 'trim to an exact multiple'),
+    not inferred from an all-zero test -- real trains end in NOISE, never in
+    exact zeros, so the old trim silently kept the noise slots."""
     fid, period = _synthetic_train(period=40, n_echoes=15)
     fid = np.concatenate([fid, np.zeros(40 * 5, complex)])   # 5 blank slots
-    ech = qcpmg.split_echoes(fid, period)
-    assert ech.shape == (15, period)                        # blanks dropped
+    assert qcpmg.split_echoes(fid, period).shape == (20, period)
+    assert qcpmg.split_echoes(fid, period, n_echoes=15).shape == (15, period)
 
 
-def test_fit_t2_recovers_decay():
-    """The echo-top decay yields the transverse relaxation time."""
+def test_split_echoes_rejects_a_period_longer_than_the_train():
+    with pytest.raises(ValueError, match="exceeds"):
+        qcpmg.split_echoes(np.ones(50, complex), 80)
+
+
+def test_n_usable_echoes_stops_at_the_noise_floor():
+    period, n_real = 64, 20
+    fid, _ = _synthetic_train(period=period, n_echoes=n_real, decay=0.05)
+    rng = np.random.default_rng(0)
+    noise = rng.normal(0, 2e-3, period * 15) + 1j * rng.normal(0, 2e-3, period * 15)
+    ech = qcpmg.split_echoes(np.concatenate([fid, noise]), period)
+    assert ech.shape[0] == 35                       # all slots present...
+    assert abs(qcpmg.n_usable_echoes(ech) - n_real) <= 3   # ...but only ~20 real
+
+
+def test_fit_t2_recovers_decay_and_reports_uncertainty():
+    """The echo-top decay yields T2, with an error bar and both time axes."""
     period, n = 64, 60
     tau = 5e-4                       # 0.5 ms echo spacing
     T2_true = 12e-3                  # 12 ms
@@ -65,8 +85,96 @@ def test_fit_t2_recovers_decay():
     echoes = np.array([base * np.exp(-k * tau / T2_true) for k in range(n)],
                       dtype=complex)
     top = qcpmg.echo_top_point(echoes)
-    T2, curve = qcpmg.fit_t2(tau, qcpmg.echo_decay(echoes, top))
-    assert T2 == pytest.approx(T2_true, rel=0.05)
+    f = qcpmg.fit_t2(tau, qcpmg.echo_decay(echoes, top), period=period)
+    assert f.ok and not f.pinned
+    assert f.T2_s == pytest.approx(T2_true, rel=0.05)
+    assert np.isfinite(f.T2_err_s) and f.T2_err_s > 0     # was discarded before
+    assert f.r2 > 0.99
+    # the two axes differ by exactly the echo length -- the ssNake trap
+    assert f.T2_ssnake_s == pytest.approx(f.T2_s / period, rel=1e-9)
+    assert f.lb_Hz == pytest.approx(1.0 / (np.pi * f.T2_s), rel=1e-9)
+    assert f.lb_ssnake_Hz == pytest.approx(f.lb_Hz * period, rel=1e-6)
+
+
+def test_fit_t2_flags_failure_instead_of_fabricating_a_number():
+    """A fit that cannot be made must say so -- it used to return a plausible
+    bold number (the bound itself) for a flat or NaN decay."""
+    bad = qcpmg.fit_t2(1e-4, np.array([1.0, np.nan, 0.5, 0.2, 0.1]))
+    assert not bad.ok and bad.T2_s == 0.0
+    assert not qcpmg.fit_t2(1e-4, np.zeros(20)).ok
+    assert not qcpmg.fit_t2(1e-4, np.array([1.0, 1.0, 1.0])).ok   # too few
+
+
+def test_matched_lb_relation():
+    assert qcpmg.matched_lb_Hz(4.241e-3) == pytest.approx(75.07, rel=1e-3)
+    assert qcpmg.matched_lb_Hz(0.0) == 0.0
+
+
+def test_echo_top_is_robust_to_noise_in_any_single_echo():
+    """The top is taken from the MEAN of all echoes; one noisy row must not
+    move it (a single mid-train row picked 14 instead of 147 on real data)."""
+    period, n, true_top = 200, 40, 100
+    t = np.arange(period) - true_top
+    base = np.exp(-(t / 4.0) ** 2)
+    rng = np.random.default_rng(1)
+    ech = np.array([base * np.exp(-k * 0.12)
+                    + rng.normal(0, 0.25, period) for k in range(n)], complex)
+    assert abs(qcpmg.echo_top_point(ech, "mean") - true_top) <= 2
+
+
+def test_split_alignment_falls_when_the_period_is_wrong():
+    fid, period = _synthetic_train(period=80, n_echoes=30)
+    good = qcpmg.split_alignment(qcpmg.split_echoes(fid, period))
+    bad = qcpmg.split_alignment(qcpmg.split_echoes(fid, period - 7))
+    assert good > 0.9 and bad < good
+
+
+def test_first_last_echo_returns_both_ends():
+    fid, period = _synthetic_train(period=64, n_echoes=25, decay=0.05)
+    ech = qcpmg.split_echoes(fid, period)
+    first, last = qcpmg.first_last_echo(ech)
+    assert first.shape == last.shape == (period,)
+    assert first.max() > last.max()                  # it decayed
+
+
+def test_echo_period_from_meta_reads_the_pulse_program():
+    cnst = [0.0] * 10
+    cnst[7] = 533.3333                                # spikelet spacing, Hz
+    per, src = qcpmg.echo_period_from_meta({"sw_Hz": 156250.0, "cnst": cnst})
+    assert per == pytest.approx(292.9688, rel=1e-4) and src == "CNST7"
+    cnst2 = [0.0] * 10
+    cnst2[8] = 293.0
+    assert qcpmg.echo_period_from_meta({"sw_Hz": 0.0, "cnst": cnst2}) == (293.0, "CNST8")
+    # nothing recorded -> say so, never invent a number
+    assert qcpmg.echo_period_from_meta({"sw_Hz": 156250.0}) == (0.0, "none")
+
+
+def test_detect_period_reports_failure_rather_than_a_wrong_integer():
+    rng = np.random.default_rng(2)
+    assert qcpmg.detect_period(rng.normal(0, 1, 4000) + 0j) == 0
+    assert qcpmg.detect_period(np.zeros(500, complex)) == 0
+
+
+def test_detect_period_survives_a_wide_echo():
+    """A fixed min_period=8 left the autocorrelation's central lobe intact for
+    a wide echo, so the lobe won the argmax (real 35Cl train: 8 vs true 293)."""
+    period = 300
+    t = np.arange(period) - period // 2
+    echo = np.exp(-(t / 40.0) ** 2)                  # much wider than 8 points
+    fid = np.concatenate([echo * np.exp(-0.05 * k) for k in range(25)]).astype(complex)
+    assert abs(qcpmg.detect_period(fid) - period) <= 2
+
+
+def test_carrier_ppm_uses_the_processing_reference():
+    """(SFO1-SF)*1e6/SF, not O1/BF1 -- the two differ by 50.8 ppm on a real
+    referenced dataset, which shifts every reported chemical shift."""
+    meta = {"larmor_MHz": 78.35411487, "sf_MHz": 78.3621718681335,
+            "o1_Hz": -4074.13, "bf1_MHz": 78.358189}
+    ppm, referenced = qcpmg.carrier_ppm(meta)
+    assert referenced and ppm == pytest.approx(-102.82, abs=0.01)
+    no_procs = dict(meta); no_procs.pop("sf_MHz")
+    ppm2, referenced2 = qcpmg.carrier_ppm(no_procs)
+    assert not referenced2 and ppm2 == pytest.approx(-51.99, abs=0.01)
 
 
 def test_sum_echo_spectrum_is_phasable_absorption():
@@ -74,6 +182,323 @@ def test_sum_echo_spectrum_is_phasable_absorption():
     ppm, spec = qcpmg.sum_echo_spectrum(fid, period, 100000.0, 100.0, gb_Hz=50)
     assert np.iscomplexobj(spec)
     p0 = qcpmg.autophase0(spec)
-    real = np.real(spec * np.exp(-1j * np.deg2rad(p0)))
+    real = qcpmg.phase_spectrum(spec, p0).real
     # the autophased real spectrum has a clear positive main peak
     assert real.max() > 3 * abs(real.min())
+
+
+def _whole_echo(period=293, sw=156250.0, top=146, f0=300.0):
+    """One symmetric (whole) echo whose exact transform is pure absorption.
+
+    Deliberately NOT strongly damped: with a fast decay the samples that a
+    mis-placed zero-fill boundary moves are numerically zero, so the test
+    passes for almost any split index and cannot see the bug it guards.
+    Truncated to the SYMMETRIC extent about the top (|t| <= min(top, m-1-top))
+    so it is a genuine whole echo for any top -- otherwise the surplus
+    one-sided samples are themselves a truncation artefact."""
+    k = np.arange(period) - top
+    t = k / sw
+    y = np.exp(-np.abs(t) * f0 * np.pi) * np.exp(2j * np.pi * f0 * t)
+    reach = min(top, period - 1 - top)
+    return np.where(np.abs(k) <= reach, y, 0.0)
+
+
+@pytest.mark.parametrize("zf", [1, 2, 4, 16])
+@pytest.mark.parametrize("top", [146, 147, 100])
+def test_whole_echo_ft_is_pure_absorption_at_every_zerofill(zf, top):
+    """THE regression: zero-fill must go MID-ARRAY, split at (m - top).
+
+    Appending zeros after the negative-time samples re-reads them as large
+    positive times and turns a pure absorption spectrum into a ~60%-dispersive
+    one. Splitting at m//2 instead of m-top is subtler but still wrong for any
+    top away from the centre."""
+    period, sw = 293, 156250.0
+    ppm, spec = qcpmg.whole_echo_ft(_whole_echo(period, sw, top), top,
+                                    sw, 100.0, zf=zf)
+    assert np.abs(spec.imag).max() / np.abs(spec.real).max() < 0.02
+
+
+def test_whole_echo_ft_puts_the_line_at_the_right_frequency():
+    """A mis-placed zero-fill split also SHIFTS the peak (measured 38 Hz = 2
+    bins at top=100), which would move every reported chemical shift."""
+    period, sw, sfo, f0 = 293, 156250.0, 78.0, 300.0
+    for top in (146, 147, 100, 80):
+        ppm, spec = qcpmg.whole_echo_ft(_whole_echo(period, sw, top, f0), top,
+                                        sw, sfo, zf=16)
+        peak_hz = ppm[int(np.argmax(spec.real))] * sfo
+        assert peak_hz == pytest.approx(f0, abs=15.0), top
+
+
+def test_fit_t2_honours_an_explicit_time_axis_after_exclusions():
+    """THE click-to-exclude regression: dropping a point must not re-time the
+    survivors onto 0, tau, 2*tau... Excluding the second echo of a real train
+    shifted T2 by -36% when the axis was rebuilt contiguously."""
+    tau, T2_true, n = 1.875e-3, 4.24e-3, 38
+    t = np.arange(n) * tau
+    decay = 0.02 + 1.0 * np.exp(-t / T2_true)
+    keep = np.ones(n, bool)
+    keep[1] = False                      # exclude an EARLY point: worst case
+    good = qcpmg.fit_t2(tau, decay[keep], t_s=t[keep], period=293)
+    assert good.T2_s == pytest.approx(T2_true, rel=0.02)
+    # without the explicit axis the same points give a materially different T2
+    naive = qcpmg.fit_t2(tau, decay[keep], period=293)
+    assert abs(naive.T2_s - T2_true) > 5 * abs(good.T2_s - T2_true)
+    with pytest.raises(ValueError, match="t_s has"):
+        qcpmg.fit_t2(tau, decay[keep], t_s=t)          # length mismatch
+
+
+def test_fit_t2_refuses_pure_noise():
+    """A noise decay converges happily (R2 ~ 0.02) and would otherwise hand
+    the user a matched filter computed from nothing."""
+    rng = np.random.default_rng(0)
+    f = qcpmg.fit_t2(1.875e-3, rng.normal(0, 1, 38), period=293)
+    assert not f.ok
+    assert f.r2 < 0.5
+
+
+def test_echo_top_uses_the_coherent_average():
+    """Averaging MAGNITUDES adds the noise floor and can land a point off the
+    true top; the echoes add in phase, so average them coherently. One point
+    matters: it changed a real measured T2 by 110%."""
+    period, n, true_top = 293, 38, 147
+    t = np.arange(period) - true_top
+    # a SHARP echo: adjacent points must differ by more than the noise, or
+    # neither estimator could resolve 146 from 147 even in principle
+    base = np.exp(-(t / 2.0) ** 2).astype(complex)
+    rng = np.random.default_rng(3)
+    ech = np.array([base * np.exp(-k * 0.45)
+                    + rng.normal(0, 0.02, period)
+                    + 1j * rng.normal(0, 0.02, period) for k in range(n)])
+    assert qcpmg.echo_top_point(ech) == true_top
+    cands = qcpmg.echo_top_candidates(ech)
+    assert set(cands) == {"coherent", "magnitude", "first"}
+    assert cands["coherent"] == true_top
+
+
+def test_echo_period_from_meta_rejects_an_unset_constant():
+    """CNST defaults to 1.0 on a Bruker dataset, so an untouched CNST7 would
+    'read' a period of the whole sweep width and blow up the split."""
+    cnst = [1.0] * 10                                  # pulse-program default
+    assert qcpmg.echo_period_from_meta(
+        {"sw_Hz": 156250.0, "cnst": cnst}, n_points=11194) == (0.0, "none")
+    # and a rotor-synchronised guess that is far too short is rejected too
+    assert qcpmg.echo_period_from_meta(
+        {"sw_Hz": 156250.0, "masr_Hz": 16000.0}, n_points=11194)[1] == "MASR"
+
+
+def test_split_echoes_rejects_dropping_every_echo():
+    with pytest.raises(ValueError, match="leaves no echoes"):
+        qcpmg.split_echoes(np.arange(1000) + 0j, 250, drop_first=4)
+
+
+def test_measurement_helpers_refuse_degenerate_input():
+    """The most degenerate cases must not come back looking the most
+    confident (a zero-width window used to report sigma = 0.000)."""
+    x = np.linspace(-200, 200, 4001)
+    # a peak pinned to the very edge -> no window can be walked
+    hi, lo = qcpmg.cg_window(x, np.exp(-((x + 200) / 10.0) ** 2))
+    assert (not np.isfinite(hi)) or hi > lo
+    cg, sig = qcpmg.centre_of_gravity(x, np.zeros_like(x), (float("nan"),) * 2)
+    assert not np.isfinite(cg) and not np.isfinite(sig)
+    # equal +/- lobes: the weights cancel, the ratio is meaningless
+    y = np.exp(-((x - 50) / 10.0) ** 2) - np.exp(-((x + 50) / 10.0) ** 2)
+    cg2, _ = qcpmg.centre_of_gravity(x, y, (200.0, -200.0))
+    assert not np.isfinite(cg2)
+    assert qcpmg.fwhm_hz(x, np.zeros_like(x), 100.0) == 0.0
+
+
+def test_coadd_spectrum_agrees_with_the_shared_whole_echo_transform():
+    """One whole-echo convention in the module: the legacy coadd path used to
+    keep the old one-sided window and end-appended zero-fill, giving a 53%
+    wider line than sum_echo_spectrum for the same data."""
+    fid, period = _synthetic_train(period=64, n_echoes=40, decay=0.03)
+    sw, sfo = 100000.0, 100.0
+    ppm_c, env = qcpmg.coadd_spectrum(fid, period, sw, sfo, lb_Hz=0.0, zf=8)
+    ech = qcpmg.split_echoes(fid, period)
+    top = qcpmg.echo_top_point(ech)
+    ppm_s, spec = qcpmg.whole_echo_ft(qcpmg.sum_echoes(ech, period / sw), top,
+                                      sw, sfo, zf=8)
+    a = env / (env.max() or 1.0)
+    b = np.abs(spec) / (np.abs(spec).max() or 1.0)
+    assert ppm_c.shape == ppm_s.shape
+    assert float(np.abs(a - b).max()) < 0.05
+
+
+def test_whole_echo_apodization_window_is_symmetric_about_the_top():
+    """After the swap the echo's LEFT half sits at the END of the array; a
+    one-sided window multiplied it by ~0, discarding 44% of the echo."""
+    n, sw = 512, 50000.0
+    w = qcpmg._gaussian_apod(n, sw, 2000.0, whole_echo=True)
+    assert w[0] == pytest.approx(1.0)
+    assert w[1] == pytest.approx(w[-1], rel=1e-9)     # symmetric
+    assert w[n // 2] == pytest.approx(w.min())        # minimum in the middle
+    one_sided = qcpmg._gaussian_apod(n, sw, 2000.0, whole_echo=False)
+    assert one_sided[-1] < 1e-6 < w[-1]               # the old behaviour
+
+
+def test_whole_echo_apodization_keeps_the_spectrum_absorptive():
+    period, sw, top = 512, 50000.0, 147
+    echo = _whole_echo(period, sw, top)
+    for gb in (500.0, 2000.0):
+        ppm, spec = qcpmg.whole_echo_ft(echo, top, sw, 100.0, gb_Hz=gb, zf=4)
+        assert np.abs(spec.imag).max() / np.abs(spec.real).max() < 0.05
+
+
+def test_whole_echo_ft_rejects_an_out_of_range_top():
+    with pytest.raises(ValueError, match="outside the echo"):
+        qcpmg.whole_echo_ft(np.ones(50, complex), 180, 50000.0, 100.0)
+
+
+def test_autophase0_sign_matches_how_callers_apply_it():
+    """autophase0 scored one sign and every consumer applied the other, so
+    applying the returned angle INVERTED the spectrum (max(real) went negative)."""
+    n = 2048
+    x = np.arange(n) - n / 2
+    line = np.exp(-(x / 30.0) ** 2).astype(complex)      # positive absorption
+    for true_p0 in (60.0, -100.0, 155.0):
+        dephased = line * np.exp(1j * np.deg2rad(true_p0))
+        p0 = qcpmg.autophase0(dephased)
+        real = qcpmg.phase_spectrum(dephased, p0).real
+        assert real.max() > 0.99 * np.abs(line).max()
+        assert real.max() > 20 * abs(real.min())
+
+
+def test_autophase_recovers_a_positive_lineshape():
+    n = 2048
+    x = np.arange(n) - n / 2
+    line = np.exp(-(x / 40.0) ** 2).astype(complex)
+    for true_p0 in (60.0, 120.0, -100.0):
+        p0, p1 = qcpmg.autophase(line * np.exp(1j * np.deg2rad(true_p0)))
+        real = qcpmg.phase_spectrum(line * np.exp(1j * np.deg2rad(true_p0)), p0, p1).real
+        assert real.max() > 0.95 * np.abs(line).max()
+
+
+def test_sum_echoes_normalised_is_invariant_to_t2_weighting():
+    """Toggling the matched filter must not rescale the spectrum (it changed
+    the peak by 0.56x before), or 'before/after' plots are not comparable."""
+    fid, period = _synthetic_train(period=64, n_echoes=40, decay=0.05)
+    ech = qcpmg.split_echoes(fid, period)
+    tau = 1e-4
+    plain = qcpmg.sum_echoes(ech, tau, None, normalise=True)
+    weighted = qcpmg.sum_echoes(ech, tau, 2e-3, normalise=True)
+    # weighting still favours the early (larger) echoes, so the peak may rise
+    # somewhat -- what must not happen is the old wholesale rescaling
+    ratio = float(np.abs(weighted).max() / np.abs(plain).max())
+    assert 0.7 < ratio < 1.6, ratio
+    raw = qcpmg.sum_echoes(ech, tau, None, normalise=False)
+    assert np.abs(raw).max() > 5 * np.abs(plain).max()     # opt-out still works
+
+
+def test_apodize_echoes_returns_the_weighted_matrix():
+    fid, period = _synthetic_train(period=32, n_echoes=12)
+    ech = qcpmg.split_echoes(fid, period)
+    tau, t2 = 1e-4, 5e-4
+    out = qcpmg.apodize_echoes(ech, tau, t2)
+    assert out.shape == ech.shape
+    assert out[3] == pytest.approx(ech[3] * np.exp(-3 * tau / t2))
+    w = qcpmg.echo_weights(12, tau, t2)
+    assert w[0] == 1.0 and w[-1] < w[0]
+
+
+def test_centre_of_gravity_and_fwhm_on_a_known_lineshape():
+    ppm = np.linspace(-200, 200, 4001)
+    y = np.exp(-((ppm + 50.0) / 20.0) ** 2)          # centred at -50 ppm
+    cg, sigma = qcpmg.centre_of_gravity(ppm, y, (100.0, -200.0))
+    assert cg == pytest.approx(-50.0, abs=0.5)
+    assert sigma >= 0.0
+    # FWHM of a Gaussian exp(-(x/a)^2) is 2*a*sqrt(ln2)
+    expected_ppm = 2 * 20.0 * np.sqrt(np.log(2))
+    assert qcpmg.fwhm_hz(ppm, y, 100.0, (100.0, -200.0)) == pytest.approx(
+        expected_ppm * 100.0, rel=0.02)
+
+
+def test_cg_sigma_grows_when_the_window_is_sloppy():
+    """sigma is the QUALITY FLAG that tells the user to place the edges by
+    hand: it must react to a window whose edges sit on a sloping tail."""
+    ppm = np.linspace(-400, 200, 6001)
+    y = np.exp(-((ppm + 50.0) / 25.0) ** 2) + 0.25 * np.exp(-((ppm + 250.0) / 90.0) ** 2)
+    _, tight = qcpmg.centre_of_gravity(ppm, y, (10.0, -110.0))
+    _, sloppy = qcpmg.centre_of_gravity(ppm, y, (100.0, -400.0))
+    assert sloppy > tight
+
+
+def test_overlay_pair_puts_both_traces_on_one_scale():
+    a = np.array([0.0, 2.0, 1.0]); b = np.array([0.0, 0.5, 0.25])
+    sa, sb = qcpmg.overlay_pair(a, b)
+    assert sa.max() == pytest.approx(1.0) and sb.max() == pytest.approx(1.0)
+    za, zb = qcpmg.overlay_pair(np.zeros(3), b)      # no divide-by-zero
+    assert np.all(np.isfinite(za)) and np.all(np.isfinite(zb))
+
+
+# --------------------------------------------------------------------------
+# Acceptance against the real, published MagLab 35Cl dataset. Skipped when the
+# data is not on this machine, but the expected values stay here so the
+# protocol is documented either way.
+
+_DATA = pathlib.Path(
+    r"C:\Users\samso\Desktop\WSU_work\NMR\MagLab\DATA\35Cl_2025-12")
+
+#: EXPNO -> (sample, published ssNake T in s)  [xlsx 'T2' sheet]
+_PUBLISHED = {1: ("LAW3CL0CA", 1.446e-05), 3: ("LAW3CL4CA", 6.381e-05),
+              4: ("LAW3CL1CA", 1.783e-05), 5: ("LAW3CL3CA", 4.078e-05),
+              6: ("NS3", 1.216e-05), 7: ("Ab-3Cl", 8.232e-06),
+              8: ("SV6-Cl", 2.548e-05), 9: ("CN1-3Cl", 3.290e-05),
+              11: ("LAW3CL2CA", 2.910e-05), 14: ("SV-1Cl", 2.685e-05),
+              15: ("CS-3Cl", 4.694e-05), 16: ("An-3Cl", 7.477e-05)}
+
+_needs_data = pytest.mark.skipif(not _DATA.exists(),
+                                 reason="MagLab 35Cl dataset not on this machine")
+
+
+def _load_real(expno: int):
+    from larmor.io import bruker
+    d = bruker.read(str(_DATA / str(expno) / "fid"))
+    return np.asarray(d.data, complex), dict(d.meta)
+
+
+@_needs_data
+def test_real_data_metadata_is_read_not_guessed():
+    fid, meta = _load_real(1)
+    per, src = qcpmg.echo_period_from_meta(meta, n_points=fid.size)
+    assert src == "CNST7" and per == pytest.approx(292.9688, rel=1e-5)
+    ppm, referenced = qcpmg.carrier_ppm(meta)
+    assert referenced
+    # TopSpin's own OFFSET - SW_p/(2*SF) for this dataset
+    assert ppm == pytest.approx(-102.817, abs=0.01)
+
+
+@_needs_data
+@pytest.mark.parametrize("expno", sorted(_PUBLISHED))
+def test_real_data_reproduces_the_published_t2(expno):
+    """The acceptance test: LARMOR must reproduce the ssNake T value the
+    published protocol recorded, for every sample in the set."""
+    name, t_pub = _PUBLISHED[expno]
+    fid, meta = _load_real(expno)
+    per = int(round(qcpmg.echo_period_from_meta(meta, n_points=fid.size)[0]))
+    assert per == 293
+    ech = qcpmg.split_echoes(fid, per)
+    top = qcpmg.echo_top_point(ech)
+    assert top == 147, f"{name}: echo top moved (ssNake used 147)"
+    f = qcpmg.fit_t2(per / meta["sw_Hz"], qcpmg.echo_decay(ech, top, "real"),
+                     offset=True, period=per)
+    assert f.T2_ssnake_s == pytest.approx(t_pub, rel=0.07), name
+    assert f.lb_ssnake_Hz == pytest.approx(1.0 / (np.pi * t_pub), rel=0.07)
+
+
+@_needs_data
+def test_real_data_sum_echo_is_absorptive_and_measurable():
+    fid, meta = _load_real(1)
+    per = int(round(qcpmg.echo_period_from_meta(meta, n_points=fid.size)[0]))
+    ech = qcpmg.split_echoes(fid, per)
+    top = qcpmg.echo_top_point(ech)
+    f = qcpmg.fit_t2(per / meta["sw_Hz"], qcpmg.echo_decay(ech, top, "real"),
+                     offset=True, period=per)
+    carrier, _ = qcpmg.carrier_ppm(meta)
+    ppm, spec = qcpmg.sum_echo_spectrum(
+        fid, per, meta["sw_Hz"], meta["larmor_MHz"], carrier, top=top,
+        t2_weight_s=f.T2_s, zf=16)
+    real = qcpmg.phase_spectrum(spec, qcpmg.autophase0(spec)).real
+    # a correct whole-echo transform needs only a zero-order phase
+    assert real.min() / real.max() > -0.10
+    fwhm = qcpmg.fwhm_hz(ppm, real, meta["larmor_MHz"], qcpmg.cg_window(ppm, real))
+    assert fwhm == pytest.approx(4638.0, rel=0.05)      # published 4638 Hz

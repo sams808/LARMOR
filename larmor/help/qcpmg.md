@@ -15,6 +15,7 @@
 |---|---|---|---|
 | **Sum echo** (absorption) | split the train, coadd the echoes, process one echo | high | ✅ **yes** — a continuous powder lineshape |
 | **Spikelets** | Fourier-transform the whole train | spectacular | ❌ no — a comb with no lineshape *between* spikes |
+| **Both, overlaid** | Stage 5, tick both | — | the validation: the envelope must trace the spikelet tops |
 
 The spikelet **maxima** trace the powder pattern, but a smooth model cannot fit
 the comb — fit the **sum echo** and use spikelets only to inspect the manifold.
@@ -23,74 +24,146 @@ the comb — fit the **sum echo** and use spikelets only to inspect the manifold
 
 ## 1 · The two spectra
 
-**Sum echo (absorption) — fit this.** Split the train into individual echoes, add
-them together, and process the resulting single echo. You get a normal,
-continuous powder lineshape at high S/N — send it to the workbench and model it
-with `ext Czjzek`, `Quad CT`, etc.
+**Sum echo.** Split the train into its echoes, add them (optionally weighted by
+the T₂ decay), and process the single resulting echo with *whole-echo*
+processing: the echo top is moved to t = 0 so the transform is **pure
+absorption**. This is the spectrum you fit with the usual quadrupolar models.
 
-**Spikelets.** Fourier-transform the whole train without splitting. You get a
-manifold of sharp spikelets spaced by $1/\tau_\text{echo}$, whose maxima trace the
-powder pattern. All the signal is concentrated in the spikes, so S/N is
-spectacular — but **the area between spikelets carries no lineshape
-information**, and fitting a smooth model onto the comb is meaningless.
+**Spikelets.** Fourier-transform the whole train untouched. The manifold of
+sharp lines, spaced by 1/τ_echo, traces the powder pattern with superb S/N —
+but there is no information *between* the spikes, so no smooth lineshape model
+can fit it. Use it to check that the sum-echo envelope really does follow the
+intensity distribution: **Stage 5 draws both on one axes** for exactly that
+comparison.
 
 ---
 
-## 2 · The controls, step by step (mirrors the ssNake tutorial)
+## 2 · The six stages
 
-**period (points per echo)** — the number of data points between two consecutive
-echo tops. Auto-detected from the autocorrelation of the magnitude FID; it equals
-$\text{SW}/(\text{spikelet spacing})$ (e.g. $200\,\text{kHz}/2000\,\text{Hz} =
-100$ points). It is the split length; if the echoes don't align, nudge it.
+Each stage shows one plot and gives you one number. The headline readout and
+**Send to fit →** stay visible from every stage.
 
-**echo top** — the index of the echo maximum *within one period*. Used for
-**whole-echo processing**: the summed echo is circularly shifted so its top sits
-at $t=0$, which makes the transform come out in **pure absorption** (ssNake's
-*swap echo* step). Auto-detected from a clean mid-train echo.
+> **Open the raw `fid`**, not the EXPNO folder — an EXPNO resolves to the
+> *processed* data, which is no longer an echo train. LARMOR picks the `fid`
+> for you if you hand it a folder.
 
-**T₂ (echo-top decay → the evolution time)** — the intensity at the echo top,
-echo by echo, decays as
+### 1 · Train & split
 
-$$I_k = I_0\,e^{-t/T_2},\qquad t = k\,\tau_\text{echo},\qquad \tau_\text{echo} = \frac{\text{period}}{\text{SW}}.$$
+The echo period is **read from the pulse program** (`CNST7`, the spikelet
+spacing in Hz; or `CNST8` in points) — not guessed. The readout says where it
+came from; if it says *GUESSED from the autocorrelation*, check the period
+markers against the echoes yourself.
 
-LARMOR fits this and reports **T₂ in ms** — your transverse *evolution time*.
-Beside it is the **matched apodization**
+You can type the period as **points or Hz** — they stay in sync. The
+**alignment** score (0–1) is the split's own health check: a wrong period
+drops it sharply.
 
-$$\text{LB} = \frac{1}{\pi\,T_2}\ \text{(Hz)},$$
+### 2 · Echo & top
 
-the Lorentzian that weights the echoes by how much signal they still carry.
+All echoes overlaid, plus **first vs last** — the ssNake validation that the
+split is right: their features (and the flat tail) must line up.
 
-**T₂ weighting** — when ticked, echo $k$ is scaled by
-$e^{-k\,\tau_\text{echo}/T_2}$ before summing: the **matched filter**. Echoes that
-have mostly decayed (noise-dominated) count less, giving the best S/N — exactly
-ssNake's "apply a Lorentzian $\text{LB}=1/(\pi T_2)$ along the echo dimension".
+**Drag the vertical line onto the echo top** (this is ssNake's "Pos *N*"); the
+numeric field follows, and vice versa. A dotted line marks the block centre as
+a **tolerance marker**: for whole-echo processing the top should be *within a
+point or two* of it.
 
-**GB (Hz)** — Gaussian broadening of the summed echo before the transform;
-smooths the lineshape.
+⚠️ **Put the marker on the measured echo maximum, not on the centre line.** For
+an odd echo length the true top is typically `centre + 1`, and this is the most
+expensive mistake available in this dialog — moving the top by a single point
+changed the fitted T₂ by 4 % to 7400 % (median 39 %) across a real 12-sample
+set. The **Auto** button uses the coherent average of all echoes, which found
+the published top on all twelve; trust it unless the marker visibly misses.
 
-**p0 / p1 and step** — zero- and first-order phase. The **step** sets how much the
-arrows / wheel move the phase per click — lower it for fine control. **Autophase**
-optimises p0 **and** p1 by minimising the negative area of the real spectrum (a
-robust criterion for an all-positive powder pattern). Fine-tune p1 by hand if the
-wings aren't flat.
+That one point drives three things — where the decay is sampled, where the
+whole-echo swap happens, and therefore the phase of the final spectrum.
+
+### 3 · Decay & T₂
+
+The echo-top intensity versus echo number, fitted with `C + B·exp(-t/T₂)`.
+**Click any point to exclude it**; it refits immediately.
+
+- **Signed real** (default) is what ssNake samples and what reproduces
+  published values. *Magnitude* has a rectified noise floor that biases the
+  tail upward.
+- **Fit a constant offset** (default on): the decay sits on a noise floor.
+  Across a real 12-sample set `B/C` ranged 10–77 (median 18), and dropping
+  `C` moved T₂ by 6–67 % (median 26 %).
+- You get **T₂ ± uncertainty and R²** — so a decay that is not actually
+  measurable says so instead of returning a confident number. A sample whose
+  signal dies within one or two echoes will show a large error and a warning;
+  that is a real limit of the experiment, not a fit you should tune.
+
+⚠️ **Two time axes.** ssNake's `Split` copies the *acquisition* sweep width
+onto the echo dimension, so a T₂ read there is in "one dwell per echo" units,
+**not seconds**:
+
+> `T₂(physical) = T₂(ssNake D1) × points-per-echo`
+
+For a 293-point echo, ssNake's `1.446e-05 s` **is** `4.24 ms`, and its matched
+`22013 Hz` is physically `75 Hz`. Both are self-consistent; only the physical
+pair transfers to another program. LARMOR shows **both**, always labelled, and
+the CSV export names them `T2_physical_s` and `T2_ssnake_D1_s` — never a bare
+`T2`.
+
+### 4 · Apodization
+
+**Matched filter**: one click applies `LB = 1/(π·T₂)`, with the value on the
+button. Weighting each echo by `exp(-t/T₂)` before summing is the matched
+filter that maximises S/N — echoes that are mostly noise contribute
+proportionately less.
+
+You see the **apodized echoes** and the **weighting curve along the echo
+dimension** (ssNake's "Apodised echoes" / "Apodised D1"), plus how many
+echoes effectively survive. Toggling the weighting no longer rescales the
+spectrum, so before/after are directly comparable.
+
+### 5 · Spectrum
+
+Sum echo and spikelets, **independently toggleable** — tick both for the
+overlay. A correct whole-echo transform is already near-pure absorption, so
+**p0 alone is normally enough**; p1 is there for the rare case.
+
+The ppm axis uses the **processing reference** (`SF` from `procs`), i.e. the
+same zero TopSpin puts on the axis. If `procs` is missing, the readout warns
+that the carrier fell back to `O1/BF1` — on a referenced dataset the two can
+differ by tens of ppm, which would shift every shift you report.
+
+### 6 · Measure — δ_CG and FWHM
+
+For a broad, distribution-dominated pattern measured at a **single field**, a
+lineshape fit cannot separate δ_iso from the second-order quadrupolar shift
+(both are distributed and correlated). The defensible numbers are the
+**centre of gravity** of the central band and its **width**.
+
+Drag the window onto the first intensity minima either side of the central
+peak. LARMOR reports **δ_CG ± σ**, where σ is the spread obtained by jittering
+each window edge — a deterministic replacement for integrating three times by
+hand. Read σ as a **quality flag**: a few ppm means the window is well
+defined; tens of ppm means the edges are running down a tail and should be
+placed by hand (the dialog says so).
 
 ---
 
 ## 3 · Recommended workflow
 
-1. **Open the raw fid** of the QCPMG experiment (the echo train).
-2. Check **period** and **echo top** on the echo-train plot (red lines mark the
-   period). The auto values are usually right.
-3. Read **T₂** off the decay plot; optionally tick **T₂ weighting**.
-4. Choose **sum echo (absorption)** mode.
-5. **Autophase**, then nudge **p1** (small step) until the lineshape is clean
-   absorption.
-6. Adjust **GB** to taste.
-7. **Send to fit →**, add a quadrupolar model (`ext Czjzek`, `Quad CT`, …) and fit
-   as usual (see the **Lineshapes** reference).
+1. **Open the raw `fid`** of the QCPMG EXPNO.
+2. **Stage 1** — confirm the period was read from the pulse program and the
+   markers sit on the echoes.
+3. **Stage 2** — check first-vs-last overlap; put the top marker on the echo
+   maximum (it is usually already there).
+4. **Stage 3** — read T₂ ± error and R². Exclude obvious outliers by clicking.
+5. **Stage 4** — click **Use matched LB**.
+6. **Stage 5** — **Autophase**, then tick *spikelets* to confirm the envelope
+   traces the spikelet tops.
+7. **Stage 6** — place the window, read δ_CG ± σ and FWHM.
+8. **Copy CSV** for the lab book, then **Send to fit →** to model the
+   lineshape (see the *Lineshapes* manual — for a glass, `czjzek` or
+   `ext_czjzek`).
 
-Use **spikelets** mode only to inspect the manifold or confirm the spikelet
-spacing; do not fit it directly.
+> Fitting a single-field QCPMG spectrum gives correlated δ_iso/C_Q. Quote
+> δ_CG and the central-band width as the primary numbers, and treat the fit as
+> supporting information — or measure at a second field (§4).
 
 ---
 

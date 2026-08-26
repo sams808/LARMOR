@@ -382,7 +382,56 @@ def _meta_1d(acqus: dict, title: str, expno: Path) -> dict:
         "title": title,
         "grpdly": acqus.get("GRPDLY"),
         "expno": str(expno),
+        # the pulse-program constant arrays: CNST[7]/CNST[8] carry the QCPMG
+        # spikelet spacing / echo period exactly, so the echo period is READ,
+        # never guessed from an autocorrelation (see larmor.qcpmg)
+        "cnst": _num_list(acqus.get("CNST")),
+        "d": _num_list(acqus.get("D")),
+        "l": _num_list(acqus.get("L")),
+        # processing reference (procs/SF) -- needed for a correctly referenced
+        # ppm axis; O1/BF1 alone is off by (SFO1-SF)*1e6/SF, tens of ppm on a
+        # referenced dataset. Filled by _read_procs_ref() where procs exists.
+        **_read_procs_ref(expno),
     }
+
+
+def _num_list(v) -> list[float]:
+    """A Bruker parameter array (CNST/D/L) as a plain float list; [] if absent."""
+    if v is None:
+        return []
+    if isinstance(v, (list, tuple, np.ndarray)):
+        out = []
+        for x in v:
+            try:
+                out.append(float(x))
+            except (TypeError, ValueError):
+                out.append(0.0)
+        return out
+    try:
+        return [float(v)]
+    except (TypeError, ValueError):
+        return []
+
+
+def _read_procs_ref(expno: Path) -> dict:
+    """{'sf_MHz', 'sr_hz'} from pdata/1/procs -- the *referenced* spectrometer
+    frequency. Returns {} when procs is missing (a freshly acquired dataset),
+    so callers fall back to O1/BF1 and can say the axis is unreferenced."""
+    p = Path(expno) / "pdata" / "1" / "procs"
+    if not p.exists():
+        return {}
+    try:
+        procs = ng.fileio.bruker.read_jcamp(str(p))
+    except Exception:
+        return {}
+    sf = procs.get("SF")
+    if sf is None:
+        return {}
+    try:
+        sf = float(sf)
+    except (TypeError, ValueError):
+        return {}
+    return {"sf_MHz": sf, "sr_hz": float(procs.get("SR", 0.0) or 0.0)}
 
 
 def _conflicts(meta: dict, title: str) -> list[str]:
