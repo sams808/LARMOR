@@ -116,6 +116,13 @@ class QcpmgDialog(QDialog):
         self.tabs.addTab(self._build_stage6(), "6 · Measure")
         v.addWidget(self.tabs, 1)
 
+        # typing '293' digit by digit must not act on the intermediate '29':
+        # _on_period_pts's top.setMaximum(28) would clamp a top of 147 down and
+        # the debounced recompute would silently run from the wrong point
+        for sb in (self.findChildren(QSpinBox)
+                   + self.findChildren(QDoubleSpinBox)):
+            sb.setKeyboardTracking(False)
+
         # persistent headline + actions: visible from every stage
         self.res = QLabel("")
         self.res.setWordWrap(True)
@@ -209,7 +216,8 @@ class QcpmgDialog(QDialog):
         self.useOffset = QCheckBox("fit a constant offset")
         self.useOffset.setChecked(True)
         self.useOffset.setToolTip("ssNake's model is C + B·exp(-t/T2); "
-                                  "dropping C shifts T2 by ~10%")
+                                  "dropping C shifted T2 by 6–67% "
+                                  "(median 26%) on a real 12-sample set")
         self.useOffset.toggled.connect(self._queue)
         lv.addWidget(_row("decay from", self.decayMode, self.useOffset))
         self.p_decay = _plot("echo-top intensity vs echo number — "
@@ -351,6 +359,21 @@ class QcpmgDialog(QDialog):
             self.lbl.setText(str(src))
             self.fid = np.asarray(d.data, complex)
             self.meta = dict(d.meta)
+            # a fresh dataset starts from a clean slate FIRST, before anything
+            # that can raise: a failure below must not leave the old sample's
+            # phase/exclusions/window attached to the new sample's fid
+            self.excluded.clear(); self.keep = None
+            self.t2 = None
+            self._phased = False; self._window_user = False
+            self._cg = self._sigma = self._fwhm = None
+            self._ppm = self._spec = self._spec_raw = None
+            self._spk_ppm = self._spk = None
+            for w in (self.lb, self.gb, self.p0, self.p1):
+                w.blockSignals(True); w.setValue(0.0); w.blockSignals(False)
+            self.dropFirst.blockSignals(True)
+            self.dropFirst.setValue(0)
+            self.dropFirst.blockSignals(False)
+
             self._carrier, self._referenced = qcpmg.carrier_ppm(self.meta)
             sw = float(self.meta.get("sw_Hz", 0.0) or 0.0)
 
@@ -373,14 +396,12 @@ class QcpmgDialog(QDialog):
             self._n_usable = qcpmg.n_usable_echoes(ech)
             self.top.setMaximum(per - 1)
             self.top.setValue(qcpmg.echo_top_point(ech))
-            # a fresh dataset starts from a clean slate: carrying the previous
-            # sample's LB/phase/window over would silently mis-process it
-            self.excluded.clear(); self.keep = None
-            self._phased = False; self._window_user = False
-            self._cg = self._sigma = self._fwhm = None
-            for w in (self.lb, self.gb, self.p0, self.p1):
-                w.blockSignals(True); w.setValue(0.0); w.blockSignals(False)
         except Exception as exc:                              # noqa: BLE001
+            # never leave the PREVIOUS sample's spectrum sendable under the
+            # NEW sample's name -- the spectra were nulled above, so all that
+            # is left is to make the actions unreachable
+            for w in (self.btnCsv, self.btnSend):
+                w.setEnabled(False)
             self.res.setText(f"cannot process: {exc}")
             return
         finally:
@@ -398,30 +419,65 @@ class QcpmgDialog(QDialog):
         if not self._loading and self.fid is not None:
             self._timer.start()
 
+    def _flush(self):
+        """Run any recompute still sitting in the 150 ms debounce NOW.
+
+        Send/Copy inside the debounce window otherwise ships the STALE
+        spectrum while the provenance records the NEW widget values -- the
+        exported meta would lie about how the data was processed."""
+        if self._timer.isActive():
+            self._timer.stop()
+            self._recompute()
+
+    def _apply_period(self, per: int, sw: float):
+        """A period change re-splits the whole train: every echo-indexed
+        setting from the OLD split (exclusions, echo count) points at a
+        different stretch of data under the new one, so they are reset --
+        keeping excluded={3} across a period change would silently mask a
+        different piece of the FID."""
+        # write the QUANTISED spacing back, so the field never shows a
+        # spacing the integer period cannot actually realise
+        self.periodHz.blockSignals(True)
+        self.periodHz.setValue(sw / per if per and sw else 0.0)
+        self.periodHz.blockSignals(False)
+        self.top.setMaximum(max(0, per - 1))
+        self.excluded.clear()
+        self.keep = None
+        if self.fid is not None and per >= 4:
+            n = max(1, self.fid.size // per)
+            for w in (self.nEch, self.dropFirst):
+                w.blockSignals(True)
+            self.nEch.setMaximum(n)
+            self.nEch.setValue(n)
+            self.dropFirst.setMaximum(max(0, n - 2))
+            self.dropFirst.setValue(0)
+            for w in (self.nEch, self.dropFirst):
+                w.blockSignals(False)
+        self._period_src = "manual"
+        self._queue()
+
     def _on_period_pts(self, val):
         if self._loading:
             return
-        sw = float(self.meta.get("sw_Hz", 0.0) or 0.0)
-        self.periodHz.blockSignals(True)
-        self.periodHz.setValue(sw / val if val and sw else 0.0)
-        self.periodHz.blockSignals(False)
-        self.top.setMaximum(max(0, val - 1))
-        self._period_src = "manual"
-        self.keep = None
-        self._queue()
+        self._apply_period(int(val), float(self.meta.get("sw_Hz", 0.0) or 0.0))
 
     def _on_period_hz(self, val):
         if self._loading:
             return
         sw = float(self.meta.get("sw_Hz", 0.0) or 0.0)
         if val and sw:
+            per = max(4, int(round(sw / val)))
+            if per == self.period.value():
+                # same integer period: still snap the field to the spacing
+                # that period actually realises, then stop
+                self.periodHz.blockSignals(True)
+                self.periodHz.setValue(sw / per)
+                self.periodHz.blockSignals(False)
+                return
             self.period.blockSignals(True)
-            self.period.setValue(max(4, int(round(sw / val))))
+            self.period.setValue(per)
             self.period.blockSignals(False)
-            self.top.setMaximum(max(0, self.period.value() - 1))
-            self._period_src = "manual"
-            self.keep = None
-            self._queue()
+            self._apply_period(per, sw)
 
     def _on_top_spin(self, val):
         if self._loading:
@@ -506,7 +562,8 @@ class QcpmgDialog(QDialog):
                 f"spikelet spacing {self.periodHz.value():,.1f} Hz "
                 f"({self.periodHz.value() / sfo if sfo else 0:.2f} ppm) · "
                 f"period {src} · alignment {align:.2f} · "
-                f"{getattr(self, '_n_usable', ech.shape[0])} echoes above 3σ "
+                f"signal above 3σ through echo "
+                f"{getattr(self, '_n_usable', ech.shape[0])} "
                 f"(all are kept — the fitted constant absorbs the noise floor)"
                 + ("   ⚠ echoes do not line up — check the period"
                    if warn else ""))
@@ -723,6 +780,12 @@ class QcpmgDialog(QDialog):
         if self._spec is None:
             return
         hi, lo = qcpmg.cg_window(self._ppm, self._spec)
+        if not (np.isfinite(hi) and np.isfinite(lo)) or hi <= lo:
+            # a NaN region is un-grabbable, so 'drag it onto the band' would
+            # be impossible advice -- seed the middle third instead
+            span = float(self._ppm.max() - self._ppm.min())
+            mid = float(self._ppm.min()) + span / 2.0
+            lo, hi = mid - span / 6.0, mid + span / 6.0
         self.region.blockSignals(True)
         self.region.setRegion((lo, hi))
         self.region.blockSignals(False)
@@ -740,6 +803,7 @@ class QcpmgDialog(QDialog):
         lo, hi = self.region.getRegion()
         if not self._phased:
             self._cg = self._sigma = self._fwhm = None
+            self.cgLine.setVisible(False)      # no stale number on the plot
             self.lbl6.setText(
                 f"<span style='color:{t.model}'>phase the spectrum first "
                 f"(stage 5 → Autophase) — δCG and FWHM measured on an unphased "
@@ -752,12 +816,14 @@ class QcpmgDialog(QDialog):
                            float(self.meta.get("larmor_MHz", 0.0) or 0.0), (hi, lo))
         if not np.isfinite(cg):
             self._cg = self._sigma = self._fwhm = None
+            self.cgLine.setVisible(False)      # no stale number on the plot
             self.lbl6.setText(
                 f"<span style='color:{t.model}'>the window contains no usable "
                 f"signal — drag it onto the central band.</span>")
             self._update_headline()
             return
         self.cgLine.setValue(cg)
+        self.cgLine.setVisible(True)
         self._cg, self._sigma, self._fwhm = cg, sigma, fw
         sloppy = sigma > 8.0
         sfo = float(self.meta.get("larmor_MHz", 0.0) or 1.0)
@@ -783,7 +849,12 @@ class QcpmgDialog(QDialog):
     def _copy_csv(self):
         from PySide6.QtWidgets import QApplication
         from larmor import qcpmg
-        if self.fid is None:
+        self._flush()
+        # _spec_raw is None whenever the current settings could not be
+        # processed (failed load or failed recompute) -- there is nothing
+        # whose provenance could honestly be copied, and re-splitting the fid
+        # below would raise the very error that put us in this state
+        if self.fid is None or self._spec_raw is None:
             return
         per = self.period.value()
         sw = float(self.meta.get("sw_Hz", 0.0) or 0.0)
@@ -828,6 +899,7 @@ class QcpmgDialog(QDialog):
         show_help(self, "qcpmg", "QCPMG processing guide")
 
     def _send(self):
+        self._flush()
         if self._ppm is None or self._spec is None:
             return
         meta = {

@@ -156,6 +156,94 @@ def test_period_in_points_and_hz_stay_consistent(qapp, tmp_path):
     d.close()
 
 
+def test_send_flushes_a_pending_debounce(qapp, tmp_path):
+    """Send inside the 150 ms debounce window used to ship the STALE spectrum
+    while the meta recorded the NEW settings -- provenance that lies about how
+    the data was processed."""
+    d = _dialog_with(qapp, _synthetic_qcpmg(tmp_path))
+    stale = d._spec.copy()                     # spectrum at LB = 0
+    d.lb.setValue(800.0)                       # queues a recompute...
+    assert d._timer.isActive()                 # ...which has NOT run yet
+    got = {}
+    d.accepted_1d.connect(lambda p, a, m: got.update(amp=a, meta=m))
+    d._send()                                  # must flush, then emit
+    assert not d._timer.isActive()
+    assert got["meta"]["qcpmg_lb_Hz"] == 800.0
+    assert not np.array_equal(got["amp"], stale)
+    d.close()
+
+
+def test_failed_second_load_keeps_nothing_sendable(qapp, tmp_path, monkeypatch):
+    """A second _load that reads fine but cannot be processed (e.g. an aborted
+    3-point fid) used to leave the OLD spectrum sendable under the NEW file's
+    name; now nothing is sendable and the state is fully reset."""
+    from larmor.io import bruker
+
+    d = _dialog_with(qapp, _synthetic_qcpmg(tmp_path))
+    assert d.btnSend.isEnabled()
+
+    class _Tiny:
+        domain, ndim = "time", 1
+        data = np.ones(3, complex)
+        meta = {"sw_Hz": 50000.0, "title": "aborted", "expno": "2"}
+    monkeypatch.setattr(bruker, "read", lambda _s: _Tiny())
+    d._load(str(tmp_path / "2" / "fid"))
+    assert "cannot process" in d.res.text()
+    assert not d.btnSend.isEnabled() and not d.btnCsv.isEnabled()
+    assert d._spec is None and d._spec_raw is None
+    got = {}
+    d.accepted_1d.connect(lambda p, a, m: got.update(meta=m))
+    d._send()
+    assert not got                             # nothing emitted
+    d._copy_csv()                              # must not raise either
+    d.close()
+
+
+def test_period_change_resets_echo_bookkeeping(qapp, tmp_path):
+    """Exclusions and the echo count are indices INTO one particular split;
+    after a period change they would point at different stretches of data, so
+    they are reset (excluded={3} at 128 pts is not echo 3 at 64 pts)."""
+    d = _dialog_with(qapp, _synthetic_qcpmg(tmp_path))
+
+    class _Pt:
+        def data(self):
+            return 3
+    d._decay_clicked(None, [_Pt()])
+    assert d.excluded == {3}
+    d.dropFirst.setValue(1)
+    d.period.setValue(64)
+    assert d.excluded == set()
+    assert d.nEch.value() == d.fid.size // 64
+    assert d.dropFirst.value() == 0
+    d.close()
+
+
+def test_spinboxes_do_not_react_per_keystroke(qapp):
+    """Typing '293' digit by digit must not act on the intermediate '29' --
+    _on_period_pts would clamp the echo top to 28 and the recompute would
+    silently run from the wrong point."""
+    from PySide6.QtWidgets import QDoubleSpinBox, QSpinBox
+
+    from larmor.desktop.qcpmg_dialog import QcpmgDialog
+    d = QcpmgDialog(None, None)
+    boxes = d.findChildren(QSpinBox) + d.findChildren(QDoubleSpinBox)
+    assert boxes
+    assert all(not b.keyboardTracking() for b in boxes)
+    d.close()
+
+
+def test_period_hz_field_always_shows_a_realisable_spacing(qapp, tmp_path):
+    """Typing 392 Hz quantises to the same 128-point period; the field must
+    snap back to the 390.625 Hz that period actually realises, not keep
+    showing a spacing the data cannot have."""
+    d = _dialog_with(qapp, _synthetic_qcpmg(tmp_path), period=128, sw=50000.0)
+    d.periodHz.setValue(392.0)
+    assert d.period.value() == 128
+    # the field shows 2 decimals, so the snap lands on 390.62
+    assert d.periodHz.value() == pytest.approx(390.625, abs=0.011)
+    d.close()
+
+
 def test_copy_csv_includes_both_time_axes(qapp, tmp_path):
     """The CSV must never say a bare 'T2' -- the ssNake pseudo-axis value and
     the physical one differ by the echo length and are both in the wild."""

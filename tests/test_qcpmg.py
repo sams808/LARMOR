@@ -373,6 +373,46 @@ def test_autophase_recovers_a_positive_lineshape():
         assert real.max() > 0.95 * np.abs(line).max()
 
 
+def test_autophase_handles_a_line_far_from_the_pivot():
+    """A genuine linear phase across a line at ~25% of the axis needs
+    |p1| ~ 180-360 deg; the old 1e-6 quadratic penalty charged that as much
+    as a visible negative lobe, so the optimiser returned a smaller p1 and a
+    partly dispersive spectrum."""
+    n = 2048
+    x = np.arange(n)
+    line = np.exp(-((x - 0.25 * n) / 30.0) ** 2).astype(complex)
+    for true_p0, true_p1 in ((30.0, 240.0), (-45.0, -300.0)):
+        ramp = x / (n - 1) - 0.5
+        dephased = line * np.exp(1j * np.deg2rad(true_p0 + true_p1 * ramp))
+        p0, p1 = qcpmg.autophase(dephased)
+        real = qcpmg.phase_spectrum(dephased, p0, p1).real
+        assert real.max() > 0.95 * np.abs(line).max(), (true_p0, true_p1)
+        assert np.abs(real[real < 0]).sum() < 0.05 * real.sum()
+
+
+def test_fwhm_is_the_outermost_crossing_at_any_sampling():
+    """FWHM = the outermost half-max crossings, by convention: a two-horned
+    pattern whose saddle dips below half spans BOTH horns, and the value must
+    not depend on how finely the axis is sampled (a sample-count 'noise
+    pruning' rule made the same lineshape report 1367 vs 1465 Hz at zf 2 vs 4
+    -- resolution-dependent, so it was removed). A spike in the window is
+    handled by the WINDOW, which is draggable."""
+    sfo = 100.0
+    for npts in (401, 4001):                          # coarse and fine axes
+        x = np.linspace(-200.0, 200.0, npts)
+        horn = lambda c: np.exp(-((x - c) / 8.0) ** 2)
+        w2 = qcpmg.fwhm_hz(x, horn(-30.0) + horn(30.0), sfo)
+        assert 60.0 * sfo < w2 < 90.0 * sfo, npts      # spans both horns
+    x = np.linspace(-200.0, 200.0, 4001)
+    horn = np.exp(-(x / 8.0) ** 2)
+    spiked = horn.copy()
+    spiked[3800] = 0.9                                 # one noisy sample far out
+    clean = qcpmg.fwhm_hz(x, horn, sfo)
+    # the designed remedy: a window excluding the spike recovers the line
+    assert qcpmg.fwhm_hz(x, spiked, sfo, (100.0, -100.0)) == pytest.approx(
+        clean, rel=1e-6)
+
+
 def test_sum_echoes_normalised_is_invariant_to_t2_weighting():
     """Toggling the matched filter must not rescale the spectrum (it changed
     the peak by 0.56x before), or 'before/after' plots are not comparable."""

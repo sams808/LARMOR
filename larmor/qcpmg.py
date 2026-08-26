@@ -61,8 +61,8 @@ def detect_period(fid: np.ndarray, min_period: int = 8) -> int:
     fall = np.where(np.diff(ac) > 0)[0]
     lobe = int(fall[0]) + 1 if fall.size else max(1, min_period)
     start = max(int(min_period), lobe)
-    half = max(start + 2, ac.size // 2)
-    if start >= half:
+    half = ac.size // 2
+    if start + 2 > half:                # nothing left to search
         return 0
     seg = ac[start:half]
     k = int(np.argmax(seg))
@@ -200,6 +200,12 @@ def fwhm_hz(ppm: np.ndarray, y: np.ndarray, sfo_MHz: float,
     above = np.where(y >= half)[0]
     if above.size < 2:
         return 0.0
+    # the OUTERMOST half-max crossings, by convention: a two-horned pattern
+    # whose saddle dips below half still spans both horns. No noise-spike
+    # pruning here -- any sample-count rule is resolution-dependent (the same
+    # lineshape got a different FWHM at different zero-fills), and a spike
+    # inside the window is the WINDOW's problem: it is draggable, and delta_CG
+    # sigma already flags a badly placed one.
     return abs(float(ppm[above[-1]] - ppm[above[0]])) * (sfo_MHz or 0.0)
 
 
@@ -755,7 +761,10 @@ def autophase(spec: np.ndarray) -> tuple[float, float]:
         # area ALONE is degenerate on a non-negative pattern -- it is flat over
         # a wide window of p0, so the optimiser could stop anywhere in it.
         score = (r.sum() - 4.0 * np.abs(r[r < 0]).sum()) / norm
-        return -score + 1e-6 * (p1 ** 2)
+        # keep the p1 penalty far below the score scale: at 1e-6 a line
+        # sitting at ~25% of the axis (legitimate p1 ~ 200 deg) was paying
+        # 0.04 -- enough to drag p1 visibly toward 0. 1e-8 only breaks ties.
+        return -score + 1e-8 * (p1 ** 2)
 
     p0_0 = autophase0(spec)
     best = None

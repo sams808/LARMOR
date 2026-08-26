@@ -431,7 +431,21 @@ def _read_procs_ref(expno: Path) -> dict:
         sf = float(sf)
     except (TypeError, ValueError):
         return {}
-    return {"sf_MHz": sf, "sr_hz": float(procs.get("SR", 0.0) or 0.0)}
+    if sf <= 0:                # an unprocessed procs writes SF=0: unreferenced
+        return {}
+    # derive SR from SF/BF1 rather than trusting the SR key: some processing
+    # writes a referenced SF but leaves SR at 0, and the frequency-domain
+    # reader already defines sr_hz as (SF - BF1) * 1e6 -- keep the two paths
+    # consistent. Fall back to the key only when acqus/BF1 is unreadable.
+    sr = float(procs.get("SR", 0.0) or 0.0)
+    try:
+        acqus = ng.fileio.bruker.read_jcamp(str(Path(expno) / "acqus"))
+        bf1 = float(acqus.get("BF1", 0.0))
+        if bf1 > 0:
+            sr = (sf - bf1) * 1e6
+    except Exception:
+        pass
+    return {"sf_MHz": sf, "sr_hz": sr}
 
 
 def _conflicts(meta: dict, title: str) -> list[str]:
