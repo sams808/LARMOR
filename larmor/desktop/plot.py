@@ -213,6 +213,8 @@ class SpectrumView(pg.PlotWidget):
         pi.getAxis("right").setPen(pg.mkPen(t.axis_minor))
         label_style = {"color": t.axis, "font-size": "10pt"}
         self.setLabel("bottom", "chemical shift", units="ppm", **label_style)
+        # never let pyqtgraph SI-prefix a ppm axis ("kppm" is not a unit)
+        pi.getAxis("bottom").enableAutoSIPrefix(False)
         self.setLabel("left", "intensity", **label_style)
         self.showGrid(x=True, y=True, alpha=t.grid_alpha)
         self._exp.setPen(pg.mkPen(t.experiment, width=1.4))

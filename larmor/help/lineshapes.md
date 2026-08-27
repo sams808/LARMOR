@@ -316,7 +316,7 @@ Practical rules:
 - **Comparing with a dmfit fit or a dmfit-based paper**: their "CQ" ÷ 4 = σ;
   their *sCZ_CQ* ÷ 2 = σ. (Empirically validated: refitting the same real
   spectrum in both programs gives identical residuals with exactly these
-  factors — see `docs/LARMOR_VALIDATION_REPORT.md`.)
+  factors — see `docs/validation.md`.)
 - **What to put in a paper**: report **σ (state the convention explicitly!)
   and/or P_Q = √5·σ**, never a bare "C_Q" — a Czjzek site has no single C_Q,
   and an unlabeled number is unusable by the next reader. P_Q is the safest

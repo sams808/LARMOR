@@ -45,6 +45,7 @@ class IntegralsDialog(QDialog):
         self.plot = pg.PlotWidget(background=theme.active().plot_bg)
         self.plot.getPlotItem().invertX(True)
         self.plot.setLabel("bottom", "shift", units="ppm")
+        self.plot.getPlotItem().getAxis("bottom").enableAutoSIPrefix(False)
         self.plot.plot(self.ppm, self.amp, pen=pg.mkPen("#1a2831", width=1.2))
         v.addWidget(self.plot, 1)
 

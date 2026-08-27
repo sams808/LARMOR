@@ -57,6 +57,7 @@ class BaselineDialog(QDialog):
         self.p_bot.showGrid(x=True, y=True, alpha=0.12)
         self.p_bot.setLabel("left", "corrected")
         self.p_bot.setLabel("bottom", "shift", units="ppm")
+        self.p_bot.getPlotItem().getAxis("bottom").enableAutoSIPrefix(False)
         self.p_bot.setXLink(self.p_top)
         glw.ci.layout.setRowStretchFactor(0, 3)
         glw.ci.layout.setRowStretchFactor(1, 2)

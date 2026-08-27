@@ -1,4 +1,4 @@
-"""Physics-validation regressions backing docs/PHYSICS_AUDIT.md.
+"""Physics-validation regressions backing docs/validation.md.
 
 These guard the claims that (a) the mrsimulator-simulated central-transition
 lineshape agrees with LARMOR's analytic 2nd-order quadrupolar shift formula, and

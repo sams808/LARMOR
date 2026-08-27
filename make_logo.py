@@ -1,12 +1,11 @@
 """make_logo.py — generate LARMOR brand assets into assets/:
   larmor_logo.png    (512×512, window/taskbar icon source)
-  larmor_splash.png  (760×440, startup splash)
+  larmor_splash.png  (860×440, startup splash)
   larmor.ico         (multi-size Windows icon, for the exe + title bar)
 
 Design: a nuclear spin precessing about B0 (the Larmor precession the app is
-named for) traces a helix whose projection radiates an NMR lineshape — the
-second-order quadrupolar powder pattern LARMOR was built to fit. Physics in,
-resolved spectrum out. Regenerate any time: python make_logo.py
+named for) traces a helix, drawn next to a second-order quadrupolar powder
+pattern of the kind LARMOR fits. Regenerate any time: python make_logo.py
 """
 from __future__ import annotations
 
@@ -29,8 +28,8 @@ MIST = "#d7e3e6"
 
 
 def _quad_lineshape(x):
-    """A stylized second-order quadrupolar central-transition powder pattern:
-    the two horns and the tail LARMOR fits every day."""
+    """A stylized second-order quadrupolar central-transition powder pattern
+    with two horns and a low-frequency tail."""
     def horn(x0, w):
         return 1.0 / (1.0 + ((x - x0) / w) ** 2)
     y = 0.95 * horn(-0.15, 0.05) + 0.75 * horn(0.28, 0.09)

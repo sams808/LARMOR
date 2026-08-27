@@ -96,6 +96,15 @@ class ExplorerPanel(QWidget):
         self._pinned = list(QSettings("LARMOR", "app").value("pinnedFolders", []) or [])
         if isinstance(self._pinned, str):
             self._pinned = [self._pinned]
+        # optional display names for pins (path -> name), JSON in QSettings so
+        # the round-trip is platform-independent
+        try:
+            import json
+            raw = QSettings("LARMOR", "app").value("pinnedNames", "") or ""
+            self._pin_names = {k: v for k, v in json.loads(raw).items()
+                               if isinstance(v, str)} if raw else {}
+        except Exception:
+            self._pin_names = {}
 
         self.tree = QTreeWidget()
         self.tree.setHeaderHidden(True)
@@ -156,10 +165,20 @@ class ExplorerPanel(QWidget):
             self._hl[color] = target
 
     # ---------------- pins ----------------
+    def _pin_label(self, path: str) -> str:
+        return self._pin_names.get(path) or Path(path).name
+
+    def _save_pin_names(self):
+        import json
+
+        from PySide6.QtCore import QSettings
+        QSettings("LARMOR", "app").setValue("pinnedNames",
+                                            json.dumps(self._pin_names))
+
     def _readd_pins(self):
         for p in self._pinned:
             if Path(p).exists():
-                it = self._folder_item(Path(p).name, p,
+                it = self._folder_item(self._pin_label(p), p,
                                        is_sample=self._is_sample(p), pinned=True)
                 self.tree.addTopLevelItem(it)
 
@@ -176,7 +195,7 @@ class ExplorerPanel(QWidget):
         if path not in self._pinned:
             self._pinned.insert(0, path)
             QSettings("LARMOR", "app").setValue("pinnedFolders", self._pinned)
-            it = self._folder_item(Path(path).name, path,
+            it = self._folder_item(self._pin_label(path), path,
                                    is_sample=self._is_sample(path), pinned=True)
             self.tree.insertTopLevelItem(0, it)
 
@@ -184,11 +203,35 @@ class ExplorerPanel(QWidget):
         from PySide6.QtCore import QSettings
         self._pinned = [p for p in self._pinned if p != path]
         QSettings("LARMOR", "app").setValue("pinnedFolders", self._pinned)
+        if self._pin_names.pop(path, None) is not None:
+            self._save_pin_names()
         for i in range(self.tree.topLevelItemCount()):
             it = self.tree.topLevelItem(i)
             if it.data(0, _ROLE_PATH) == path and it.data(0, _ROLE_KIND) == "pin":
                 self.tree.takeTopLevelItem(i)
                 break
+
+    def set_pin_name(self, path: str, name: str):
+        """Give a pinned folder a display name (empty = back to the folder's
+        own name). Persisted, so it survives restarts."""
+        name = (name or "").strip()
+        if name and name != Path(path).name:
+            self._pin_names[path] = name
+        else:
+            self._pin_names.pop(path, None)
+        self._save_pin_names()
+        for i in range(self.tree.topLevelItemCount()):
+            it = self.tree.topLevelItem(i)
+            if it.data(0, _ROLE_PATH) == path and it.data(0, _ROLE_KIND) == "pin":
+                it.setText(0, "📌 " + self._pin_label(path))
+
+    def _rename_pin(self, path: str):
+        name, ok = QInputDialog.getText(
+            self, "Rename pinned folder",
+            f"Display name for\n{path}\n(leave empty to use the folder name):",
+            text=self._pin_label(path))
+        if ok:
+            self.set_pin_name(path, name)
 
     def _context_menu(self, pos):
         item = self.tree.itemAt(pos)
@@ -199,6 +242,7 @@ class ExplorerPanel(QWidget):
             return
         m = QMenu(self)
         if path in self._pinned:
+            m.addAction("Rename pin…", lambda: self._rename_pin(path))
             m.addAction("Unpin folder", lambda: self._unpin(path))
         else:
             m.addAction("📌 Pin folder", lambda: self._pin(path))
@@ -276,6 +320,8 @@ class ExplorerPanel(QWidget):
         it = QTreeWidgetItem([prefix + name])
         it.setData(0, _ROLE_PATH, path)
         it.setData(0, _ROLE_KIND, "pin" if pinned else "folder")
+        if pinned:      # a renamed pin should still say where it points
+            it.setToolTip(0, path)
         if not is_expno:
             it.addChild(QTreeWidgetItem(["…"]))    # lazy placeholder
         return it

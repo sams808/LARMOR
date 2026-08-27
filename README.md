@@ -1,170 +1,127 @@
 # LARMOR
 
-A modern, open successor to [dmfit](https://nmr.cemhti.cnrs-orleans.fr/Dmfit/) for solid-state
-NMR lineshape fitting and analysis — a native desktop application (PySide6 + pyqtgraph) built on
-the [mrsimulator](https://mrsimulator.readthedocs.io) / [lmfit](https://lmfit.github.io/lmfit-py/)
-/ [csdmpy](https://csdmpy.readthedocs.io) / [nmrglue](https://nmrglue.readthedocs.io) stack, with
-one thing dmfit doesn't give you: **an uncertainty on every fitted number**, and fully
-reproducible fits.
+LARMOR is a desktop application for fitting solid-state NMR spectra, written as an
+open successor to [dmfit](https://nmr.cemhti.cnrs-orleans.fr/Dmfit/). I started it
+because I wanted dmfit's fitting workflow with two things it doesn't have: an
+uncertainty on every fitted number, and fits I can reproduce a year later from a
+plain text file.
 
-## Install (quick start)
+The physics comes from [mrsimulator](https://mrsimulator.readthedocs.io) and the
+fitting from [lmfit](https://lmfit.github.io/lmfit-py/); LARMOR adds the interactive
+fitting UI, file readers, batch workflows and figure export on top. Spectra are read
+directly from instrument folders (Bruker, Varian/Agilent, legacy dmfit files), always
+read-only. A fit is saved as a JSON "recipe" that references the data by path and
+hash, so it can be re-run, diffed, and shared.
 
-**Full step-by-step instructions — Windows, macOS, Linux — are in
-[INSTALL.md](INSTALL.md)**, including troubleshooting for the usual snags.
+![A 27Al fit of a calcium aluminosilicate glass](examples/CaAlGlass_fit.png)
 
-- **Windows, one-click:** double-click **`install.bat`** in this folder. It sets
-  everything up and puts a **`LARMOR.bat` on your Desktop** to launch the app.
-  Update later by double-clicking **`update.bat`**.
+## Installation
 
-- **Manual (any platform),** from inside the repository folder:
-  ```
-  # Recommended (Conda — handles the compiled packages for you):
-  conda env create -f environment.yml
-  conda activate larmor
+On Windows, double-click `install.bat` in this folder. It creates the Python
+environment and puts a `LARMOR.bat` launcher on your Desktop; `update.bat` updates
+an existing install. Full instructions for all platforms, including the usual
+troubleshooting, are in [INSTALL.md](INSTALL.md).
 
-  # …or with pip, into a Python 3.11 virtual environment:
-  pip install -r requirements.txt
-  ```
-  **Launch:** `larmor desktop`.
+Manual install, from inside the repository:
 
-> Use **Python 3.11** (3.10–3.12 fine, **not 3.13** yet). If `larmor desktop`
-> says a package is missing or `mrsimulator` won't install, see
-> [INSTALL.md → Troubleshooting](INSTALL.md#troubleshooting).
+```
+conda env create -f environment.yml     # or: pip install -r requirements.txt
+conda activate larmor
+larmor desktop
+```
 
-## Capabilities
+Use Python 3.10–3.12 (3.11 recommended). On 3.13 mrsimulator currently has no
+wheels and the install fails; see INSTALL.md if that happens to you.
 
-**Fitting** — dmfit-style paddles (drag position + amplitude, side handles for width), a
-spreadsheet parameter table with pin-to-fix, live re-simulation, and:
-- **15 lineshape models** in a self-describing registry (`larmor/models/`) — Gauss/Lorentz,
-  Voigt, J-multiplet, sidebands, Czjzek, extended Czjzek, dmfit-style "Amorphous"
-  (Gaussian Cq/η disorder), discrete 2nd-order quadrupolar CT, 1st-order quadrupolar
-  (satellites), quad+CSA, CSA powder, external spectrum/function backgrounds — every
-  quadrupolar/CSA model resolves gyromagnetic ratio and spin generically, so a new nucleus
-  needs no code changes. Fast cached (Cq, η) kernel where applicable — a full multi-site fit
-  runs in seconds, not minutes.
-- Constraints: fix, bounds, algebraic links; **dependent positions in ppm _or_ Hz** and
-  amplitude/width ratios via dialogs (no expression writing); full error propagation.
-- Fit **zones** (dmfit-style union of regions), editable νrot / Larmor / nucleus, quantification
-  table (% ± error, `larmor.quantify`), CSV export.
-- **Auto Fit** (multi-start, escapes local minima).
+## What it does
 
-**Uncertainty, always** — this is LARMOR's actual headline difference from dmfit:
-- **Covariance**, **Monte-Carlo** (parametric bootstrap), and **χ² profile** (real 1σ/2σ
-  confidence intervals, not just the covariance) error methods everywhere a fit happens —
-  single spectrum, batch, or sequential. Monte-Carlo and χ² profile run **across all your CPU
-  cores** (one left free for the app), not one refit at a time.
-- **At-bounds diagnosis**: a parameter that finishes pinned at a bound is flagged, with
-  uncertainties computed conditional on that pin instead of silently vanishing.
-- **Identifiability**: unidentifiable parameter pairs (from the fit covariance) are flagged with
-  a warning, not left to be discovered later.
+**Fitting.** Drag components directly on the spectrum (position, amplitude, width
+handles), or edit them in a parameter table with per-parameter fix/bounds/links.
+Fifteen lineshape models are available, from plain Gauss/Lorentz, Voigt and
+J-multiplets through Czjzek, extended Czjzek, dmfit's "Amorphous" Gaussian
+disorder, second-order quadrupolar, quad+CSA and CSA powder patterns, to external
+spectra used as backgrounds. The quadrupolar models take the nucleus and field
+from the data, so there is nothing special to do for a new isotope. Fit windows
+can be a union of regions, dmfit-style, and a multi-start "Auto fit" helps with
+awkward starting points.
 
-**Batch & multi-spectrum workflows**
-- **Batch fit**: one shared model fit to many spectra at once, amplitudes free per spectrum,
-  optional per-parameter "release" (let δiso/width drift a little, per spectrum); per-cell
-  **exclude a component** for samples where a line doesn't apply; exports a long-format CSV
-  (value + error + integrated population %) with each spectrum's saved fit alongside it.
-- **Sequential fit**: forward/backward warm-started fitting across a series (e.g. a pressure or
-  composition series) — each spectrum starts from its converged neighbour, 1/2/4/8/16 passes.
-- **Multi-field / multi-dataset** simultaneous fits (`larmor multifit`) — lifts the Cq/δiso
-  degeneracy a single field can't resolve.
+**Uncertainties.** Every fit reports errors, three ways: from the covariance
+matrix, by Monte-Carlo resampling, or from χ² profiling (proper 1σ/2σ confidence
+intervals). The latter two run on all CPU cores. Parameters that finish pinned at
+a bound are flagged rather than reported with a meaningless error bar, and the fit
+warns when two parameters are so correlated the data cannot separate them.
 
-**2D / MQMAS** (`larmor.twod`) — interactive fitting (click to place a site, fitted model
-overlaid as a dashed contour), exact hypercomplex 2D phasing, manual shear, contour figures with
-noise-measured levels and projections.
+**Series of spectra.** A batch fit applies one shared model to many spectra at
+once, with amplitudes free per spectrum and any parameter optionally "released"
+to drift between samples; components can be excluded per sample. A sequential fit
+walks a composition or temperature series, each spectrum starting from its
+neighbour's result. Multi-field datasets can be fit simultaneously, which is often
+the only way to separate Cq from δiso. Results export to a long-format CSV with
+errors and populations.
 
-**Processing** (TopSpin/ssNake parity) — EM/GM/SINE/QSINE/TRAF windows, TDeff, ZF (factor or SI),
-FCOR, FT, manual/ACME phase, SR, magnitude, Hilbert reconstruction, linear prediction
-(forward/backward), whole-echo, polynomial/iterative/interactive-anchor baselines, region
-extract, spectra algebra, align, peak picking, 2-point background subtraction. Pipelines are
-stored in the recipe and **replayed on load**, including inside every batch/publication figure.
+**2D and MQMAS.** Interactive 2D fitting (click to place a site, the fitted model
+drawn as contours over the data), hypercomplex phasing, shearing, and contour
+figures with projections and computed CS/QIS reference lines.
 
-**Relaxation & recoupling** — automatic **T1/T2** from arrayed EXPNOs (satrec/invrec/CPMG/T1ρ,
-window- or **per-site** via NNLS decomposition), **REDOR** dipolar couplings and distances
-(model-free short-time or full pair curve), **QCPMG** (echo-train sum, spikelet or sum-echo
-absorption spectra), two-field infinite-field extrapolation.
+**Processing.** The usual TopSpin/ssNake operations: apodization windows,
+zero-filling, Fourier transform, phasing (manual or automatic), baseline
+correction, linear prediction, Hilbert reconstruction, whole-echo processing,
+region extraction, spectrum algebra and alignment. Processing steps are stored in
+the recipe and replayed whenever the data is reloaded.
 
-**Import** (ssNake-style, universal) — point at almost anything: a legacy dmfit `.fxmla`/`.fxml`,
-a LARMOR recipe, or **any Bruker path** — a processed `1r`/`2rr` file, a raw `fid`/`ser`, a
-`pdata/N` folder, or an EXPNO folder — plus Varian/Agilent `.fid`. The reader figures out 1D vs
-2D, raw vs processed, and a real spectroscopic 2D vs a pseudo-2D arrayed experiment. **Open
-FID…** processes the raw fid/ser before the Fourier transform (windowing, zero-fill, phase, and
-for 2D the indirect quadrature mode). Everything is strictly read-only against instrument
-folders.
+**Relaxation and dipolar experiments.** T1/T2 extraction from arrayed experiments
+(saturation/inversion recovery, CPMG, T1ρ), including per-site decomposition;
+REDOR curves to dipolar couplings and distances; QCPMG echo trains to spikelet or
+sum-echo spectra with a guided, step-by-step processing dialog.
 
-**Publication figures** — the Plotting Studio: 1D overlay/stack, 2D contour (with a fitted-model
-overlay and computed CS/QIS reference lines), deconvolution/composition grids from a whole batch
-fit, species-distribution bars, and relaxation/REDOR series, all from a declarative JSON spec
-(savable, re-renderable identically later). Per-component colors and legend control, journal
-style presets (`article`, `article-wide`, `presentation`, `thesis`), png + svg + pdf export.
+**Figures.** A plotting studio produces publication figures (overlays, stacked
+plots, deconvolution grids from a batch fit, species distributions, relaxation
+series) from a JSON spec that can be saved and re-rendered identically. Journal
+style presets, PNG/SVG/PDF output.
 
-**Advanced** — **DFT tensor import** (CASTEP/QE `.magres` → fittable sites, EFG→Cq validated
-against first principles); **SIMPSON** bridge for exact density-matrix recoupling simulations.
+**Other.** DFT tensor import from CASTEP/Quantum ESPRESSO `.magres` files, an
+optional bridge to SIMPSON for exact recoupling simulations, and a `larmor` CLI
+(`info`, `import`, `fit`, `batchfit`, `seqfit`, `multifit`, `satrec`, `redor`,
+`magres`) for scripted use — the whole thing is an ordinary Python package
+underneath.
 
-Reuse-first design: the physics comes from mrsimulator + lmfit; LARMOR adds ingestion, the
-dmfit-faithful UX, orchestration, uncertainties, and reproducibility. Instrument folders are
-always read-only.
+## How it compares to dmfit
 
-## LARMOR vs dmfit
+dmfit is the reference point throughout, and LARMOR reads its `.fxml`/`.fxmla`
+fit files directly. The practical differences: uncertainties are computed for
+everything rather than being a separate tool, fits are plain JSON instead of an
+opaque format, batch and series fitting are built in, everything is scriptable
+from Python, and it runs on any platform. If you have years of dmfit fits, they
+import — that was one of the design goals, and 20 fits from one of our published
+papers reproduce their parameters exactly on import
+([validation report, §5.7](docs/validation.md)).
 
-dmfit is the tool this project is modeled on and still cites throughout (docs, Methods text,
-`.fxml`/`.fxmla` import). What's different:
+## Validation
 
-| | dmfit | LARMOR |
-|---|---|---|
-| Uncertainty on a fitted value | Optional, separate Monte-Carlo tool | Covariance/MC/χ² profile everywhere, parallelized across CPU cores |
-| Fit file format | Binary/XML, dmfit-only | JSON recipe, diffable, forward-compatible, data referenced by path+hash never embedded |
-| Batch / series fitting | Manual, one spectrum at a time | Built-in shared-model batch fit + sequential warm-start fit |
-| Scripting / automation | None | Python library + `larmor` CLI (`fit`/`batchfit`/`seqfit`/`multifit`/…) |
-| Publication figures | External plotting | Built-in Plotting Studio, spec-driven, reproducible |
-| Platform | Windows-native (Delphi) | Cross-platform Python/Qt |
-
-## Trust & validation
-
-`docs/LARMOR_VALIDATION_REPORT.md` cross-checks LARMOR's physics against analytic theory,
-direct ensemble simulation, and **real published data** — including reproducing 20 fits from a
-peer-reviewed paper (Soudani *et al.*, *J. Non-Cryst. Solids* **638**, 123085 (2024)) with exact
-parameter agreement. `docs/ROADMAP_v1.md` tracks, honestly, what's still needed before a 1.0
-sign-off (splitting the 4000+-line main window module and setting up CI are the biggest open
-items — neither affects the correctness of a fit today).
+I don't think a fitting program should be trusted on faith, so the physics is
+checked against analytic theory, direct ensemble simulations, and real published
+data: see [docs/validation.md](docs/validation.md). The figures in that report are
+generated by a script in the repo, not drawn. The test suite (about 600 tests,
+`pytest tests/`) includes fits of real Bruker datasets and the published-paper
+reproductions mentioned above.
 
 ## Status
 
-LARMOR's native desktop app is the primary, actively-developed interface and has been for most
-of this project's history — this is not an early prototype. The `larmor` Python package
-(`pip install -e .`) is a fully working library on its own (see `larmor.engine`/`larmor.fit` for
-the fitting core, `larmor.io` for readers, `larmor.figures` for the publication-plotting engine),
-and every capability above is backed by an automated test (500+ tests, `pytest tests/`).
+The desktop app is the primary interface and where all development happens.
+Around 28k lines of Python, of which the fitting core is Qt-free and usable as a
+library. Known gaps are tracked in [docs/roadmap.md](docs/roadmap.md) — the
+honest summary is that the code is well tested but there is no CI or signed
+release pipeline yet, so installing from source is the reliable route. A FastAPI
+web variant exists in the tree but is unmaintained; don't use it.
 
-A browser-based variant (`larmor app`, FastAPI + Plotly) also exists in the codebase but is
-**not actively maintained** — the desktop app absorbed all feature development early on. Treat
-it as experimental; if you need a browser-based/shared-lab-server interface, open an issue
-rather than assuming it's current.
+Tutorials live in [docs/tutorials/](docs/tutorials/). Raw instrument data is
+never committed to this repository and never written to — `data/` holds only
+notes about where data lives.
 
-**Tutorials** (in [docs/tutorials/](docs/tutorials/)) currently cover the fitting basics; a
-refresh covering batch fitting, MQMAS, and error analysis is planned (`docs/ROADMAP_v1.md`
-Pillar E).
+## License
 
-## Data policy
+MIT. If you use LARMOR in published work, a citation of the repository is
+appreciated, alongside dmfit (Massiot et al., *Magn. Reson. Chem.* 2002) whose
+design this follows and mrsimulator which does the quantum mechanics.
 
-Raw instrument data (TopSpin EXPNO folders) and legacy `.fxmla` files are **never copied into this repo** and **never written to**. `data/` holds only small reference notes (paths, hashes) — see `data/README.md`.
-
-## Installation & launching
-
-**See [INSTALL.md](INSTALL.md) for the complete, cross-platform guide with
-troubleshooting.** In brief, from inside this folder:
-
-```
-conda env create -f environment.yml     # recommended (or: pip install -r requirements.txt)
-conda activate larmor
-larmor desktop                           # …or double-click LARMOR.bat on Windows
-```
-
-- The **native desktop app** (PySide6 + pyqtgraph — instant zoom/pan/drag, no
-  browser) is the primary interface.
-- CLI without any GUI: `larmor info <path>`, `larmor import <fxmla>`, `larmor fit <recipe>`,
-  plus `satrec`/`redor`/`magres`/`multifit`/`batchfit`/`seqfit` for their respective workflows.
-- A packaged Windows build (`packaging/larmor.spec`, PyInstaller) exists for a Conda-free
-  install, but is not yet part of a signed, tested release pipeline — the Conda/pip route above
-  is the reliable path today.
-- If an existing env predates a feature, refresh it with
-  `conda env update -f environment.yml`.
+Sam Soudani — McCloy group, Washington State University.

@@ -69,6 +69,16 @@ def attach_plot_menu(widget, *, title: str = "figure", parent=None,
     omitted, the plotted curves are sent as a generic 1D overlay."""
     _disable_native_export(widget)
     try:
+        # pyqtgraph's "Plot Options > Average" submenu is a bare QListWidget
+        # in a QWidgetAction; with no averageable traces it pops up as a big
+        # empty white box. Averaging spectra makes no sense here anyway.
+        pi = widget.getPlotItem()
+        for act in list(pi.ctrlMenu.actions()):
+            if act.text() == "Average":
+                pi.ctrlMenu.removeAction(act)
+    except Exception:
+        pass
+    try:
         menu = widget.getPlotItem().getViewBox().menu
     except Exception:
         return

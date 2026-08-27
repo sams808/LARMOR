@@ -255,3 +255,19 @@ def test_copy_csv_includes_both_time_axes(qapp, tmp_path):
     assert "LB_physical_Hz=" in text and "LB_ssnake_D1_Hz=" in text
     assert "period_pts=" in text and "echo_top=" in text
     d.close()
+
+
+def test_dialog_fits_the_screen_and_can_be_shrunk(qapp, tmp_path):
+    """The fixed 1180x820 spilled past a laptop screen and the layout minimum
+    made shrinking impossible -- the dialog must open inside the available
+    screen and accept being resized well below its default."""
+    d = _dialog_with(qapp, _synthetic_qcpmg(tmp_path))
+    d.show()
+    qapp.processEvents()
+    avail = d.screen().availableGeometry()
+    assert d.width() <= avail.width() and d.height() <= avail.height()
+    assert d.isSizeGripEnabled()
+    d.resize(760, 540)
+    qapp.processEvents()
+    assert d.width() <= 800 and d.height() <= 620
+    d.close()

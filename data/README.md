@@ -1,5 +1,3 @@
 # data/
 
-This folder holds **references to** raw data, never copies of it.
-
-Raw Bruker TopSpin experiments live under `Desktop\WSU_work\NMR\NMRFAM\DATA\...` and legacy dmfit fits live wherever they were saved (e.g. `Desktop\CaAlGlass.fxmla`). LARMOR notebooks and code read those paths directly and read-only — nothing under `data/` in this repo should ever be the instrument data itself, only small text notes (source paths, content hashes, what an EXPNO contains) that are safe to commit.
+No instrument data is committed to this repository. LARMOR reads raw Bruker experiments and legacy dmfit fits from their original locations on disk, read-only. Anything under `data/` should be small text notes only (source paths, content hashes, what an EXPNO contains).

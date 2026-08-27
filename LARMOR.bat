@@ -5,7 +5,6 @@ REM  One-time setup (in an Anaconda/Miniconda prompt, from this
 REM  folder):   conda env create -f environment.yml
 REM ============================================================
 setlocal
-set "PORT=8642"
 cd /d "%~dp0"
 
 REM 1) explicit override: set LARMOR_PYTHON to a python.exe if you know it

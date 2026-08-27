@@ -1,4 +1,4 @@
-"""Generate the validation figures for docs/LARMOR_VALIDATION_REPORT.md.
+"""Generate the validation figures for docs/validation.md.
 
 Every figure is a REAL computation from LARMOR / mrsimulator — nothing is drawn
 by hand. Run with the `larmor` conda env python.

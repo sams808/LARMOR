@@ -39,9 +39,13 @@ _log = logging.getLogger(__name__)
 def _plot(title: str = "", ppm_axis: bool = False, height: int | None = None,
           parent=None):
     pw = pg.PlotWidget(background=theme.active().plot_bg)
+    # keep each plot's minimum small: tabs stack up to two of them, and their
+    # combined minimum is what decides how far the DIALOG can be shrunk
+    pw.setMinimumHeight(90)
     if ppm_axis:
         pw.getPlotItem().invertX(True)
         pw.setLabel("bottom", "shift", units="ppm")
+        pw.getPlotItem().getAxis("bottom").enableAutoSIPrefix(False)
     if height:
         pw.setMaximumHeight(height)
     if title:
@@ -70,7 +74,17 @@ class QcpmgDialog(QDialog):
     def __init__(self, parent, source: str | None):
         super().__init__(parent)
         self.setWindowTitle("QCPMG processing — guided sum-echo workflow")
-        self.resize(1180, 820)
+        # size to the screen, never past it: on a laptop the fixed 1180x820
+        # spilled off-screen and the layout minimum made shrinking impossible
+        w, h = 1180, 820
+        scr = self.screen()
+        if scr is not None:
+            avail = scr.availableGeometry()
+            w = min(w, avail.width() - 60)
+            h = min(h, avail.height() - 80)
+        self.resize(max(720, w), max(500, h))
+        self.setMinimumSize(720, 500)
+        self.setSizeGripEnabled(True)
         self.source = source
         self.fid = None
         self.meta: dict = {}

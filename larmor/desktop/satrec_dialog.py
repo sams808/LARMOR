@@ -103,6 +103,7 @@ class SatrecDialog(QDialog):
         self.spec_plot = pg.PlotWidget(background=theme.active().plot_bg)
         self.spec_plot.getPlotItem().invertX(True)
         self.spec_plot.setLabel("bottom", "shift", units="ppm")
+        self.spec_plot.getPlotItem().getAxis("bottom").enableAutoSIPrefix(False)
         self.spec_plot.showGrid(x=True, y=True, alpha=0.1)
         sb.addWidget(self.spec_plot)
         split.addWidget(spec_box)

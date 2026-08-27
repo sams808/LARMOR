@@ -22,8 +22,5 @@ data/**/*.fxmla
 build/
 dist/
 
-# local test clones
-git-test/
-
-# generated brand assets are tracked (needed by the app + exe)
-!assets/
+# reference PDFs kept locally, not distributed
+examples/bib/

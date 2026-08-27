@@ -90,6 +90,7 @@ class QcpmgFieldsDialog(QDialog):
         self.plot = pg.PlotWidget(background=theme.active().plot_bg)
         self.plot.setLabel("bottom", "1 / ν₀²", units="MHz⁻²")
         self.plot.setLabel("left", "δcg", units="ppm")
+        self.plot.getPlotItem().getAxis("left").enableAutoSIPrefix(False)
         self.plot.showGrid(x=True, y=True, alpha=0.15)
         self.plot.setMinimumHeight(180)
         v.addWidget(self.plot)

@@ -46,8 +46,8 @@ larmor fit CaAlGlass.recipe.json --window 150 -80 --plot fit_constrained.png
 You should see:
 
 - `s1_amp` reported as `== '0.29 * s0_amp'` in the fit report, with a stderr
-  that is exactly 0.29 × the stderr of `s0_amp` — that's error propagation,
-  not a coincidence.
+  that is exactly 0.29 × the stderr of `s0_amp`. That is error propagation at
+  work rather than a coincidence.
 - The RMSD rises slightly (constraints remove freedom; ~0.004 vs 0.0025 free).
   A small rise is the price of a physically meaningful model. A large rise
   means your constraint is wrong.
@@ -55,36 +55,38 @@ You should see:
 ## 3. Or add them in the app
 
 ```
-larmor app
+larmor desktop
 ```
 
-Load the file, then click **constraints ▸** on any site. Each parameter gains
-three fields:
+Open the file, then click the **⚙** button on a site's card (its tooltip
+reads "constraints: link expression / min / max"). Each parameter gains a
+constraint row with three fields:
 
 - **link** — type the expression, e.g. `0.29 * s0.amplitude`. The value box
-  greys out and shows a ⚭ symbol; the parameter now follows its expression
-  live in the plot.
+  greys out and the parameter label gains a ⚭ mark; the parameter now follows
+  its expression live in the plot.
 - **min / max** — box bounds for the fit.
-- The plain checkbox next to each value still fixes it outright.
+- The plain checkbox next to each value still fixes it outright (checked =
+  fitted, unchecked = fixed).
 
 ## 4. When a constraint fights the data
 
 Try linking the amplitude with a deliberately wrong ratio, e.g.
-`0.5 * s0.amplitude`, and fit again. The report now warns:
+`0.5 * s0.amplitude`, and fit again. The fit flags the problem, and a note is
+written into the recipe so the caveat travels with the result:
 
 ```
-⚠ at bounds (constraint or start value fighting the data?): s4.amplitude
+parameters finished at a bound (check constraints/starting model; uncertainties are conditional on them): s2.amplitude
 ```
 
 What happened: forced to hold a 2:1 ratio the data doesn't support, the
-optimizer pushed other parameters to the edges of their allowed ranges — the
-third site's amplitude collapsed to zero. LARMOR detects parameters that
-finish at a bound, warns you, and reports the remaining uncertainties
-*conditional* on those pinned values (the note is also written into the
-recipe, so the caveat travels with the result).
+optimizer pushed other parameters to the edges of their allowed ranges — here
+the third site's amplitude (`s2.amplitude`) collapsed to zero. LARMOR detects
+parameters that finish at a bound, warns you, and reports the remaining
+uncertainties *conditional* on those pinned values.
 
-The rule of thumb: **parameters at bounds after a constrained fit mean the
-constraint and the data disagree** — revisit one of them.
+The rule of thumb: parameters at bounds after a constrained fit mean the
+constraint and the data disagree — revisit one of them.
 
 ## 5. Constraint cookbook
 

@@ -719,7 +719,11 @@ def test_czjzek_display_convention_rescales_cell_and_header(qapp):
     from larmor.desktop import table
     from larmor.desktop.table import LinesTable
 
-    assert table.czjzek_display_mode() == "sigma"        # default unchanged
+    # the ambient mode is whatever the developer's own app settings hold (a
+    # main-window test earlier in the suite applies the saved preference), so
+    # pin the starting state instead of asserting the factory default
+    prev = table.czjzek_display_mode()
+    table.set_czjzek_display("sigma")
     t = LinesTable()
     try:
         rec = _czjzek_recipe_dict(sigma=1.0)
@@ -756,4 +760,61 @@ def test_czjzek_display_convention_rescales_cell_and_header(qapp):
         # and the derived side-label shows sigma when sigma is hidden
         assert "σ" in cell.derived.text()
     finally:
-        table.set_czjzek_display("sigma")                # never leak the mode
+        table.set_czjzek_display(prev)                   # never leak the mode
+
+
+def test_pin_rename_persists_and_updates_label(qapp, tmp_path):
+    """Right-click > Rename pin: the display name sticks to the pin, survives a
+    restart (fresh panel), resets on empty input, and is dropped on unpin."""
+    from PySide6.QtCore import QSettings
+
+    from larmor.desktop import explorer
+    s = QSettings("LARMOR", "app")
+    old_pins = s.value("pinnedFolders", [])
+    old_names = s.value("pinnedNames", "")
+    try:
+        s.setValue("pinnedFolders", [])
+        s.setValue("pinnedNames", "")
+        panel = explorer.ExplorerPanel()
+        folder = tmp_path / "GlassSeries_2026"
+        folder.mkdir()
+        panel._pin(str(folder))
+        assert "GlassSeries_2026" in panel.tree.topLevelItem(0).text(0)
+        panel.set_pin_name(str(folder), "LAW glasses (MagLab)")
+        assert panel.tree.topLevelItem(0).text(0) == "📌 LAW glasses (MagLab)"
+
+        panel2 = explorer.ExplorerPanel()          # "restart"
+        it2 = panel2.tree.topLevelItem(0)
+        assert "LAW glasses (MagLab)" in it2.text(0)
+        assert it2.toolTip(0) == str(folder)       # the real path stays visible
+        panel2.set_pin_name(str(folder), "  ")     # empty -> folder's own name
+        assert panel2._pin_label(str(folder)) == "GlassSeries_2026"
+        panel2.set_pin_name(str(folder), "again")
+        panel2._unpin(str(folder))                 # unpin forgets the name
+
+        panel3 = explorer.ExplorerPanel()
+        assert panel3._pin_names == {}
+    finally:
+        s.setValue("pinnedFolders", old_pins)
+        s.setValue("pinnedNames", old_names)
+
+
+def test_plot_menu_prunes_the_broken_average_submenu(qapp):
+    """pyqtgraph's 'Plot Options > Average' popped up as a big empty white box
+    (a bare QListWidget with nothing in it); it is removed on every plot that
+    gets the shared menu."""
+    import pyqtgraph as pg
+
+    from larmor.desktop.plot_menu import attach_plot_menu
+    pw = pg.PlotWidget()
+    attach_plot_menu(pw, title="t")
+    texts = [a.text() for a in pw.getPlotItem().ctrlMenu.actions()]
+    assert texts and "Average" not in texts
+
+
+def test_ppm_axes_never_grow_an_si_prefix(qapp):
+    """A wide quadrupolar spectrum made pyqtgraph relabel the axis 'kppm' --
+    kilo-ppm is not a unit a spectroscopist has ever used."""
+    from larmor.desktop.qcpmg_dialog import _plot
+    pw = _plot("x", ppm_axis=True)
+    assert pw.getPlotItem().getAxis("bottom").autoSIPrefix is False
