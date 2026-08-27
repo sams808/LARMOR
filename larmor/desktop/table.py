@@ -100,22 +100,51 @@ def czjzek_display_factor() -> float:
     return CZJZEK_DISPLAYS[_CZJZEK_MODE][1]
 
 #: column order and short headers, dmfit-style
+#: curated column order + headers for every parameter the registry's models
+#: use today, roughly dmfit's panel order: amplitude/position/width first,
+#: then quadrupolar, then CSA, then couplings/sidebands. This is a DISPLAY
+#: preference only -- rebuild() appends an automatic column for any key this
+#: list does not know (header from the model's own ParamDef), so a model can
+#: never again have a fitted-but-invisible parameter, as the Amorphous
+#: ΔCq FWHM was for weeks.
 PARAM_COLUMNS = [
     ("amplitude", "Amplitude"),
     ("isotropic_chemical_shift_ppm", "Position\n(ppm)"),
+    ("shift_ppm", "Shift\n(ppm)"),                 # external-spectrum offset
     ("shift_fwhm_ppm", "Width\n(ppm)"),
+    ("gauss_fwhm_ppm", "Gauss w\n(ppm)"),          # true Voigt
+    ("lorentz_fwhm_ppm", "Lorentz w\n(ppm)"),
     ("gl", "xG/(1-x)L"),
     ("sigma_Cq_MHz", "σ(Cq)\n(MHz)"),
     ("Cq_MHz", "Cq\n(MHz)"),
-    # the Amorphous model's distribution widths (dmfit FWHM_CQ / FWHM_etaQ)
-    # and its lb: these were fitted but INVISIBLE before -- any key missing
-    # from this list simply never gets a column
     ("Cq_fwhm_MHz", "ΔCq FWHM\n(MHz)"),
     ("eta", "η"),
+    ("eta_q", "η(Q)"),
     ("eta_fwhm", "Δη FWHM"),
+    ("eps", "ε"),                                  # extended Czjzek
     ("line_fwhm_ppm", "lb\n(ppm)"),
     ("zeta_ppm", "ζ CSA\n(ppm)"),
+    ("sigma_zeta_ppm", "σ(ζ)\n(ppm)"),
+    ("eta_cs", "η(CSA)"),
+    ("j_hz", "J\n(Hz)"),
+    ("n_j", "n(J)"),
+    ("ssb_ratio", "SSB ratio"),
+    ("n_ssb", "n(SSB)"),
 ]
+
+
+def _auto_header(model: str, key: str) -> str:
+    """Header for a parameter the curated list does not know, taken from the
+    model's own ParamDef (short key + unit) so it is never blank."""
+    try:
+        from larmor import models
+
+        for pd in models.get(model).params:
+            if pd.name == key:
+                return f"{pd.key}\n({pd.unit})" if pd.unit else pd.key
+    except Exception:
+        pass
+    return key
 
 
 class _Cell(QWidget):
@@ -369,6 +398,14 @@ class LinesTable(QWidget):
         sites = (recipe or {}).get("sites", [])
         used = [(k, h) for k, h in PARAM_COLUMNS
                 if any(k in s["params"] for s in sites)]
+        # a key the curated list does not know still gets a column, so mixed
+        # recipes and future models can never hide a parameter
+        known = {k for k, _ in PARAM_COLUMNS}
+        for s in sites:
+            for k in s["params"]:
+                if k not in known:
+                    known.add(k)
+                    used.append((k, _auto_header(s.get("model", ""), k)))
         self._used_keys = [k for k, _ in used]
         t.setColumnCount(2 + len(used))
         # the Czjzek width column is headed by whichever convention the user

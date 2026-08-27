@@ -899,3 +899,58 @@ def test_app_save_dialogs_seed_from_the_open_dataset(qapp, tmp_path):
     w.source_path = str(sample / "10" / "pdata" / "1" / "1r")
     (sample / "10" / "pdata" / "1" / "1r").write_bytes(b"\0")
     assert w._suggest_dir() == str(sample / "10" / "pdata" / "1")
+
+
+def _one_site_recipe(model_name):
+    from larmor import models
+    m = models.get(model_name)
+    params = {p.name: {"value": p.default, "vary": p.vary,
+                       "min": p.min, "max": p.max} for p in m.params}
+    return {"nucleus": "27Al", "larmor_frequency_MHz": 130.32,
+            "spin_rate_Hz": 20000.0,
+            "sites": [{"model": model_name, "label": "", "params": params}]}
+
+
+def test_every_registered_model_shows_every_parameter(qapp):
+    """The Amorphous ΔCq FWHM was fitted but invisible because the table's
+    column allowlist did not know the key; 8 of 15 models had the same class
+    of hole (Voigt widths, J coupling, sideband ratio, ext-Czjzek eps, the
+    two quad+CSA etas, ...). Every parameter of every registered model must
+    get a column and a live cell -- including models added in the future,
+    via the automatic-header fallback."""
+    from larmor.models.base import REGISTRY
+
+    from larmor.desktop.table import LinesTable
+    t = LinesTable()
+    for name, m in REGISTRY.items():
+        t.rebuild(_one_site_recipe(name), set())
+        for p in m.params:
+            assert p.name in t._used_keys, f"{name}.{p.name} has no column"
+            col = 2 + t._used_keys.index(p.name)
+            assert t.table.cellWidget(0, col) is not None, f"{name}.{p.name}"
+            head = t.table.horizontalHeaderItem(col).text()
+            assert head.strip(), f"{name}.{p.name} has a blank header"
+
+
+def test_mixed_model_recipe_gets_one_cell_per_own_parameter(qapp):
+    """Sites of DIFFERENT models in one recipe: the table is the union of
+    their parameters, each row carrying cells only for its own model's keys
+    (blank holes elsewhere, never a wrong-model cell)."""
+    from larmor.models.base import REGISTRY
+
+    from larmor.desktop.table import LinesTable
+    names = ["gauss_lor", "voigt", "jmultiplet", "czjzek", "quad_csa",
+             "amorphous", "spectrum"]
+    sites = [_one_site_recipe(n)["sites"][0] for n in names]
+    rec = {"nucleus": "27Al", "larmor_frequency_MHz": 130.32,
+           "spin_rate_Hz": 20000.0, "sites": sites}
+    t = LinesTable()
+    t.rebuild(rec, set())
+    for row, name in enumerate(names):
+        keys = {p.name for p in REGISTRY[name].params}
+        for c, key in enumerate(t._used_keys, start=2):
+            cell = t.table.cellWidget(row, c)
+            if key in keys:
+                assert cell is not None, f"row {name} missing cell for {key}"
+            else:
+                assert cell is None, f"row {name} has a spurious {key} cell"

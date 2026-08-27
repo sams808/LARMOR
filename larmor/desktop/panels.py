@@ -35,6 +35,10 @@ PARAM_LABELS = {
     "n_ssb": "n sidebands",
     "amplitude": "amplitude",
     "gl": "g/l fraction",
+    "a": "a (function)",
+    "b": "b (function)",
+    "c": "c (function)",
+    "d": "d (function)",
 }
 
 
