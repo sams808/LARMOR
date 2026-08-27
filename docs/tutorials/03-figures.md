@@ -70,7 +70,7 @@ instrument data folders are refused; figures go in your own folders.
     {"f1": [20, 55], "label": "AlO$_5$", "scale": 0.5}
   ],
   "slopes": [{"slope": 1.0, "intercept": 0.0}],
-  "annotation": "my glass, 3QMAS"
+  "annotation": "pCABS glass, 3QMAS"
 }
 ```
 

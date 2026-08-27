@@ -1,8 +1,7 @@
 # Roadmap
 
-Where LARMOR stands and where it is going, checked against the code rather than
-against my intentions. There are no dates on any of this; items move up when they
-block real work.
+Where LARMOR stands and where it is going, checked against the code. There are
+no dates on any of this; items move up when they block real work.
 
 ## Where it stands
 
