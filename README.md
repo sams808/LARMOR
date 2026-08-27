@@ -9,11 +9,16 @@ file.
 The physics comes from [mrsimulator](https://mrsimulator.readthedocs.io) and the
 fitting from [lmfit](https://lmfit.github.io/lmfit-py/); LARMOR adds the interactive
 fitting UI, file readers, batch workflows and figure export on top. Spectra are read
-directly from instrument folders (Bruker, Varian/Agilent, legacy dmfit files), always
-read-only. A fit is saved as a JSON "recipe" that references the data by path and
-hash, so it can be re-run, diffed, and shared.
+directly from instrument folders (Bruker, Varian/Agilent, legacy dmfit files); the
+acquired files are never modified. A fit is saved as a JSON "recipe" that references
+the data by path and hash, so it can be re-run, diffed, and shared — typically right
+next to the spectrum it fits.
 
-![A 27Al fit of a calcium aluminosilicate glass](examples/CaAlGlass_fit.png)
+![11B and 27Al fits of the bundled pCABS2-4 glass dataset](examples/pCABS2-4_fits.png)
+
+The figure above is rendered by LARMOR itself from the example data in
+[examples/](examples/README.md) — a real ¹¹B and ²⁷Al dataset of one glass
+that all the tutorials run against.
 
 ## Installation
 

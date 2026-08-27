@@ -595,8 +595,14 @@ class Contour2DView(QWidget):
             return
         coords = self.data.f2_ppm if axis == "f2" else self.data.f1_ppm
         amp = self.data.projection(axis, "sum")
+        from pathlib import Path
+
+        from larmor.desktop.paths import suggest_save_dir
+        start = suggest_save_dir(getattr(self, "source_path", None))
         path, _ = QFileDialog.getSaveFileName(
-            self, f"Save {axis.upper()} projection", f"{axis}_projection.csv",
+            self, f"Save {axis.upper()} projection",
+            str(Path(start) / f"{axis}_projection.csv") if start
+            else f"{axis}_projection.csv",
             "CSV (*.csv)")
         if path:
             spectra.write_csv(path, coords, amp,

@@ -5,7 +5,7 @@ import pytest
 
 from larmor import figures
 
-from conftest import BRUKER_2RR_MQMAS, CAALGLASS, EXPNO_1901, NMRVEW_2D, require
+from conftest import BRUKER_2RR_MQMAS, EXPNO_1901, NMRVEW_2D, require
 
 
 def test_styles_complete():
@@ -39,15 +39,16 @@ def test_render_1d_inline():
     assert ax.lines[1].get_ydata().max() == pytest.approx(1.7, abs=1e-6)
 
 
-def test_render_1d_from_fxmla_and_recipe():
-    require(CAALGLASS)
-    recipe_path = Path(__file__).resolve().parents[1] / "examples" / "CaAlGlass.recipe.json"
+def test_render_1d_from_the_shipped_example_recipe(monkeypatch):
+    root = Path(__file__).resolve().parents[1]
+    recipe_path = root / "examples" / "pCABS2-4_27Al.recipe.json"
     if not recipe_path.exists():
         pytest.skip("example recipe not present")
+    monkeypatch.chdir(root)          # the recipe references its data relatively
     spec = {
         "kind": "1d",
         "traces": [
-            {"path": str(CAALGLASS), "label": "exp"},
+            {"path": str(root / "examples" / "pCABS2-4" / "3616"), "label": "exp"},
             {"recipe": str(recipe_path), "part": "total", "label": "fit"},
             {"recipe": str(recipe_path), "part": "site", "site": 0},
             {"recipe": str(recipe_path), "part": "residual"},
@@ -56,6 +57,30 @@ def test_render_1d_from_fxmla_and_recipe():
     }
     png = figures.render_png_bytes(spec)
     assert len(png) > 10_000
+
+
+def test_render_batch_grid_per_panel_xlim(tmp_path):
+    """Panels of different nuclei need different ranges: a panel's own xlim
+    must override the grid-wide one."""
+    root = Path(__file__).resolve().parents[1]
+    r_b = root / "examples" / "pCABS2-4_11B.recipe.json"
+    r_al = root / "examples" / "pCABS2-4_27Al.recipe.json"
+    if not (r_b.exists() and r_al.exists()):
+        pytest.skip("example recipes not present")
+    import os
+    cwd = os.getcwd()
+    os.chdir(root)
+    try:
+        spec = {"kind": "batch_grid",
+                "panels": [{"recipe": str(r_b), "xlim": [30.0, -30.0]},
+                           {"recipe": str(r_al)}],
+                "cols": 2, "legend": False, "xlim": [150.0, -80.0]}
+        fig = figures.render(spec)
+        axes = [a for a in fig.axes if a.get_visible()]
+        assert axes[0].get_xlim() == (30.0, -30.0)      # panel's own
+        assert axes[1].get_xlim() == (150.0, -80.0)     # grid-wide fallback
+    finally:
+        os.chdir(cwd)
 
 
 def test_render_2d_nmrvew():

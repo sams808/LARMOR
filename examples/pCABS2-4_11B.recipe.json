@@ -1,0 +1,232 @@
+{
+  "sample": "pCABS2-4 (11B)",
+  "source_kind": "bruker",
+  "source_path": "examples/pCABS2-4/1118",
+  "source_sha256": "52b09f4d6e706b4d1fd5285677ca40a9a596162b6fb7c80514ff4ba11ea8a685",
+  "nucleus": "11B",
+  "larmor_frequency_MHz": 160.4606499,
+  "spin_rate_Hz": 20000.0,
+  "mas_uncertain": false,
+  "sr_hz": 0.0,
+  "engine": "czjzek-kernel+lmfit",
+  "sites": [
+    {
+      "model": "amorphous",
+      "label": "BO$_3$",
+      "params": {
+        "isotropic_chemical_shift_ppm": {
+          "value": 16.369827274934046,
+          "stderr": null,
+          "vary": true,
+          "min": null,
+          "max": null,
+          "expr": null
+        },
+        "Cq_MHz": {
+          "value": 2.0991938605613485,
+          "stderr": null,
+          "vary": true,
+          "min": 0.05,
+          "max": 6.0,
+          "expr": null
+        },
+        "eta": {
+          "value": 0.07352782882258407,
+          "stderr": null,
+          "vary": true,
+          "min": 0.0,
+          "max": 1.0,
+          "expr": null
+        },
+        "Cq_fwhm_MHz": {
+          "value": 0.19633899616025088,
+          "stderr": null,
+          "vary": true,
+          "min": 0.0,
+          "max": 3.0,
+          "expr": null
+        },
+        "eta_fwhm": {
+          "value": 0.16053950140261097,
+          "stderr": null,
+          "vary": true,
+          "min": 0.0,
+          "max": 1.0,
+          "expr": null
+        },
+        "shift_fwhm_ppm": {
+          "value": 5.286585089964141,
+          "stderr": null,
+          "vary": true,
+          "min": 0.0,
+          "max": null,
+          "expr": null
+        },
+        "line_fwhm_ppm": {
+          "value": 0.13761861987595547,
+          "stderr": null,
+          "vary": true,
+          "min": 0.0,
+          "max": null,
+          "expr": null
+        },
+        "gl": {
+          "value": 0.0,
+          "stderr": null,
+          "vary": false,
+          "min": 0.0,
+          "max": 1.0,
+          "expr": null
+        },
+        "amplitude": {
+          "value": 2692771.4614415085,
+          "stderr": null,
+          "vary": true,
+          "min": 0.0,
+          "max": null,
+          "expr": null
+        }
+      },
+      "ref": null,
+      "func": null
+    },
+    {
+      "model": "amorphous",
+      "label": "BO$_3$",
+      "params": {
+        "isotropic_chemical_shift_ppm": {
+          "value": 11.420110505564868,
+          "stderr": null,
+          "vary": true,
+          "min": null,
+          "max": null,
+          "expr": null
+        },
+        "Cq_MHz": {
+          "value": 2.5611419375212807,
+          "stderr": null,
+          "vary": true,
+          "min": 0.05,
+          "max": 6.0,
+          "expr": null
+        },
+        "eta": {
+          "value": 0.19700363836517565,
+          "stderr": null,
+          "vary": true,
+          "min": 0.0,
+          "max": 1.0,
+          "expr": null
+        },
+        "Cq_fwhm_MHz": {
+          "value": 0.044470955413865795,
+          "stderr": null,
+          "vary": true,
+          "min": 0.0,
+          "max": 3.0,
+          "expr": null
+        },
+        "eta_fwhm": {
+          "value": 0.04711330165720079,
+          "stderr": null,
+          "vary": true,
+          "min": 0.0,
+          "max": 1.0,
+          "expr": null
+        },
+        "shift_fwhm_ppm": {
+          "value": 3.437352590044594,
+          "stderr": null,
+          "vary": true,
+          "min": 0.0,
+          "max": null,
+          "expr": null
+        },
+        "line_fwhm_ppm": {
+          "value": 0.07398953461823937,
+          "stderr": null,
+          "vary": true,
+          "min": 0.0,
+          "max": null,
+          "expr": null
+        },
+        "gl": {
+          "value": 0.0,
+          "stderr": null,
+          "vary": false,
+          "min": 0.0,
+          "max": 1.0,
+          "expr": null
+        },
+        "amplitude": {
+          "value": 1487632.8338491176,
+          "stderr": null,
+          "vary": true,
+          "min": 0.0,
+          "max": null,
+          "expr": null
+        }
+      },
+      "ref": null,
+      "func": null
+    },
+    {
+      "model": "gauss_lor",
+      "label": "BO$_4$",
+      "params": {
+        "isotropic_chemical_shift_ppm": {
+          "value": -0.30680640272258214,
+          "stderr": null,
+          "vary": true,
+          "min": null,
+          "max": null,
+          "expr": null
+        },
+        "shift_fwhm_ppm": {
+          "value": 2.8744428190909885,
+          "stderr": null,
+          "vary": true,
+          "min": 0.1,
+          "max": null,
+          "expr": null
+        },
+        "amplitude": {
+          "value": 8583843.669340221,
+          "stderr": null,
+          "vary": true,
+          "min": 0.0,
+          "max": null,
+          "expr": null
+        },
+        "gl": {
+          "value": 1.0,
+          "stderr": null,
+          "vary": false,
+          "min": 0.0,
+          "max": 1.0,
+          "expr": null
+        }
+      },
+      "ref": null,
+      "func": null
+    }
+  ],
+  "processing": [],
+  "processing_from_raw": false,
+  "fit_window_ppm": [
+    30.0,
+    -30.0
+  ],
+  "fit_zones": [],
+  "fit_rmsd": 0.003723557595841918,
+  "mqmas_f1_ref_ppm": 0.0,
+  "mqmas_f1_scale": 1.0,
+  "mqmas_f1_ref_vary": true,
+  "notes": [
+    "2 Amorphous line(s): dmfit area amplitudes converted to peak amplitudes (x3.55/area) for correct relative heights; absolute scale still needs a fit.",
+    "imported from dmfit 20200306 (Fit 1D); Czjzek sigma = sCZ_CQ x 0.5 (Phase 0 convention)",
+    "line 0 'Amorphous' at 16.2 ppm: dmfit lb was negative (resolution enhancement); imported as 0 -- refit the line broadening if needed.",
+    "line 1 'Amorphous' at 11.4 ppm: dmfit lb was negative (resolution enhancement); imported as 0 -- refit the line broadening if needed."
+  ],
+  "larmor_recipe_version": 1
+}

@@ -1,81 +1,77 @@
-# Tutorial 1 — Your first fit: ²⁷Al MAS spectrum of a glass
+# Tutorial 1 — A first fit: ²⁷Al MAS spectrum of a glass
 
-*Time: ~15 minutes. You need: the `larmor` conda environment, and a dmfit
-`.fxmla` file with an embedded spectrum (this tutorial uses `CaAlGlass.fxmla`,
-a ²⁷Al MAS spectrum of a Ca-aluminosilicate glass fitted with Czjzek
-distributions). The `CaAlGlass.fxmla` source file itself is not included in
-the repository, though the fitted recipe it produces is, in `examples/` —
-substitute your own dmfit file and read the numbers below as a worked
-reference.*
+*Time: ~15 minutes. Everything used here ships with the repository: a ²⁷Al MAS
+spectrum of a Ca-aluminoborosilicate glass (`examples/pCABS2-4/3616`, a Bruker
+EXPNO) together with the dmfit fit that was originally made for it. Run the
+commands from the repository root.*
 
-In this tutorial you will load a spectrum, inspect the model, run a fit, and
-read the uncertainties, which dmfit does not report.
+This tutorial loads a spectrum, inspects an existing dmfit model, runs a fit,
+and reads the uncertainties, which dmfit does not report.
 
 ## 1. Look before you fit
 
-Open a terminal, activate the environment, and ask LARMOR what's in the file:
+Open a terminal and activate the environment:
 
 ```
 conda activate larmor
-larmor info C:\path\to\CaAlGlass.fxmla
+larmor info examples/pCABS2-4/3616
 ```
 
-You should see something like:
-
 ```
-dmfit fit file (version 20110208, mode 'Fit 1D')
-dimension F2: 27Al at 195.483 MHz, 9 lines
-  [0] CzSimple   pos=66.18 ppm  sCZ_CQ=4549 kHz
-  [1] CzSimple   pos=37.20 ppm  sCZ_CQ=4407 kHz
-  [2] Gaus/Lor   pos=236.27 ppm  wid=20.25 ppm
-  ...
-embedded spectrum: 1D, NP=8192
+EXPNO: examples\pCABS2-4\3616
+nucleus: 27Al   SFO1: 130.3230 MHz
+pulse program: zg   TD: 2048   SW: 100000 Hz
+MASR (acqus): 26000.0 Hz
 ```
 
-Things to notice:
-
-- Three `CzSimple` lines — dmfit's simple Czjzek distribution, the standard
-  model for a distribution of quadrupolar couplings in a disordered material.
-  For ²⁷Al in a glass, the three positions (~66, ~37, ~14 ppm) are the classic
-  AlO₄ / AlO₅ / AlO₆ coordination assignment.
-- Two `Gaus/Lor` lines at 236 and 208 ppm. These are not extra aluminum
-  sites: at 33.3 kHz MAS and 195.5 MHz, one rotor frequency is 170 ppm, so
-  236 ≈ 66 + 170 and 208 ≈ 37 + 170. They are the +1 spinning sidebands, which
-  dmfit models as separate ad-hoc lines. LARMOR simulates sidebands physically,
-  so these lines get frozen automatically during the fit.
-
-## 2. Convert to a LARMOR recipe
+A single-pulse ²⁷Al acquisition at 26 kHz MAS. The dmfit fit made for this
+spectrum sits next to the processed data; LARMOR reads it directly:
 
 ```
-larmor import C:\path\to\CaAlGlass.fxmla -o CaAlGlass.recipe.json
+larmor info examples/pCABS2-4/3616/pdata/1/1r.fxml
 ```
 
-The recipe is a small, readable JSON file: the model *only*, with the data
-referenced by path and SHA-256 hash instead of copied. Open it in any text
-editor. Every parameter looks like:
+```
+dmfit fit file (version 20200306, mode 'Fit 1D')
+dimension F2: 27Al at 130.318 MHz, 3 lines
+  [0] CzSimple   pos=64.10 ppm  sCZ_CQ=3508 kHz
+  [1] CzSimple   pos=33.80 ppm  sCZ_CQ=3965 kHz
+  [2] CzSimple   pos=3.88 ppm  sCZ_CQ=3020 kHz
+```
+
+Three `CzSimple` lines — dmfit's simple Czjzek distribution, the standard
+model for a distribution of quadrupolar couplings in a disordered material.
+The three positions (~64, ~34, ~4 ppm) are the classic AlO₄ / AlO₅ / AlO₆
+coordination assignment.
+
+## 2. The recipe
+
+A LARMOR fit lives in a small, readable JSON "recipe": the model only, with
+the data referenced by path and SHA-256 hash instead of copied. The shipped
+`examples/pCABS2-4_27Al.recipe.json` was produced by importing the dmfit file
+above (`larmor import <file.fxml> -o out.recipe.json` does the conversion).
+Open it in any text editor; every parameter looks like:
 
 ```json
-"sigma_Cq_MHz": { "value": 2.274, "stderr": null, "vary": true, "min": 0.05, "max": null, "expr": null }
+"sigma_Cq_MHz": { "value": 1.754, "stderr": null, "vary": true, "min": 0.05, "max": null, "expr": null }
 ```
 
-The Czjzek width was converted with `sigma = sCZ_CQ / 2`. dmfit and
-mrsimulator use conventions that differ by exactly a factor of two; the
-conversion was verified numerically against this dataset during development.
+The Czjzek width was converted with `sigma = sCZ_CQ / 2`: dmfit and
+mrsimulator use conventions that differ by exactly a factor of two (see the
+validation report for the numerical check).
 
 ## 3. Fit
 
 ```
-larmor fit CaAlGlass.recipe.json --window 150 -80 --plot fit.png
+larmor fit examples/pCABS2-4_27Al.recipe.json --window 150 -80 --plot fit.png
 ```
 
-The window `150 -80` (high ppm, low ppm) covers the central-transition region
-and excludes the sidebands. The first run builds the Czjzek simulation kernel
-(~15 s); after that, iterations are milliseconds.
-
-You should see, at the end of the report:
+The window `150 -80` (high ppm, low ppm) covers the central-transition region.
+The first run builds the Czjzek simulation kernel (~15 s); after that,
+iterations are milliseconds. At the end of the report:
 
 ```
-normalized RMSD: 0.0025
+normalized RMSD: 0.0462
 ```
 
 and `fit.png` shows the experiment (black), total fit (red), and each site's
@@ -83,18 +79,20 @@ contribution (dashed).
 
 ## 4. Read the uncertainties
 
-Open the updated `CaAlGlass.recipe.json` and look at each site's `stderr`
-fields, or read them from the fit report. On this dataset:
+Look at each site's `stderr` fields in the updated recipe, or read them from
+the fit report. On this dataset:
 
-- The AlO₄ site is well determined: δiso = 65.1 ± 0.4 ppm, σ(Cq) = 1.84 ± 0.13 MHz.
-- The middle (AlO₅) site is not: its σ(Cq) error is several times its
-  value. The 1D lineshape simply does not contain enough information to pin
-  three overlapping Czjzek sites independently.
+- The AlO₄ site is well determined: δiso = 63.8 ± 0.6 ppm,
+  σ(Cq) = 1.74 ± 0.14 MHz.
+- The AlO₅ site is marginal: δiso = 31.3 ± 6.0 ppm.
+- The AlO₆ site is not determined at all: δiso = −2 ± 39 ppm, and its σ(Cq)
+  error is ten times its value. The 1D lineshape simply does not contain
+  enough information to pin three overlapping Czjzek sites independently.
 
-That second bullet isn't a failure of the fit. To quantify the AlO₅ site you
-need more data: an MQMAS spectrum, a second field, or a constraint from
-chemistry. dmfit reports the same parameter values with no error bars, so this
-degeneracy stays invisible there.
+That last bullet isn't a failure of the fit. To quantify the minor sites you
+need more data — an MQMAS spectrum (one ships in `examples/pCABS2-4/3620`), a
+second field, or a constraint from chemistry. dmfit reports the same parameter
+values with no error bars, so this degeneracy stays invisible there.
 
 Tutorial 2 shows how to add exactly those constraints.
 
@@ -104,8 +102,9 @@ Tutorial 2 shows how to add exactly those constraints.
 larmor desktop
 ```
 
-In the desktop application, use **File > Open…** and pick the `.fxmla` file.
-The spectrum appears with the model overlaid; every parameter edit redraws the
-model immediately. **Fit** (F5) runs the same engine and shows `± error` next
-to each parameter. You can also load a Bruker EXPNO folder via
-**File > Open EXPNO / folder…** — LARMOR never writes into it.
+In the desktop application, use **File > Open EXPNO / folder…** and pick
+`examples/pCABS2-4/3616` — the explorer also lists the `.fxml` fit under the
+proc, and double-clicking it loads the model over the spectrum. Every
+parameter edit redraws the model immediately; **Fit** (F5) runs the same
+engine and shows `± error` next to each parameter. Fits can be saved next
+to the data — LARMOR never modifies the acquired files themselves.

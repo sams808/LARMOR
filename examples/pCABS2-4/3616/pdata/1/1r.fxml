@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<NMRFit>
+	<FitParameters>
+		<timestamp>2022-06-30T09:10:29Z</timestamp>
+		<DMFitVersion>20200306</DMFitVersion>
+		<FitMode>0</FitMode>
+		<FitModeAsc>Fit 1D</FitModeAsc>
+		<ComputeParam>
+			<ShapeSize>4096</ShapeSize>
+			<npasab>64</npasab>
+			<ssbMax>10</ssbMax>
+			<QuadStep>5</QuadStep>
+			<EtaStep>5</EtaStep>
+			<CSAStep>15</CSAStep>
+			<MinCSAStep>50</MinCSAStep>
+			<GaussMult>0.75</GaussMult>
+			<SWMult>4</SWMult>
+		</ComputeParam>
+		<Dimension>F2
+			<nucleus>27Al</nucleus>
+			<frequency>130.3175616</frequency>
+			<BaseLine>
+				<BLmode>Polynomial</BLmode>
+				<Baseline0>-28.94450347</Baseline0>
+				<Baseline1>2.752538885e-005</Baseline1>
+				<Baseline2>0</Baseline2>
+				<Baseline3>0</Baseline3>
+			</BaseLine>
+			<spinrate>26000</spinrate>
+			<line>
+				<ModelName>CzSimple</ModelName>
+				<amp>1662.108341</amp>
+				<pos  Unit="ppm">64.10401251</pos>
+				<gl>0</gl>
+				<dCS  Unit="ppm">15.09756597</dCS>
+				<em_au>-200</em_au>
+				<lb  Unit="ppm">-10.43973393</lb>
+				<CQ>7015.85138</CQ>
+				<d>5</d>
+				<sCZ_CQ>3507.92569</sCZ_CQ>
+				<CQ_max>7015.85138</CQ_max>
+			</line>
+			<line>
+				<ModelName>CzSimple</ModelName>
+				<amp>324.2294811</amp>
+				<pos  Unit="ppm">33.79989814</pos>
+				<gl>0</gl>
+				<dCS  Unit="ppm">13.32917731</dCS>
+				<em_au>-200</em_au>
+				<lb  Unit="ppm">-13.33619149</lb>
+				<CQ>7929.605412</CQ>
+				<d>5</d>
+				<sCZ_CQ>3964.802706</sCZ_CQ>
+				<CQ_max>7929.605412</CQ_max>
+			</line>
+			<line>
+				<ModelName>CzSimple</ModelName>
+				<amp Fix="*"  Error="5.84090">141.024852</amp>
+				<pos  Unit="ppm">3.880489503</pos>
+				<gl>0</gl>
+				<dCS  Unit="ppm">7.958806609</dCS>
+				<em_au>-200</em_au>
+				<lb  Unit="ppm">-7.738086618</lb>
+				<CQ>6040.215853</CQ>
+				<d>5</d>
+				<sCZ_CQ>3020.107926</sCZ_CQ>
+				<CQ_max>6040.215853</CQ_max>
+			</line>
+		</Dimension>
+	</FitParameters>
+	<GraphParameters>
+		<GrDimension>F2
+			<min>21395.35914</min>
+			<max>-14380.8945</max>
+			<tic>0</tic>
+		</GrDimension>
+	</GraphParameters>
+	<DataFile>
+		<FileName>C:\Users\sami-admin\THESE\RMN\Data\pCABS2-4\3616\pdata\1\1r</FileName>
+		<FileTitle>02/12/21 : conditions OK</FileTitle>
+	</DataFile>
+</NMRFit>

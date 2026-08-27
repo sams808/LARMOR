@@ -1,0 +1,149 @@
+{
+  "sample": "pCABS2-4 (27Al)",
+  "source_kind": "bruker",
+  "source_path": "examples/pCABS2-4/3616",
+  "source_sha256": "5b0c124375e28613c93f51a319225a9459093f97ce8f949f96c940ac0fea03df",
+  "nucleus": "27Al",
+  "larmor_frequency_MHz": 130.3175616,
+  "spin_rate_Hz": 26000.0,
+  "mas_uncertain": false,
+  "sr_hz": 0.0,
+  "engine": "czjzek-kernel+lmfit",
+  "sites": [
+    {
+      "model": "czjzek",
+      "label": "AlO$_4$",
+      "params": {
+        "isotropic_chemical_shift_ppm": {
+          "value": 63.80424874723367,
+          "stderr": 0.5797543983875325,
+          "vary": true,
+          "min": null,
+          "max": null,
+          "expr": null
+        },
+        "sigma_Cq_MHz": {
+          "value": 1.7440916022519533,
+          "stderr": 0.14266815551059275,
+          "vary": true,
+          "min": 0.05,
+          "max": null,
+          "expr": null
+        },
+        "shift_fwhm_ppm": {
+          "value": 13.03104799512949,
+          "stderr": 0.8306177339837091,
+          "vary": true,
+          "min": 0.1,
+          "max": null,
+          "expr": null
+        },
+        "amplitude": {
+          "value": 3912184.988947562,
+          "stderr": 40501.112466791245,
+          "vary": true,
+          "min": 0.0,
+          "max": null,
+          "expr": null
+        }
+      },
+      "ref": null,
+      "func": null
+    },
+    {
+      "model": "czjzek",
+      "label": "AlO$_5$",
+      "params": {
+        "isotropic_chemical_shift_ppm": {
+          "value": 31.346562852601295,
+          "stderr": 6.017460832801212,
+          "vary": true,
+          "min": null,
+          "max": null,
+          "expr": null
+        },
+        "sigma_Cq_MHz": {
+          "value": 1.3593262327212068,
+          "stderr": 0.6222344738613472,
+          "vary": true,
+          "min": 0.05,
+          "max": null,
+          "expr": null
+        },
+        "shift_fwhm_ppm": {
+          "value": 21.452382218152234,
+          "stderr": 8.035484581775476,
+          "vary": true,
+          "min": 0.1,
+          "max": null,
+          "expr": null
+        },
+        "amplitude": {
+          "value": 736585.3619204527,
+          "stderr": 242885.56431995193,
+          "vary": true,
+          "min": 0.0,
+          "max": null,
+          "expr": null
+        }
+      },
+      "ref": null,
+      "func": null
+    },
+    {
+      "model": "czjzek",
+      "label": "AlO$_6$",
+      "params": {
+        "isotropic_chemical_shift_ppm": {
+          "value": -2.185330628145537,
+          "stderr": 39.1221691546021,
+          "vary": true,
+          "min": null,
+          "max": null,
+          "expr": null
+        },
+        "sigma_Cq_MHz": {
+          "value": 0.514624963864941,
+          "stderr": 5.8129771340544245,
+          "vary": true,
+          "min": 0.05,
+          "max": null,
+          "expr": null
+        },
+        "shift_fwhm_ppm": {
+          "value": 18.304870937524154,
+          "stderr": 19.898654266578077,
+          "vary": true,
+          "min": 0.1,
+          "max": null,
+          "expr": null
+        },
+        "amplitude": {
+          "value": 357429.42782417615,
+          "stderr": 142766.6475184614,
+          "vary": true,
+          "min": 0.0,
+          "max": null,
+          "expr": null
+        }
+      },
+      "ref": null,
+      "func": null
+    }
+  ],
+  "processing": [],
+  "processing_from_raw": false,
+  "fit_window_ppm": [
+    150.0,
+    -80.0
+  ],
+  "fit_zones": [],
+  "fit_rmsd": 0.046772950530524146,
+  "mqmas_f1_ref_ppm": 0.0,
+  "mqmas_f1_scale": 1.0,
+  "mqmas_f1_ref_vary": true,
+  "notes": [
+    "imported from dmfit 20200306 (Fit 1D); Czjzek sigma = sCZ_CQ x 0.5 (Phase 0 convention)"
+  ],
+  "larmor_recipe_version": 1
+}

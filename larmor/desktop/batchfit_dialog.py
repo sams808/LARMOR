@@ -150,6 +150,7 @@ class BatchFitDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Batch fit — one shared model, amplitudes per spectrum")
         self.resize(1000, 780)
+        self._src_paths = [str(p) for p in (paths or [])]
         self._model_sites = ((model_recipe or {}).get("sites") or None)
         self._window = ((model_recipe or {}).get("fit_window_ppm") or None)
         self._recipe_tag = ""            # set when a model is loaded from a recipe
@@ -1026,8 +1027,12 @@ class BatchFitDialog(QDialog):
         import csv
         from larmor import batchfit
 
+        from larmor.desktop.paths import suggest_save_dir
+        start = suggest_save_dir(self._src_paths[0] if self._src_paths else None)
         path, _ = QFileDialog.getSaveFileName(
-            self, "Save batch table", "batch_table.csv", "CSV (*.csv)")
+            self, "Save batch table",
+            str(Path(start) / "batch_table.csv") if start else "batch_table.csv",
+            "CSV (*.csv)")
         if not path:
             return
         rows = batchfit.shared_table(self._result)
@@ -1138,9 +1143,12 @@ class BatchFitDialog(QDialog):
             return
         m = self.errCombo.currentData()
         have = m in getattr(self._result, "error_detail", {})
+        from larmor.desktop.paths import suggest_save_dir
+        start = suggest_save_dir(self._src_paths[0] if self._src_paths else None)
         path, _ = QFileDialog.getSaveFileName(
             self, "Export fit table with errors",
-            f"batch_fit_{m}.csv", "CSV (*.csv)")
+            str(Path(start) / f"batch_fit_{m}.csv") if start else f"batch_fit_{m}.csv",
+            "CSV (*.csv)")
         if not path:
             return
         if not have:                     # compute the selected method, then export

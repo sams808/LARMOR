@@ -818,3 +818,84 @@ def test_ppm_axes_never_grow_an_si_prefix(qapp):
     from larmor.desktop.qcpmg_dialog import _plot
     pw = _plot("x", ppm_axis=True)
     assert pw.getPlotItem().getAxis("bottom").autoSIPrefix is False
+
+
+def test_amorphous_distribution_widths_get_table_columns(qapp):
+    """dmfit's Amorphous fits a Gaussian Cq distribution (FWHM_CQ) -- the
+    engine always fitted it, but the parameter-table column allowlist did not
+    include it, so the value was invisible and uneditable from the table."""
+    from larmor.desktop.table import LinesTable
+
+    params = {k: {"value": v, "vary": True} for k, v in [
+        ("isotropic_chemical_shift_ppm", 17.4), ("Cq_MHz", 2.6),
+        ("eta", 0.2), ("Cq_fwhm_MHz", 0.3), ("eta_fwhm", 0.0),
+        ("shift_fwhm_ppm", 5.0), ("line_fwhm_ppm", 0.5), ("gl", 0.0),
+        ("amplitude", 62.0)]}
+    rec = {"nucleus": "11B", "larmor_frequency_MHz": 160.46,
+           "sites": [{"model": "amorphous", "label": "BO3", "params": params}]}
+    t = LinesTable()
+    t.rebuild(rec, set())
+    for key in ("Cq_fwhm_MHz", "eta_fwhm", "line_fwhm_ppm"):
+        assert key in t._used_keys, key
+        col = 2 + t._used_keys.index(key)
+        assert t.table.cellWidget(0, col) is not None, key
+    # a recipe with no amorphous site does not grow the extra columns
+    t.rebuild({"nucleus": "27Al", "larmor_frequency_MHz": 130.32, "sites": [
+        {"model": "gauss_lor", "label": "", "params": {
+            k: {"value": 1.0, "vary": True} for k in
+            ("isotropic_chemical_shift_ppm", "shift_fwhm_ppm",
+             "amplitude", "gl")}}]}, set())
+    assert "Cq_fwhm_MHz" not in t._used_keys
+
+
+def test_suggest_save_dir_follows_the_current_dataset(tmp_path):
+    """Save dialogs must propose the CURRENT dataset's own folder (where
+    dmfit keeps fits and the Explorer lists them) -- not whichever folder the
+    last file dialog visited."""
+    from larmor.desktop.paths import suggest_save_dir
+
+    sample = tmp_path / "pCABS2-4"
+    proc = sample / "3616" / "pdata" / "1"
+    proc.mkdir(parents=True)
+    (sample / "3616" / "acqus").write_text("##$PULPROG= <zg>")
+    (sample / "3616" / "fid").write_bytes(b"\0")
+    (proc / "1r").write_bytes(b"\0")
+
+    assert suggest_save_dir(proc / "1r") == str(proc)      # fit next to 1r
+    assert suggest_save_dir(sample / "3616") == str(sample / "3616")
+    plain = tmp_path / "exports"; plain.mkdir()
+    (plain / "s.csv").write_text("x")
+    assert suggest_save_dir(plain / "s.csv") == str(plain)
+    # no source -> the caller's fallback
+    assert suggest_save_dir(None, "FB") == "FB"
+    assert suggest_save_dir(tmp_path / "gone" / "x.csv", "FB") == "FB"
+
+
+def test_saves_allowed_anywhere_but_never_over_an_acquired_file(tmp_path):
+    """Saving next to raw data is allowed (that is the dmfit convention);
+    only REPLACING an acquired file itself is refused."""
+    from larmor.desktop.paths import is_instrument_file
+
+    proc = tmp_path / "3616" / "pdata" / "1"
+    proc.mkdir(parents=True)
+    (tmp_path / "3616" / "fid").write_bytes(b"\0")
+    (proc / "1r").write_bytes(b"\0")
+
+    assert not is_instrument_file(proc / "myfit.recipe.json")   # new file: fine
+    assert not is_instrument_file(tmp_path / "3616" / "out.csv")
+    assert is_instrument_file(proc / "1r")                      # the data itself
+    assert is_instrument_file(tmp_path / "3616" / "fid")
+    # the name alone is not enough -- only an EXISTING acquired file is guarded
+    assert not is_instrument_file(tmp_path / "elsewhere" / "1r")
+
+
+def test_app_save_dialogs_seed_from_the_open_dataset(qapp, tmp_path):
+    from larmor.desktop.app import MainWindow
+
+    w = MainWindow.__new__(MainWindow)      # no full app construction needed
+    sample = tmp_path / "S1"
+    (sample / "10" / "pdata" / "1").mkdir(parents=True)
+    (sample / "10" / "acqus").write_text("x")
+    w.source_path = str(sample / "10" / "pdata" / "1" / "1r")
+    (sample / "10" / "pdata" / "1" / "1r").write_bytes(b"\0")
+    assert w._suggest_dir() == str(sample / "10" / "pdata" / "1")

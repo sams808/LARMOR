@@ -130,12 +130,6 @@ class FigureDialog(QDialog):
         if not path:
             return
         base = Path(path).with_suffix("")
-        for parent in [base.parent, *base.parent.parents]:
-            if (parent / "acqus").exists() or (parent / "fid").exists() \
-                    or (parent / "ser").exists():
-                QMessageBox.warning(self, "Refused",
-                                    f"{parent} is an instrument data folder.")
-                return
         formats = [f for f, cb in (("png", self.fmt_png), ("svg", self.fmt_svg),
                                    ("pdf", self.fmt_pdf)) if cb.isChecked()]
         from larmor import figures

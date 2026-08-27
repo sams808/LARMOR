@@ -20,7 +20,7 @@ and then points you to the manual for whatever experiment is in front of you.
 | **Reproducible recipes** | Processing and fitting are stored as a **recipe** replayed from the raw data. A saved recipe *is* the analysis — it reopens exactly, and it diffs cleanly in version control. |
 
 Every fitted number is reported **with its uncertainty**, or with the reason
-there is none. Instrument folders are opened **read-only** — LARMOR never writes
+there is none. Instrument files are opened **read-only** — LARMOR never modifies
 into your Bruker data.
 
 ---

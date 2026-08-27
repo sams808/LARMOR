@@ -1817,6 +1817,13 @@ class MainWindow(QMainWindow):
     def _last_dir(self) -> str:
         return QSettings("LARMOR", "app").value("lastDir", "")
 
+    def _suggest_dir(self) -> str:
+        """Save dialogs follow the CURRENT dataset (its sample folder),
+        not whichever folder the last file dialog happened to visit."""
+        from larmor.desktop.paths import suggest_save_dir
+        return suggest_save_dir(getattr(self, "source_path", None),
+                                self._last_dir())
+
     # ------------------------------------------------------- workspaces
     def _doc_title(self) -> str:
         if self.central_stack.currentWidget() is self.view2d:
@@ -1831,7 +1838,7 @@ class MainWindow(QMainWindow):
         """Save every open 1D workspace (spectrum + processing + fit) as one
         reopenable project file."""
         path, _ = QFileDialog.getSaveFileName(
-            self, "Save project", self._last_dir(),
+            self, "Save project", self._suggest_dir(),
             "LARMOR project (*.larproj.json)")
         if not path:
             return
@@ -2501,6 +2508,8 @@ class MainWindow(QMainWindow):
         if not self._in_load_source:
             self._sync_active()
         self._data2d = data2d
+        # let the 2D view seed its export dialogs from the dataset it shows
+        self.view2d.source_path = getattr(self, "source_path", "") or ""
         self.view2d.set_data(data2d, f"{kind} — {title}")
         self.view2d.clear_model()
         self.central_stack.setCurrentWidget(self.view2d)
@@ -3545,34 +3554,31 @@ class MainWindow(QMainWindow):
         default = "".join(c if c.isalnum() or c in "-_" else "_"
                           for c in default)[:40] or "fit"
         path, _ = QFileDialog.getSaveFileName(
-            self, "Save recipe", str(Path(self._last_dir()) /
+            self, "Save recipe", str(Path(self._suggest_dir()) /
                                      f"{default}.recipe.json"),
             "LARMOR recipe (*.json)")
         if not path:
             return
         target = Path(path)
-        for parent in [target.parent, *target.parent.parents]:
-            if (parent / "acqus").exists() or (parent / "fid").exists() \
-                    or (parent / "ser").exists():
-                QMessageBox.warning(
-                    self, "Refused",
-                    f"{parent} is an instrument data folder — pick another "
-                    "location. LARMOR never writes next to raw data.")
-                return
+        if not self._guard_write(target):
+            return
         Recipe.from_dict(self.recipe).save(target)
         self._add_recent_recipe(str(target))
         self.statusBar().showMessage(f"recipe saved — {target.name}")
         self.statusBar().showMessage(f"recipe saved: {target}")
 
     def _guard_write(self, target: Path) -> bool:
-        for parent in [target.parent, *target.parent.parents]:
-            if (parent / "acqus").exists() or (parent / "fid").exists() \
-                    or (parent / "ser").exists():
-                QMessageBox.warning(
-                    self, "Refused",
-                    f"{parent} is an instrument data folder — pick another "
-                    "location. LARMOR never writes next to raw data.")
-                return False
+        """Saving is allowed anywhere — including next to raw data, which is
+        where dmfit keeps fits and where the Explorer lists them. The one
+        thing a save may never do is REPLACE an acquired file itself."""
+        from larmor.desktop.paths import is_instrument_file
+        if is_instrument_file(target):
+            QMessageBox.warning(
+                self, "Refused",
+                f"{target.name} is an instrument file (the measurement "
+                "itself) — pick another file name. Saving new files next to "
+                "the data is fine.")
+            return False
         return True
 
     def save_fit_as(self):
@@ -3587,7 +3593,7 @@ class MainWindow(QMainWindow):
         filters = ";;".join(
             f"{name} (*.{ext})" for name, (ext, _) in export.FORMATS.items())
         path, chosen = QFileDialog.getSaveFileName(
-            self, "Save fit as", str(Path(self._last_dir()) / default), filters)
+            self, "Save fit as", str(Path(self._suggest_dir()) / default), filters)
         if not path:
             return
         # figure out the format from the chosen filter (or the extension)
@@ -3663,7 +3669,7 @@ class MainWindow(QMainWindow):
         default = "".join(c if c.isalnum() or c in "-_ " else "_"
                           for c in default).strip()[:60] or "spectrum"
         path, _ = QFileDialog.getSaveFileName(
-            self, "Save spectrum", str(Path(self._last_dir()) / f"{default}.csv"),
+            self, "Save spectrum", str(Path(self._suggest_dir()) / f"{default}.csv"),
             "LARMOR spectrum (*.csv);;Text (*.txt)")
         if not path:
             return

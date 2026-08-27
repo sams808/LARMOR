@@ -192,7 +192,7 @@ def run_fit(req: FitRequest):
 @app.post("/api/save")
 def save(req: SaveRequest):
     target = Path(req.path)
-    # data-protection guard: never write into an instrument data folder
+    # data-protection guard: never overwrite an acquired file
     _guard_instrument_dir(target)
     Recipe.from_dict(req.recipe).save(target)
     return {"saved": str(target)}
@@ -297,10 +297,11 @@ def process(req: ProcessRequest):
 
 
 def _guard_instrument_dir(target: Path) -> None:
-    for parent in [target.parent, *target.parent.parents]:
-        if (parent / "acqus").exists() or (parent / "fid").exists() or (parent / "ser").exists():
-            raise HTTPException(
-                403, f"refusing to write inside instrument data folder: {parent}")
+    # saving next to raw data is allowed; replacing an acquired file is not
+    from larmor.desktop.paths import is_instrument_file
+    if is_instrument_file(target):
+        raise HTTPException(
+            403, f"refusing to overwrite the instrument file: {target}")
 
 
 @app.post("/api/figure/template")

@@ -1,7 +1,9 @@
 # Tutorial 2 — Constraining a fit: fix, bound, link
 
-*Time: ~15 minutes. Follows on from Tutorial 1 (you have
-`CaAlGlass.recipe.json` and know the three-site ²⁷Al model is degenerate).*
+*Time: ~15 minutes. Follows on from Tutorial 1 (you have fitted
+`examples/pCABS2-4_27Al.recipe.json` and know the three-site ²⁷Al model is
+degenerate). Work on a copy of the recipe so the shipped example stays
+pristine.*
 
 LARMOR supports the three kinds of constraint you know from ssNake, in a more
 general algebraic form:
@@ -20,36 +22,43 @@ from the parameters it depends on (full error propagation).
 
 ## 1. Why constrain?
 
-In Tutorial 1 the fit told you the AlO₅ site was undetermined — the optimizer
-can trade its width, position, and amplitude against the neighboring sites
-almost freely. Suppose you know from an MQMAS spectrum (or a composition
-argument) that the AlO₅/AlO₄ population ratio is ~0.29 and that both sites,
-being in the same glass, should share the same chemical-shift-distribution
-width. Those two facts are exactly two constraints.
+In Tutorial 1 the fit told you the AlO₅ and AlO₆ sites were poorly
+determined — the optimizer can trade their widths, positions, and amplitudes
+against the neighboring sites almost freely. Suppose independent information
+— an MQMAS spectrum, or a composition argument — gives you an AlO₅/AlO₄
+population ratio of about 0.19, and says the two sites, being in the same
+glass, share the same chemical-shift-distribution width. Those two facts are
+exactly two constraints.
 
 ## 2. Add constraints in the recipe file
 
-Open `CaAlGlass.recipe.json` and edit site 1 (the AlO₅ site):
+Copy the recipe, then edit site 1 (the AlO₅ site) in the copy:
 
 ```json
-"amplitude":      { "value": 465, "vary": true, "min": 0.0, "expr": "0.29 * s0.amplitude" },
-"shift_fwhm_ppm": { "value": 27,  "vary": true, "min": 0.1, "expr": "s0.shift_fwhm_ppm" }
+"amplitude":      { "value": 740000, "vary": true, "min": 0.0, "expr": "0.19 * s0.amplitude" },
+"shift_fwhm_ppm": { "value": 21,     "vary": true, "min": 0.0, "expr": "s0.shift_fwhm_ppm" }
 ```
 
 (Only the `expr` field matters; `value` becomes the starting point and is then
 derived.) Re-run:
 
 ```
-larmor fit CaAlGlass.recipe.json --window 150 -80 --plot fit_constrained.png
+larmor fit my_constrained.recipe.json --window 150 -80 --plot fit_constrained.png
 ```
 
 You should see:
 
-- `s1_amp` reported as `== '0.29 * s0_amp'` in the fit report, with a stderr
-  that is exactly 0.29 × the stderr of `s0_amp`, since the two are linked.
-- The RMSD rises slightly (constraints remove freedom; ~0.004 vs 0.0025 free).
-  A small rise is normal; if it rises a lot, the constraint is fighting the
-  data and should be questioned.
+- `s1_amp` reported as linked in the fit report, with a stderr that is
+  exactly 0.19 × the stderr of `s0_amp` — that is error propagation through
+  the link, not a coincidence of rounding.
+- The AlO₅ position error drops from ±6.0 to ±2.0 ppm: the constraints
+  removed exactly the freedom that made the site undetermined.
+- The RMSD is essentially unchanged (≈ 0.047), consistent with the
+  constraint. If it had risen sharply, the constraint would be fighting the
+  data.
+- A warning: `s2.sigma_Cq_MHz` finished at a bound. Constraining two sites
+  changed what the optimizer could do with the third, and the weakest site's
+  Czjzek width collapsed to its lower bound — which brings us to §4.
 
 ## 3. Or add them in the app
 
@@ -68,30 +77,35 @@ constraint row with three fields:
 - The plain checkbox next to each value still fixes it outright (checked =
   fitted, unchecked = fixed).
 
-## 4. When a constraint fights the data
+## 4. When a constraint fights the data — and when it hides
 
-Try linking the amplitude with a deliberately wrong ratio, e.g.
-`0.5 * s0.amplitude`, and fit again. The fit flags the problem, and a note is
-written into the recipe so the caveat travels with the result:
+When a parameter finishes at a bound, the fit flags it and a note is written
+into the recipe so the caveat travels with the result:
 
 ```
-parameters finished at a bound (check constraints/starting model; uncertainties are conditional on them): s2.amplitude
+parameters finished at a bound (check constraints/starting model; uncertainties are conditional on them): s2.sigma_Cq_MHz
 ```
 
-What happened: forced to hold a 2:1 ratio the data doesn't support, the
-optimizer pushed other parameters to the edges of their allowed ranges — here
-the third site's amplitude (`s2.amplitude`) collapsed to zero. LARMOR detects
-parameters that finish at a bound, warns you, and reports the remaining
-uncertainties *conditional* on those pinned values.
+That is what happened in §2: constraining sites 0 and 1 changed what the
+optimizer could do with site 2, and its Czjzek width ran to the edge of its
+allowed range. LARMOR reports the remaining uncertainties *conditional* on
+the pinned value. Parameters at bounds after a constrained fit mean the
+constraints, the starting model, and the data disagree somewhere — revisit
+one of them.
 
-The rule of thumb: parameters at bounds after a constrained fit mean the
-constraint and the data disagree — revisit one of them.
+The opposite failure is quieter. Refit with a deliberately wrong ratio,
+`0.5 * s0.amplitude`: on this dataset the RMSD barely moves and nothing
+finishes at a bound — the undetermined AlO₆ site simply absorbs the error by
+shifting its own position and width. A degenerate fit can hide a wrong
+constraint completely, which is why the ratio should come from independent
+information (MQMAS, composition), not from trying values until the RMSD looks
+good.
 
 ## 5. Constraint cookbook
 
 | Goal | expr on which parameter | expression |
 |---|---|---|
-| Population ratio from MQMAS/chemistry | site j `amplitude` | `0.29 * s0.amplitude` |
+| Population ratio from MQMAS/chemistry | site j `amplitude` | `0.19 * s0.amplitude` |
 | Shared Gaussian width across sites of one phase | site j `shift_fwhm_ppm` | `s0.shift_fwhm_ppm` |
 | Fixed shift difference (e.g. crystallographic pair) | site j `isotropic_chemical_shift_ppm` | `s0.isotropic_chemical_shift_ppm - 12.5` |
 | Two sites, equal populations | site j `amplitude` | `s0.amplitude` |

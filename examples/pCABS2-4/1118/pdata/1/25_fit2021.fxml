@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<NMRFit>
+	<FitParameters>
+		<timestamp>2022-02-18T09:25:05Z</timestamp>
+		<DMFitVersion>20200306</DMFitVersion>
+		<FitMode>0</FitMode>
+		<FitModeAsc>Fit 1D</FitModeAsc>
+		<ComputeParam>
+			<ShapeSize>4096</ShapeSize>
+			<npasab>64</npasab>
+			<ssbMax>10</ssbMax>
+			<QuadStep>5</QuadStep>
+			<EtaStep>5</EtaStep>
+			<CSAStep>15</CSAStep>
+			<MinCSAStep>50</MinCSAStep>
+			<GaussMult>0.75</GaussMult>
+			<SWMult>4</SWMult>
+		</ComputeParam>
+		<Dimension>F2
+			<nucleus>11B</nucleus>
+			<frequency>160.4606499</frequency>
+			<BaseLine>
+				<BLmode>Polynomial</BLmode>
+				<Baseline0>0.1495838012</Baseline0>
+				<Baseline1>5.831387114e-005</Baseline1>
+				<Baseline2>0</Baseline2>
+				<Baseline3>0</Baseline3>
+			</BaseLine>
+			<spinrate>20000</spinrate>
+			<line>
+				<ModelName>Amorphous</ModelName>
+				<amp Fix="*"  Error="19.39399">926.9754334</amp>
+				<pos Fix="*"  Unit="ppm" Error="0.08374">16.21456657</pos>
+				<gl>0</gl>
+				<dCS Fix="*"  Unit="ppm" Error="0.10572">5.328860361</dCS>
+				<em_au>-200</em_au>
+				<lb  Unit="ppm">-1.270905305</lb>
+				<CQ Fix="*"  Error="13.25313">2017.928362</CQ>
+				<etaQ>0.24</etaQ>
+				<FWHM_CQ>360</FWHM_CQ>
+				<FWHM_etaQ>0.2</FWHM_etaQ>
+			</line>
+			<line>
+				<ModelName>Amorphous</ModelName>
+				<amp Fix="*"  Error="4.76904">409.0530188</amp>
+				<pos Fix="*"  Unit="ppm" Error="0.05427">11.36133273</pos>
+				<gl>0</gl>
+				<dCS Fix="*"  Unit="ppm" Error="0.07547">3.303721209</dCS>
+				<em_au>-200</em_au>
+				<lb  Unit="ppm">-1.694565021</lb>
+				<CQ Fix="*"  Error="8.64708">2488.662708</CQ>
+				<etaQ>0</etaQ>
+				<FWHM_CQ>310</FWHM_CQ>
+				<FWHM_etaQ>0.2</FWHM_etaQ>
+			</line>
+			<line>
+				<ModelName>Gaus/Lor</ModelName>
+				<amp Fix="*"  Error="3.40016">870.3136912</amp>
+				<pos Fix="*"  Unit="ppm" Error="0.00265">-0.3113877053</pos>
+				<wid Fix="*"  Unit="ppm" Error="0.00791">2.902919807</wid>
+				<gl>1</gl>
+				<T2>0.6833552602</T2>
+			</line>
+		</Dimension>
+	</FitParameters>
+	<GraphParameters>
+		<GrDimension>F2
+			<min>6592.470053</min>
+			<max>-4749.793626</max>
+			<tic>0</tic>
+		</GrDimension>
+	</GraphParameters>
+	<DataFile>
+		<FileName>C:\Users\sami-admin\THESE\RMN\Data\pCABS2-4\1118\pdata\25\1r</FileName>
+		<FileTitle></FileTitle>
+	</DataFile>
+</NMRFit>

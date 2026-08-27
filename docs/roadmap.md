@@ -9,14 +9,14 @@ The fitting engine is validated on real published work: 20 dmfit fits from a pee
 
 File formats are versioned. A recipe writes a `larmor_recipe_version` field, and when a file written by a newer version is opened, unrecognized fields are dropped with a note rather than a refusal to load. A project bundle (`.larproj.json`) saves every open 1D workspace, its processed spectrum, and its overlays in one file. 2D workspaces, figures, and live batch-fit sessions are not part of a bundle yet.
 
-The weak points are engineering and onboarding. The main window lives in a single module of about 4,600 lines. There is no continuous integration; the test suite is substantial but runs only when started by hand, in one development environment. Releases so far are git tags: no installer executable has been built, verified end to end, and published, and nothing is signed. Development and testing happen on Windows only. The three tutorials predate the desktop app and cover none of the batch, MQMAS, or error-analysis workflows, and the repository bundles a single example (a fitted recipe and figure for a ²⁷Al glass — no spectrum data ships with it).
+The weak points are engineering and onboarding. The main window lives in a single module of about 4,600 lines. There is no continuous integration; the test suite is substantial but runs only when started by hand, in one development environment. Releases so far are git tags: no installer executable has been built, verified end to end, and published, and nothing is signed. Development and testing happen on Windows only. The three tutorials cover a first fit, constraints, and figures against the bundled example data (one glass: ¹¹B and ²⁷Al 1D spectra plus a ²⁷Al 3QMAS), but none of the batch, series, or error-analysis workflows.
 
 ## Next
 
 - Split the main-window module and put continuous integration in place, so the test suite runs on every push in a clean environment.
 - Build the Windows installer from the existing PyInstaller spec, verify it end to end on a machine without a development setup, and publish it as a release.
 - Extend project bundles to cover 2D workspaces, figures, and batch-fit sessions.
-- Bring the documentation up to the app: tutorials for batch fitting, MQMAS, and error analysis, and example datasets beyond the single glass — a 2D set, a composition series, a relaxation set.
+- Bring the documentation up to the app: tutorials for batch fitting, MQMAS, and error analysis, and example datasets beyond the single glass — a composition series and a relaxation set.
 - A peak-pick assignment table: pickable, labelable peaks (AlIV / AlV / AlVI and the like) that export and double as fit starting points.
 
 ## Further out

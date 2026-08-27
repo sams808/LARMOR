@@ -22,8 +22,7 @@ and its fit if there is one). The **Template** dropdown offers named starting
 points — a stacked series, a deconvolution grid, a composition trend, and so
 on — each pre-filling the layout so you only add your traces. Edit, click
 **Preview**, then **Export…** (png + svg + pdf at 600 dpi, ready for the
-journal). **Save spec…** and **Load spec…** round-trip the JSON. Exports into
-instrument data folders are refused; figures go in your own folders.
+journal). **Save spec…** and **Load spec…** round-trip the JSON.
 
 ## 2. Anatomy of a 1D spec
 
@@ -33,10 +32,10 @@ instrument data folders are refused; figures go in your own folders.
   "style": "article-wide",
   "xlim": [150, -80],
   "traces": [
-    {"path": "C:/data/CaAlGlass.fxmla", "label": "experiment", "color": "black"},
-    {"recipe": "CaAlGlass.recipe.json", "part": "total", "label": "fit", "color": "crimson"},
-    {"recipe": "CaAlGlass.recipe.json", "part": "site", "site": 0, "label": "AlO$_4$", "linestyle": "--"},
-    {"recipe": "CaAlGlass.recipe.json", "part": "residual", "label": "residual", "offset": -260}
+    {"path": "examples/pCABS2-4/3616", "label": "experiment", "color": "black"},
+    {"recipe": "examples/pCABS2-4_27Al.recipe.json", "part": "total", "label": "fit", "color": "crimson"},
+    {"recipe": "examples/pCABS2-4_27Al.recipe.json", "part": "site", "site": 0, "label": "AlO$_4$", "linestyle": "--"},
+    {"recipe": "examples/pCABS2-4_27Al.recipe.json", "part": "residual", "label": "residual", "offset": -260}
   ]
 }
 ```
@@ -57,13 +56,13 @@ instrument data folders are refused; figures go in your own folders.
 {
   "kind": "2d",
   "style": "thesis",
-  "path": "C:/data/my2Dexpno",
+  "path": "examples/pCABS2-4/3620",
   "xlabel": "$^{27}$Al NMR shift (ppm)",
   "ylabel": "Isotropic dimension (ppm)",
   "levels": {"mode": "log", "n": 12},
   "proj_top": true, "proj_right": true,
   "overlay_top": [
-    {"path": "C:/data/my1Dexpno", "label": "zg", "normalize": true}
+    {"path": "examples/pCABS2-4/3616", "label": "zg", "normalize": true}
   ],
   "subproj": [
     {"f1": [55, 90], "label": "AlO$_4$", "scale": 1.0},
@@ -113,7 +112,7 @@ overlaid directly.
 ```python
 from larmor import figures
 spec = {...}                                  # same JSON as the app
-figures.export(spec, "fig/CaAlGlass_fit")     # writes .png, .svg, .pdf
+figures.export(spec, "fig/pCABS2-4_fit")     # writes .png, .svg, .pdf
 ```
 
 Because specs are plain dicts, a composition series is a for-loop that edits

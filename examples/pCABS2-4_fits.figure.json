@@ -1,0 +1,25 @@
+{
+  "kind": "batch_grid",
+  "style": "article-wide",
+  "panels": [
+    {
+      "recipe": "examples/pCABS2-4_11B.recipe.json",
+      "title": "$^{11}$B MAS (20 kHz)",
+      "xlim": [
+        30.0,
+        -30.0
+      ]
+    },
+    {
+      "recipe": "examples/pCABS2-4_27Al.recipe.json",
+      "title": "$^{27}$Al MAS (26 kHz)",
+      "xlim": [
+        150.0,
+        -80.0
+      ]
+    }
+  ],
+  "cols": 2,
+  "legend": false,
+  "peak_labels": "label"
+}

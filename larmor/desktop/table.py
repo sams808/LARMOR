@@ -107,7 +107,13 @@ PARAM_COLUMNS = [
     ("gl", "xG/(1-x)L"),
     ("sigma_Cq_MHz", "σ(Cq)\n(MHz)"),
     ("Cq_MHz", "Cq\n(MHz)"),
+    # the Amorphous model's distribution widths (dmfit FWHM_CQ / FWHM_etaQ)
+    # and its lb: these were fitted but INVISIBLE before -- any key missing
+    # from this list simply never gets a column
+    ("Cq_fwhm_MHz", "ΔCq FWHM\n(MHz)"),
     ("eta", "η"),
+    ("eta_fwhm", "Δη FWHM"),
+    ("line_fwhm_ppm", "lb\n(ppm)"),
     ("zeta_ppm", "ζ CSA\n(ppm)"),
 ]
 

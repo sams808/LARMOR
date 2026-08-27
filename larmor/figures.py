@@ -783,6 +783,8 @@ def render_batch_grid(spec: dict) -> Figure:
     (optionally) its components, laid out as a small-multiples grid.
 
     ``panels``: ``[{"recipe": "path/to/fit.recipe.json", "title": "…"}, …]``.
+    A panel may carry its own ``"xlim"`` (hi, lo), overriding the grid-wide
+    one — needed when panels show different nuclei.
     Each recipe is resolved through ``load_trace`` exactly like a 1D trace, so
     it follows the fit's own ``source_path`` for the experimental data
     (kernel or not, data-less or not) — nothing here re-implements that.
@@ -919,8 +921,11 @@ def render_batch_grid(spec: dict) -> Figure:
 
             x_ref = x_total if x_total is not None else ex
             if x_is_ppm:
-                if spec.get("xlim"):
-                    hi, lo = spec["xlim"]
+                # a panel's own "xlim" wins over the grid-wide one: panels of
+                # different nuclei (a 11B next to a 27Al) need different ranges
+                panel_xlim = p.get("xlim") or spec.get("xlim")
+                if panel_xlim:
+                    hi, lo = panel_xlim
                     ax.set_xlim(max(hi, lo), min(hi, lo))
                 elif x_ref is not None:
                     ax.set_xlim(float(np.max(x_ref)), float(np.min(x_ref)))

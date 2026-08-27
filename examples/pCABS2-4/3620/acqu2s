@@ -1,0 +1,24 @@
+##TITLE= Parameter file, TopSpin 3.6.3
+##JCAMPDX= 5.0
+##DATATYPE= Parameter Values
+##NPOINTS= 41	$$ modification sequence number
+##ORIGIN= Bruker BioSpin GmbH
+##OWNER= nmr
+$$ 2022-02-08 08:10:31.828 +0100  nmr@jupiter
+$$ /opt/topspin3.6.3/data/ssoudani/nmr/pCABS2-4/3620/acqu2s
+$$ process /opt/topspin3.6.3/prog/au/bin/xfshear
+##$ACQT0= 0
+##$BF1= 184.617406083333
+##$FnILOOP= 0
+##$FnMODE= 4
+##$NUC1= <27Al>
+##$NusJSP= 0
+##$NusT2= 1
+##$NusTD= 22
+##$O1= 4795.62
+##$ProjAngle= 0
+##$SFO1= 184.624199878333
+##$SW= 141.052289097455
+##$SW_h= 26041.6666666667
+##$TD= 22
+##END=

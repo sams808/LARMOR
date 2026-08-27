@@ -15,7 +15,7 @@ import numpy as np
 
 def cmd_info(args: argparse.Namespace) -> int:
     path = Path(args.path)
-    if path.suffix.lower() == ".fxmla":
+    if path.suffix.lower() in (".fxmla", ".fxml"):
         from larmor.io import fxmla
 
         dm = fxmla.read(path)

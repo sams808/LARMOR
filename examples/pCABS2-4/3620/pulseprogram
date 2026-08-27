@@ -1,0 +1,115 @@
+# 1 "/opt/topspin3.6.3/exp/stan/nmr/lists/pp/mp3qdfsz"
+# 1 "<built-in>"
+# 1 "<command-line>"
+# 1 "/opt/topspin3.6.3/exp/stan/nmr/lists/pp/mp3qdfsz"
+; mp3qdfsz
+;
+; TS3 / 05.07.2011
+;
+; 3Q MAS pulse program for odd half integer spin nuclei
+; 4-pulse experiment with z-filter:
+; excitation - t1(3Q) - conversion - opt.t1(1Q) - 90sel - tau(zfil) - 90sel - acquisition
+; split-t1 mode for I = 3/2 nuclei may be used. In this case 
+; set in10 = in0*7/9, else set in10 = 0
+;
+; written by Stefan Steuernagel (031201)
+;
+; applies a double frequency sweep during p2, for which the parameters
+; need to be set as described below
+; use 1/4 of a rotor period to start with and power level found in dfs90sel optimisation
+; 90 selective pulse should be determined first using Hahn-echo, 
+; determination by single pulse excitation is also possible
+; before optimising the sweep the excitation pulse p1 needs to be determined first. 
+; see also mp3qdfs, mp3qzqf, mp3q, mp3qzfil, mp3qfam, mp3qfamz 
+; IMPORTANT: use with AU program zg_dfs for correct calculation of sweep,
+; i.e. set aunm to zg_dfs and run acquisition with xaua
+;
+;Avance III version
+;parameters
+;pl1 : =0W, not used
+;pl11 : power level for excitation pulse
+;pl21 : power level for selective pulse, ca. plw11 / 1024
+;spw1 : power level for frequency sweep
+;p1 : excitation pulse at plw11
+;p2 : =1s/(cnst31*l0) duration of sweep at spw1
+;p3 : 90 degree selective pulse at plw21
+;p25 : dummy pulse, used for calculations only
+;d0 : =1u
+;d1 : recycle delay
+;d4 : z-filter delay, usually =20u
+;d10 : =0.1u
+;ns : 96 * n
+;cnst1 : (in kHz) Startfrequency of sweep
+;cnst2 : (in kHz) Endfrequency of sweep
+;cnst3 : (in ns) timing resolution of sweep
+;cnst31 : spinning frequency
+;cnst0 : to define sweep as fraction or multiples of rotor period
+;in0 : 1 rotation period for rotor synchronised experiment
+;in10 : in0*7/9 for 3/2 split-t1, else =0
+;spnam1 : dfs, file name of sweep
+;td1 : number of experiments
+;FnMODE: States
+;
+;
+;$CLASS=Solids
+;$DIM=2D
+;$TYPE=half integer quadrupoles
+;$SUBTYPE=MQMAS
+;$COMMENT=4 pulse z-filtered 3QMAS with DFS
+
+prosol relations=<solids_mqmas>
+
+# 59 "/opt/topspin3.6.3/exp/stan/nmr/lists/pp/mp3qdfsz"
+"p25=(1u*cnst1*cnst31/(cnst3+cnst2))+1u"
+"p2=1s/(cnst31*cnst0)"
+"acqt0=1u*cnst11"
+"in0=inf1"
+
+# 1 "mc_line 64 file /opt/topspin3.6.3/exp/stan/nmr/lists/pp/mp3qdfsz exp. def. part of mc cmd. before ze"
+; dimension 2D; AQ_mode  (F1) States
+define delay MCWRK
+define delay MCREST
+define loopcounter ST1CNT
+"ST1CNT = trunc(td1 / 2)"
+"MCREST = 10m - 10m"
+"MCWRK = 0.250000*10m"
+
+    dccorr
+# 64 "/opt/topspin3.6.3/exp/stan/nmr/lists/pp/mp3qdfsz"
+  ze
+# 1 "mc_line 64 file /opt/topspin3.6.3/exp/stan/nmr/lists/pp/mp3qdfsz exp. def. of mc cmd. after ze"
+LBLAV, MCWRK
+# 65 "/opt/topspin3.6.3/exp/stan/nmr/lists/pp/mp3qdfsz"
+# 1 "mc_line 65 file /opt/topspin3.6.3/exp/stan/nmr/lists/pp/mp3qdfsz exp. start label for mc cmd."
+1 MCWRK 
+LBLSTS1, MCWRK  * 2
+LBLF1, MCWRK
+  MCREST
+# 66 "/opt/topspin3.6.3/exp/stan/nmr/lists/pp/mp3qdfsz"
+  d1
+  (p1 pl11 ph1):f1
+  d0
+  (p2:sp1 ph2):f1
+  d10
+  (p3 pl21 ph3):f1
+  d4
+  (p3 ph4):f1
+  go=1 ph31
+# 1 "mc_line 75 file /opt/topspin3.6.3/exp/stan/nmr/lists/pp/mp3qdfsz exp. mc cmd. in line"
+  MCWRK  wr #0 if #0 zd ip1
+  lo to LBLSTS1 times 2
+  MCWRK  rp1 id0  MCWRK  id10
+  lo to LBLF1 times ST1CNT
+  MCWRK rf #0
+  lo to LBLAV times tdav
+# 76 "/opt/topspin3.6.3/exp/stan/nmr/lists/pp/mp3qdfsz"
+exit
+
+ph1=(12) 0 2 4 6 8 10
+ph2= {0}*24 {1}*24 {2}*24 {3}*24
+ph3= 0
+ph4= 0 0 0 0 0 0 1 1 1 1 1 1 2 2 2 2 2 2 3 3 3 3 3 3
+ph31= 0 2 0 2 0 2 1 3 1 3 1 3 2 0 2 0 2 0 3 1 3 1 3 1
+      2 0 2 0 2 0 3 1 3 1 3 1 0 2 0 2 0 2 1 3 1 3 1 3
+# 87 "/opt/topspin3.6.3/exp/stan/nmr/lists/pp/mp3qdfsz"
+;$Id: mp3qdfsz,v 1.8.2.2 2017/02/22 17:02:22 ber Exp $
