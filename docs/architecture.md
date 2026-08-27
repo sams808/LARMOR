@@ -20,9 +20,10 @@ it afterwards. The main window, `desktop/app.py`, is the largest module by far
 Ingestion lives in `larmor/io/`: `bruker.py` (1r/2rr/fid/ser, EXPNO/pdata
 layout, pseudo-2D detection), `varian.py` (VnmrJ .fid), `fxmla.py` (dmfit
 round-trip), `spectra.py` (CSV/txt), `scan.py` (sample auto-identify), and
-`export.py` (fit results to txt/csv/dmfit). `loader.load_any` is the single
-entry point; callers never dispatch on format themselves. `fourier.py` handles
-States/TPPI/echo-antiecho recombination for 2D acquisitions.
+`export.py` (fit results to txt/csv/dmfit). One level up, `larmor/loader.py`
+exposes `load_any`, the single entry point; callers never dispatch on format
+themselves. `larmor/fourier.py` handles States/TPPI/echo-antiecho
+recombination for 2D acquisitions.
 
 Processing is `processing.py` (apodization, zero-fill, FT, phase, baseline,
 linear prediction, applied live or absolute from an unprocessed base) plus
@@ -111,7 +112,7 @@ Heavy imports (mrsimulator, matplotlib) happen lazily inside the functions
 that need them, which keeps startup fast — do not hoist them to module level
 in the core or the desktop dialogs. During a fit, the model is simulated only
 on the fit window plus a margin for models on the `grid_restrictable`
-allowlist (an allowlist deliberately, since some cached models derive their
+allowlist (an allowlist, since some cached models derive their
 span from the grid), the live-animation redraw is throttled to every
 `frame_every` iterations, and error-bar recovery can be skipped via
 `compute_errorbars=False` where the stderr is never read (batch initial

@@ -1,4 +1,4 @@
-"""Residual diagnostics (idea #4) and per-nucleus seeding (idea #17)."""
+"""Residual diagnostics and per-nucleus seeding."""
 import os
 import types
 

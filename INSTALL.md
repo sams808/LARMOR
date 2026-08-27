@@ -60,8 +60,8 @@ Everything below is run from inside that `LARMOR` folder.
 
 ## Option A — Conda (recommended)
 
-Conda installs the compiled scientific packages as prebuilt binaries, so
-nothing has to compile on your machine.
+The Conda route pins Python 3.11, for which every dependency (mrsimulator
+included) has prebuilt wheels, so nothing has to compile on your machine.
 
 1. Install Miniconda if you don't have it:
    <https://docs.conda.io/en/latest/miniconda.html>
@@ -173,8 +173,8 @@ or, for a Conda env, `conda env update -f environment.yml`.
 `Failed building wheel for mrsimulator`, or a long C/Cython compiler error:
 this almost always means your Python is too new (3.13+) so pip couldn't find
 a prebuilt wheel and tried to compile from source. Two fixes:
-1. Use Conda (Option A) — it installs `mrsimulator` as a prebuilt binary and
-   sidesteps compiling entirely. This is the recommended fix.
+1. Use Conda (Option A) — it pins Python 3.11, for which `mrsimulator` has a
+   prebuilt wheel, so nothing compiles. This is the recommended fix.
 2. Or use Python 3.11 for your virtual environment instead of the newest one.
 
 **`LARMOR.bat` flashes open and closes**, or says

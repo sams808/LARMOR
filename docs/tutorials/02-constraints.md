@@ -46,11 +46,10 @@ larmor fit CaAlGlass.recipe.json --window 150 -80 --plot fit_constrained.png
 You should see:
 
 - `s1_amp` reported as `== '0.29 * s0_amp'` in the fit report, with a stderr
-  that is exactly 0.29 × the stderr of `s0_amp`. That is error propagation at
-  work rather than a coincidence.
+  that is exactly 0.29 × the stderr of `s0_amp`, since the two are linked.
 - The RMSD rises slightly (constraints remove freedom; ~0.004 vs 0.0025 free).
-  A small rise is the price of a physically meaningful model. A large rise
-  means your constraint is wrong.
+  A small rise is normal; if it rises a lot, the constraint is fighting the
+  data and should be questioned.
 
 ## 3. Or add them in the app
 

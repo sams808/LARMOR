@@ -138,7 +138,7 @@ def test_batch_fit_exclusion_works_regardless_of_which_models_site():
 def test_csv_round_trip_preserves_each_sites_own_model(tmp_path):
     """batchfit's table export + series_grid's reconstruction must carry each
     site's OWN model name through -- not assume one model for the whole CSV
-    (unlike this session's single-model PBi conversion scripts, which could
+    (unlike a converter that assumes one model for the whole file, which could
     safely assume gauss_lor only because that happened to be true there)."""
     entries = _mixed_batch_entries()
     # give each spectrum a resolvable source_path (reconstruction needs one to

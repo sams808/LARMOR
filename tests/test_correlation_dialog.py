@@ -1,4 +1,4 @@
-"""Parameter correlation heat-map (idea #3)."""
+"""Parameter correlation heat-map."""
 import os
 import types
 

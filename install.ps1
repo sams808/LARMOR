@@ -80,9 +80,11 @@ if ($conda) {
     }
     $ver = (& $py.Source -c "import sys;print('.'.join(map(str, sys.version_info[:2])))").Trim()
     Write-Host "Found Python $ver at $($py.Source)"
-    if ($ver -eq "3.13" -or $ver -eq "3.14" -or $ver -eq "3.15") {
+    $parts = $ver.Split("."); $minor = 0
+    if ($parts.Count -ge 2) { $minor = [int]$parts[1] }
+    if ($parts[0] -ne "3" -or $minor -lt 10 -or $minor -ge 13) {
         Write-Host ""
-        Write-Host "Python $ver is too new for one of LARMOR's dependencies (mrsimulator)." -ForegroundColor Red
+        Write-Host "Python $ver is outside the supported range (3.10 - 3.12)." -ForegroundColor Red
         Write-Host "Install Miniconda (recommended - handles this for you), or Python 3.11,"
         Write-Host "then re-run this installer. See INSTALL.md."
         Read-Host "Press Enter to close"; exit 1

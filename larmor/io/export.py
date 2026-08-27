@@ -127,7 +127,7 @@ def export_fxmla(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
 #: CaAlGlass.fxmla's dominant, best-determined line (LARMOR peak 1656.7 ↔ dmfit
 #: amp 6492.7 = 3.92). Gauss/Lorentz lines need no conversion (ratio ≈ 1).
 #: NOTE: derived from one ²⁷Al glass at 195 MHz — may want per-nucleus/field
-#: refinement if a different system exports mis-scaled (idea #19).
+#: refinement if a different system exports mis-scaled.
 _DMFIT_CZJZEK_AMP_FACTOR = 3.92
 
 

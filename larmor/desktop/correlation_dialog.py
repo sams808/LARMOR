@@ -1,4 +1,4 @@
-"""Parameter correlation heat-map from the last fit's covariance (idea #3).
+"""Parameter correlation heat-map from the last fit's covariance.
 Shows which fitted parameters the data cannot separate — |correlation| near 1
 (deep red/blue) means the pair trades off and their individual errors are large."""
 from __future__ import annotations

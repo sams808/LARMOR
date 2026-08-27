@@ -1,7 +1,7 @@
-"""Multi-experiment correlation decomposition (roadmap Priority 9).
+"""Multi-experiment correlation decomposition.
 
-ARCHITECTURE ONLY — this engine is intentionally NOT wired into the app yet
-(see ROADMAP.md). It generalizes the HMQC "1D − projection" difference to any
+Engine only — not wired into the app yet (see docs/roadmap.md, where it is
+listed last on purpose). It generalizes the HMQC "1D − projection" difference to any
 set of shared-nucleus observables (1D spectra, 2D projections, REDOR ΔS/S…):
 
   * every dataset contributes an *observable* on a shared ppm axis;

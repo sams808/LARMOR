@@ -1,4 +1,4 @@
-"""The Czjzek C_Q distribution implied by a fitted σ (idea #2)."""
+"""The Czjzek C_Q distribution implied by a fitted σ."""
 import numpy as np
 import pytest
 

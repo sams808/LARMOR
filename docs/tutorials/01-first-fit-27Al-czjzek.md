@@ -79,10 +79,7 @@ normalized RMSD: 0.0025
 ```
 
 and `fit.png` shows the experiment (black), total fit (red), and each site's
-contribution (dashed). Note that this 0.0025 is the RMSD of a free fit; it is
-a different quantity from the ~0.027 RMSD quoted in the feasibility notebook,
-which comes from replaying dmfit's own parameter values without refitting
-anything.
+contribution (dashed).
 
 ## 4. Read the uncertainties
 
@@ -94,10 +91,10 @@ fields, or read them from the fit report. On this dataset:
   value. The 1D lineshape simply does not contain enough information to pin
   three overlapping Czjzek sites independently.
 
-That second bullet is no failure of the fit. It is the fit telling you a
-scientific truth: to quantify the AlO₅ site you need more data (an MQMAS
-spectrum, a second field, or a constraint from chemistry). dmfit reports the
-same parameter values with no error bars, so this degeneracy stays invisible.
+That second bullet isn't a failure of the fit. To quantify the AlO₅ site you
+need more data: an MQMAS spectrum, a second field, or a constraint from
+chemistry. dmfit reports the same parameter values with no error bars, so this
+degeneracy stays invisible there.
 
 Tutorial 2 shows how to add exactly those constraints.
 

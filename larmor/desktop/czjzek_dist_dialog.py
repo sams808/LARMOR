@@ -1,4 +1,4 @@
-"""Show the Czjzek C_Q distribution implied by each fitted σ (idea #2).
+"""Show the Czjzek C_Q distribution implied by each fitted σ.
 Turns the width σ into the physical P(C_Q) it stands for; see larmor.czjzek_dist
 and the Lineshapes manual (Czjzek section)."""
 from __future__ import annotations

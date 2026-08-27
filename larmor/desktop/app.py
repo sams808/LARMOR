@@ -1829,7 +1829,7 @@ class MainWindow(QMainWindow):
     # ---------- project (all open 1D spectra + fits) ----------
     def save_project(self):
         """Save every open 1D workspace (spectrum + processing + fit) as one
-        reopenable project file (idea #8)."""
+        reopenable project file."""
         path, _ = QFileDialog.getSaveFileName(
             self, "Save project", self._last_dir(),
             "LARMOR project (*.larproj.json)")
@@ -2627,7 +2627,7 @@ class MainWindow(QMainWindow):
         super().keyPressEvent(ev)
 
     #: sensible starting quadrupolar parameters by nucleus (glasses/materials);
-    #: only a starting point — always refined by the fit (idea #17)
+    #: only a starting point — always refined by the fit
     _NUCLEUS_START = {
         "27Al": {"sigma_Cq_MHz": 1.5, "Cq_MHz": 3.0, "eta": 0.6, "shift_fwhm_ppm": 12.0},
         "11B":  {"sigma_Cq_MHz": 1.0, "Cq_MHz": 2.6, "eta": 0.2, "shift_fwhm_ppm": 3.0},
@@ -2639,7 +2639,7 @@ class MainWindow(QMainWindow):
     }
 
     def _seed_nucleus_defaults(self, name: str, params: dict):
-        """Pre-fill starting values for a new site from the nucleus (idea #17):
+        """Pre-fill starting values for a new site from the nucleus:
         first what the user last fitted for this nucleus+model, else the built-in
         quadrupolar starting table."""
         nucleus = (self.recipe or {}).get("nucleus", "")

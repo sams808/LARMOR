@@ -1,4 +1,4 @@
-"""Project files: save/reopen all open 1D spectra + fits (idea #8)."""
+"""Project files: save/reopen all open 1D spectra + fits."""
 import os
 import tempfile
 from pathlib import Path
