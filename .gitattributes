@@ -1,0 +1,2 @@
+# Bruker example data ships byte-identical -- never newline-convert it
+examples/pCABS2-4/** -text
