@@ -1003,3 +1003,32 @@ def test_datasets_panel_empty_state_hints(qapp):
     p.rebuild("something", [])
     texts = " ".join(w.text() for w in p._host.findChildren(QLabel))
     assert "no comparison spectra" in texts
+
+
+def test_figure_exports_remember_their_folder(qapp, tmp_path, monkeypatch):
+    """Exporting a second figure must start where the first one landed, not
+    back in the LARMOR root. Gated on LARMOR_NO_SESSION so the suite itself
+    never touches the real setting."""
+    from PySide6.QtCore import QSettings
+
+    from larmor.desktop import paths
+
+    # under LARMOR_NO_SESSION (the test default) nothing is read or written
+    assert paths.remembered_dir(paths.FIGURE_DIR_KEY, "FB") == "FB"
+    paths.remember_dir(paths.FIGURE_DIR_KEY, tmp_path / "x.png")
+
+    s = QSettings("LARMOR", "app")
+    old = s.value(paths.FIGURE_DIR_KEY)
+    monkeypatch.delenv("LARMOR_NO_SESSION", raising=False)
+    try:
+        fig_dir = tmp_path / "figs"; fig_dir.mkdir()
+        paths.remember_dir(paths.FIGURE_DIR_KEY, fig_dir / "fig1.png")
+        assert paths.remembered_dir(paths.FIGURE_DIR_KEY) == str(fig_dir)
+        # a remembered folder that no longer exists falls back cleanly
+        paths.remember_dir(paths.FIGURE_DIR_KEY, tmp_path / "gone" / "f.png")
+        assert paths.remembered_dir(paths.FIGURE_DIR_KEY, "FB") == "FB"
+    finally:
+        if old is None:
+            s.remove(paths.FIGURE_DIR_KEY)
+        else:
+            s.setValue(paths.FIGURE_DIR_KEY, old)

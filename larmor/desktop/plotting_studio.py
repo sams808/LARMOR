@@ -1411,14 +1411,21 @@ class PlottingStudio(QDialog):
             self.msg.setText(f"exported {path}")
 
     def _save_spec(self):
+        from larmor.desktop.paths import (FIGURE_DIR_KEY, remember_dir,
+                                          remembered_dir)
+        start = remembered_dir(FIGURE_DIR_KEY)
+        seed = str(Path(start) / "figure.json") if start else "figure.json"
         path, _ = QFileDialog.getSaveFileName(self, "Save figure spec",
-                                              "figure.json", "JSON (*.json)")
+                                              seed, "JSON (*.json)")
         if path:
             Path(path).write_text(json.dumps(self._spec(), indent=2))
+            remember_dir(FIGURE_DIR_KEY, path)
             self.msg.setText(f"saved {path}")
 
     def _load_spec(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Load figure spec", "",
+        from larmor.desktop.paths import FIGURE_DIR_KEY, remembered_dir
+        path, _ = QFileDialog.getOpenFileName(self, "Load figure spec",
+                                              remembered_dir(FIGURE_DIR_KEY),
                                               "JSON (*.json)")
         if path:
             self._apply_spec(json.loads(Path(path).read_text()))

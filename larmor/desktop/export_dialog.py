@@ -61,9 +61,15 @@ def choose(parent, formats, **kw) -> dict | None:
 
 
 def _ask_path(parent, default_name, ext) -> str:
+    from larmor.desktop.paths import FIGURE_DIR_KEY, remember_dir, remembered_dir
+    start = remembered_dir(FIGURE_DIR_KEY)
+    seed = (str(Path(start) / f"{default_name}.{ext}") if start
+            else f"{default_name}.{ext}")
     path, _ = QFileDialog.getSaveFileName(
-        parent, "Save figure", f"{default_name}.{ext}",
+        parent, "Save figure", seed,
         f"{ext.upper()} (*.{ext});;All files (*)")
+    if path:                # the NEXT export starts where this one landed
+        remember_dir(FIGURE_DIR_KEY, path)
     return path
 
 

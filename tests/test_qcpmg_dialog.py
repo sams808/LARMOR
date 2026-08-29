@@ -321,3 +321,89 @@ def test_fields_dialog_table_is_visible_at_default_size(qapp):
     qapp.processEvents()
     assert d.table.height() >= 140
     d.close()
+
+
+def test_figure_package_builds_and_exports_three_formats(qapp, tmp_path,
+                                                         monkeypatch):
+    """'Export figure package' writes one publication-layout figure of the
+    whole workflow as .png + .svg + .pdf next to wherever the user points."""
+    d = _dialog_with(qapp, _synthetic_qcpmg(tmp_path))
+    fig = d._package_figure()
+    assert len(fig.axes) == 4                     # train / decay / spectrum / band
+    base = tmp_path / "pkg" ; (tmp_path / "pkg").mkdir()
+    monkeypatch.setattr(
+        "PySide6.QtWidgets.QFileDialog.getSaveFileName",
+        staticmethod(lambda *a, **k: (str(base / "qcpmg_fig"), "")))
+    d._export_package()
+    for ext in ("png", "svg", "pdf"):
+        f = base / f"qcpmg_fig.{ext}"
+        assert f.exists() and f.stat().st_size > 5_000, ext
+    assert "figure package written" in d.res.text()
+    d.close()
+
+
+def test_large_p1_gets_an_honest_warning(qapp, tmp_path):
+    """A whole echo should phase with p0 only: |p1| > 20 deg means the period
+    or top is off, and the stage-5 label must say so (the symptom the user
+    sees is dips flanking the line)."""
+    d = _dialog_with(qapp, _synthetic_qcpmg(tmp_path))
+    d._phased = True
+    d.p1.setValue(150.0)
+    d._redraw_spec()
+    assert "p0 only" in d.lbl5.text()
+    d.p1.setValue(0.0)
+    d._redraw_spec()
+    assert "p0 only" not in d.lbl5.text()
+    d.close()
+
+
+def test_save_as_dataset_roundtrips_through_the_reader(qapp, tmp_path,
+                                                       monkeypatch):
+    """Stage 5 'Save as dataset…' writes a LARMOR .csv that loads back with
+    the same axis, data and nucleus."""
+    from larmor.io import spectra
+
+    d = _dialog_with(qapp, _synthetic_qcpmg(tmp_path))
+    out = tmp_path / "qcpmg_1_sumecho.csv"
+    monkeypatch.setattr(
+        "PySide6.QtWidgets.QFileDialog.getSaveFileName",
+        staticmethod(lambda *a, **k: (str(out), "")))
+    d._save_dataset()
+    assert out.exists()
+    ppm, amp, meta = spectra.read_csv(out)
+    assert meta.get("nucleus") == "35Cl"
+    assert ppm.size == d._ppm.size
+    assert np.allclose(np.sort(ppm), np.sort(d._ppm))
+    d.close()
+
+
+def test_send_to_infinite_field_accumulates_across_sessions(qapp, tmp_path):
+    """Stage 6 '→ infinite-field δiso…': the shared dialog keeps rows from
+    one processing session to the next, which is the whole point — process
+    field 1, send; process field 2, send; Compute."""
+    from larmor.desktop import qcpmg_fields_dialog as qfd
+
+    qfd._shared = None                       # isolate from other tests
+    try:
+        d1 = _dialog_with(qapp, _synthetic_qcpmg(tmp_path))
+        d1._autophase()
+        d1._send_infinite()
+        assert "sent to infinite-field" in d1.res.text()
+        shared = qfd._shared
+        assert shared is not None
+        rows_after_first = shared.table.rowCount()
+        d1.close()
+
+        d2 = _dialog_with(qapp, _synthetic_qcpmg(tmp_path, t2_echoes=4.0))
+        d2.meta["larmor_MHz"] = 160.0        # "the other field"
+        d2._autophase()
+        d2._send_infinite()
+        assert qfd._shared is shared          # same instance, accumulated
+        assert shared.table.rowCount() == rows_after_first + 1
+        # both dataset rows are supervisable (spectrum attached)
+        ds_rows = [r for r in range(shared.table.rowCount())
+                   if shared._row_ds_id(r) is not None]
+        assert len(ds_rows) == 2
+        shared.close()
+    finally:
+        qfd._shared = None

@@ -4307,14 +4307,17 @@ class MainWindow(QMainWindow):
         CzjzekDistDialog(self, self.recipe).exec()
 
     def open_qcpmg_fields(self):
-        from larmor.desktop.qcpmg_fields_dialog import QcpmgFieldsDialog
+        from larmor.desktop.qcpmg_fields_dialog import shared_fields_dialog
 
         cur = None
         if self.recipe and self.exp_ppm is not None and self.exp_ppm.size:
             cur = (self.recipe.get("larmor_frequency_MHz", 0.0),
                    np.asarray(self.exp_ppm), np.asarray(self.exp_amp))
         nuc = self.recipe.get("nucleus", "") if self.recipe else ""
-        QcpmgFieldsDialog(self, nuc, cur).exec()
+        # one persistent, NON-modal instance: fields sent from QCPMG
+        # processing sessions accumulate here until Compute
+        dlg = shared_fields_dialog(self, nuc, cur)
+        dlg.show(); dlg.raise_(); dlg.activateWindow()
 
     def open_qcpmg(self):
         from larmor.desktop.qcpmg_dialog import QcpmgDialog

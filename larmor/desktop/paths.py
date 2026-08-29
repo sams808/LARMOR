@@ -13,6 +13,7 @@ those are the measurement, and no fit output is worth clobbering them.
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 #: the files that ARE the measurement / its processing, by exact name
@@ -39,3 +40,33 @@ def suggest_save_dir(data_path=None, fallback: str = "") -> str:
     if not p.exists():
         return fallback
     return str(p if p.is_dir() else p.parent)
+
+
+#: settings key for "where figures were last exported to"
+FIGURE_DIR_KEY = "figureExportDir"
+
+
+def remembered_dir(key: str, fallback: str = "") -> str:
+    """The last directory the user chose for ``key`` (figure exports, spec
+    saves, ...), persisted across sessions. Gated on LARMOR_NO_SESSION so
+    tests neither read nor write real settings."""
+    if os.environ.get("LARMOR_NO_SESSION"):
+        return fallback
+    try:
+        from PySide6.QtCore import QSettings
+        d = str(QSettings("LARMOR", "app").value(key, "") or "")
+    except Exception:
+        return fallback
+    return d if d and Path(d).is_dir() else fallback
+
+
+def remember_dir(key: str, chosen_file) -> None:
+    """Record the folder of a file the user just picked, for ``key``."""
+    if os.environ.get("LARMOR_NO_SESSION") or not chosen_file:
+        return
+    try:
+        from PySide6.QtCore import QSettings
+        QSettings("LARMOR", "app").setValue(
+            key, str(Path(str(chosen_file)).parent))
+    except Exception:
+        pass

@@ -124,11 +124,15 @@ class FigureDialog(QDialog):
         spec = self._spec()
         if spec is None:
             return
+        from larmor.desktop.paths import (FIGURE_DIR_KEY, remember_dir,
+                                          remembered_dir)
         path, _ = QFileDialog.getSaveFileName(
-            self, "Export figure (base name, extensions added)", "",
+            self, "Export figure (base name, extensions added)",
+            remembered_dir(FIGURE_DIR_KEY),
             "Figure base name (*)")
         if not path:
             return
+        remember_dir(FIGURE_DIR_KEY, path)
         base = Path(path).with_suffix("")
         formats = [f for f, cb in (("png", self.fmt_png), ("svg", self.fmt_svg),
                                    ("pdf", self.fmt_pdf)) if cb.isChecked()]

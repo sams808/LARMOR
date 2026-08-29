@@ -168,6 +168,13 @@ class QcpmgDialog(QDialog):
         v.addWidget(self.res)
 
         bb = QDialogButtonBox(QDialogButtonBox.Help)
+        self.btnFig = bb.addButton("Export figure package…",
+                                   QDialogButtonBox.ActionRole)
+        self.btnFig.setToolTip(
+            "one publication-layout figure of the whole workflow — echo "
+            "train, T₂ decay + fit, spectrum with spikelets, measured band — "
+            "written as .png + .svg + .pdf at 600 dpi")
+        self.btnFig.clicked.connect(self._export_package)
         self.btnCsv = bb.addButton("Copy CSV", QDialogButtonBox.ActionRole)
         self.btnCsv.setToolTip("decay points + every processing value, for the lab book")
         self.btnCsv.clicked.connect(self._copy_csv)
@@ -177,7 +184,7 @@ class QcpmgDialog(QDialog):
         bb.helpRequested.connect(self._help)
         v.addWidget(bb)
 
-        for w in (self.btnCsv, self.btnSend):
+        for w in (self.btnCsv, self.btnSend, self.btnFig):
             w.setEnabled(False)
         if source:
             self._load(source)
@@ -307,8 +314,13 @@ class QcpmgDialog(QDialog):
         self.norm.currentIndexChanged.connect(self._redraw_spec)
         self.zf = QComboBox(); self.zf.addItems(["2", "4", "8", "16", "32"])
         self.zf.setCurrentText("16"); self.zf.currentIndexChanged.connect(self._queue)
+        self.btnSaveDs = QPushButton("Save as dataset…")
+        self.btnSaveDs.setToolTip(
+            "write the processed sum-echo spectrum as a LARMOR .csv dataset — "
+            "openable, overlayable and fittable like any other spectrum")
+        self.btnSaveDs.clicked.connect(self._save_dataset)
         lv.addWidget(_row(self.showSum, self.showSpk, "  scale", self.norm,
-                          "  zero-fill ×", self.zf))
+                          "  zero-fill ×", self.zf, "   ", self.btnSaveDs))
         self.p0 = QDoubleSpinBox(); self.p0.setRange(-720, 720)
         self.p0.setDecimals(2); self.p0.setWrapping(True)
         self.p0.valueChanged.connect(self._rephase)
@@ -340,7 +352,14 @@ class QcpmgDialog(QDialog):
                                "sensitivity of δCG — replaces integrating by "
                                "hand three times")
         self.jitter.valueChanged.connect(self._measure)
-        lv.addWidget(_row(bAuto, "  edge jitter", self.jitter))
+        self.btnInf = QPushButton("→ infinite-field δiso…")
+        self.btnInf.setToolTip(
+            "send this spectrum, with its δcg window, to the multi-field "
+            "extrapolation — process the other field's dataset and send it "
+            "too, then Compute there")
+        self.btnInf.clicked.connect(self._send_infinite)
+        lv.addWidget(_row(bAuto, "  edge jitter", self.jitter, "   ",
+                          self.btnInf))
         self.p_measure = _plot("central band", ppm_axis=True, parent=self)
         lv.addWidget(self.p_measure, 1)
         self.region = pg.LinearRegionItem(
@@ -437,13 +456,13 @@ class QcpmgDialog(QDialog):
             # never leave the PREVIOUS sample's spectrum sendable under the
             # NEW sample's name -- the spectra were nulled above, so all that
             # is left is to make the actions unreachable
-            for w in (self.btnCsv, self.btnSend):
+            for w in (self.btnCsv, self.btnSend, self.btnFig):
                 w.setEnabled(False)
             self.res.setText(f"cannot process: {exc}")
             return
         finally:
             self._loading = False
-        for w in (self.btnCsv, self.btnSend):
+        for w in (self.btnCsv, self.btnSend, self.btnFig):
             w.setEnabled(True)
         self._recompute()
         # phase once automatically: on an UNPHASED spectrum the tallest feature
@@ -694,7 +713,7 @@ class QcpmgDialog(QDialog):
                 self.fid, sw, sfo, self._carrier,
                 lb_Hz=max(self.lb.value(), 1.0), zf=2)
             self._spk = np.abs(spk)
-            for w in (self.btnCsv, self.btnSend):
+            for w in (self.btnCsv, self.btnSend, self.btnFig):
                 w.setEnabled(True)
             self._rephase()
         except Exception as exc:                              # noqa: BLE001
@@ -702,7 +721,7 @@ class QcpmgDialog(QDialog):
             # do not leave a stale spectrum reachable behind a new, bad setting
             self._ppm = self._spec = self._spec_raw = None
             self._cg = self._sigma = self._fwhm = None
-            for w in (self.btnCsv, self.btnSend):
+            for w in (self.btnCsv, self.btnSend, self.btnFig):
                 w.setEnabled(False)
             self.lbl1.setText(f"cannot process: {exc}")
             self.lbl1.setStyleSheet(f"color: {theme.active().model};")
@@ -807,10 +826,23 @@ class QcpmgDialog(QDialog):
         ref = ("" if self._referenced else
                f"<span style='color:{t.model}'> · carrier from O1/BF1 — no "
                f"procs, the ppm axis may be offset</span>")
+        # a correctly split whole echo transforms to pure absorption and needs
+        # p0 ONLY; a large p1 means the echo top is off by a fraction of a
+        # dwell (usually a slightly wrong period), and the mixed-in dispersion
+        # shows up as negative dips flanking the line
+        p1warn = ""
+        if self._phased and abs(self.p1.value()) > 20.0:
+            p1warn = (f"<br><span style='color:{t.model}'>⚠ |p1| = "
+                      f"{abs(self.p1.value()):.0f}° — a whole echo should need "
+                      f"p0 only. Check the period (stage 1: the spikelet "
+                      f"spacing must match the pulse program) and the echo "
+                      f"top (stage 2); dips beside the line are the usual "
+                      f"symptom.</span>")
         self.lbl5.setText(
             f"{' ⊕ '.join(shown) or 'nothing shown'} · scale {mode} · "
             f"zero-fill ×{self.zf.currentText()} · p0 {self.p0.value():.1f}° "
-            f"p1 {self.p1.value():.1f}° · carrier {self._carrier:.2f} ppm{ref}")
+            f"p1 {self.p1.value():.1f}° · carrier {self._carrier:.2f} ppm{ref}"
+            + p1warn)
         self._update_headline()
 
     def _autophase(self):
@@ -895,6 +927,173 @@ class QcpmgDialog(QDialog):
         self.res.setText("   ·   ".join(bits))
 
     # --------------------------------------------------------------- output
+    # ------------------------------------------------- dataset / ∞-field
+    def _save_dataset(self):
+        """Write the processed sum-echo spectrum as a LARMOR .csv dataset."""
+        self._flush()
+        if self._spec is None or self._ppm is None:
+            self.res.setText("nothing to save — process a train first")
+            return
+        from larmor.desktop.paths import suggest_save_dir
+        from larmor.io import spectra
+        expno = self.meta.get("expno", "") or "qcpmg"
+        start = suggest_save_dir(self.source, "")
+        name = f"qcpmg_{expno}_sumecho.csv"
+        seed = str(Path(start) / name) if start else name
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save processed spectrum as dataset", seed,
+            "LARMOR spectrum (*.csv)")
+        if not path:
+            return
+        title = (self.meta.get("title", "") or "").splitlines()
+        spectra.write_csv(path, self._ppm, self._spec, {
+            "nucleus": self.meta.get("nucleus", ""),
+            "larmor_MHz": self.meta.get("larmor_MHz", 0.0),
+            "spin_rate_Hz": 0.0,
+            "sample": (title[0] if title else "")
+            + f" · QCPMG sum echo (LB {self.lb.value():,.0f} Hz)"})
+        self.res.setText(f"dataset written — {Path(path).name}")
+
+    def _send_infinite(self):
+        """Hand this spectrum, with its measured window, to the shared
+        multi-field extrapolation dialog. It stays open and accumulates: do
+        the same from the other field's dataset, then Compute there."""
+        self._flush()
+        if self._spec is None or self._ppm is None:
+            self.res.setText("nothing to send — process a train first")
+            return
+        if not self._phased:
+            self.res.setText("phase the spectrum first (stage 5 → Autophase) "
+                             "— δcg on an unphased spectrum is meaningless")
+            return
+        from larmor.desktop.qcpmg_fields_dialog import shared_fields_dialog
+        dlg = shared_fields_dialog(self.parent(),
+                                   self.meta.get("nucleus", ""))
+        dlg.add_dataset_spectrum(
+            float(self.meta.get("larmor_MHz", 0.0) or 0.0),
+            self._ppm, self._spec, window=self.region.getRegion())
+        dlg.show(); dlg.raise_(); dlg.activateWindow()
+        self.res.setText("sent to infinite-field δiso — process the other "
+                         "field's dataset and send it too, then Compute there")
+
+    # ------------------------------------------------- figure package
+    def _package_figure(self):
+        """One publication-layout figure of the whole workflow: (a) echo
+        train, (b) echo-top decay with the T2 fit, (c) sum-echo spectrum with
+        the spikelets behind it, (d) the measured band with delta_CG and the
+        window. Built from exactly the state the dialog is showing."""
+        from matplotlib.figure import Figure
+        from larmor import qcpmg
+
+        per = self.period.value()
+        sw = float(self.meta.get("sw_Hz", 0.0) or 0.0)
+        tau = per / sw if sw else 0.0
+        ech = self._echoes()
+        top = int(np.clip(self.top.value(), 0, per - 1))
+        mode = "real" if self.decayMode.currentIndex() == 0 else "magnitude"
+        decay = qcpmg.echo_decay(ech, top, mode)
+        keep = (self.keep if self.keep is not None
+                and self.keep.size == decay.size
+                else np.ones(decay.size, bool))
+        tt = np.arange(decay.size) * tau
+
+        fig = Figure(figsize=(7.1, 5.4), dpi=110)
+        axs = fig.subplots(2, 2)
+        (ax_tr, ax_dec), (ax_sp, ax_ms) = axs
+
+        ax_tr.plot(np.abs(self.fid), color="black", lw=0.5)
+        ax_tr.set_xlabel("point"); ax_tr.set_yticks([])
+        ax_tr.set_title("echo train", fontsize=9)
+
+        ms = 1e3
+        ax_dec.plot(tt[keep] * ms, decay[keep] / (decay.max() or 1.0), "o",
+                    color="black", ms=3.5, label="echo tops")
+        if (~keep).any():
+            ax_dec.plot(tt[~keep] * ms, decay[~keep] / (decay.max() or 1.0),
+                        "x", color="#999999", ms=4, label="excluded")
+        if self.t2 is not None and self.t2.ok:
+            xs = np.linspace(0.0, float(tt.max()), 200)
+            ax_dec.plot(xs * ms, self.t2.model(xs) / (decay.max() or 1.0),
+                        color="#c0392b", lw=1.2)
+            ax_dec.set_title(
+                f"T$_2$ = {self.t2.T2_s * 1e3:.2f} ms · matched LB = "
+                f"{self.t2.lb_Hz:,.0f} Hz", fontsize=9)
+        else:
+            ax_dec.set_title("echo-top decay (T$_2$ not determined)",
+                             fontsize=9)
+        ax_dec.set_xlabel("time (ms)"); ax_dec.set_yticks([])
+
+        for ax in (ax_sp, ax_ms):
+            ax.set_xlabel(f"$^{{{''.join(c for c in self.meta.get('nucleus', '') if c.isdigit())}}}$"
+                          f"{''.join(c for c in self.meta.get('nucleus', '') if c.isalpha())}"
+                          " shift (ppm)")
+            ax.set_yticks([])
+        if self._spk is not None and self._spk_ppm is not None:
+            b = self._spk / (np.abs(self._spk).max() or 1.0)
+            ax_sp.plot(self._spk_ppm, b, color="#9aa7b0", lw=0.5,
+                       label="spikelets")
+        if self._spec is not None and self._ppm is not None:
+            a = self._spec / (np.abs(self._spec).max() or 1.0)
+            ax_sp.plot(self._ppm, a, color="black", lw=1.0, label="sum echo")
+            ax_sp.legend(fontsize=7, frameon=False)
+            ax_sp.invert_xaxis()
+            ax_sp.set_title(f"LB {self.lb.value():,.0f} Hz · GB "
+                            f"{self.gb.value():,.0f} Hz", fontsize=9)
+
+            ax_ms.plot(self._ppm, a, color="black", lw=1.0)
+            lo, hi = self.region.getRegion()
+            m = (self._ppm >= min(lo, hi)) & (self._ppm <= max(lo, hi))
+            ax_ms.fill_between(self._ppm[m], 0.0, a[m], color="#1f6feb",
+                               alpha=0.18, lw=0)
+            title = ""
+            if self._cg is not None:
+                ax_ms.axvline(self._cg, color="#c0392b", lw=1.0, ls="--")
+                title = (f"δ$_{{CG}}$ = {self._cg:.1f} ± {self._sigma:.1f} "
+                         f"ppm · FWHM = {self._fwhm:,.0f} Hz")
+            ax_ms.set_title(title or "central band (unphased — no numbers)",
+                            fontsize=9)
+            pad = 0.5 * abs(hi - lo)
+            ax_ms.set_xlim(max(lo, hi) + pad, min(lo, hi) - pad)
+
+        src = Path(self.source).parent.parent.name if self.source else ""
+        fig.suptitle(f"QCPMG sum-echo processing — "
+                     f"{self.meta.get('nucleus', '')} "
+                     f"{src or self.meta.get('expno', '')} · period {per} pts "
+                     f"· top {top} · {self.nEch.value()} echoes",
+                     fontsize=9.5)
+        fig.tight_layout(rect=(0, 0, 1, 0.95))
+        return fig
+
+    def _export_package(self):
+        self._flush()
+        if self.fid is None or self._spec_raw is None:
+            self.res.setText("nothing to export — process a train first")
+            return
+        from larmor.desktop.paths import (FIGURE_DIR_KEY, remember_dir,
+                                          remembered_dir)
+        start = remembered_dir(FIGURE_DIR_KEY)
+        name = f"qcpmg_{self.meta.get('expno', 'fig')}"
+        seed = str(Path(start) / name) if start else name
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export figure package (base name — .png/.svg/.pdf added)",
+            seed, "Figure base name (*)")
+        if not path:
+            return
+        remember_dir(FIGURE_DIR_KEY, path)
+        base = Path(path).with_suffix("")
+        try:
+            fig = self._package_figure()
+            written = []
+            for ext in ("png", "svg", "pdf"):
+                out = f"{base}.{ext}"
+                fig.savefig(out, dpi=600, bbox_inches="tight")
+                written.append(out)
+        except Exception as exc:                              # noqa: BLE001
+            _log.exception("figure package export failed")
+            self.res.setText(f"figure export failed: {exc}")
+            return
+        self.res.setText(f"figure package written — {base}.png / .svg / .pdf")
+
     def _copy_csv(self):
         from PySide6.QtWidgets import QApplication
         from larmor import qcpmg

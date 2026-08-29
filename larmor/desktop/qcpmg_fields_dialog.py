@@ -162,13 +162,18 @@ class QcpmgFieldsDialog(QDialog):
             QMessageBox.warning(self, "Some datasets were skipped",
                                 "\n".join(errors))
 
-    def add_dataset_spectrum(self, larmor_MHz: float, ppm, amp) -> int:
-        """Add one field's spectrum: δcg ± σ and FWHM are computed over an
-        automatic window and written into a new row; the spectrum stays
-        attached so selecting the row shows it for supervision."""
+    def add_dataset_spectrum(self, larmor_MHz: float, ppm, amp,
+                             window=None) -> int:
+        """Add one field's spectrum: δcg ± σ and FWHM are computed over the
+        given window (or an automatic one) and written into a new row; the
+        spectrum stays attached so selecting the row shows it for
+        supervision."""
         from larmor import qcpmg
         ppm = np.asarray(ppm, float); amp = np.asarray(amp, float)
-        hi, lo = qcpmg.cg_window(ppm, amp)
+        if window is not None:
+            lo, hi = float(min(window)), float(max(window))
+        else:
+            hi, lo = qcpmg.cg_window(ppm, amp)
         if not (np.isfinite(hi) and np.isfinite(lo)) or hi <= lo:
             span = float(ppm.max() - ppm.min())
             mid = float(ppm.min()) + span / 2.0
@@ -353,3 +358,27 @@ class QcpmgFieldsDialog(QDialog):
             f"ppm</b>  (intercept, 1/ν₀²→0)   ·   "
             f"C_Q = {res.cq_MHz:.2f} ± {res.cq_err_MHz:.2f} MHz   ·   "
             f"P_Q = {res.pq_MHz:.2f} MHz   (η = {res.eta:g} assumed)")
+
+
+#: the one shared instance — fields sent from several QCPMG processing
+#: sessions accumulate here until the user computes the extrapolation
+_shared: QcpmgFieldsDialog | None = None
+
+
+def shared_fields_dialog(parent=None, nucleus: str = "",
+                         current=None) -> QcpmgFieldsDialog:
+    """Get (or create) the persistent infinite-field dialog. Non-modal by
+    design: process one field's dataset, send it here, process the next,
+    send it too — then Compute."""
+    global _shared
+    if _shared is not None:
+        try:
+            _shared.isVisible()               # raises once the C++ side died
+        except RuntimeError:
+            _shared = None
+    if _shared is None:
+        _shared = QcpmgFieldsDialog(parent, nucleus, current)
+    elif current is not None:
+        _shared._current = current
+        _shared.b_cur.setEnabled(True)
+    return _shared
