@@ -1138,6 +1138,7 @@ class MainWindow(QMainWindow):
         self.datasets_panel.make_active.connect(self.overlay_make_active)
         self.datasets_panel.remove.connect(self.overlay_remove)
         self.datasets_panel.visibility_changed.connect(self.overlay_visibility)
+        self.datasets_panel.color_changed.connect(self.overlay_set_color)
         self.datasets_panel.offset_changed.connect(lambda _: self._refresh_overlays())
         self.datasets_dock.setWidget(self.datasets_panel)
         self.addDockWidget(Qt.LeftDockWidgetArea, self.datasets_dock)
@@ -1913,11 +1914,11 @@ class MainWindow(QMainWindow):
             for ov in w.get("overlays", []):
                 src = ov.get("source", "")
                 try:
-                    label, ppm, amp = self._read_overlay_source(src)
+                    label, ppm, amp, info = self._read_overlay_source(src)
                 except Exception:
                     missing_overlays.append(ov.get("label") or src)
                     continue
-                self._add_overlay(ov.get("label") or label, ppm, amp, src)
+                self._add_overlay(ov.get("label") or label, ppm, amp, src, info)
                 new = self._overlays[-1]
                 new["visible"] = bool(ov.get("visible", True))
                 if ov.get("color"):
@@ -2313,11 +2314,11 @@ class MainWindow(QMainWindow):
         if not path:
             return
         try:
-            label, ppm, amp = self._read_overlay_source(path)
+            label, ppm, amp, info = self._read_overlay_source(path)
         except Exception as exc:
             QMessageBox.warning(self, "Add overlay", f"cannot read: {exc}")
             return
-        self._add_overlay(label, ppm, amp, path)
+        self._add_overlay(label, ppm, amp, path, info)
 
     @staticmethod
     def _read_overlay_source(path: str):
@@ -2337,25 +2338,45 @@ class MainWindow(QMainWindow):
             # overlay restoration into save_project/open_project.
             ppm, amp, recipe, *_ = _load_any(path)
             label = recipe.get("sample") or Path(path).name
-            return label, np.asarray(ppm), np.asarray(amp)
+            info = {"nucleus": recipe.get("nucleus", ""),
+                    "larmor_MHz": float(recipe.get("larmor_frequency_MHz", 0.0)
+                                        or 0.0),
+                    "npts": int(np.asarray(ppm).size), "title": ""}
+            return label, np.asarray(ppm), np.asarray(amp), info
         except Exception:
             from larmor.io import bruker
 
             d = bruker.read(path)
             if d.ndim != 1 or d.domain != "freq":
                 raise ValueError("not a 1D spectrum") from None
-            return (Path(path).name, np.asarray(d.axes[0].values),
-                    np.asarray(d.data, float))
+            meta = d.meta or {}
+            # "1r" says nothing -- name the overlay by sample folder + EXPNO
+            parts = Path(path).parts
+            sample = parts[-5] if len(parts) >= 5 else ""      # .../S/EXP/pdata/N/1r
+            expno = str(meta.get("expno", "") or "")
+            label = " · ".join(x for x in (sample, expno) if x) or Path(path).name
+            info = {"nucleus": meta.get("nucleus", ""),
+                    "larmor_MHz": float(meta.get("larmor_MHz", 0.0) or 0.0),
+                    "npts": int(np.asarray(d.data).size),
+                    "title": (meta.get("title", "") or "").splitlines()[0]
+                    if meta.get("title") else ""}
+            return (label, np.asarray(d.axes[0].values),
+                    np.asarray(d.data, float), info)
 
-    def _add_overlay(self, label, ppm, amp, source=""):
+    def _add_overlay(self, label, ppm, amp, source="", info=None):
         from larmor.desktop.datasets import overlay_color
 
         self._overlays.append({
             "label": label, "ppm": np.asarray(ppm), "amp": np.asarray(amp),
             "color": overlay_color(len(self._overlays)), "visible": True,
-            "source": source})
+            "source": source, **(info or {})})
         self._refresh_overlays()
         self.datasets_dock.raise_()
+
+    def overlay_set_color(self, i: int, color: str):
+        if 0 <= i < len(self._overlays) and color:
+            self._overlays[i]["color"] = color
+            self._refresh_overlays()
 
     def overlay_remove(self, i: int):
         if 0 <= i < len(self._overlays):
@@ -2398,11 +2419,17 @@ class MainWindow(QMainWindow):
                 drawn.append((ov["ppm"], ov["amp"] + step * (k + 1),
                               ov["color"], ov["label"]))
         self.view.set_overlays(drawn)
-        label = ""
+        label, detail = "", ""
         if self.recipe is not None:
             label = self.recipe.get("sample") or (
                 Path(self.source_path).name if self.source_path else "")
-        self.datasets_panel.rebuild(label, self._overlays)
+            nuc = self.recipe.get("nucleus", "")
+            mhz = float(self.recipe.get("larmor_frequency_MHz", 0.0) or 0.0)
+            bits = [b for b in (nuc, f"{mhz:.1f} MHz" if mhz else "",
+                                f"{self.exp_ppm.size} pts"
+                                if self.exp_ppm.size else "") if b]
+            detail = " · ".join(bits)
+        self.datasets_panel.rebuild(label, self._overlays, detail)
 
     #: colour assigned to each HMQC projection axis (matches the overlay + the
     #: Explorer highlight)

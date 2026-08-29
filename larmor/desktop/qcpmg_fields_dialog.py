@@ -33,7 +33,7 @@ class QcpmgFieldsDialog(QDialog):
     def __init__(self, parent, nucleus: str = "", current=None):
         super().__init__(parent)
         self.setWindowTitle("QCPMG — infinite-field δiso (2+ fields)")
-        self.resize(720, 560)
+        self.resize(760, 680)
         self._nucleus = nucleus or "35Cl"
         self._current = current            # (larmor_MHz, ppm, amp) of the open spectrum
         v = QVBoxLayout(self)
@@ -71,6 +71,9 @@ class QcpmgFieldsDialog(QDialog):
             ["Larmor ν₀ (MHz)", "δcg (ppm)", "± err (ppm)",
              "FWHM (ppm)", "CT-selective"])
         self.table.horizontalHeader().setStretchLastSection(True)
+        # a QTableWidget's own minimum is ~1.5 rows, so at the default dialog
+        # size the plot's fixed minimum squeezed the table nearly out of view
+        self.table.setMinimumHeight(150)             # header + ~4 field rows
         v.addWidget(self.table, 1)
 
         row = QHBoxLayout()
@@ -78,12 +81,19 @@ class QcpmgFieldsDialog(QDialog):
         b_add.clicked.connect(lambda: self._add_row())
         b_del = QPushButton("Remove selected")
         b_del.clicked.connect(self._del_row)
+        b_ds = QPushButton("Add from datasets…")
+        b_ds.setToolTip("pick the processed spectra (1r) measured at each "
+                        "field: δcg ± σ and FWHM are read off automatically, "
+                        "and selecting the row shows the spectrum with a "
+                        "draggable band to supervise the values")
+        b_ds.clicked.connect(self._pick_datasets)
         self.b_cur = QPushButton("δcg from open spectrum (visible range)")
         self.b_cur.setToolTip("centre of gravity of the currently open spectrum "
                               "over the visible x-range — zoom to the CT band first")
         self.b_cur.clicked.connect(self._from_current)
         self.b_cur.setEnabled(self._current is not None)
-        row.addWidget(b_add); row.addWidget(b_del); row.addWidget(self.b_cur)
+        row.addWidget(b_add); row.addWidget(b_del); row.addWidget(b_ds)
+        row.addWidget(self.b_cur)
         row.addStretch(1)
         v.addLayout(row)
 
@@ -92,8 +102,8 @@ class QcpmgFieldsDialog(QDialog):
         self.plot.setLabel("left", "δcg", units="ppm")
         self.plot.getPlotItem().getAxis("left").enableAutoSIPrefix(False)
         self.plot.showGrid(x=True, y=True, alpha=0.15)
-        self.plot.setMinimumHeight(180)
-        v.addWidget(self.plot)
+        self.plot.setMinimumHeight(140)
+        v.addWidget(self.plot, 1)        # table and plot share extra height
 
         self.result = QLabel("add at least two fields, then Compute")
         self.result.setStyleSheet(f"font-weight:600; color:{theme.active().accent};")
@@ -117,9 +127,115 @@ class QcpmgFieldsDialog(QDialog):
         bb.addButton(QDialogButtonBox.Help).clicked.connect(self._help)
         v.addWidget(bb)
 
+        # dataset supervision: rows added from a dataset keep their spectrum,
+        # and selecting one shows it with a draggable band
+        self._ds: dict[int, dict] = {}
+        self._ds_seq = 0
+        self._region = None
+        self._cg_line = None
+        self.table.itemSelectionChanged.connect(self._show_selected_dataset)
+
         # seed two rows; prefill the first from the open spectrum's field
         self._add_row(self._current[0] if self._current else 0.0)
         self._add_row()
+
+    # ------------------------------------------------- datasets (supervised)
+    def _pick_datasets(self):
+        from PySide6.QtWidgets import QFileDialog, QMessageBox
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, "Choose the processed spectrum (1r) measured at each field",
+            "", "Bruker processed (1r);;All files (*)")
+        errors = []
+        for p in paths:
+            try:
+                from larmor.io import bruker
+                d = bruker.read(p)
+                if d.ndim != 1 or d.domain != "freq":
+                    raise ValueError("not a processed 1D spectrum")
+                ppm = np.asarray(d.axes[0].values, float)
+                amp = np.asarray(d.data, float)
+                self.add_dataset_spectrum(
+                    float(d.meta.get("larmor_MHz", 0.0) or 0.0), ppm, amp)
+            except Exception as exc:                          # noqa: BLE001
+                errors.append(f"{p}: {exc}")
+        if errors:
+            QMessageBox.warning(self, "Some datasets were skipped",
+                                "\n".join(errors))
+
+    def add_dataset_spectrum(self, larmor_MHz: float, ppm, amp) -> int:
+        """Add one field's spectrum: δcg ± σ and FWHM are computed over an
+        automatic window and written into a new row; the spectrum stays
+        attached so selecting the row shows it for supervision."""
+        from larmor import qcpmg
+        ppm = np.asarray(ppm, float); amp = np.asarray(amp, float)
+        hi, lo = qcpmg.cg_window(ppm, amp)
+        if not (np.isfinite(hi) and np.isfinite(lo)) or hi <= lo:
+            span = float(ppm.max() - ppm.min())
+            mid = float(ppm.min()) + span / 2.0
+            lo, hi = mid - span / 6.0, mid + span / 6.0
+        self._ds_seq += 1
+        ds_id = self._ds_seq
+        self._ds[ds_id] = {"ppm": ppm, "amp": amp, "window": (lo, hi)}
+        self._add_row(larmor_MHz)
+        r = self.table.rowCount() - 1
+        self.table.item(r, 0).setData(Qt.UserRole, ds_id)
+        self._apply_ds_values(r, ds_id)
+        self.table.selectRow(r)
+        return r
+
+    def _apply_ds_values(self, r: int, ds_id: int):
+        from larmor import qcpmg
+        d = self._ds[ds_id]
+        lo, hi = d["window"]
+        cg, sigma = qcpmg.centre_of_gravity(d["ppm"], d["amp"], (hi, lo),
+                                            jitter_frac=0.10)
+        fw_ppm = qcpmg.fwhm_hz(d["ppm"], d["amp"], 1.0, (hi, lo))
+        if np.isfinite(cg):
+            self.table.setItem(r, 1, QTableWidgetItem(f"{cg:.2f}"))
+            self.table.setItem(r, 2, QTableWidgetItem(f"{max(sigma, 0.1):.1f}"))
+        self.table.setItem(r, 3, QTableWidgetItem(f"{fw_ppm:.2f}"))
+        if self._cg_line is not None and np.isfinite(cg):
+            self._cg_line.setValue(cg)
+
+    def _row_ds_id(self, r: int):
+        it = self.table.item(r, 0)
+        return it.data(Qt.UserRole) if it is not None else None
+
+    def _show_selected_dataset(self):
+        r = self.table.currentRow()
+        ds_id = self._row_ds_id(r) if r >= 0 else None
+        if ds_id is None or ds_id not in self._ds:
+            return
+        d = self._ds[ds_id]
+        self.plot.clear()
+        self._region = self._cg_line = None
+        self.plot.getPlotItem().invertX(True)
+        self.plot.setLabel("bottom", "shift", units="ppm")
+        self.plot.setLabel("left", "intensity", units="")
+        self.plot.getPlotItem().getAxis("bottom").enableAutoSIPrefix(False)
+        self.plot.setTitle("dataset — drag the band edges; δcg / FWHM in the "
+                           "row follow", color=theme.active().text_dim,
+                           size="9pt")
+        self.plot.plot(d["ppm"], d["amp"],
+                       pen=pg.mkPen(theme.active().experiment, width=1.2))
+        lo, hi = d["window"]
+        self._region = pg.LinearRegionItem(values=(lo, hi), movable=True)
+        self.plot.addItem(self._region)
+        self._region.sigRegionChangeFinished.connect(
+            lambda *_: self._region_moved(r, ds_id))
+        self._cg_line = pg.InfiniteLine(pos=0.0, angle=90, movable=False,
+                                        pen=pg.mkPen(theme.active().pivot,
+                                                     style=Qt.DashLine))
+        self.plot.addItem(self._cg_line)
+        self._apply_ds_values(r, ds_id)
+
+    def _region_moved(self, r: int, ds_id: int):
+        if self._region is None or ds_id not in self._ds:
+            return
+        a, b = self._region.getRegion()
+        self._ds[ds_id]["window"] = (min(a, b), max(a, b))
+        if r < self.table.rowCount() and self._row_ds_id(r) == ds_id:
+            self._apply_ds_values(r, ds_id)
 
     def _help(self):
         from larmor.desktop.help_dialog import show_help
@@ -217,6 +333,12 @@ class QcpmgFieldsDialog(QDialog):
             self.result.setText(f"cannot extrapolate: {exc}")
             return
         self.plot.clear()
+        # the plot may be in dataset-supervision mode (inverted ppm axis)
+        self._region = self._cg_line = None
+        self.plot.getPlotItem().invertX(False)
+        self.plot.setTitle(None)
+        self.plot.setLabel("bottom", "1 / ν₀²", units="MHz⁻²")
+        self.plot.setLabel("left", "δcg", units="ppm")
         x = np.array([1.0 / p.larmor_MHz ** 2 for p in pts])
         y = np.array([p.dcg_ppm for p in pts])
         self.plot.plot(x, y, pen=None, symbol="o", symbolBrush="#1f6feb",

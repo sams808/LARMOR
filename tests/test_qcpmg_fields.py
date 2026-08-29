@@ -89,3 +89,43 @@ def test_dialog_computes(qapp=None):
     assert "csd" in dlg.wresult.text().lower()
     assert dlg.spin.value() == 1.5                  # 35Cl
     dlg.close()
+
+
+@pytest.fixture(scope="module")
+def qapp():
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    os.environ.setdefault("LARMOR_NO_SESSION", "1")
+    pytest.importorskip("PySide6")
+    from PySide6.QtWidgets import QApplication
+    return QApplication.instance() or QApplication([])
+
+
+def test_add_dataset_spectrum_fills_row_and_supervises(qapp):
+    """'Add from datasets…': δcg ± σ and FWHM are read off automatically over
+    an auto window; selecting the row shows the spectrum with a draggable
+    band, and moving the band recomputes the row."""
+    import numpy as np
+
+    from larmor.desktop.qcpmg_fields_dialog import QcpmgFieldsDialog
+
+    d = QcpmgFieldsDialog(None, "35Cl")
+    x = np.linspace(-300.0, 100.0, 4001)
+    y = np.exp(-(((x + 105.0) / 25.0) ** 2))         # CT band at -105 ppm
+    r = d.add_dataset_spectrum(78.354, x, y)
+    assert float(d.table.item(r, 0).text()) == pytest.approx(78.354, rel=1e-6)
+    assert float(d.table.item(r, 1).text()) == pytest.approx(-105.0, abs=2.0)
+    fwhm_true = 2.0 * 25.0 * np.sqrt(np.log(2.0))     # ~41.6 ppm
+    assert float(d.table.item(r, 3).text()) == pytest.approx(fwhm_true, rel=0.1)
+    # the row was auto-selected -> supervision view with a draggable band
+    assert d._region is not None and d._cg_line is not None
+    d._region.setRegion((-170.0, -40.0))              # user drags the band
+    ds_id = d._row_ds_id(r)
+    d._region_moved(r, ds_id)
+    assert d._ds[ds_id]["window"] == (-170.0, -40.0)
+    assert float(d.table.item(r, 1).text()) == pytest.approx(-105.0, abs=2.0)
+    # two dataset rows + Compute = the whole two-field workflow
+    d.add_dataset_spectrum(160.0, x, np.exp(-(((x + 101.0) / 15.0) ** 2)))
+    d._compute()
+    assert "δiso" in d.result.text()
+    d.close()

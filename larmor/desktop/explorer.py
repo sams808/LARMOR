@@ -241,12 +241,57 @@ class ExplorerPanel(QWidget):
         if not path or not Path(path).is_dir():
             return
         m = QMenu(self)
+        if (Path(path) / "acqus").exists():          # an EXPNO: it has a story
+            m.addAction("Dataset info…", lambda: self._dataset_info(path))
+            m.addSeparator()
         if path in self._pinned:
             m.addAction("Rename pin…", lambda: self._rename_pin(path))
             m.addAction("Unpin folder", lambda: self._unpin(path))
         else:
             m.addAction("📌 Pin folder", lambda: self._pin(path))
         m.exec(self.tree.viewport().mapToGlobal(pos))
+
+    @staticmethod
+    def dataset_info_text(path: str) -> str:
+        """The dataset's own description — the full TITLE text the way
+        TopSpin's title page shows it, plus the key acquisition facts."""
+        from larmor.io import bruker
+        parts = []
+        try:
+            exp = bruker.read_expno(path, verify=False)
+            parts.append(exp.summary)
+        except Exception as exc:                              # noqa: BLE001
+            parts.append(f"(acquisition summary unavailable: {exc})")
+        # the summary shows only the title's first line; give the whole text
+        for procdir in sorted((Path(path) / "pdata").glob("*")):
+            tf = procdir / "title"
+            if tf.exists():
+                try:
+                    full = tf.read_text(errors="replace").strip()
+                except OSError:
+                    continue
+                if full and "\n" in full:
+                    parts.append(f"\ntitle ({procdir.name}):\n{full}")
+                break
+        return "\n".join(parts)
+
+    def _dataset_info(self, path: str):
+        from PySide6.QtWidgets import (QDialog, QDialogButtonBox,
+                                       QPlainTextEdit, QVBoxLayout)
+        dlg = QDialog(self)
+        dlg.setWindowTitle(f"{Path(path).name} — dataset info")
+        dlg.resize(560, 380)
+        v = QVBoxLayout(dlg)
+        txt = QPlainTextEdit(self.dataset_info_text(path))
+        txt.setReadOnly(True)
+        f = txt.font(); f.setFamily("Consolas"); txt.setFont(f)
+        v.addWidget(txt)
+        bb = QDialogButtonBox(QDialogButtonBox.Close)
+        bb.rejected.connect(dlg.reject)
+        bb.accepted.connect(dlg.accept)
+        bb.button(QDialogButtonBox.Close).clicked.connect(dlg.close)
+        v.addWidget(bb)
+        dlg.exec()
 
     # ---------------- loading ----------------
     def _open_sample(self):

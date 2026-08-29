@@ -19,6 +19,7 @@ The headline readout and "Send to fit →" stay visible from every stage.
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 
 import numpy as np
@@ -28,8 +29,8 @@ from larmor.desktop.plot_menu import attach_plot_menu
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
-    QFileDialog, QHBoxLayout, QLabel, QPushButton, QSpinBox, QSplitter,
-    QTabWidget, QVBoxLayout, QWidget,
+    QFileDialog, QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea,
+    QSpinBox, QSplitter, QTabWidget, QVBoxLayout, QWidget,
 )
 
 
@@ -57,6 +58,16 @@ def _plot(title: str = "", ppm_axis: bool = False, height: int | None = None,
     return pw
 
 
+def _scrolled(w: QWidget) -> QScrollArea:
+    """Wrap a stage page so its layout minimum can never block shrinking the
+    dialog: below the content's minimum the page scrolls instead."""
+    sa = QScrollArea()
+    sa.setWidget(w)
+    sa.setWidgetResizable(True)
+    sa.setFrameShape(QFrame.NoFrame)
+    return sa
+
+
 def _row(*widgets) -> QWidget:
     w = QWidget()
     h = QHBoxLayout(w)
@@ -74,17 +85,28 @@ class QcpmgDialog(QDialog):
     def __init__(self, parent, source: str | None):
         super().__init__(parent)
         self.setWindowTitle("QCPMG processing — guided sum-echo workflow")
-        # size to the screen, never past it: on a laptop the fixed 1180x820
-        # spilled off-screen and the layout minimum made shrinking impossible
-        w, h = 1180, 820
-        scr = self.screen()
-        if scr is not None:
-            avail = scr.availableGeometry()
-            w = min(w, avail.width() - 60)
-            h = min(h, avail.height() - 80)
-        self.resize(max(720, w), max(500, h))
-        self.setMinimumSize(720, 500)
+        # freely resizable: each stage sits in a scroll area, so no layout
+        # minimum can ever block shrinking; the size the user leaves the
+        # dialog at is remembered and restored on the next open
+        self.setMinimumSize(480, 360)
         self.setSizeGripEnabled(True)
+        restored = False
+        if not os.environ.get("LARMOR_NO_SESSION"):
+            try:
+                from PySide6.QtCore import QSettings
+                geo = QSettings("LARMOR", "app").value("qcpmgDialogGeometry")
+                if geo is not None:
+                    restored = bool(self.restoreGeometry(geo))
+            except Exception:
+                restored = False
+        if not restored:
+            w, h = 1080, 760
+            scr = self.screen()
+            if scr is not None:
+                avail = scr.availableGeometry()
+                w = min(w, avail.width() - 80)
+                h = min(h, avail.height() - 100)
+            self.resize(max(640, w), max(480, h))
         self.source = source
         self.fid = None
         self.meta: dict = {}
@@ -122,12 +144,13 @@ class QcpmgDialog(QDialog):
         v.addLayout(top)
 
         self.tabs = QTabWidget()
-        self.tabs.addTab(self._build_stage1(), "1 · Train && split")
-        self.tabs.addTab(self._build_stage2(), "2 · Echo && top")
-        self.tabs.addTab(self._build_stage3(), "3 · Decay && T₂")
-        self.tabs.addTab(self._build_stage4(), "4 · Apodization")
-        self.tabs.addTab(self._build_stage5(), "5 · Spectrum")
-        self.tabs.addTab(self._build_stage6(), "6 · Measure")
+        self.tabs.tabBar().setUsesScrollButtons(True)   # 6 tabs, narrow window
+        self.tabs.addTab(_scrolled(self._build_stage1()), "1 · Train && split")
+        self.tabs.addTab(_scrolled(self._build_stage2()), "2 · Echo && top")
+        self.tabs.addTab(_scrolled(self._build_stage3()), "3 · Decay && T₂")
+        self.tabs.addTab(_scrolled(self._build_stage4()), "4 · Apodization")
+        self.tabs.addTab(_scrolled(self._build_stage5()), "5 · Spectrum")
+        self.tabs.addTab(_scrolled(self._build_stage6()), "6 · Measure")
         v.addWidget(self.tabs, 1)
 
         # typing '293' digit by digit must not act on the intermediate '29':
@@ -429,6 +452,18 @@ class QcpmgDialog(QDialog):
             self._autophase()
 
     # ------------------------------------------------------------ plumbing
+    def done(self, r: int):
+        """Every way the dialog closes (X, Esc, Send) funnels through here:
+        remember the size/position the user chose for the next open."""
+        if not os.environ.get("LARMOR_NO_SESSION"):
+            try:
+                from PySide6.QtCore import QSettings
+                QSettings("LARMOR", "app").setValue("qcpmgDialogGeometry",
+                                                    self.saveGeometry())
+            except Exception:
+                pass
+        super().done(r)
+
     def _queue(self, *_):
         if not self._loading and self.fid is not None:
             self._timer.start()

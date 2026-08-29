@@ -271,3 +271,53 @@ def test_dialog_fits_the_screen_and_can_be_shrunk(qapp, tmp_path):
     qapp.processEvents()
     assert d.width() <= 800 and d.height() <= 620
     d.close()
+
+
+def test_dialog_shrinks_far_below_the_old_floor(qapp, tmp_path):
+    """Stages sit in scroll areas now, so no layout minimum can stop the user
+    from making the window as small as they like (content scrolls instead)."""
+    d = _dialog_with(qapp, _synthetic_qcpmg(tmp_path))
+    d.show()
+    qapp.processEvents()
+    d.resize(520, 400)
+    qapp.processEvents()
+    assert d.width() <= 560 and d.height() <= 440
+    d.close()
+
+
+def test_dialog_remembers_the_size_the_user_chose(qapp, tmp_path, monkeypatch):
+    """The size/position the dialog is closed at comes back on the next open
+    (gated on LARMOR_NO_SESSION so tests do not pollute real settings)."""
+    from PySide6.QtCore import QSettings
+
+    s = QSettings("LARMOR", "app")
+    old = s.value("qcpmgDialogGeometry")
+    monkeypatch.delenv("LARMOR_NO_SESSION", raising=False)
+    try:
+        d = _dialog_with(qapp, _synthetic_qcpmg(tmp_path))
+        d.show(); qapp.processEvents()
+        d.resize(804, 604); qapp.processEvents()
+        d.done(0)
+        d2 = _dialog_with(qapp, _synthetic_qcpmg(tmp_path))
+        d2.show(); qapp.processEvents()
+        # the platform may re-clamp by a few frame pixels; the point is that
+        # the user's chosen size comes back, not the built-in default
+        assert abs(d2.width() - 804) <= 10 and abs(d2.height() - 604) <= 10
+        d2.done(0)
+    finally:
+        if old is None:
+            s.remove("qcpmgDialogGeometry")
+        else:
+            s.setValue("qcpmgDialogGeometry", old)
+
+
+def test_fields_dialog_table_is_visible_at_default_size(qapp):
+    """The infinite-field dialog's per-field table was squeezed to ~1.5 rows
+    by the plot's fixed minimum; it must get real height from the start."""
+    from larmor.desktop.qcpmg_fields_dialog import QcpmgFieldsDialog
+
+    d = QcpmgFieldsDialog(None, "35Cl")
+    d.show()
+    qapp.processEvents()
+    assert d.table.height() >= 140
+    d.close()

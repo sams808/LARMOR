@@ -954,3 +954,52 @@ def test_mixed_model_recipe_gets_one_cell_per_own_parameter(qapp):
                 assert cell is not None, f"row {name} missing cell for {key}"
             else:
                 assert cell is None, f"row {name} has a spurious {key} cell"
+
+
+def test_dataset_info_text_reads_like_topspin_title_page(qapp):
+    """Right-click > Dataset info on an EXPNO: the acquisition summary plus
+    the FULL title text (the summary alone shows only its first line)."""
+    from pathlib import Path
+
+    from larmor.desktop import explorer
+    expno = Path(__file__).resolve().parents[1] / "examples" / "pCABS2-4" / "3616"
+    if not expno.exists():
+        pytest.skip("example data not present")
+    text = explorer.ExplorerPanel.dataset_info_text(str(expno))
+    assert "27Al" in text and "zg" in text
+    assert "MASR" in text                      # spinning rate is on the page
+    assert "MAS=26 kHz" in text                # a later line of the full title
+
+
+def test_datasets_panel_rows_show_detail_and_offer_color(qapp):
+    from PySide6.QtWidgets import QLabel
+
+    from larmor.desktop.datasets import DatasetsPanel
+
+    p = DatasetsPanel()
+    got = {}
+    p.color_changed.connect(lambda i, c: got.update(i=i, c=c))
+    p.rebuild("pCABS2-4", [
+        {"label": "35Cl_2025-12 · 1", "color": "#e8832a", "visible": True,
+         "source": "C:/x/1/pdata/1/1r", "nucleus": "35Cl",
+         "larmor_MHz": 78.354, "npts": 4096, "title": "conditions OK"},
+        {"label": "bare", "color": "#1f77b4", "visible": True, "source": ""},
+    ], active_detail="35Cl · 78.4 MHz · 4096 pts")
+    joined = " | ".join(w.text() for w in p._host.findChildren(QLabel))
+    assert "78.4 MHz" in joined                 # active detail line
+    assert "35Cl" in joined and "4096 pts" in joined
+    assert "bare" in joined                     # detail-less overlay still fine
+    # the swatch is a button that emits color_changed (picker itself is modal,
+    # so emit directly to prove the wiring)
+    p.color_changed.emit(1, "#123456")
+    assert got == {"i": 1, "c": "#123456"}
+
+
+def test_datasets_panel_empty_state_hints(qapp):
+    from PySide6.QtWidgets import QLabel
+
+    from larmor.desktop.datasets import DatasetsPanel
+    p = DatasetsPanel()
+    p.rebuild("something", [])
+    texts = " ".join(w.text() for w in p._host.findChildren(QLabel))
+    assert "no comparison spectra" in texts
