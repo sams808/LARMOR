@@ -327,12 +327,21 @@ class QcpmgDialog(QDialog):
         self.norm.currentIndexChanged.connect(self._redraw_spec)
         self.zf = QComboBox(); self.zf.addItems(["2", "4", "8", "16", "32"])
         self.zf.setCurrentText("16"); self.zf.currentIndexChanged.connect(self._queue)
+        self.magMode = QCheckBox("magnitude (mc)")
+        self.magMode.setToolTip(
+            "TopSpin's 'mc': plot |spectrum|, which needs no phase at all — "
+            "phase-independent by construction — for a phase error that is "
+            "not a polynomial, or as a cross-check on a p2-phased spectrum. "
+            "For a WHOLE echo it costs no width (the ×√3 penalty applies to "
+            "one-sided FIDs); the rectified noise floor is subtracted")
+        self.magMode.toggled.connect(self._on_mag_toggled)
         self.btnSaveDs = QPushButton("Save as dataset…")
         self.btnSaveDs.setToolTip(
             "write the processed sum-echo spectrum as a LARMOR .csv dataset — "
             "openable, overlayable and fittable like any other spectrum")
         self.btnSaveDs.clicked.connect(self._save_dataset)
-        lv.addWidget(_row(self.showSum, self.showSpk, "  scale", self.norm,
+        lv.addWidget(_row(self.showSum, self.showSpk, "  ", self.magMode,
+                          "  scale", self.norm,
                           "  zero-fill ×", self.zf, "   ", self.btnSaveDs))
         self.p0 = QDoubleSpinBox(); self.p0.setRange(-720, 720)
         self.p0.setDecimals(2); self.p0.setWrapping(True)
@@ -341,12 +350,21 @@ class QcpmgDialog(QDialog):
         self.p1.setDecimals(2); self.p1.valueChanged.connect(self._rephase)
         self.p1.setToolTip("rarely needed — a correct whole-echo transform is "
                            "already near-pure absorption, so p0 alone usually does it")
+        self.p2 = QDoubleSpinBox(); self.p2.setRange(-36000, 36000)
+        self.p2.setDecimals(2); self.p2.valueChanged.connect(self._rephase)
+        self.p2.setToolTip(
+            "second-order (quadratic) phase, in degrees at the ends of the "
+            "axis. A frequency-swept refocusing pulse (WURST/chirp, e.g. "
+            "WCPMG) imprints exactly this and NO p0/p1 can remove it — "
+            "Autophase adds it automatically when it helps")
         self.pstep = QDoubleSpinBox(); self.pstep.setRange(0.01, 90.0)
         self.pstep.setDecimals(2); self.pstep.setValue(1.0)
         self.pstep.setToolTip("phase increment per click/scroll")
         self.pstep.valueChanged.connect(self._set_pstep)
-        bAuto = QPushButton("Autophase"); bAuto.clicked.connect(self._autophase)
-        lv.addWidget(_row("p0", self.p0, "p1", self.p1, "step", self.pstep, bAuto))
+        self.btnAutophase = QPushButton("Autophase")
+        self.btnAutophase.clicked.connect(self._autophase)
+        lv.addWidget(_row("p0", self.p0, "p1", self.p1, "p2", self.p2,
+                          "step", self.pstep, self.btnAutophase))
         self.p_spec = _plot("QCPMG spectrum", ppm_axis=True, parent=self)
         lv.addWidget(self.p_spec, 1)
         self.lbl5 = QLabel(""); self.lbl5.setWordWrap(True)
@@ -437,8 +455,12 @@ class QcpmgDialog(QDialog):
             self._cg = self._sigma = self._fwhm = None
             self._ppm = self._spec = self._spec_raw = None
             self._spk_ppm = self._spk = None
-            for w in (self.lb, self.gb, self.p0, self.p1):
+            for w in (self.lb, self.gb, self.p0, self.p1, self.p2):
                 w.blockSignals(True); w.setValue(0.0); w.blockSignals(False)
+            self.magMode.blockSignals(True)
+            self.magMode.setChecked(False)
+            self.magMode.blockSignals(False)
+            self._on_mag_toggled(False)
             self.dropFirst.blockSignals(True)
             self.dropFirst.setValue(0)
             self.dropFirst.blockSignals(False)
@@ -761,9 +783,19 @@ class QcpmgDialog(QDialog):
             _log.exception("QCPMG recompute failed")
             # do not leave a stale spectrum reachable behind a new, bad setting
             self._ppm = self._spec = self._spec_raw = None
+            self._spk_ppm = self._spk = None
             self._cg = self._sigma = self._fwhm = None
             for w in (self.btnCsv, self.btnSend, self.btnFig):
                 w.setEnabled(False)
+            # the plots and the stage-5/6 labels would otherwise keep showing
+            # the LAST good spectrum while every control says something else
+            for pw in (self.p_spec, self.p_measure):
+                pw.clear()
+            self.p_measure.addItem(self.region)
+            self.p_measure.addItem(self.cgLine)
+            self.cgLine.setVisible(False)
+            for lb in (self.lbl5, self.lbl6):
+                lb.setText("")
             self.lbl1.setText(f"cannot process: {exc}")
             self.lbl1.setStyleSheet(f"color: {theme.active().model};")
             self._update_headline()
@@ -839,10 +871,16 @@ class QcpmgDialog(QDialog):
         from larmor import qcpmg
         if self._spec_raw is None:
             return
-        if self.p0.value() or self.p1.value():
-            self._phased = True
-        self._spec = qcpmg.phase_spectrum(
-            self._spec_raw, self.p0.value(), self.p1.value()).real
+        if self.magMode.isChecked():
+            # |spectrum| is phase-independent by construction; the floor
+            # subtraction keeps the rectified noise from dragging delta_CG
+            self._spec = qcpmg.magnitude_spectrum(self._spec_raw)
+        else:
+            if self.p0.value() or self.p1.value() or self.p2.value():
+                self._phased = True
+            self._spec = qcpmg.phase_spectrum(
+                self._spec_raw, self.p0.value(), self.p1.value(),
+                p2_deg=self.p2.value()).real
         self._redraw_spec()
         if self._window_user:
             self._measure()          # keep the window the user placed
@@ -871,8 +909,21 @@ class QcpmgDialog(QDialog):
         # p0 ONLY; a large p1 means the echo top is off by a fraction of a
         # dwell (usually a slightly wrong period), and the mixed-in dispersion
         # shows up as negative dips flanking the line
+        if self.magMode.isChecked():
+            self.lbl5.setText(
+                f"{' ⊕ '.join(shown) or 'nothing shown'} · <b>magnitude "
+                f"(mc)</b> · scale {mode} · zero-fill ×{self.zf.currentText()}"
+                f" · carrier {self._carrier:.2f} ppm{ref}"
+                f"<br><span style='color:{t.text_dim}'>no phase needed, and "
+                f"for a whole echo no width penalty either (the ×√3 rule is "
+                f"for one-sided FIDs). The rectified noise floor is "
+                f"subtracted, so a genuinely negative feature would fold "
+                f"upward unseen — cross-check against a p2-phased "
+                f"spectrum.</span>")
+            self._update_headline()
+            return
         p1warn = ""
-        if self._phased and abs(self.p1.value()) > 200.0:
+        if self._phased and abs(self.p1.value()) > 200.0 and not self.p2.value():
             p1warn = (f"<br><span style='color:{t.model}'>⚠ |p1| = "
                       f"{abs(self.p1.value()):.0f}° — an echo top that falls "
                       f"between samples legitimately needs up to ±180°, but "
@@ -882,16 +933,27 @@ class QcpmgDialog(QDialog):
         self.lbl5.setText(
             f"{' ⊕ '.join(shown) or 'nothing shown'} · scale {mode} · "
             f"zero-fill ×{self.zf.currentText()} · p0 {self.p0.value():.1f}° "
-            f"p1 {self.p1.value():.1f}° · carrier {self._carrier:.2f} ppm{ref}"
+            f"p1 {self.p1.value():.1f}°"
+            + (f" p2 {self.p2.value():.0f}°" if self.p2.value() else "")
+            + f" · carrier {self._carrier:.2f} ppm{ref}"
             + p1warn)
         self._update_headline()
+
+    def _on_mag_toggled(self, on: bool):
+        for w in (self.p0, self.p1, self.p2, self.pstep, self.btnAutophase):
+            w.setEnabled(not on)
+        # the sum-echo box governs the plotted trace: never call it
+        # "absorption" while |spectrum| is what is drawn
+        self.showSum.setText("sum echo (magnitude — mc)" if on
+                             else "sum echo (absorption — fit this)")
+        self._rephase()
 
     def _autophase(self):
         from larmor import qcpmg
         if self._spec_raw is None:
             return
-        p0, p1 = qcpmg.autophase(self._spec_raw)
-        for w, val in ((self.p0, p0), (self.p1, p1)):
+        p0, p1, p2 = qcpmg.autophase_best(self._spec_raw)
+        for w, val in ((self.p0, p0), (self.p1, p1), (self.p2, p2)):
             w.blockSignals(True); w.setValue(val); w.blockSignals(False)
         self._phased = True
         self._rephase()
@@ -923,13 +985,14 @@ class QcpmgDialog(QDialog):
         self.p_measure.plot(self._ppm, self._spec,
                             pen=pg.mkPen(t.experiment, width=1.4))
         lo, hi = self.region.getRegion()
-        if not self._phased:
+        if not (self._phased or self.magMode.isChecked()):
             self._cg = self._sigma = self._fwhm = None
             self.cgLine.setVisible(False)      # no stale number on the plot
             self.lbl6.setText(
                 f"<span style='color:{t.model}'>phase the spectrum first "
-                f"(stage 5 → Autophase) — δCG and FWHM measured on an unphased "
-                f"spectrum are meaningless.</span>")
+                f"(stage 5 → Autophase), or switch stage 5 to magnitude (mc) "
+                f"— δCG and FWHM measured on an unphased spectrum are "
+                f"meaningless.</span>")
             self._update_headline()
             return
         cg, sigma = qcpmg.centre_of_gravity(self._ppm, self._spec, (hi, lo),
@@ -953,6 +1016,7 @@ class QcpmgDialog(QDialog):
             f"<b>δCG = {cg:.1f} ± {sigma:.1f} ppm</b> &nbsp;·&nbsp; "
             f"<b>FWHM = {fw:,.0f} Hz</b> ({fw / sfo:.1f} ppm) &nbsp;·&nbsp; "
             f"window {max(lo, hi):.1f} … {min(lo, hi):.1f} ppm"
+            + (f"<br><span style='color:{t.text_dim}'>measured on the magnitude spectrum (no width penalty for a whole echo, but negative features fold upward)</span>" if self.magMode.isChecked() else "")
             + (f"<br><span style='color:{t.model}'>the window is sensitive — "
                f"drag its edges onto the first minima either side of the "
                f"central band</span>" if sloppy else ""))
@@ -963,7 +1027,8 @@ class QcpmgDialog(QDialog):
         if self.t2 is not None and self.t2.ok:
             bits.append(f"T₂ {self.t2.T2_s * 1e3:.2f} ms · LB {self.t2.lb_Hz:,.0f} Hz")
         if getattr(self, "_cg", None) is not None:
-            bits.append(f"δCG {self._cg:.1f} ± {self._sigma:.1f} ppm")
+            bits.append(f"δCG {self._cg:.1f} ± {self._sigma:.1f} ppm"
+                        + (" (mc)" if self.magMode.isChecked() else ""))
             bits.append(f"FWHM {self._fwhm:,.0f} Hz")
         self.res.setText("   ·   ".join(bits))
 
@@ -992,7 +1057,8 @@ class QcpmgDialog(QDialog):
             "larmor_MHz": self.meta.get("larmor_MHz", 0.0),
             "spin_rate_Hz": 0.0,
             "sample": (title[0] if title else "")
-            + f" · QCPMG sum echo (LB {self.lb.value():,.0f} Hz)"})
+            + f" · QCPMG sum echo (LB {self.lb.value():,.0f} Hz"
+            + (", magnitude)" if self.magMode.isChecked() else ")")})
         self.res.setText(f"dataset written — {Path(path).name}")
 
     def _send_infinite(self):
@@ -1003,16 +1069,19 @@ class QcpmgDialog(QDialog):
         if self._spec is None or self._ppm is None:
             self.res.setText("nothing to send — process a train first")
             return
-        if not self._phased:
-            self.res.setText("phase the spectrum first (stage 5 → Autophase) "
-                             "— δcg on an unphased spectrum is meaningless")
+        mag = self.magMode.isChecked()
+        if not (self._phased or mag):
+            self.res.setText("phase the spectrum first (stage 5 → Autophase), "
+                             "or switch stage 5 to magnitude (mc) — δcg on an "
+                             "unphased spectrum is meaningless")
             return
         from larmor.desktop.qcpmg_fields_dialog import shared_fields_dialog
         dlg = shared_fields_dialog(self.parent(),
                                    self.meta.get("nucleus", ""))
         dlg.add_dataset_spectrum(
             float(self.meta.get("larmor_MHz", 0.0) or 0.0),
-            self._ppm, self._spec, window=self.region.getRegion())
+            self._ppm, self._spec, window=self.region.getRegion(),
+            magnitude=mag)
         dlg.show(); dlg.raise_(); dlg.activateWindow()
         self.res.setText("sent to infinite-field δiso — process the other "
                          "field's dataset and send it too, then Compute there")
@@ -1078,8 +1147,10 @@ class QcpmgDialog(QDialog):
             ax_sp.plot(self._ppm, a, color="black", lw=1.0, label="sum echo")
             ax_sp.legend(fontsize=7, frameon=False)
             ax_sp.invert_xaxis()
-            ax_sp.set_title(f"LB {self.lb.value():,.0f} Hz · GB "
-                            f"{self.gb.value():,.0f} Hz", fontsize=9)
+            ax_sp.set_title(
+                f"LB {self.lb.value():,.0f} Hz · GB {self.gb.value():,.0f} Hz"
+                + (" · magnitude" if self.magMode.isChecked() else ""),
+                fontsize=9)
 
             ax_ms.plot(self._ppm, a, color="black", lw=1.0)
             lo, hi = self.region.getRegion()
@@ -1090,8 +1161,9 @@ class QcpmgDialog(QDialog):
             if self._cg is not None:
                 ax_ms.axvline(self._cg, color="#c0392b", lw=1.0, ls="--")
                 title = (f"δ$_{{CG}}$ = {self._cg:.1f} ± {self._sigma:.1f} "
-                         f"ppm · FWHM = {self._fwhm:,.0f} Hz")
-            ax_ms.set_title(title or "central band (unphased — no numbers)",
+                         f"ppm · FWHM = {self._fwhm:,.0f} Hz"
+                         + (" (magnitude)" if self.magMode.isChecked() else ""))
+            ax_ms.set_title(title or "central band (phase it first)",
                             fontsize=9)
             pad = 0.5 * abs(hi - lo)
             ax_ms.set_xlim(max(lo, hi) + pad, min(lo, hi) - pad)
@@ -1173,6 +1245,7 @@ class QcpmgDialog(QDialog):
         lines += [
             f"# LB_applied_Hz={self.lb.value():.9g}  GB_applied_Hz={self.gb.value():.9g}",
             f"# t2_weighted={self.t2w.isChecked()}  zerofill={self.zf.currentText()}",
+            f"# spectrum_mode={'magnitude(mc)' if self.magMode.isChecked() else 'absorption'}",
             f"# p0_deg={self.p0.value():.9g}  p1_deg={self.p1.value():.9g}",
             f"# carrier_ppm={self._carrier:.9g}  referenced={self._referenced}",
         ]
@@ -1191,6 +1264,18 @@ class QcpmgDialog(QDialog):
         self._flush()
         if self._ppm is None or self._spec is None:
             return
+        if self.magMode.isChecked():
+            from PySide6.QtWidgets import QMessageBox
+            if QMessageBox.warning(
+                    self, "Magnitude spectrum",
+                    "This is a magnitude (mc) spectrum. For a whole echo it "
+                    "closely matches the absorption lineshape, so a fit is "
+                    "usually sound — but |spectrum| folds any negative "
+                    "feature upward and its noise is rectified, which biases "
+                    "the wings and the baseline.\n\nSend it anyway?",
+                    QMessageBox.Yes | QMessageBox.Cancel,
+                    QMessageBox.Cancel) != QMessageBox.Yes:
+                return
         meta = {
             "expno": self.meta.get("expno", ""),
             "title": (self.meta.get("title", "").splitlines() or ["QCPMG"])[0]
@@ -1204,11 +1289,13 @@ class QcpmgDialog(QDialog):
             "qcpmg_period_pts": self.period.value(),
             "qcpmg_echo_top": self.top.value(),
             "qcpmg_realign": self.chkRealign.isChecked(),
+            "qcpmg_magnitude": self.magMode.isChecked(),
             "qcpmg_n_echoes": self.nEch.value(),
             "qcpmg_lb_Hz": self.lb.value(),
             "qcpmg_gb_Hz": self.gb.value(),
-            "qcpmg_p0_deg": self.p0.value(),
-            "qcpmg_p1_deg": self.p1.value(),
+            "qcpmg_p0_deg": 0.0 if self.magMode.isChecked() else self.p0.value(),
+            "qcpmg_p2_deg": 0.0 if self.magMode.isChecked() else self.p2.value(),
+            "qcpmg_p1_deg": 0.0 if self.magMode.isChecked() else self.p1.value(),
             "qcpmg_carrier_ppm": self._carrier,
             "qcpmg_referenced": self._referenced,
         }

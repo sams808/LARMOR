@@ -15,6 +15,7 @@
 |---|---|---|---|
 | **Sum echo** (absorption) | split the train, coadd the echoes, process one echo | high | ✅ **yes** — a continuous powder lineshape |
 | **Spikelets** | Fourier-transform the whole train | spectacular | ❌ no — a comb with no lineshape *between* spikes |
+| **Sum echo, magnitude (mc)** | as above, then \|spectrum\| | high | ❌ no — but the only option when the pattern cannot be phased |
 | **Both, overlaid** | Stage 5, tick both | — | the validation: the envelope must trace the spikelet tops |
 
 The spikelet **maxima** trace the powder pattern, but a smooth model cannot fit
@@ -122,7 +123,49 @@ spectrum, so before/after are directly comparable.
 
 Sum echo and spikelets, **independently toggleable** — tick both for the
 overlay. A correct whole-echo transform is already near-pure absorption, so
-**p0 alone is normally enough**; p1 is there for the rare case.
+**p0 alone is normally enough**.
+
+A large p1 is a *diagnostic*, not a nuisance. An echo top that falls between
+two samples needs a first-order phase to compensate it exactly, and up to
+±180° is legitimate (a −0.76-dwell top on a real ⁸¹Br train needed +148°).
+Beyond about ±200°, the period or the top is genuinely wrong: go back to
+stage 1 (**Find period**) and stage 2 (**Auto**).
+
+#### When p0/p1 is not enough: the second-order phase
+
+A **frequency-swept refocusing pulse** — WURST or chirp, as in WURST-CPMG
+(`WCPMG`) — imprints a *quadratic* phase across the swept band. That is
+invisible to p0 and p1, so a spectrum that looks hopeless under ordinary
+phasing is usually not: it needs a **p2** term.
+
+On a real ⁸¹Br WCPMG dataset (2 MHz sweep, pattern ~400 kHz wide) the best
+p0/p1 phasing still left −47 % negative dips and a meaningless δ_CG of
+−94 ppm. Adding p2 takes the dips to **−3.8 %** and gives δ_CG = −314 ppm.
+**Autophase fits p2 automatically** and keeps it only when it genuinely
+helps, so an ordinary echo still reports p2 = 0.
+
+#### Magnitude (mc)
+
+Ticking **magnitude (mc)** plots |spectrum| — TopSpin's `mc` — which is
+phase-independent by construction. Use it when a phase error cannot be
+written as a polynomial at all, or as a cross-check: on the ⁸¹Br sample above
+magnitude gives δ_CG = −310 ppm against the p2-phased −314 ppm, which is the
+agreement that makes both trustworthy.
+
+Two things to know, and one common myth to drop:
+
+- **Magnitude does *not* cost you ×√3 in width here.** That factor applies to
+  a *causal* (one-sided) FID, where absorption and dispersion are Hilbert
+  partners. A whole echo is symmetric about t = 0, so its ideal spectrum is
+  **real** and |spectrum| simply recovers the absorption lineshape — measured
+  widening 1.000 through LARMOR's own transform, against 1.70 for the same
+  linewidth from a one-sided FID.
+- **The rectified noise floor is subtracted**, estimated from the two *edges*
+  of the spectrum (never the median of the whole trace, which stops being a
+  floor once a wide pattern fills the window — that mistake moved a real
+  δ_CG by 44 ppm).
+- **The sign is what you lose.** |spectrum| ≥ 0 before the floor subtraction,
+  so a genuinely negative feature folds upward and cannot be recognised.
 
 The ppm axis uses the **processing reference** (`SF` from `procs`), i.e. the
 same zero TopSpin puts on the axis. If `procs` is missing, the readout warns

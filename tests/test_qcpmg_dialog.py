@@ -442,3 +442,123 @@ def test_load_verifies_a_guessed_period_against_the_data(qapp, tmp_path,
     assert d._period_src == "echo correlation"
     assert "MEASURED from the data" in d.lbl1.text()
     d.close()
+
+
+def test_magnitude_mode_needs_no_phase_and_unlocks_stage6(qapp, tmp_path):
+    """'magnitude (mc)': the phase controls go dead (they mean nothing), the
+    trace becomes |spectrum| with its floor removed, and stage 6 measures
+    without demanding a phase first."""
+    from larmor import qcpmg
+
+    d = _dialog_with(qapp, _synthetic_qcpmg(tmp_path))
+    d._phased = False
+    d._measure()
+    assert d._cg is None and "phase the spectrum first" in d.lbl6.text()
+
+    d.magMode.setChecked(True)
+    assert not d.p0.isEnabled() and not d.btnAutophase.isEnabled()
+    assert not d.p2.isEnabled()
+    assert "magnitude" in d.showSum.text()      # never call it "absorption"
+    assert np.allclose(d._spec, qcpmg.magnitude_spectrum(d._spec_raw))
+    assert "magnitude (mc)" in d.lbl5.text()
+    d._measure()
+    assert d._cg is not None                      # measured without phasing
+    assert "magnitude spectrum" in d.lbl6.text()
+
+    # a phase change must not alter a magnitude trace
+    before = d._spec.copy()
+    d.p0.setValue(55.0)
+    d._rephase()
+    assert np.allclose(d._spec, before)
+
+    d.magMode.setChecked(False)
+    assert d.p0.isEnabled() and d.btnAutophase.isEnabled() and d.p2.isEnabled()
+    assert "absorption" in d.showSum.text()
+    d.close()
+
+
+def test_magnitude_mode_is_recorded_and_reset(qapp, tmp_path, monkeypatch):
+    """The mode travels with the result (provenance + CSV) and does not leak
+    into the next dataset."""
+    from PySide6.QtWidgets import QApplication, QMessageBox
+    from larmor.io import bruker
+
+    d = _dialog_with(qapp, _synthetic_qcpmg(tmp_path))
+    d.magMode.setChecked(True)
+    monkeypatch.setattr(QMessageBox, "warning",
+                        staticmethod(lambda *a, **k: QMessageBox.Yes))
+    got = {}
+    d.accepted_1d.connect(lambda p, a, m: got.update(meta=m))
+    d._send()
+    assert got["meta"]["qcpmg_magnitude"] is True
+    d._copy_csv()
+    assert "spectrum_mode=magnitude(mc)" in QApplication.clipboard().text()
+
+    class _Other:
+        domain, ndim = "time", 1
+        data = _synthetic_qcpmg(tmp_path)
+        meta = {"sw_Hz": 50000.0, "larmor_MHz": 78.0, "nucleus": "35Cl",
+                "title": "next", "expno": "2"}
+    monkeypatch.setattr(bruker, "read", lambda _s: _Other())
+    d._load(str(tmp_path / "2" / "fid"))
+    assert not d.magMode.isChecked()               # a fresh sample, fresh mode
+    assert d.p0.isEnabled()
+    d.close()
+
+
+def test_second_order_phase_is_offered_and_applied(qapp, tmp_path):
+    """Stage 5 exposes p2 and applies it; Autophase fills it only when the
+    spectrum needs it (a swept-pulse chirp), leaving it 0 otherwise."""
+    from larmor import qcpmg
+
+    d = _dialog_with(qapp, _synthetic_qcpmg(tmp_path))
+    d.p2.setValue(120.0)
+    d._rephase()
+    assert np.allclose(d._spec, qcpmg.phase_spectrum(
+        d._spec_raw, d.p0.value(), d.p1.value(), p2_deg=120.0).real)
+    assert "p2 120" in d.lbl5.text()
+    assert d._phased                             # p2 alone counts as phased
+
+    d.p2.setValue(0.0)
+    d._autophase()                               # an ordinary echo
+    assert d.p2.value() == 0.0
+    d.close()
+
+
+def test_infinite_field_handoff_records_the_mode(qapp, tmp_path):
+    """A magnitude δcg and an absorption δcg are different observables; the
+    multi-field table must know which is which and say so."""
+    from larmor.desktop import qcpmg_fields_dialog as qfd
+
+    qfd._shared = None
+    try:
+        d = _dialog_with(qapp, _synthetic_qcpmg(tmp_path))
+        d._autophase()
+        d._send_infinite()                       # absorption
+        d.magMode.setChecked(True)
+        d.meta["larmor_MHz"] = 160.0
+        d._send_infinite()                       # magnitude
+        shared = qfd._shared
+        modes = [v.get("magnitude") for v in shared._ds.values()]
+        assert modes == [False, True]
+        assert "mix magnitude" in shared.wresult.text()
+        shared.close()
+        d.close()
+    finally:
+        qfd._shared = None
+
+
+def test_failed_recompute_leaves_no_stale_trace(qapp, tmp_path):
+    """After a failure the plots and stage labels must not keep showing the
+    last good spectrum while the controls describe something else."""
+    d = _dialog_with(qapp, _synthetic_qcpmg(tmp_path))
+    assert d._spec is not None
+    d.period.setValue(d.fid.size * 2)            # a period longer than the train
+    d._flush()
+    assert d._spec is None and d._spec_raw is None
+    assert not d.btnSend.isEnabled()
+    assert d.lbl5.text() == "" and d.lbl6.text() == ""
+    assert not d.p_spec.getPlotItem().listDataItems()
+    d.magMode.setChecked(True)                   # must not redraw dead data
+    assert d._spec is None
+    d.close()

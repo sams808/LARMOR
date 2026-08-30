@@ -153,6 +153,53 @@ def find_period_by_correlation(fid: np.ndarray, min_period: int = 8
     return pick, period_correlation(x, pick)
 
 
+#: widening of a MAGNITUDE line relative to its absorption part, for a CAUSAL
+#: (one-sided) FID, where absorption and dispersion are Hilbert partners:
+#: |L| = 1/sqrt(1+x^2) halves at x = sqrt(3), the absorption 1/(1+x^2) at
+#: x = 1. It does NOT apply to whole-echo processing -- see
+#: :func:`magnitude_spectrum`.
+MAGNITUDE_LORENTZ_WIDENING = 3.0 ** 0.5
+
+
+def noise_floor(y: np.ndarray, edge_frac: float = 0.10) -> float:
+    """Baseline level estimated from the two EDGES of a spectrum, which are
+    signal-free in any sanely-referenced acquisition.
+
+    The median of the WHOLE trace is not a floor once the pattern occupies a
+    large fraction of the window -- exactly the wide-line case that matters
+    here. On a real 81Br pattern filling ~59 % of the axis the global median
+    came out 6.2x the true floor, and subtracting it moved delta_CG by 44 ppm.
+    """
+    y = np.asarray(y, float)
+    k = max(1, int(round(float(np.clip(edge_frac, 0.01, 0.49)) * y.size)))
+    return float(np.median(np.concatenate([y[:k], y[-k:]])))
+
+
+def magnitude_spectrum(spec: np.ndarray, *, subtract_floor: bool = True,
+                       edge_frac: float = 0.10) -> np.ndarray:
+    """|spectrum| -- TopSpin's ``mc`` -- with its rectified noise floor
+    removed (see :func:`noise_floor`).
+
+    Magnitude is phase-independent by construction, which makes it the
+    fallback whenever a phase error cannot be written as p0/p1 (a swept
+    WURST/chirp refocusing pulse imprints a QUADRATIC phase, for instance).
+
+    The usual objection -- that magnitude costs a factor sqrt(3) in width --
+    does NOT apply to a whole-echo spectrum. That factor comes from the
+    dispersion of a CAUSAL FID adding in quadrature; a whole echo is
+    symmetric about t = 0, so its ideal spectrum is REAL and |spec| simply
+    recovers the absorption lineshape (measured widening 1.000 through
+    :func:`whole_echo_ft`, against 1.70 for the same linewidth from a
+    one-sided FID). What magnitude really costs is the sign: rectification
+    turns zero-mean noise into a positive pedestal, and folds any genuinely
+    negative feature upward.
+    """
+    m = np.abs(np.asarray(spec))
+    if subtract_floor and m.size:
+        m = m - noise_floor(m, edge_frac)
+    return m
+
+
 def carrier_ppm(meta: dict) -> tuple[float, bool]:
     """Transmitter offset in ppm, correctly referenced, and whether it is.
 
@@ -564,6 +611,30 @@ class T2Fit:
         return self.const + self.coeff * np.exp(-t / self.T2_s)
 
 
+def autophase_best(spec: np.ndarray, *, gain: float = 0.25):
+    """(p0, p1, p2) using the LOWEST order that actually phases the spectrum.
+
+    Fits p0/p1, then p0/p1/p2, and keeps the quadratic term only when it
+    reduces the residual negative area by more than ``gain`` (25 %) -- so an
+    ordinary echo is phased exactly as before and reports p2 = 0, while a
+    frequency-swept (WURST/chirp) dataset gets the term it genuinely needs.
+    On a real WCPMG 81Br sample this took the negative dips from -47 % to
+    -3.8 %, and brought the phased delta_CG into agreement with the
+    magnitude-mode value (-314 vs -310 ppm) where p0/p1 alone gave -94.
+    """
+    def neg_frac(y: np.ndarray) -> float:
+        mx = float(np.abs(y).max()) or 1.0
+        return float(np.abs(y[y < 0]).sum()) / (y.size * mx)
+
+    p0, p1 = autophase(spec, order=1)
+    base = neg_frac(phase_spectrum(spec, p0, p1).real)
+    q0, q1, q2 = autophase(spec, order=2)
+    quad = neg_frac(phase_spectrum(spec, q0, q1, p2_deg=q2).real)
+    if base > 0 and quad < (1.0 - float(gain)) * base:
+        return float(q0), float(q1), float(q2)
+    return float(p0), float(p1), 0.0
+
+
 def matched_lb_Hz(T2_s: float) -> float:
     """The matched-filter Lorentzian broadening, LB = 1/(pi*T2)."""
     return 1.0 / (np.pi * T2_s) if T2_s and T2_s > 0 else 0.0
@@ -801,13 +872,22 @@ def sum_echo_spectrum(fid: np.ndarray, period: int, sw_Hz: float, sfo_MHz: float
 
 
 def phase_spectrum(spec: np.ndarray, p0_deg: float = 0.0, p1_deg: float = 0.0,
-                   pivot_frac: float = 0.5) -> np.ndarray:
-    """Apply a p0/p1 phase, with p1 pivoted at ``pivot_frac`` of the spectrum
+                   pivot_frac: float = 0.5, p2_deg: float = 0.0) -> np.ndarray:
+    """Apply a p0/p1/p2 phase, pivoted at ``pivot_frac`` of the spectrum
     (0.5 = centre, matching larmor.processing.op_phase). Pivoting on the left
-    edge instead makes p0 and p1 fight each other."""
+    edge instead makes the orders fight each other.
+
+    ``p2_deg`` is the SECOND-order (quadratic) term, in degrees at the ends of
+    the axis. A frequency-swept refocusing pulse (WURST/chirp, as in
+    WURST-CPMG) imprints exactly such a quadratic phase across the swept band,
+    and no amount of p0/p1 removes it: on a real WCPMG 81Br dataset the
+    residual negative dips fall from -47 % to about -4 % once p2 is allowed.
+    """
     n = np.asarray(spec).size
     ramp = np.arange(n) / max(n - 1, 1) - float(pivot_frac)
-    return spec * np.exp(-1j * (np.deg2rad(p0_deg) + np.deg2rad(p1_deg) * ramp))
+    phi = (np.deg2rad(p0_deg) + np.deg2rad(p1_deg) * ramp
+           + np.deg2rad(p2_deg) * (2.0 * ramp) ** 2)
+    return spec * np.exp(-1j * phi)
 
 
 def autophase0(spec: np.ndarray) -> float:
@@ -821,12 +901,16 @@ def autophase0(spec: np.ndarray) -> float:
     return float(np.degrees(ph[int(np.argmax(scores))]))
 
 
-def autophase(spec: np.ndarray) -> tuple[float, float]:
-    """Zero- and first-order phase (deg) for a mostly-absorptive lineshape.
+def autophase(spec: np.ndarray, order: int = 1):
+    """Phase (deg) for a mostly-absorptive lineshape.
 
     Minimises the area of the negative part of the real spectrum (a robust
     criterion for a powder pattern that should be all-positive), with a light
-    penalty on p1 to avoid runaway first-order twists. Returns (p0, p1).
+    penalty on p1 to avoid runaway first-order twists.
+
+    ``order=1`` returns (p0, p1) -- the default, unchanged. ``order=2``
+    returns (p0, p1, p2) and is what a frequency-swept (WURST/chirp)
+    refocusing pulse needs: its quadratic phase is invisible to p0/p1.
     """
     from scipy.optimize import minimize
 
@@ -835,9 +919,13 @@ def autophase(spec: np.ndarray) -> tuple[float, float]:
     ramp = np.arange(n) / max(n - 1, 1) - 0.5          # pivot at the centre
     norm = np.abs(spec).sum() or 1.0
 
+    quad = (2.0 * ramp) ** 2
+
     def penalty(ph):
-        p0, p1 = ph
-        r = np.real(spec * np.exp(-1j * (np.deg2rad(p0) + np.deg2rad(p1) * ramp)))
+        p0, p1 = ph[0], ph[1]
+        p2 = ph[2] if len(ph) > 2 else 0.0
+        r = np.real(spec * np.exp(-1j * (np.deg2rad(p0) + np.deg2rad(p1) * ramp
+                                         + np.deg2rad(p2) * quad)))
         # maximise (positive area - 4x negative area): minimising the negative
         # area ALONE is degenerate on a non-negative pattern -- it is flat over
         # a wide window of p0, so the optimiser could stop anywhere in it.
@@ -849,11 +937,17 @@ def autophase(spec: np.ndarray) -> tuple[float, float]:
 
     p0_0 = autophase0(spec)
     best = None
-    # a few p1 starts so we don't fall into a local twist
+    # a few p1 (and p2) starts so we don't fall into a local twist
+    p2_starts = (0.0,) if order < 2 else (0.0, 180.0, -180.0, 360.0, -360.0)
     for p1_0 in (0.0, 180.0, -180.0, 360.0, -360.0):
-        res = minimize(penalty, [p0_0, p1_0], method="Nelder-Mead",
-                       options={"xatol": 0.5, "fatol": 1e-4, "maxiter": 800})
-        if best is None or res.fun < best.fun:
-            best = res
+        for p2_0 in p2_starts:
+            x0 = [p0_0, p1_0] if order < 2 else [p0_0, p1_0, p2_0]
+            res = minimize(penalty, x0, method="Nelder-Mead",
+                           options={"xatol": 0.5, "fatol": 1e-4,
+                                    "maxiter": 800 * (2 if order > 1 else 1)})
+            if best is None or res.fun < best.fun:
+                best = res
     p0 = ((best.x[0] + 180) % 360) - 180
-    return float(p0), float(best.x[1])
+    if order < 2:
+        return float(p0), float(best.x[1])
+    return float(p0), float(best.x[1]), float(best.x[2])

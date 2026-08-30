@@ -163,7 +163,7 @@ class QcpmgFieldsDialog(QDialog):
                                 "\n".join(errors))
 
     def add_dataset_spectrum(self, larmor_MHz: float, ppm, amp,
-                             window=None) -> int:
+                             window=None, magnitude: bool = False) -> int:
         """Add one field's spectrum: δcg ± σ and FWHM are computed over the
         given window (or an automatic one) and written into a new row; the
         spectrum stays attached so selecting the row shows it for
@@ -180,13 +180,32 @@ class QcpmgFieldsDialog(QDialog):
             lo, hi = mid - span / 6.0, mid + span / 6.0
         self._ds_seq += 1
         ds_id = self._ds_seq
-        self._ds[ds_id] = {"ppm": ppm, "amp": amp, "window": (lo, hi)}
+        self._ds[ds_id] = {"ppm": ppm, "amp": amp, "window": (lo, hi),
+                           "magnitude": bool(magnitude)}
         self._add_row(larmor_MHz)
         r = self.table.rowCount() - 1
         self.table.item(r, 0).setData(Qt.UserRole, ds_id)
+        if magnitude:
+            it = self.table.item(r, 1)
+            if it is not None:
+                it.setToolTip("δcg measured on a MAGNITUDE (mc) spectrum")
         self._apply_ds_values(r, ds_id)
+        self._warn_mixed_modes()
         self.table.selectRow(r)
         return r
+
+    def _warn_mixed_modes(self):
+        """Sandland's extrapolation compares centres of gravity ACROSS
+        fields; one measured in magnitude and one in absorption are not the
+        same observable, so say so rather than fitting them together
+        silently."""
+        modes = {bool(d.get("magnitude")) for d in self._ds.values()}
+        if len(modes) > 1:
+            self.wresult.setText(
+                "<span style='color:#c0392b'>⚠ these fields mix magnitude "
+                "(mc) and absorption δcg values — they are different "
+                "observables; reprocess them the same way before "
+                "extrapolating.</span>")
 
     def _apply_ds_values(self, r: int, ds_id: int):
         from larmor import qcpmg

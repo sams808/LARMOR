@@ -596,3 +596,166 @@ def test_real_data_period_finder():
         d2 = bruker.read(str(br))
         p2, sc2 = qcpmg.find_period_by_correlation(np.asarray(d2.data, complex))
         assert p2 == 475 and sc2 > 0.9
+
+
+def test_magnitude_costs_no_width_on_a_whole_echo():
+    """THE correction: sqrt(3) is the widening of a CAUSAL (one-sided) FID,
+    where absorption and dispersion are Hilbert partners. A whole echo is
+    symmetric about t=0, so its spectrum is REAL and |spec| recovers the
+    absorption lineshape unchanged. The dialog told users the opposite."""
+    sw, sfo, per = 100000.0, 100.0, 512
+    t = np.arange(per) - per // 2
+    echo = np.exp(-np.abs(t) / 40.0).astype(complex)      # symmetric = whole
+    f, sp = qcpmg.whole_echo_ft(echo, per // 2, sw, sfo, zf=16)
+    hz = f * sfo
+
+    def fwhm(y):
+        i = np.where(y >= 0.5 * y.max())[0]
+        return abs(float(hz[i[-1]] - hz[i[0]]))
+
+    assert np.abs(sp.imag).max() / np.abs(sp.real).max() < 1e-3   # real
+    assert fwhm(np.abs(sp)) / fwhm(sp.real) == pytest.approx(1.0, abs=0.01)
+
+    # ... while the sqrt(3) IS right for the one-sided case the constant names
+    causal = np.fft.fftshift(np.fft.fft(np.exp(-np.arange(per) / 40.0) + 0j,
+                                        n=per * 16))
+    hz = np.fft.fftshift(np.fft.fftfreq(per * 16, 1.0 / sw))
+    assert fwhm(np.abs(causal)) / fwhm(causal.real) == pytest.approx(
+        qcpmg.MAGNITUDE_LORENTZ_WIDENING, rel=0.05)
+
+
+def test_magnitude_spectrum_removes_the_rectified_floor():
+    """Rectification turns zero-mean noise into a POSITIVE pedestal, which
+    drags an integrated centre of gravity toward the window centre. The floor
+    is estimated from the EDGES: the median of the whole trace stops being a
+    floor once a wide pattern fills the window (it over-estimated a real
+    81Br floor 6.2x and moved delta_CG by 44 ppm)."""
+    rng = np.random.default_rng(0)
+    noise = rng.normal(0, 1, 20000) + 1j * rng.normal(0, 1, 20000)
+    assert np.abs(noise).mean() > 1.0                     # the pedestal
+    assert abs(qcpmg.magnitude_spectrum(noise).mean()) < 0.15
+    assert qcpmg.magnitude_spectrum(noise, subtract_floor=False).mean() > 1.0
+    # a real line survives the subtraction
+    x = np.linspace(-100.0, 100.0, 4001)
+    line = np.exp(-((x - 10.0) / 3.0) ** 2).astype(complex)
+    m = qcpmg.magnitude_spectrum(line)
+    assert x[int(np.argmax(m))] == pytest.approx(10.0, abs=0.2)
+    assert m.max() == pytest.approx(1.0, abs=0.01)
+    # and a pattern filling most of the window is NOT eaten: the edge floor
+    # stays at the baseline where the global median would sit inside the line
+    wide = np.exp(-(x / 30.0) ** 2) + 0.02
+    assert qcpmg.noise_floor(wide) == pytest.approx(0.02, abs=0.005)
+    assert float(np.median(wide)) > 3 * qcpmg.noise_floor(wide)
+    kept = qcpmg.magnitude_spectrum(wide.astype(complex))
+    assert kept.max() == pytest.approx(1.0, abs=0.03)
+
+
+def test_magnitude_is_phase_independent():
+    """The whole point of mc: any p0/p1 leaves it unchanged."""
+    rng = np.random.default_rng(3)
+    spec = rng.normal(0, 1, 2000) + 1j * rng.normal(0, 1, 2000)
+    base = qcpmg.magnitude_spectrum(spec)
+    for p0, p1 in ((37.0, 0.0), (-120.0, 250.0), (0.0, -1000.0)):
+        rot = qcpmg.phase_spectrum(spec, p0, p1)
+        assert np.allclose(qcpmg.magnitude_spectrum(rot), base, atol=1e-9)
+
+
+@_needs_data
+def test_magnitude_rescues_an_unphaseable_real_pattern():
+    """The 81Br LAW4Ca line is wider than the refocusing bandwidth, so its
+    phase error is non-linear and no p0/p1 flattens it (the absorption
+    spectrum keeps ~-47 % dips, which wreck the delta_CG integral).
+    Magnitude needs no phase and gives a usable number."""
+    from larmor.io import bruker
+    src = _DATA.parent / "81Br_2026-08" / "34" / "fid"
+    if not src.exists():
+        pytest.skip("81Br dataset not on this machine")
+    d = bruker.read(str(src))
+    fid = np.asarray(d.data, complex)
+    sw, sfo = float(d.meta["sw_Hz"]), float(d.meta["larmor_MHz"])
+    per, _ = qcpmg.find_period_by_correlation(fid)
+    ech = qcpmg.split_echoes(fid, per)
+    top = qcpmg.echo_top_point(ech)
+    tau = per / sw
+    f = qcpmg.fit_t2(tau, qcpmg.echo_decay(ech, top, "real"), offset=True,
+                     period=per)
+    _, sp = qcpmg.whole_echo_ft(qcpmg.sum_echoes(ech, tau, f.T2_s), top,
+                                sw, sfo, zf=16)
+    absn = qcpmg.phase_spectrum(sp, *qcpmg.autophase(sp)).real
+    mag = qcpmg.magnitude_spectrum(sp)
+    assert absn.min() / absn.max() < -0.3        # unphaseable, by a mile
+    assert mag.min() / mag.max() > -0.2          # magnitude is far cleaner
+
+
+def test_second_order_phase_rescues_a_swept_pulse_chirp():
+    """A frequency-swept (WURST/chirp) refocusing pulse imprints a QUADRATIC
+    phase that p0/p1 cannot remove. autophase_best must notice and add p2 --
+    and must NOT add it to an ordinary echo."""
+    n = 4096
+    x = np.linspace(-1.0, 1.0, n)
+    pattern = (np.exp(-((x + 0.15) / 0.22) ** 2)
+               + 0.8 * np.exp(-((x - 0.2) / 0.18) ** 2))
+    ramp = np.arange(n) / (n - 1) - 0.5
+
+    # (a) a genuine chirp phase: p0/p1 cannot flatten it, p0/p1/p2 can
+    chirped = pattern * np.exp(1j * np.deg2rad(
+        25.0 + 60.0 * ramp + 900.0 * (2.0 * ramp) ** 2))
+    p0, p1 = qcpmg.autophase(chirped, order=1)
+    lin = qcpmg.phase_spectrum(chirped, p0, p1).real
+    q0, q1, q2 = qcpmg.autophase_best(chirped)
+    quad = qcpmg.phase_spectrum(chirped, q0, q1, p2_deg=q2).real
+    assert abs(q2) > 100.0                       # the term was needed...
+    assert quad.min() / quad.max() > 3 * (lin.min() / lin.max())   # ...and helped
+    assert quad.min() / quad.max() > -0.10
+
+    # (b) an ordinary p0/p1 error: p2 must stay at exactly zero
+    plain = pattern * np.exp(1j * np.deg2rad(40.0 + 30.0 * ramp))
+    r0, r1, r2 = qcpmg.autophase_best(plain)
+    assert r2 == 0.0
+    got = qcpmg.phase_spectrum(plain, r0, r1, p2_deg=r2).real
+    assert got.min() / got.max() > -0.05
+
+
+def test_phase_spectrum_p2_is_a_pure_quadratic():
+    """p2 is defined in degrees at the ENDS of the axis, zero at the pivot,
+    so it never moves the centre of a centred line."""
+    n = 1001
+    spec = np.ones(n, complex)
+    out = qcpmg.phase_spectrum(spec, 0.0, 0.0, p2_deg=90.0)
+    ang = np.degrees(np.angle(out))
+    assert ang[n // 2] == pytest.approx(0.0, abs=1e-9)     # zero at the pivot
+    assert ang[0] == pytest.approx(-90.0, abs=1e-6)        # -p2 at both ends
+    assert ang[-1] == pytest.approx(-90.0, abs=0.5)
+    assert np.allclose(qcpmg.phase_spectrum(spec, 0.0, 0.0, p2_deg=0.0), spec)
+
+
+@_needs_data
+def test_p2_and_magnitude_agree_on_the_real_wcpmg_dataset():
+    """The cross-validation that makes both trustworthy: on a real WURST-CPMG
+    81Br sample, p0/p1 alone gives a meaningless delta_CG, while the
+    p2-phased absorption and the magnitude spectrum agree to a few ppm."""
+    from larmor.io import bruker
+    src = _DATA.parent / "81Br_2026-08" / "34" / "fid"
+    if not src.exists():
+        pytest.skip("81Br dataset not on this machine")
+    d = bruker.read(str(src))
+    fid = np.asarray(d.data, complex)
+    sw, sfo = float(d.meta["sw_Hz"]), float(d.meta["larmor_MHz"])
+    per, _ = qcpmg.find_period_by_correlation(fid)
+    ech = qcpmg.split_echoes(fid, per)
+    top = qcpmg.echo_top_point(ech)
+    tau = per / sw
+    f = qcpmg.fit_t2(tau, qcpmg.echo_decay(ech, top, "real"), offset=True,
+                     period=per)
+    ppm, sp = qcpmg.whole_echo_ft(qcpmg.sum_echoes(ech, tau, f.T2_s), top,
+                                  sw, sfo, zf=16)
+    p0, p1, p2 = qcpmg.autophase_best(sp)
+    assert abs(p2) > 100.0                      # a swept pulse: p2 is needed
+    phased = qcpmg.phase_spectrum(sp, p0, p1, p2_deg=p2).real
+    assert phased.min() / phased.max() > -0.10  # was -0.47 with p0/p1 only
+
+    def cg(y):
+        hi, lo = qcpmg.cg_window(ppm, y)
+        return qcpmg.centre_of_gravity(ppm, y, (hi, lo))[0]
+
+    assert cg(phased) == pytest.approx(cg(qcpmg.magnitude_spectrum(sp)), abs=15.0)
