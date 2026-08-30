@@ -72,6 +72,87 @@ def detect_period(fid: np.ndarray, min_period: int = 8) -> int:
     return start + k
 
 
+def period_correlation(fid: np.ndarray, period: int) -> float:
+    """How well the train repeats at ``period``: normalised correlation of
+    two adjacent period-blocks anchored on the strongest echo. 1.0 = the next
+    block is a scaled copy (the right period); near 0 = the split cuts
+    through echoes.
+
+    Anchoring on the echo matters: blocks taken blindly from the start of
+    the train are dominated by the smooth pre-echo ramp, which correlates at
+    ANY small lag. A VERIFIER, not a detector: a smooth echo is coherent over
+    a few samples, so tiny periods always score high -- only compare
+    candidates at least as long as the echo itself (which is what
+    :func:`find_period_by_correlation` arranges). On a real 81Br train this
+    scored 0.98 at the true 475 points and 0.01 at a plausible-looking wrong
+    candidate."""
+    x = np.asarray(fid, complex)
+    p = int(period)
+    n = x.size
+    if p < 4 or 2 * p > n:
+        return 0.0
+    k = int(np.argmax(np.abs(x)))
+    i0 = min(max(k - p // 3, 0), n - 2 * p)
+    a, b = x[i0:i0 + p], x[i0 + p:i0 + 2 * p]
+    na, nb = float(np.linalg.norm(a)), float(np.linalg.norm(b))
+    if na == 0.0 or nb == 0.0:
+        return 0.0
+    return float(abs(np.vdot(a, b)) / (na * nb))
+
+
+def find_period_by_correlation(fid: np.ndarray, min_period: int = 8
+                               ) -> tuple[int, float]:
+    """The period MEASURED from the data: autocorrelation proposes
+    candidates (with harmonics, divisors and ±1 jitter), the echo-anchored
+    :func:`period_correlation` verifies them, and the SMALLEST candidate
+    within 90 % of the best score wins — sub-multiples of the true period cut
+    echoes apart and collapse the score, while multiples always score well,
+    so the smallest good one is the fundamental.
+
+    Returns (0, best_score) when nothing repeats convincingly (score < 0.5),
+    so a caller can say "not found" instead of guessing."""
+    x = np.asarray(fid, complex)
+    n = x.size
+    d = detect_period(x, min_period)
+    if not d:
+        return 0, 0.0
+    cands: set[int] = set()
+    for f in (1, 2, 3, 4):
+        cands.add(d * f)
+        if d % f == 0:
+            cands.add(d // f)
+    for c in list(cands):
+        cands.update({c - 1, c + 1})
+    scored = [(p, period_correlation(x, p)) for p in sorted(cands)
+              if min_period <= p <= n // 2]
+    if not scored:
+        return 0, 0.0
+    best = max(s for _, s in scored)
+    if best < 0.5:
+        return 0, best
+    pick = next(p for p, s in scored if s >= 0.9 * best)
+
+    # refine ±2: adjacent-block correlation barely separates p from p±1, but
+    # a one-point error drifts k points over k periods, so add a three-
+    # periods-apart block to the score (a real 81Br train: 475 vs 474)
+    def long_score(p: int) -> float:
+        s1 = period_correlation(x, p)
+        if n < 4 * p:
+            return s1
+        k = int(np.argmax(np.abs(x)))
+        i0 = min(max(k - p // 3, 0), n - 4 * p)
+        a, b = x[i0:i0 + p], x[i0 + 3 * p:i0 + 4 * p]
+        na, nb = float(np.linalg.norm(a)), float(np.linalg.norm(b))
+        if na == 0.0 or nb == 0.0:
+            return s1
+        return s1 + float(abs(np.vdot(a, b)) / (na * nb))
+
+    lo = max(int(min_period), pick - 2)
+    hi2 = min(n // 2, pick + 2)
+    pick = max(range(lo, hi2 + 1), key=long_score)
+    return pick, period_correlation(x, pick)
+
+
 def carrier_ppm(meta: dict) -> tuple[float, bool]:
     """Transmitter offset in ppm, correctly referenced, and whether it is.
 

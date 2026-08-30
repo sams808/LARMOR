@@ -343,17 +343,21 @@ def test_figure_package_builds_and_exports_three_formats(qapp, tmp_path,
 
 
 def test_large_p1_gets_an_honest_warning(qapp, tmp_path):
-    """A whole echo should phase with p0 only: |p1| > 20 deg means the period
-    or top is off, and the stage-5 label must say so (the symptom the user
-    sees is dips flanking the line)."""
+    """A top BETWEEN samples legitimately needs |p1| up to ~180 deg (it is
+    the exact compensation of a sub-dwell shift); beyond ~200 deg the period
+    or top is genuinely off and the stage-5 label must say so (the symptom
+    the user sees is dips flanking the line)."""
     d = _dialog_with(qapp, _synthetic_qcpmg(tmp_path))
     d._phased = True
-    d.p1.setValue(150.0)
+    d.p1.setValue(150.0)                  # legitimate sub-dwell compensation
     d._redraw_spec()
-    assert "p0 only" in d.lbl5.text()
+    assert "period or top is off" not in d.lbl5.text()
+    d.p1.setValue(450.0)                  # beyond any sub-dwell explanation
+    d._redraw_spec()
+    assert "period or top is off" in d.lbl5.text()
     d.p1.setValue(0.0)
     d._redraw_spec()
-    assert "p0 only" not in d.lbl5.text()
+    assert "period or top is off" not in d.lbl5.text()
     d.close()
 
 
@@ -407,3 +411,34 @@ def test_send_to_infinite_field_accumulates_across_sessions(qapp, tmp_path):
         shared.close()
     finally:
         qfd._shared = None
+
+
+def test_load_verifies_a_guessed_period_against_the_data(qapp, tmp_path,
+                                                         monkeypatch):
+    """The 81Br lesson: CNST7 unset, so the period was ASSUMED
+    rotor-synchronised from MASR — and was wrong by a factor of ~2.7. A
+    guessed (not recorded) period is now verified against the data's own
+    echo-repeat correlation and replaced when the data disagrees."""
+    from larmor.io import bruker
+
+    per = 250
+    t = np.arange(per) - 125
+    echo = np.exp(-np.abs(t) / 20.0) * np.exp(2j * np.pi * 0.03 * t)
+    rng = np.random.default_rng(5)
+    fid = np.concatenate([echo * np.exp(-k / 6.0) for k in range(24)])
+    fid = fid + rng.normal(0, 0.01, fid.size) + 1j * rng.normal(0, 0.01, fid.size)
+
+    class _Fake:
+        domain, ndim = "time", 1
+        data = fid
+        # MASR would suggest sw/masr = 100 pts -- wrong by 2.5x
+        meta = {"sw_Hz": 50000.0, "larmor_MHz": 78.0, "nucleus": "35Cl",
+                "masr_Hz": 500.0, "title": "t", "expno": "9"}
+    monkeypatch.setattr(bruker, "read", lambda _s: _Fake())
+    from larmor.desktop.qcpmg_dialog import QcpmgDialog
+    d = QcpmgDialog(None, None)
+    d._load(str(tmp_path / "9" / "fid"))
+    assert d.period.value() == per
+    assert d._period_src == "echo correlation"
+    assert "MEASURED from the data" in d.lbl1.text()
+    d.close()

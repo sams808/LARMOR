@@ -206,8 +206,15 @@ class QcpmgDialog(QDialog):
             s.valueChanged.connect(self._on_period_pts if s is self.period
                                    else self._queue)
         self.periodHz.valueChanged.connect(self._on_period_hz)
+        self.btnFind = QPushButton("Find period")
+        self.btnFind.setToolTip(
+            "measure the period from the data itself: autocorrelation proposes "
+            "candidates, echo-repeat correlation verifies them (slower but "
+            "trustworthy when the pulse program did not record CNST7)")
+        self.btnFind.clicked.connect(self._find_period)
         lv.addWidget(_row("period", self.period, "pts   =", self.periodHz,
-                          "    echoes", self.nEch, "   drop first", self.dropFirst))
+                          "    echoes", self.nEch, "   drop first", self.dropFirst,
+                          "   ", self.btnFind))
         self.p_train = _plot("echo train (|FID|) — dotted lines mark the period", parent=self)
         self.p_train.setLabel("bottom", "point")
         lv.addWidget(self.p_train, 1)
@@ -223,7 +230,13 @@ class QcpmgDialog(QDialog):
         self.top.valueChanged.connect(self._on_top_spin)
         bAuto = QPushButton("Auto (mean of all echoes)")
         bAuto.clicked.connect(self._auto_top)
-        lv.addWidget(_row("echo top", self.top, bAuto))
+        self.chkRealign = QCheckBox("realign echo tops before summing")
+        self.chkRealign.setToolTip(
+            "shift each echo so its own maximum lands on the marker before "
+            "coadding — for trains whose tops jitter by a point or two "
+            "(long-T₂ samples, slightly fractional periods)")
+        self.chkRealign.toggled.connect(self._queue)
+        lv.addWidget(_row("echo top", self.top, bAuto, "   ", self.chkRealign))
         split = QSplitter(Qt.Vertical)
         self.p_echoes = _plot("all echoes — drag the vertical line onto the top", parent=self)
         self.p_echoes.setLabel("bottom", "point in echo")
@@ -436,6 +449,15 @@ class QcpmgDialog(QDialog):
             per_f, self._period_src = qcpmg.echo_period_from_meta(
                 self.meta, n_points=self.fid.size)
             per = int(round(per_f)) if per_f >= 4 else 0
+            if self._period_src in ("MASR", "none"):
+                # the guess is not a recording -- measure instead, and only
+                # keep the guess when the data itself does not disagree
+                pc, sc = qcpmg.find_period_by_correlation(self.fid)
+                if pc and (per < 4 or (abs(pc - per) > max(2, 0.02 * pc)
+                           and qcpmg.period_correlation(self.fid, per)
+                           < 0.8 * sc)):
+                    per = pc
+                    self._period_src = "echo correlation"
             if per < 4:
                 per = qcpmg.detect_period(self.fid)
                 self._period_src = "autocorrelation" if per else "none"
@@ -567,6 +589,22 @@ class QcpmgDialog(QDialog):
             self.top.blockSignals(False)
             self._queue()
 
+    def _find_period(self):
+        from larmor import qcpmg
+        if self.fid is None:
+            return
+        pc, sc = qcpmg.find_period_by_correlation(self.fid)
+        if not pc:
+            self.lbl1.setText("no convincing echo repetition found "
+                              f"(best correlation {sc:.2f}) — set the period "
+                              "from the pulse program instead")
+            self.lbl1.setStyleSheet(f"color: {theme.active().model};")
+            return
+        if pc != self.period.value():
+            self.period.setValue(pc)          # fires _apply_period
+        self._period_src = "echo correlation"
+        self._queue()
+
     def _auto_top(self):
         from larmor import qcpmg
         if self.fid is None:
@@ -622,14 +660,17 @@ class QcpmgDialog(QDialog):
                    "CNST8": "read from the pulse program (CNST8)",
                    "MASR": "assumed rotor-synchronised (MASR)",
                    "autocorrelation": "GUESSED from the autocorrelation — check the markers",
+                   "echo correlation": "MEASURED from the data (echo-repeat correlation)",
                    "manual": "set by hand",
                    "none": "unknown"}.get(self._period_src, self._period_src)
+            repeat = qcpmg.period_correlation(self.fid, per)
             warn = align < 0.35
             self.lbl1.setText(
                 f"{ech.shape[0]} echoes × {per} pts · τecho = {tau * 1e6:,.1f} µs · "
                 f"spikelet spacing {self.periodHz.value():,.1f} Hz "
                 f"({self.periodHz.value() / sfo if sfo else 0:.2f} ppm) · "
-                f"period {src} · alignment {align:.2f} · "
+                f"period {src} · echo-repeat {repeat:.2f} · "
+                f"alignment {align:.2f} · "
                 f"signal above 3σ through echo "
                 f"{getattr(self, '_n_usable', ech.shape[0])} "
                 f"(all are kept — the fitted constant absorbs the noise floor)"
@@ -708,7 +749,7 @@ class QcpmgDialog(QDialog):
                 self.fid, per, sw, sfo, self._carrier, top=top,
                 n_echoes=self.nEch.value(), drop_first=self.dropFirst.value(),
                 t2_weight_s=t2s, lb_Hz=self.lb.value(), gb_Hz=self.gb.value(),
-                zf=zf)
+                zf=zf, realign=self.chkRealign.isChecked())
             self._spk_ppm, spk = qcpmg.spikelet_spectrum(
                 self.fid, sw, sfo, self._carrier,
                 lb_Hz=max(self.lb.value(), 1.0), zf=2)
@@ -831,13 +872,13 @@ class QcpmgDialog(QDialog):
         # dwell (usually a slightly wrong period), and the mixed-in dispersion
         # shows up as negative dips flanking the line
         p1warn = ""
-        if self._phased and abs(self.p1.value()) > 20.0:
+        if self._phased and abs(self.p1.value()) > 200.0:
             p1warn = (f"<br><span style='color:{t.model}'>⚠ |p1| = "
-                      f"{abs(self.p1.value()):.0f}° — a whole echo should need "
-                      f"p0 only. Check the period (stage 1: the spikelet "
-                      f"spacing must match the pulse program) and the echo "
-                      f"top (stage 2); dips beside the line are the usual "
-                      f"symptom.</span>")
+                      f"{abs(self.p1.value()):.0f}° — an echo top that falls "
+                      f"between samples legitimately needs up to ±180°, but "
+                      f"more than that means the period or top is off: try "
+                      f"'Find period' (stage 1) and Auto top (stage 2); dips "
+                      f"beside the line are the usual symptom.</span>")
         self.lbl5.setText(
             f"{' ⊕ '.join(shown) or 'nothing shown'} · scale {mode} · "
             f"zero-fill ×{self.zf.currentText()} · p0 {self.p0.value():.1f}° "
@@ -1162,6 +1203,7 @@ class QcpmgDialog(QDialog):
             "mas_uncertain": False,
             "qcpmg_period_pts": self.period.value(),
             "qcpmg_echo_top": self.top.value(),
+            "qcpmg_realign": self.chkRealign.isChecked(),
             "qcpmg_n_echoes": self.nEch.value(),
             "qcpmg_lb_Hz": self.lb.value(),
             "qcpmg_gb_Hz": self.gb.value(),

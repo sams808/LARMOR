@@ -542,3 +542,57 @@ def test_real_data_sum_echo_is_absorptive_and_measurable():
     assert real.min() / real.max() > -0.10
     fwhm = qcpmg.fwhm_hz(ppm, real, meta["larmor_MHz"], qcpmg.cg_window(ppm, real))
     assert fwhm == pytest.approx(4638.0, rel=0.05)      # published 4638 Hz
+
+
+def test_find_period_by_correlation_recovers_the_period():
+    """The data-measured period: candidates from the autocorrelation,
+    verified by echo-anchored correlation, refined by a three-periods-apart
+    block (a one-point error drifts three points there)."""
+    per, true = 250, 250
+    t = np.arange(per) - 125
+    echo = np.exp(-np.abs(t) / 20.0) * np.exp(2j * np.pi * 0.03 * t)
+    rng = np.random.default_rng(1)
+    # a long healthy train
+    tr = np.concatenate([echo * np.exp(-k / 8.0) for k in range(40)])
+    tr = tr + rng.normal(0, 0.01, tr.size) + 1j * rng.normal(0, 0.01, tr.size)
+    p, sc = qcpmg.find_period_by_correlation(tr)
+    assert p == true and sc > 0.9
+    # the 81Br situation: T2' of ~1.5 echoes, the tail is pure noise
+    tr2 = np.concatenate([echo * np.exp(-k / 1.5) for k in range(24)])
+    tr2 = tr2 + rng.normal(0, 0.02, tr2.size) + 1j * rng.normal(0, 0.02, tr2.size)
+    p2, sc2 = qcpmg.find_period_by_correlation(tr2)
+    assert p2 == true and sc2 > 0.8
+    # pure noise: refuse, never invent
+    assert qcpmg.find_period_by_correlation(
+        rng.normal(0, 1, 6000) + 0j) == (0, 0.0)
+
+
+def test_period_correlation_discriminates_and_anchors():
+    """The score must collapse at a wrong period, and must NOT be fooled by
+    the smooth pre-echo ramp (blocks are anchored on the strongest echo --
+    unanchored first-blocks correlate at ANY small lag)."""
+    per = 300
+    t = np.arange(per) - 220                    # echo far into the block
+    echo = np.exp(-np.abs(t) / 15.0) * np.exp(2j * np.pi * 0.05 * t)
+    tr = np.concatenate([echo * np.exp(-k / 6.0) for k in range(20)])
+    good = qcpmg.period_correlation(tr, per)
+    assert good > 0.95
+    assert qcpmg.period_correlation(tr, int(per * 0.63)) < 0.5 * good
+    # NOTE: tiny periods still correlate (any smooth echo is coherent over a
+    # few samples) -- that degeneracy is handled by find_period_by_correlation
+    # only scoring autocorrelation-proposed candidates, never raw small lags
+
+
+@_needs_data
+def test_real_data_period_finder():
+    """81Br (CNST7 unset, MASR guess 179 pts, true 475) and 35Cl (true 293):
+    the finder must land both from the data alone."""
+    from larmor.io import bruker
+    d = bruker.read(str(_DATA / "1" / "fid"))
+    p, sc = qcpmg.find_period_by_correlation(np.asarray(d.data, complex))
+    assert p == 293 and sc > 0.9
+    br = _DATA.parent / "81Br_2026-08" / "30" / "fid"
+    if br.exists():
+        d2 = bruker.read(str(br))
+        p2, sc2 = qcpmg.find_period_by_correlation(np.asarray(d2.data, complex))
+        assert p2 == 475 and sc2 > 0.9
