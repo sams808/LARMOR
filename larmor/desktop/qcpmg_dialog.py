@@ -90,6 +90,11 @@ class QcpmgDialog(QDialog):
         # dialog at is remembered and restored on the next open
         self.setMinimumSize(480, 360)
         self.setSizeGripEnabled(True)
+        # a real window: minimise/maximise buttons, so it can be put aside
+        # while the main window is used
+        self.setWindowFlags(self.windowFlags() | Qt.Window
+                            | Qt.WindowMinimizeButtonHint
+                            | Qt.WindowMaximizeButtonHint)
         restored = False
         if not os.environ.get("LARMOR_NO_SESSION"):
             try:
@@ -1141,12 +1146,10 @@ class QcpmgDialog(QDialog):
                          "field's dataset and send it too, then Compute there")
 
     # ------------------------------------------------- figure package
-    def _package_figure(self):
-        """One publication-layout figure of the whole workflow: (a) echo
-        train, (b) echo-top decay with the T2 fit, (c) sum-echo spectrum with
-        the spikelets behind it, (d) the measured band with delta_CG and the
-        window. Built from exactly the state the dialog is showing."""
-        from matplotlib.figure import Figure
+    def _panel_painters(self):
+        """``{name: paint(ax)}`` for each panel of the figure package, plus a
+        suptitle. The 2x2 block and the single-panel files are drawn by the
+        SAME code, so they cannot drift apart."""
         from larmor import qcpmg
 
         per = self.period.value()
@@ -1160,76 +1163,108 @@ class QcpmgDialog(QDialog):
                 and self.keep.size == decay.size
                 else np.ones(decay.size, bool))
         tt = np.arange(decay.size) * tau
+        peak = decay.max() or 1.0
+        nuc = self.meta.get("nucleus", "")
+        xlabel = (f"$^{{{''.join(c for c in nuc if c.isdigit())}}}$"
+                  f"{''.join(c for c in nuc if c.isalpha())} shift (ppm)")
+        mag = self.magMode.isChecked()
 
-        fig = Figure(figsize=(7.1, 5.4), dpi=110)
-        axs = fig.subplots(2, 2)
-        (ax_tr, ax_dec), (ax_sp, ax_ms) = axs
-
-        ax_tr.plot(np.abs(self.fid), color="black", lw=0.5)
-        ax_tr.set_xlabel("point"); ax_tr.set_yticks([])
-        ax_tr.set_title("echo train", fontsize=9)
-
-        ms = 1e3
-        ax_dec.plot(tt[keep] * ms, decay[keep] / (decay.max() or 1.0), "o",
-                    color="black", ms=3.5, label="echo tops")
-        if (~keep).any():
-            ax_dec.plot(tt[~keep] * ms, decay[~keep] / (decay.max() or 1.0),
-                        "x", color="#999999", ms=4, label="excluded")
-        if self.t2 is not None and self.t2.ok:
-            xs = np.linspace(0.0, float(tt.max()), 200)
-            ax_dec.plot(xs * ms, self.t2.model(xs) / (decay.max() or 1.0),
-                        color="#c0392b", lw=1.2)
-            ax_dec.set_title(
-                f"T$_2$ = {self.t2.T2_s * 1e3:.2f} ms · matched LB = "
-                f"{self.t2.lb_Hz:,.0f} Hz", fontsize=9)
-        else:
-            ax_dec.set_title("echo-top decay (T$_2$ not determined)",
-                             fontsize=9)
-        ax_dec.set_xlabel("time (ms)"); ax_dec.set_yticks([])
-
-        for ax in (ax_sp, ax_ms):
-            ax.set_xlabel(f"$^{{{''.join(c for c in self.meta.get('nucleus', '') if c.isdigit())}}}$"
-                          f"{''.join(c for c in self.meta.get('nucleus', '') if c.isalpha())}"
-                          " shift (ppm)")
+        def train(ax):
+            ax.plot(np.abs(self.fid), color="black", lw=0.5)
+            ax.set_xlabel("point")
             ax.set_yticks([])
-        if self._spk is not None and self._spk_ppm is not None:
-            b = self._spk / (np.abs(self._spk).max() or 1.0)
-            ax_sp.plot(self._spk_ppm, b, color="#9aa7b0", lw=0.5,
-                       label="spikelets")
-        if self._spec is not None and self._ppm is not None:
-            a = self._spec / (np.abs(self._spec).max() or 1.0)
-            ax_sp.plot(self._ppm, a, color="black", lw=1.0, label="sum echo")
-            ax_sp.legend(fontsize=7, frameon=False)
-            ax_sp.invert_xaxis()
-            ax_sp.set_title(
-                f"LB {self.lb.value():,.0f} Hz · GB {self.gb.value():,.0f} Hz"
-                + (" · magnitude" if self.magMode.isChecked() else ""),
-                fontsize=9)
+            ax.set_title("echo train", fontsize=9)
 
-            ax_ms.plot(self._ppm, a, color="black", lw=1.0)
+        def decay_panel(ax):
+            ax.plot(tt[keep] * 1e3, decay[keep] / peak, "o", color="black",
+                    ms=3.5, label="echo tops")
+            if (~keep).any():
+                ax.plot(tt[~keep] * 1e3, decay[~keep] / peak, "x",
+                        color="#999999", ms=4, label="excluded")
+            if self.t2 is not None and self.t2.ok:
+                xs = np.linspace(0.0, float(tt.max()), 200)
+                ax.plot(xs * 1e3, self.t2.model(xs) / peak, color="#c0392b",
+                        lw=1.2)
+                ax.set_title(f"T$_2$ = {self.t2.T2_s * 1e3:.2f} ms · "
+                             f"matched LB = {self.t2.lb_Hz:,.0f} Hz",
+                             fontsize=9)
+            else:
+                ax.set_title("echo-top decay (T$_2$ not determined)",
+                             fontsize=9)
+            ax.set_xlabel("time (ms)")
+            ax.set_yticks([])
+
+        def spectrum(ax):
+            ax.set_xlabel(xlabel)
+            ax.set_yticks([])
+            if self._spk is not None and self._spk_ppm is not None:
+                b = self._spk / (np.abs(self._spk).max() or 1.0)
+                ax.plot(self._spk_ppm, b, color="#9aa7b0", lw=0.5,
+                        label="spikelets")
+            if self._spec is None or self._ppm is None:
+                return
+            a = self._spec / (np.abs(self._spec).max() or 1.0)
+            ax.plot(self._ppm, a, color="black", lw=1.0, label="sum echo")
+            ax.legend(fontsize=7, frameon=False)
+            ax.invert_xaxis()
+            ax.set_title(f"LB {self.lb.value():,.0f} Hz · "
+                         f"GB {self.gb.value():,.0f} Hz"
+                         + (" · magnitude" if mag else ""), fontsize=9)
+
+        def measure(ax):
+            ax.set_xlabel(xlabel)
+            ax.set_yticks([])
+            if self._spec is None or self._ppm is None:
+                return
+            a = self._spec / (np.abs(self._spec).max() or 1.0)
+            ax.plot(self._ppm, a, color="black", lw=1.0)
             lo, hi = self.region.getRegion()
             m = (self._ppm >= min(lo, hi)) & (self._ppm <= max(lo, hi))
-            ax_ms.fill_between(self._ppm[m], 0.0, a[m], color="#1f6feb",
-                               alpha=0.18, lw=0)
+            ax.fill_between(self._ppm[m], 0.0, a[m], color="#1f6feb",
+                            alpha=0.18, lw=0)
             title = ""
             if self._cg is not None:
-                ax_ms.axvline(self._cg, color="#c0392b", lw=1.0, ls="--")
-                title = (f"δ$_{{CG}}$ = {self._cg:.1f} ± {self._sigma:.1f} "
-                         f"ppm · FWHM = {self._fwhm:,.0f} Hz"
-                         + (" (magnitude)" if self.magMode.isChecked() else ""))
-            ax_ms.set_title(title or "central band (phase it first)",
-                            fontsize=9)
+                ax.axvline(self._cg, color="#c0392b", lw=1.0, ls="--")
+                title = (f"δ$_{{CG}}$ = {self._cg:.1f} ± {self._sigma:.1f} ppm"
+                         f" · FWHM = {self._fwhm:,.0f} Hz"
+                         + (" (magnitude)" if mag else ""))
+            ax.set_title(title or "central band (phase it first)", fontsize=9)
             pad = 0.5 * abs(hi - lo)
-            ax_ms.set_xlim(max(lo, hi) + pad, min(lo, hi) - pad)
+            ax.set_xlim(max(lo, hi) + pad, min(lo, hi) - pad)
 
         src = Path(self.source).parent.parent.name if self.source else ""
-        fig.suptitle(f"QCPMG sum-echo processing — "
-                     f"{self.meta.get('nucleus', '')} "
-                     f"{src or self.meta.get('expno', '')} · period {per} pts "
-                     f"· top {top} · {self.nEch.value()} echoes",
-                     fontsize=9.5)
+        suptitle = (f"QCPMG sum-echo processing — {nuc} "
+                    f"{src or self.meta.get('expno', '')} · period {per} pts "
+                    f"· top {top} · {self.nEch.value()} echoes")
+        return ({"train": train, "decay": decay_panel,
+                 "spectrum": spectrum, "measure": measure}, suptitle)
+
+    def _package_figure(self):
+        """The 2x2 publication-layout figure of the whole workflow."""
+        from matplotlib.figure import Figure
+
+        painters, suptitle = self._panel_painters()
+        fig = Figure(figsize=(7.1, 5.4), dpi=110)
+        axs = fig.subplots(2, 2).ravel()
+        for ax, name in zip(axs, ("train", "decay", "spectrum", "measure")):
+            painters[name](ax)
+        fig.suptitle(suptitle, fontsize=9.5)
         fig.tight_layout(rect=(0, 0, 1, 0.95))
         return fig
+
+    def _panel_figures(self):
+        """``{name: Figure}`` -- each panel on its own, sized for a single
+        column, for the papers that want one of them rather than the block."""
+        from matplotlib.figure import Figure
+
+        painters, _ = self._panel_painters()
+        out = {}
+        for name, paint in painters.items():
+            fig = Figure(figsize=(3.4, 2.6), dpi=110)
+            paint(fig.add_subplot(111))
+            fig.tight_layout()
+            out[name] = fig
+        return out
 
     def _export_package(self):
         self._flush()
@@ -1255,6 +1290,13 @@ class QcpmgDialog(QDialog):
                 out = f"{base}.{ext}"
                 fig.savefig(out, dpi=600, bbox_inches="tight")
                 written.append(out)
+            # each panel on its own too: a paper rarely wants the 2x2 block,
+            # and re-plotting one panel by hand loses the provenance
+            for name, single in self._panel_figures().items():
+                for ext in ("png", "svg", "pdf"):
+                    out = f"{base}_{name}.{ext}"
+                    single.savefig(out, dpi=600, bbox_inches="tight")
+                    written.append(out)
         except Exception as exc:                              # noqa: BLE001
             _log.exception("figure package export failed")
             self.res.setText(f"figure export failed: {exc}")

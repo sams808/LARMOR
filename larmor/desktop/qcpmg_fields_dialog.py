@@ -4,6 +4,8 @@ of half-integer quadrupolar nuclei measured at more than one magnetic field
 (Sandland et al. 2004; Baasner et al. 2014). See larmor.qcpmg_fields."""
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pyqtgraph as pg
 from larmor.desktop import theme
@@ -33,7 +35,15 @@ class QcpmgFieldsDialog(QDialog):
     def __init__(self, parent, nucleus: str = "", current=None):
         super().__init__(parent)
         self.setWindowTitle("QCPMG — infinite-field δiso (2+ fields)")
-        self.resize(760, 680)
+        self.resize(860, 720)
+        self.setMinimumSize(560, 420)
+        self.setSizeGripEnabled(True)
+        # this window is meant to stay open across several processing
+        # sessions, so it needs to be minimisable and never modal
+        self.setWindowFlags(self.windowFlags() | Qt.Window
+                            | Qt.WindowMinimizeButtonHint
+                            | Qt.WindowMaximizeButtonHint)
+        self.setModal(False)
         self._nucleus = nucleus or "35Cl"
         self._current = current            # (larmor_MHz, ppm, amp) of the open spectrum
         v = QVBoxLayout(self)
@@ -123,6 +133,15 @@ class QcpmgFieldsDialog(QDialog):
         b_comp.clicked.connect(self._compute)
         b_w = bb.addButton("Split W_q / W_csd", QDialogButtonBox.ApplyRole)
         b_w.clicked.connect(self._compute_widths)
+        self.btnReport = bb.addButton("Export report…",
+                                      QDialogButtonBox.ActionRole)
+        self.btnReport.setToolTip("every input point, every fitted number "
+                                  "with its uncertainty, and the assumptions")
+        self.btnReport.clicked.connect(self._export_report)
+        self.btnFig = bb.addButton("Export figure…", QDialogButtonBox.ActionRole)
+        self.btnFig.setToolTip("the extrapolation as a publication figure "
+                               "(.png + .svg + .pdf, 600 dpi)")
+        self.btnFig.clicked.connect(self._export_figure)
         bb.addButton(QDialogButtonBox.Close).clicked.connect(self.accept)
         bb.addButton(QDialogButtonBox.Help).clicked.connect(self._help)
         v.addWidget(bb)
@@ -260,6 +279,79 @@ class QcpmgFieldsDialog(QDialog):
         self._ds[ds_id]["window"] = (min(a, b), max(a, b))
         if r < self.table.rowCount() and self._row_ds_id(r) == ds_id:
             self._apply_ds_values(r, ds_id)
+
+    # --------------------------------------------------------- exports
+    def _result_map(self):
+        """{sample: InfiniteFieldResult} from the current table, so the report
+        and the figure describe exactly what Compute just showed."""
+        from larmor.qcpmg_fields import fit_samples
+        pts = self._points()
+        if len(pts) < 2:
+            return {}
+        name = self._nucleus or "sample"
+        return fit_samples([(name, p) for p in pts],
+                           spin=self.spin.value(), eta=self.eta.value())
+
+    def _figure_spec(self) -> dict:
+        from larmor.qcpmg_fields import InfiniteFieldResult
+        samples = [{"label": k,
+                    "points": [[p.larmor_MHz, p.dcg_ppm, p.dcg_err_ppm]
+                               for p in r.points]}
+                   for k, r in self._result_map().items()
+                   if isinstance(r, InfiniteFieldResult)]
+        return {"kind": "infinite_field", "style": "article",
+                "nucleus": self._nucleus, "spin": self.spin.value(),
+                "eta": self.eta.value(), "samples": samples}
+
+    def _export_report(self):
+        from PySide6.QtWidgets import QFileDialog
+        from larmor.desktop.paths import (FIGURE_DIR_KEY, remember_dir,
+                                          remembered_dir)
+        from larmor.qcpmg_fields import report_text, two_field_widths
+        results = self._result_map()
+        if not results:
+            self.result.setText("need δcg at ≥ 2 fields before a report")
+            return
+        widths = {}
+        fw = self._fields_fwhm()
+        if len(fw) >= 2:
+            widths = {k: two_field_widths(fw[0][0], fw[0][1], fw[1][0], fw[1][1])
+                      for k in results}
+        start = remembered_dir(FIGURE_DIR_KEY)
+        seed = str(Path(start) / "infinite_field_report.txt") if start             else "infinite_field_report.txt"
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export report", seed, "Text (*.txt);;All files (*)")
+        if not path:
+            return
+        remember_dir(FIGURE_DIR_KEY, path)
+        Path(path).write_text(
+            report_text(results, self.spin.value(), self.eta.value(),
+                        self._nucleus, widths), encoding="utf-8")
+        self.result.setText(f"report written — {Path(path).name}")
+
+    def _export_figure(self):
+        from PySide6.QtWidgets import QFileDialog
+        from larmor import figures
+        from larmor.desktop.paths import (FIGURE_DIR_KEY, remember_dir,
+                                          remembered_dir)
+        spec = self._figure_spec()
+        if not spec["samples"]:
+            self.result.setText("need δcg at ≥ 2 fields before a figure")
+            return
+        start = remembered_dir(FIGURE_DIR_KEY)
+        seed = str(Path(start) / "infinite_field") if start else "infinite_field"
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export figure (base name — extensions added)", seed,
+            "Figure base name (*)")
+        if not path:
+            return
+        remember_dir(FIGURE_DIR_KEY, path)
+        try:
+            written = figures.export(spec, Path(path).with_suffix(""))
+        except Exception as exc:                              # noqa: BLE001
+            self.result.setText(f"figure export failed: {exc}")
+            return
+        self.result.setText(f"figure written — {Path(written[0]).stem}.png/.svg/.pdf")
 
     def _help(self):
         from larmor.desktop.help_dialog import show_help

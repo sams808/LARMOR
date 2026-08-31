@@ -271,6 +271,33 @@ the quadrupolar broadening.
 
 ---
 
+
+### Many samples at once
+
+**Tools ▸ QCPMG: batch infinite-field δiso…** opens a grid: set how many
+samples and how many fields, then **drop the processed spectra straight onto
+the cells** (the `.csv` files stage 5 writes with *Save as dataset…*), or
+double-click a cell to browse. Dropping several files at once fills a row
+from that column onwards.
+
+Each cell is measured exactly as the single-sample dialog does it — δcg over
+an automatic window — and the column header learns its field from the files
+themselves, warning if the frequencies in one column disagree. **Select any
+cell** to see its spectrum with a draggable band and supervise that one
+measurement; the fit is invalidated whenever you move a window, so a stale
+result can never be exported.
+
+**Compute all** extrapolates every sample. Then:
+
+- **Export report…** writes a plain-text record: every input point, every
+  fitted δiso, C_Q and P_Q with uncertainties, the W_q/W_csd split where two
+  fields allow it, and the assumptions (η, spin) spelled out. A sample that
+  could not be fitted is listed as such rather than silently dropped.
+- **Export figures…** writes the **merged** figure — every sample on one
+  δcg vs 1/ν₀² axes, each with its extrapolation and a starred intercept —
+  **and one figure per sample**, all as `.png` + `.svg` + `.pdf` at 600 dpi.
+
+The single-field-pair dialog has the same two export buttons for one sample.
 ## 5 · Background
 
 The echo train trades acquisition time for S/N; you recover the **true**

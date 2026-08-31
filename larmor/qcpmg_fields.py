@@ -169,3 +169,85 @@ def centre_of_gravity(ppm: np.ndarray, amp: np.ndarray,
         ppm, a = ppm[m], a[m]
     s = a.sum()
     return float((ppm * a).sum() / s) if s > 0 else float("nan")
+
+
+def fit_samples(rows, spin: float, eta: float = 0.7
+                ) -> dict[str, "InfiniteFieldResult | str"]:
+    """Extrapolate SEVERAL samples at once.
+
+    ``rows`` is an iterable of ``(sample, FieldPoint)``. Returns
+    ``{sample: InfiniteFieldResult}``, with a plain string in place of the
+    result for any sample that could not be fitted (fewer than two fields,
+    two fields too close) -- one bad sample must never sink the batch.
+    Insertion order is preserved so a report reads in the order entered.
+    """
+    grouped: dict[str, list[FieldPoint]] = {}
+    for sample, pt in rows:
+        grouped.setdefault(str(sample or ""), []).append(pt)
+    out: dict[str, InfiniteFieldResult | str] = {}
+    for sample, pts in grouped.items():
+        try:
+            out[sample] = infinite_field_diso(pts, spin=spin, eta=eta)
+        except Exception as exc:                              # noqa: BLE001
+            out[sample] = str(exc)
+    return out
+
+
+def report_text(results: dict, spin: float, eta: float, nucleus: str = "",
+                widths: dict | None = None) -> str:
+    """A plain-text report of an infinite-field extrapolation, for the lab
+    book or the SI: every input point, every fitted number with its
+    uncertainty, and the assumptions that were made."""
+    lines = [
+        "QCPMG infinite-field extrapolation of the isotropic chemical shift",
+        "=" * 66,
+        f"nucleus            : {nucleus or '(unspecified)'}",
+        f"spin I             : {spin:g}",
+        f"eta (ASSUMED)      : {eta:g}   <- not determined by this method",
+        "model              : dcg = diso + slope/nu0^2   (Sandland 2004 Eq. 1)",
+        "",
+    ]
+    ok = [(s, r) for s, r in results.items()
+          if isinstance(r, InfiniteFieldResult)]
+    bad = [(s, r) for s, r in results.items() if not isinstance(r, InfiniteFieldResult)]
+
+    for sample, res in ok:
+        lines.append(f"--- {sample or '(unnamed)'} " + "-" * max(0, 60 - len(sample)))
+        lines.append("    nu0 (MHz)      dcg (ppm)   +- err   CT-selective")
+        for p in res.points:
+            sel = "" if p.ct_selective is None else ("yes" if p.ct_selective else "no")
+            lines.append(f"    {p.larmor_MHz:10.4f}  {p.dcg_ppm:11.2f}  "
+                         f"{p.dcg_err_ppm:7.2f}   {sel}")
+        lines.append(f"    delta_iso      = {res.delta_iso_ppm:8.2f} "
+                     f"+- {res.delta_iso_err_ppm:.2f} ppm")
+        lines.append(f"    C_Q            = {res.cq_MHz:8.3f} "
+                     f"+- {res.cq_err_MHz:.3f} MHz   (eta = {res.eta:g} assumed)")
+        lines.append(f"    P_Q            = {res.pq_MHz:8.3f} MHz")
+        lines.append(f"    slope          = {res.slope:.6g} ppm.MHz^2")
+        w = (widths or {}).get(sample)
+        if w is not None and getattr(w, "ok", False):
+            lines.append(f"    W_q            = {w.wq_lo_ppm:8.1f} ppm (low field)"
+                         f" / {w.wq_hi_ppm:.1f} ppm (high field)")
+            lines.append(f"    W_csd          = {w.wcsd_ppm:8.1f} ppm "
+                         f"(field-independent)")
+        elif w is not None and getattr(w, "note", ""):
+            lines.append(f"    width split    : {w.note}")
+        lines.append("")
+
+    if ok:
+        lines.append("Summary")
+        lines.append("-" * 66)
+        lines.append("sample                         diso (ppm)      C_Q (MHz)")
+        for sample, res in ok:
+            lines.append(f"{(sample or '(unnamed)')[:28]:28s}  "
+                         f"{res.delta_iso_ppm:7.2f} +- {res.delta_iso_err_ppm:5.2f}  "
+                         f"{res.cq_MHz:6.3f} +- {res.cq_err_MHz:.3f}")
+        lines.append("")
+    for sample, why in bad:
+        lines.append(f"NOT FITTED  {sample or '(unnamed)'}: {why}")
+    if bad:
+        lines.append("")
+    lines.append("delta_iso is the intercept at 1/nu0^2 -> 0; C_Q follows from the")
+    lines.append("slope with the assumed eta, so its accuracy is limited by that")
+    lines.append("assumption. Quote P_Q when eta is unknown.")
+    return "\n".join(lines)

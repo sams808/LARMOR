@@ -1035,8 +1035,72 @@ def render_species_bar(spec: dict) -> Figure:
 
 
 # ---------------------------------------------------------------------------
+def render_infinite_field(spec: dict) -> Figure:
+    """delta_cg vs 1/nu0^2 for one or several samples, with each fitted line
+    extrapolated to the axis and its intercept (= delta_iso) marked.
+
+    ``samples``: ``[{"label": ..., "points": [[nu0_MHz, dcg_ppm, err_ppm], ...]}]``
+    The line is REFITTED from the points here rather than carried in the spec,
+    so a saved figure can never disagree with its own data.
+    """
+    from larmor.qcpmg_fields import FieldPoint, infinite_field_diso
+
+    spin = float(spec.get("spin", 1.5))
+    eta = float(spec.get("eta", 0.7))
+    samples = spec.get("samples") or []
+    with plt.rc_context(_rc(spec)):
+        fig, ax = plt.subplots(figsize=_figsize(spec))
+        x_max = 0.0
+        for i, samp in enumerate(samples):
+            pts = [FieldPoint(float(a), float(b),
+                              float(c) if len(p_) > 2 else 0.0)
+                   for p_ in samp.get("points", [])
+                   for a, b, c in [(p_[0], p_[1],
+                                    p_[2] if len(p_) > 2 else 0.0)]]
+            if len(pts) < 2:
+                continue
+            colour = samp.get("color") or site_color(i)
+            x = np.array([1.0 / q.larmor_MHz ** 2 for q in pts])
+            y = np.array([q.dcg_ppm for q in pts])
+            e = np.array([q.dcg_err_ppm for q in pts])
+            x_max = max(x_max, float(x.max()))
+            ax.errorbar(x, y, yerr=e, fmt="o", ms=5, color=colour,
+                        ecolor=colour, capsize=2.5, mfc="white", mew=1.2,
+                        label=samp.get("label") or f"sample {i + 1}", zorder=3)
+            try:
+                res = infinite_field_diso(pts, spin=spin, eta=eta)
+            except Exception:                                  # noqa: BLE001
+                continue
+            xs = np.linspace(0.0, float(x.max()) * 1.08, 50)
+            ax.plot(xs, res.line(xs), ls=(0, (5, 2)), lw=1.2, color=colour,
+                    zorder=2)
+            ax.plot([0.0], [res.delta_iso_ppm], marker="*", ms=13,
+                    color=colour, mec="black", mew=0.6, zorder=4)
+            if spec.get("annotate", True):
+                ax.annotate(f"{res.delta_iso_ppm:.1f} ppm",
+                            (0.0, res.delta_iso_ppm),
+                            textcoords="offset points", xytext=(8, 0),
+                            va="center", fontsize=7, color=colour)
+        ax.axvline(0.0, color="0.6", lw=0.8, zorder=1)
+        ax.set_xlim(left=-0.04 * (x_max or 1.0))
+        ax.set_xlabel(spec.get("xlabel", "$1/" + chr(92) + "nu_0^2$  (MHz$^{-2}$)"))
+        nuc = spec.get("nucleus", "")
+        ax.set_ylabel(spec.get("ylabel",
+                               (nucleus_xlabel(nuc).replace("shift", r"$\delta_{CG}$")
+                                if nuc else r"$\delta_{CG}$ (ppm)")))
+        if spec.get("title"):
+            ax.set_title(spec["title"])
+        n_ok = len([s_ for s_ in samples if len(s_.get("points", [])) >= 2])
+        if n_ok > 1 or spec.get("legend", False):
+            ax.legend(frameon=False, fontsize=7,
+                      loc=spec.get("legend_loc", "best"))
+        fig.tight_layout()
+    return fig
+
+
 RENDERERS = {"1d": render_1d, "2d": render_2d, "series": render_series,
-            "batch_grid": render_batch_grid, "species_bar": render_species_bar}
+            "batch_grid": render_batch_grid, "species_bar": render_species_bar,
+            "infinite_field": render_infinite_field}
 
 
 def render(spec: dict) -> Figure:

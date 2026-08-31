@@ -533,6 +533,8 @@ class MainWindow(QMainWindow):
         self._add(m_tools, "QCPMG (echo train → spectrum)…", self.open_qcpmg)
         self._add(m_tools, "QCPMG: infinite-field δiso (2 fields)…",
                   self.open_qcpmg_fields)
+        self._add(m_tools, "QCPMG: batch infinite-field δiso…",
+                  self.open_qcpmg_batch_fields)
         self._add(m_tools, "Variable temperature (Arrhenius / VFT)…", self.open_vt)
         self._add(m_tools, "REDOR (dipolar coupling)…", self.open_redor)
         m_tools.addSection("Import & 2D")
@@ -4329,6 +4331,16 @@ class MainWindow(QMainWindow):
             return
         CzjzekDistDialog(self, self.recipe).exec()
 
+    def open_qcpmg_batch_fields(self):
+        """Many samples x several fields in one grid: drop the processed
+        spectra in, supervise each window, extrapolate them all."""
+        from larmor.desktop.qcpmg_batch_dialog import QcpmgBatchFieldsDialog
+
+        nuc = self.recipe.get("nucleus", "") if self.recipe else ""
+        dlg = QcpmgBatchFieldsDialog(self, nuc)
+        self._qcpmg_batch_dlg = dlg          # non-modal: keep it alive
+        dlg.show(); dlg.raise_(); dlg.activateWindow()
+
     def open_qcpmg_fields(self):
         from larmor.desktop.qcpmg_fields_dialog import shared_fields_dialog
 
@@ -4356,9 +4368,13 @@ class MainWindow(QMainWindow):
                     source = str(ref.expno / "fid")
             except Exception:
                 source = None
+        # NON-modal, and kept alive on self: QCPMG processing is a long
+        # session, and exec() froze the whole application behind it -- including
+        # the infinite-field window it can open
         dlg = QcpmgDialog(self, source)
         dlg.accepted_1d.connect(self._fid_to_workbench)
-        dlg.exec()
+        self._qcpmg_dlg = dlg
+        dlg.show(); dlg.raise_(); dlg.activateWindow()
 
     def open_satrec(self):
         from larmor.desktop.satrec_dialog import SatrecDialog
