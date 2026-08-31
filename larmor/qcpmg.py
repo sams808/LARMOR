@@ -425,9 +425,12 @@ def spikelet_spacing_ppm(period: int, sw_Hz: float, sfo_MHz: float) -> float:
 def echo_period_from_meta(meta: dict, n_points: int = 0) -> tuple[float, str]:
     """Echo period in POINTS, read from the pulse program -- exact, not guessed.
 
-    QCPMG pulse programs record the spikelet spacing (CNST7, Hz) and/or the
-    echo length in points (CNST8). Returns ``(period_points, source)`` with
-    source one of ``"CNST7" | "CNST8" | "MASR" | "none"`` so the UI can say
+QCPMG pulse programs record the echo period, but not all in the same
+    constant. Bruker's own use CNST7 (spikelet spacing, Hz) or CNST8 (points);
+    the widely-circulated NMRFAM/Perras ``qcpmg.av4.nmrfam`` sequence writes
+    CNST11 (spikelet spacing, Hz), CNST14 (points per echo) and CNST15 (echo
+    period, us) instead, leaving CNST7 at its default of 1. Returns
+    ``(period_points, source)`` naming the constant it used, so the UI can say
     whether the number was READ or GUESSED. ``period`` may be fractional
     (e.g. 292.9688) -- callers round, but see ``sum_echoes(realign=...)``.
 
@@ -449,12 +452,48 @@ def echo_period_from_meta(meta: dict, n_points: int = 0) -> tuple[float, str]:
             return p, "CNST7"
     if len(cnst) > 8 and ok(float(cnst[8])):
         return float(cnst[8]), "CNST8"
+    # NMRFAM / Perras qcpmg.av4.nmrfam: the same three facts, different slots
+    if sw > 0 and len(cnst) > 11 and cnst[11] > 0:
+        p = sw / float(cnst[11])
+        if ok(p):
+            return p, "CNST11"
+    if sw > 0 and len(cnst) > 15 and cnst[15] > 0:
+        p = float(cnst[15]) * 1e-6 * sw            # echo period in us
+        if ok(p):
+            return p, "CNST15"
+    if len(cnst) > 14 and ok(float(cnst[14])):
+        return float(cnst[14]), "CNST14"
     masr = float(meta.get("masr_Hz") or 0.0)
     if sw > 0 and masr > 0:                 # rotor-synchronised echo, 1 rotor
         p = sw / masr
         if ok(p):
             return p, "MASR"
     return 0.0, "none"
+
+
+def centre_offset(fid: np.ndarray, period: int, *, tol_frac: float = 0.25
+                  ) -> int:
+    """Points to skip so each block holds ONE whole, CENTRED echo.
+
+    Acquisition does not always begin half an echo before the first top. The
+    NMRFAM sequence starts recording AT a top, so the natural blocks each
+    hold the right half of one echo and the left half of the NEXT -- two
+    different echoes, of different amplitude, glued into a fake one. The
+    consequences are not subtle: on a real 35Cl train it put T2 at 4.0 ms
+    instead of 10.3, demanded p1 = 493 deg and p2 = 331 deg to phase, and
+    inflated the FWHM by 24 %.
+
+    Returns 0 when the top is already within ``tol_frac`` of the centre, so a
+    train that was acquired conventionally is left exactly as it was.
+    """
+    p = int(period)
+    if p < 4 or 2 * p > np.asarray(fid).size:
+        return 0
+    top = echo_top_point(split_echoes(fid, p))
+    centre = p // 2
+    if abs(top - centre) <= tol_frac * p:
+        return 0
+    return int((top - centre) % p)
 
 
 def split_echoes(fid: np.ndarray, period: int, *, first: int = 0,

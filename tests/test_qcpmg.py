@@ -759,3 +759,50 @@ def test_p2_and_magnitude_agree_on_the_real_wcpmg_dataset():
         return qcpmg.centre_of_gravity(ppm, y, (hi, lo))[0]
 
     assert cg(phased) == pytest.approx(cg(qcpmg.magnitude_spectrum(sp)), abs=15.0)
+
+
+def test_period_is_read_from_the_nmrfam_constants_too():
+    """Not every QCPMG sequence uses Bruker's CNST7. The NMRFAM/Perras
+    qcpmg.av4.nmrfam writes CNST11 (spikelet Hz), CNST14 (points) and CNST15
+    (period us) and leaves CNST7 at its default 1.0 -- which LARMOR then
+    rejected, fell back to a MASR guess, and split the train wrongly."""
+    def meta(**kw):
+        c = [1.0] * 16
+        for i, v in kw.items():
+            c[int(i[1:])] = v
+        return {"sw_Hz": 200000.0, "cnst": c}
+
+    assert qcpmg.echo_period_from_meta(              # spikelet spacing, Hz
+        meta(c11=500.0), n_points=20978) == (400.0, "CNST11")
+    assert qcpmg.echo_period_from_meta(              # echo period, us
+        meta(c15=2000.0), n_points=20978) == (400.0, "CNST15")
+    assert qcpmg.echo_period_from_meta(              # points per echo
+        meta(c14=400.0), n_points=20978) == (400.0, "CNST14")
+    # Bruker's own still win when both are present
+    assert qcpmg.echo_period_from_meta(
+        meta(c7=533.3333, c11=500.0), n_points=20978)[1] == "CNST7"
+    # and an untouched CNST11 (its default 1.0) is still rejected
+    assert qcpmg.echo_period_from_meta(meta(), n_points=20978) == (0.0, "none")
+
+
+def test_centre_offset_finds_a_train_that_starts_on_an_echo_top():
+    """Some sequences begin acquiring AT a top, so the natural blocks hold
+    the right half of one echo and the left half of the NEXT -- two different
+    echoes glued into a fake one. Measured consequences on real 35Cl data:
+    T2 4.0 ms instead of 10.3, p1 = 493 deg and p2 = 331 deg needed to phase,
+    FWHM inflated 24 %."""
+    period, n = 400, 30
+    t = np.arange(period) - period // 2
+    echo = np.exp(-np.abs(t) / 25.0) * np.exp(2j * np.pi * 0.02 * t)
+    train = np.concatenate([echo * np.exp(-k / 8.0) for k in range(n)])
+    # conventional acquisition: already centred, so nothing is changed
+    assert qcpmg.centre_offset(train, period) == 0
+    # start recording at the first top instead
+    shifted = train[period // 2:]
+    off = qcpmg.centre_offset(shifted, period)
+    assert abs(off - period // 2) <= 3
+    tops = [int(np.argmax(np.abs(e)))
+            for e in qcpmg.split_echoes(shifted, period, first=off)[:5]]
+    assert all(abs(tp - period // 2) <= 3 for tp in tops)
+    # a too-short train cannot be judged: say 0 rather than guess
+    assert qcpmg.centre_offset(train[:100], period) == 0

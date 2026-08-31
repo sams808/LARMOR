@@ -562,3 +562,36 @@ def test_failed_recompute_leaves_no_stale_trace(qapp, tmp_path):
     d.magMode.setChecked(True)                   # must not redraw dead data
     assert d._spec is None
     d.close()
+
+
+def test_split_offset_is_set_on_load_and_resets_with_the_period(qapp, tmp_path,
+                                                                monkeypatch):
+    """A train that starts on an echo top gets its split offset applied
+    automatically; changing the period drops it (an offset belongs to ONE
+    period), and a conventional train keeps 0."""
+    from larmor.io import bruker
+
+    period = 200
+    t = np.arange(period) - period // 2
+    echo = np.exp(-np.abs(t) / 12.0) * np.exp(2j * np.pi * 0.03 * t)
+    train = np.concatenate([echo * np.exp(-k / 8.0) for k in range(30)])
+
+    class _Src:
+        domain, ndim = "time", 1
+        data = train[period // 2:]                    # starts AT a top
+        meta = {"sw_Hz": 50000.0, "larmor_MHz": 78.0, "nucleus": "35Cl",
+                "title": "t", "expno": "2", "cnst": [1.0] * 16}
+    _Src.meta["cnst"][11] = 50000.0 / period          # NMRFAM-style constant
+    monkeypatch.setattr(bruker, "read", lambda _s: _Src())
+    from larmor.desktop.qcpmg_dialog import QcpmgDialog
+    d = QcpmgDialog(None, None)
+    d._load(str(tmp_path / "2" / "fid"))
+    assert d.period.value() == period
+    assert d._period_src == "CNST11"
+    assert abs(d.offset.value() - period // 2) <= 3   # centred automatically
+    assert abs(d.top.value() - period // 2) <= 3
+    assert "offset" in d.lbl1.text()
+
+    d.period.setValue(100)                            # a different period
+    assert d.offset.value() == 0                      # the old offset is void
+    d.close()

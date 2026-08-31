@@ -50,14 +50,33 @@ Each stage shows one plot and gives you one number. The headline readout and
 
 ### 1 · Train & split
 
-The echo period is **read from the pulse program** (`CNST7`, the spikelet
-spacing in Hz; or `CNST8` in points) — not guessed. The readout says where it
-came from; if it says *GUESSED from the autocorrelation*, check the period
-markers against the echoes yourself.
+The echo period is **read from the pulse program** — not guessed. Sequences
+disagree on where they put it, so LARMOR checks the lot: Bruker's `CNST7`
+(spikelet spacing, Hz) and `CNST8` (points), then the NMRFAM/Perras
+`qcpmg.av4.nmrfam` trio `CNST11` (Hz), `CNST15` (echo period, µs) and
+`CNST14` (points). The readout names the one it used. Failing all of those it
+falls back to a rotor-synchronisation guess or the autocorrelation, and says
+so — **Find period** then measures it from the data itself (echo-repeat
+correlation), which is the reliable answer when nothing was recorded.
 
-You can type the period as **points or Hz** — they stay in sync. The
-**alignment** score (0–1) is the split's own health check: a wrong period
-drops it sharply.
+You can type the period as **points or Hz** — they stay in sync. Two health
+scores sit in the readout: **echo-repeat** (does the train actually repeat at
+this period?) and **alignment**. Both collapse when the period is wrong.
+
+#### Split offset
+
+Acquisition does not always begin half an echo before the first top. The
+NMRFAM sequence starts recording **at** a top, so the natural blocks each
+hold the *right half of one echo and the left half of the next* — two
+different echoes, of different amplitude, glued into a fake one. LARMOR
+detects this on load and skips the right number of points so the echo lands
+in the middle of its block; **Centre echo** recomputes it, and the field is
+editable.
+
+The cost of getting this wrong is not cosmetic. On a real ³⁵Cl train the
+straddled split gave **T₂ = 4.0 ms instead of 10.3 ms**, demanded p1 = 493°
+and p2 = 331° to phase (against 0° and 0° once centred), and inflated the
+FWHM by 24 %.
 
 ### 2 · Echo & top
 

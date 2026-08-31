@@ -206,6 +206,18 @@ class QcpmgDialog(QDialog):
             s.valueChanged.connect(self._on_period_pts if s is self.period
                                    else self._queue)
         self.periodHz.valueChanged.connect(self._on_period_hz)
+        self.offset = QSpinBox(); self.offset.setRange(0, 10_000_000)
+        self.offset.setToolTip(
+            "points skipped before the first block. Acquisition does not "
+            "always start half an echo before the first top: some sequences "
+            "start recording AT a top, so each block would hold the right "
+            "half of one echo and the left half of the NEXT. Set on load so "
+            "the echo lands in the middle of its block")
+        self.offset.valueChanged.connect(self._on_offset)
+        self.btnCentre = QPushButton("Centre echo")
+        self.btnCentre.setToolTip("recompute the offset that puts the echo "
+                                  "top in the middle of its block")
+        self.btnCentre.clicked.connect(self._auto_offset)
         self.btnFind = QPushButton("Find period")
         self.btnFind.setToolTip(
             "measure the period from the data itself: autocorrelation proposes "
@@ -215,6 +227,7 @@ class QcpmgDialog(QDialog):
         lv.addWidget(_row("period", self.period, "pts   =", self.periodHz,
                           "    echoes", self.nEch, "   drop first", self.dropFirst,
                           "   ", self.btnFind))
+        lv.addWidget(_row("split offset", self.offset, "pts", self.btnCentre))
         self.p_train = _plot("echo train (|FID|) — dotted lines mark the period", parent=self)
         self.p_train.setLabel("bottom", "point")
         lv.addWidget(self.p_train, 1)
@@ -494,6 +507,19 @@ class QcpmgDialog(QDialog):
             self.nEch.setValue(ech.shape[0])
             self.dropFirst.setMaximum(max(0, ech.shape[0] - 2))
             self._n_usable = qcpmg.n_usable_echoes(ech)
+            # a train that starts AT an echo top would otherwise be split
+            # straight through every echo; 0 for a conventionally-acquired one
+            off = qcpmg.centre_offset(self.fid, per)
+            self.offset.blockSignals(True)
+            self.offset.setMaximum(max(0, per - 1))
+            self.offset.setValue(int(off))
+            self.offset.blockSignals(False)
+            if off:
+                ech = qcpmg.split_echoes(self.fid, per, first=off)
+                self.nEch.blockSignals(True)
+                self.nEch.setMaximum(max(1, ech.shape[0]))
+                self.nEch.setValue(ech.shape[0])
+                self.nEch.blockSignals(False)
             self.top.setMaximum(per - 1)
             self.top.setValue(qcpmg.echo_top_point(ech))
         except Exception as exc:                              # noqa: BLE001
@@ -555,6 +581,10 @@ class QcpmgDialog(QDialog):
         self.top.setMaximum(max(0, per - 1))
         self.excluded.clear()
         self.keep = None
+        self.offset.blockSignals(True)          # an offset belongs to ONE period
+        self.offset.setValue(0)
+        self.offset.setMaximum(max(0, per - 1))
+        self.offset.blockSignals(False)
         if self.fid is not None and per >= 4:
             n = max(1, self.fid.size // per)
             for w in (self.nEch, self.dropFirst):
@@ -611,6 +641,23 @@ class QcpmgDialog(QDialog):
             self.top.blockSignals(False)
             self._queue()
 
+    def _on_offset(self, _val):
+        if self._loading:
+            return
+        self.excluded.clear()
+        self.keep = None
+        self._queue()
+
+    def _auto_offset(self):
+        from larmor import qcpmg
+        if self.fid is None:
+            return
+        off = qcpmg.centre_offset(self.fid, self.period.value())
+        self.offset.blockSignals(True)
+        self.offset.setValue(int(off))
+        self.offset.blockSignals(False)
+        self._on_offset(off)
+
     def _find_period(self):
         from larmor import qcpmg
         if self.fid is None:
@@ -644,6 +691,7 @@ class QcpmgDialog(QDialog):
     def _echoes(self):
         from larmor import qcpmg
         return qcpmg.split_echoes(self.fid, self.period.value(),
+                                  first=self.offset.value(),
                                   n_echoes=self.nEch.value(),
                                   drop_first=self.dropFirst.value())
 
@@ -680,6 +728,9 @@ class QcpmgDialog(QDialog):
             align = qcpmg.split_alignment(ech)
             src = {"CNST7": "read from the pulse program (CNST7)",
                    "CNST8": "read from the pulse program (CNST8)",
+                   "CNST11": "read from the pulse program (CNST11)",
+                   "CNST14": "read from the pulse program (CNST14)",
+                   "CNST15": "read from the pulse program (CNST15)",
                    "MASR": "assumed rotor-synchronised (MASR)",
                    "autocorrelation": "GUESSED from the autocorrelation — check the markers",
                    "echo correlation": "MEASURED from the data (echo-repeat correlation)",
@@ -691,7 +742,9 @@ class QcpmgDialog(QDialog):
                 f"{ech.shape[0]} echoes × {per} pts · τecho = {tau * 1e6:,.1f} µs · "
                 f"spikelet spacing {self.periodHz.value():,.1f} Hz "
                 f"({self.periodHz.value() / sfo if sfo else 0:.2f} ppm) · "
-                f"period {src} · echo-repeat {repeat:.2f} · "
+                + (f"offset {self.offset.value()} pts · "
+                   if self.offset.value() else "")
+                + f"period {src} · echo-repeat {repeat:.2f} · "
                 f"alignment {align:.2f} · "
                 f"signal above 3σ through echo "
                 f"{getattr(self, '_n_usable', ech.shape[0])} "
@@ -769,6 +822,7 @@ class QcpmgDialog(QDialog):
             zf = int(self.zf.currentText())
             self._ppm, self._spec_raw = qcpmg.sum_echo_spectrum(
                 self.fid, per, sw, sfo, self._carrier, top=top,
+                first=self.offset.value(),
                 n_echoes=self.nEch.value(), drop_first=self.dropFirst.value(),
                 t2_weight_s=t2s, lb_Hz=self.lb.value(), gb_Hz=self.gb.value(),
                 zf=zf, realign=self.chkRealign.isChecked())
@@ -1287,6 +1341,7 @@ class QcpmgDialog(QDialog):
             "spin_rate_Hz": 0.0,
             "mas_uncertain": False,
             "qcpmg_period_pts": self.period.value(),
+            "qcpmg_split_offset": self.offset.value(),
             "qcpmg_echo_top": self.top.value(),
             "qcpmg_realign": self.chkRealign.isChecked(),
             "qcpmg_magnitude": self.magMode.isChecked(),
