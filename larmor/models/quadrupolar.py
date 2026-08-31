@@ -10,6 +10,11 @@ import numpy as np
 from scipy.ndimage import gaussian_filter1d
 
 from larmor.models.base import Model, ParamDef, SimContext, register
+#: upper bound offered for a discrete Cq. 40 MHz was arbitrary and too low
+#: for the heavy quadrupolar halides this program is used on -- a real 81Br
+#: glass needs ~34 MHz, so the old ceiling sat right on top of the answer.
+CQ_MAX_MHZ = 120.0
+
 from larmor.models.analytic import FWHM_TO_SIGMA
 
 
@@ -110,7 +115,12 @@ def _gaussian_weight(grid: np.ndarray, mean: float, fwhm: float) -> np.ndarray:
 def _render_czjzek(v: dict, ctx: SimContext) -> np.ndarray:
     from larmor import engine
 
-    kernel = engine.build_kernel(ctx.nucleus, ctx.larmor_MHz, ctx.spin_rate_Hz)
+    sw, ref = engine.kernel_window(ctx.x_ppm, ctx.larmor_MHz)
+    kernel = engine.build_kernel(
+        ctx.nucleus, ctx.larmor_MHz, ctx.spin_rate_Hz, sw_Hz=sw,
+        npts=min(int(engine.KERNEL_SETTINGS["npts"]
+                     * max(1.0, sw / engine.KERNEL_MIN_SW_HZ)), 16384),
+        ref_offset_ppm=ref)
     y = kernel.weights(v["sigma_Cq_MHz"]) @ kernel.K
     y = _broaden_shift(kernel.x_ppm, y, v["isotropic_chemical_shift_ppm"],
                        _czjzek_fwhm(v))
@@ -153,7 +163,12 @@ def _render_ext_czjzek(v: dict, ctx: SimContext) -> np.ndarray:
 
     from larmor import engine
 
-    kernel = engine.build_kernel(ctx.nucleus, ctx.larmor_MHz, ctx.spin_rate_Hz)
+    sw, ref = engine.kernel_window(ctx.x_ppm, ctx.larmor_MHz)
+    kernel = engine.build_kernel(
+        ctx.nucleus, ctx.larmor_MHz, ctx.spin_rate_Hz, sw_Hz=sw,
+        npts=min(int(engine.KERNEL_SETTINGS["npts"]
+                     * max(1.0, sw / engine.KERNEL_MIN_SW_HZ)), 16384),
+        ref_offset_ppm=ref)
     # the dominant tensor must share the pdf grid's unit system (MHz here)
     dominant = {"Cq": v["Cq_MHz"], "eta": v["eta"]}
     res = ExtCzjzekDistribution(dominant, eps=max(v["eps"], 1e-3)).pdf(
@@ -184,7 +199,7 @@ register(Model(
         ParamDef("isotropic_chemical_shift_ppm", "pos", 0.0, "ppm",
                  "isotropic chemical shift"),
         ParamDef("Cq_MHz", "cq", 5.0, "MHz", "dominant quadrupolar coupling",
-                 min=0.05, max=40.0),
+                 min=0.05, max=CQ_MAX_MHZ),
         ParamDef("eta", "eta", 0.2, "", "dominant asymmetry", min=0.0, max=1.0),
         ParamDef("eps", "eps", 0.3, "", "perturbation fraction",
                  min=0.01, max=3.0),
@@ -232,8 +247,12 @@ def _amorphous_weights(kernel, cq_MHz: float, eta: float,
 def _render_amorphous(v: dict, ctx: SimContext) -> np.ndarray:
     from larmor import engine
 
+    sw, ref = engine.kernel_window(ctx.x_ppm, ctx.larmor_MHz)
     kernel = engine.build_kernel(
-        ctx.nucleus, ctx.larmor_MHz, ctx.spin_rate_Hz,
+        ctx.nucleus, ctx.larmor_MHz, ctx.spin_rate_Hz, sw_Hz=sw,
+        npts=min(int(engine.KERNEL_SETTINGS["npts"]
+                     * max(1.0, sw / engine.KERNEL_MIN_SW_HZ)), 16384),
+        ref_offset_ppm=ref,
         cq_max_MHz=AMORPH_CQ_MAX, n_cq=AMORPH_N_CQ, n_eta=AMORPH_N_ETA)
     w = _amorphous_weights(kernel, v["Cq_MHz"], v.get("eta", 0.0),
                            v.get("Cq_fwhm_MHz", 0.0), v.get("eta_fwhm", 0.0))
@@ -306,7 +325,7 @@ register(Model(
         ParamDef("isotropic_chemical_shift_ppm", "pos", 0.0, "ppm",
                  "isotropic chemical shift"),
         ParamDef("Cq_MHz", "cq", 3.0, "MHz", "quadrupolar coupling constant",
-                 min=0.01, max=40.0),
+                 min=0.01, max=CQ_MAX_MHZ),
         ParamDef("eta", "eta", 0.2, "", "quadrupolar asymmetry", min=0.0, max=1.0),
         ParamDef("shift_fwhm_ppm", "fwhm", 2.0, "ppm", "Gaussian broadening",
                  min=0.05),
@@ -336,7 +355,7 @@ register(Model(
         ParamDef("isotropic_chemical_shift_ppm", "pos", 0.0, "ppm",
                  "isotropic chemical shift"),
         ParamDef("Cq_MHz", "cq", 1.0, "MHz", "quadrupolar coupling constant",
-                 min=0.001, max=40.0),
+                 min=0.001, max=CQ_MAX_MHZ),
         ParamDef("eta", "eta", 0.1, "", "quadrupolar asymmetry", min=0.0, max=1.0),
         ParamDef("shift_fwhm_ppm", "fwhm", 1.0, "ppm", "Gaussian broadening",
                  min=0.05),
@@ -367,7 +386,7 @@ register(Model(
         ParamDef("isotropic_chemical_shift_ppm", "pos", 0.0, "ppm",
                  "isotropic chemical shift"),
         ParamDef("Cq_MHz", "cq", 3.0, "MHz", "quadrupolar coupling constant",
-                 min=0.01, max=40.0),
+                 min=0.01, max=CQ_MAX_MHZ),
         ParamDef("eta_q", "etaq", 0.2, "", "quadrupolar asymmetry",
                  min=0.0, max=1.0),
         ParamDef("zeta_ppm", "zeta", 50.0, "ppm", "shielding anisotropy",

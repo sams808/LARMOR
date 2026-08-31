@@ -44,6 +44,35 @@ def ftol_from_pct(pct) -> float | None:
     return max(1e-15, 2.0 * p / 100.0)
 
 
+#: models whose render() is a closed-form formula evaluated pointwise --
+#: smooth to machine precision, so scipy's default finite-difference step is
+#: the most accurate choice. Everything else simulates on a DISCRETE grid
+#: (the Czjzek (Cq, eta) kernel; mrsimulator's own powder averaging), whose
+#: quantisation swamps the true derivative at a ~1e-8 relative step.
+_ANALYTIC_MODELS = frozenset({
+    "gauss_lor", "gl_norm", "voigt", "jmultiplet", "sidebands",
+    "spectrum", "function",
+})
+
+#: relative finite-difference step for simulated (grid-based) models. At
+#: scipy's default ~1.5e-8 the Jacobian of a Czjzek model is pure grid noise:
+#: on a real 81Br dataset a step 1.3e6 times larger changed the model only 9x
+#: as much, so the optimiser "converged" after 18 evaluations without moving a
+#: single shape parameter. At 1e-3 the same fit explores properly (Cq 25 ->
+#: 33.9 MHz, the value the linewidth implies) while the validated 27Al/11B
+#: example fits are unchanged to five decimals.
+SIMULATED_DIFF_STEP = 1e-3
+
+
+def diff_step_for(recipe) -> float | None:
+    """The finite-difference step a recipe needs, or None for scipy's default
+    (analytic models only)."""
+    for s in recipe.sites:
+        if s.model not in _ANALYTIC_MODELS:
+            return SIMULATED_DIFF_STEP
+    return None
+
+
 def _tol_kws(tol) -> dict:
     """least_squares stop tolerances from a completion threshold (``ftol`` on the
     cost, matched ``xtol``); empty when no threshold is set."""
@@ -295,9 +324,11 @@ def fit(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
         warnings.filterwarnings("ignore",
                                 message="invalid value encountered in scalar divide",
                                 category=RuntimeWarning)
+        _ds = diff_step_for(recipe)
+        _step_kws = {} if _ds is None else {"diff_step": _ds}
         result = lmfit.minimize(residual, params, method="least_squares",
                                 iter_cb=(_main_cb if (frame_cb or iter_cb) else None),
-                                **_tol_kws(tol))
+                                **_step_kws, **_tol_kws(tol))
 
     def _at_bounds(res) -> list[str]:
         names = []

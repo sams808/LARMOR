@@ -110,6 +110,37 @@ def build_kernel(nucleus: str, larmor_MHz: float, spin_rate_Hz: float,
 
 # --------------------------------------------------------------------------
 
+#: the Czjzek kernel's own simulated window. It used to be a FIXED 150 kHz,
+#: which is a different width in ppm for every nucleus -- 1152 ppm for 27Al at
+#: 130 MHz (fine for aluminosilicates, which is why it went unnoticed) but only
+#: 696 ppm for 81Br at 216 MHz. Everything outside it is interpolated to ZERO,
+#: so a wide-line site simply vanished: a real 81Br site at 617 ppm rendered as
+#: all zeros, and ext_czjzek could not produce a pattern wider than ~694 ppm no
+#: matter what Cq was asked for.
+KERNEL_MIN_SW_HZ = 150000.0
+#: how much wider than the data the kernel is built, so a pattern can spill
+#: past the fit window without being clipped
+KERNEL_SPAN_MARGIN = 1.25
+
+
+def kernel_window(x_ppm, larmor_MHz: float) -> tuple[float, float]:
+    """(sw_Hz, ref_offset_ppm) for a kernel that COVERS ``x_ppm``.
+
+    Never narrower than the historical 150 kHz, so every axis that already
+    fitted keeps its kernel; only a wider request extends it.
+    """
+    if x_ppm is None or larmor_MHz <= 0:
+        return KERNEL_MIN_SW_HZ, 30.0
+    x = np.asarray(x_ppm, float)
+    if x.size < 2:
+        return KERNEL_MIN_SW_HZ, 30.0
+    lo, hi = float(np.min(x)), float(np.max(x))
+    need = (hi - lo) * KERNEL_SPAN_MARGIN * larmor_MHz
+    if need <= KERNEL_MIN_SW_HZ:
+        return KERNEL_MIN_SW_HZ, 30.0      # unchanged: the historical window
+    return float(need), 0.5 * (lo + hi)
+
+
 def needs_kernel(recipe: Recipe) -> bool:
     return any(s.model == "czjzek" for s in recipe.sites)
 
@@ -168,9 +199,14 @@ def site_width_margin(sites, default: float = 10.0, factor: float = 6.0) -> floa
 def make_context(recipe: Recipe, exp_ppm: np.ndarray | None = None) -> SimContext:
     """Build the simulation context; picks the axis a recipe should render on."""
     if needs_kernel(recipe):
+        sw, ref = kernel_window(exp_ppm, recipe.larmor_frequency_MHz)
+        # keep the RESOLUTION when the window is widened, or a broad-line
+        # dataset would be simulated on a coarser grid than its own data
+        npts = int(KERNEL_SETTINGS["npts"]
+                   * max(1.0, sw / KERNEL_MIN_SW_HZ))
         kernel = build_kernel(recipe.nucleus, recipe.larmor_frequency_MHz,
-                              recipe.spin_rate_Hz,
-                              npts=KERNEL_SETTINGS["npts"],
+                              recipe.spin_rate_Hz, sw_Hz=sw,
+                              npts=min(npts, 16384), ref_offset_ppm=ref,
                               cq_max_MHz=KERNEL_SETTINGS["cq_max_MHz"],
                               n_cq=KERNEL_SETTINGS["n_cq"],
                               n_eta=KERNEL_SETTINGS["n_eta"])

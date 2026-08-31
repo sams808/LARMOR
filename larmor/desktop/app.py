@@ -2691,6 +2691,28 @@ class MainWindow(QMainWindow):
                 if k in params and not (remembered and k in remembered):
                     params[k]["value"] = val
 
+    def _seed_from_data(self, name: str, params: dict, centre_ppm: float):
+        """Measure the starting width from the SPECTRUM. A per-nucleus table
+        cannot cover every isotope: for 81Br the defaults gave a 19 kHz
+        needle on a 400 kHz pattern, which the fit has no gradient to escape
+        from. Skipped when the user's own remembered values already apply."""
+        if self.exp_ppm is None or not len(self.exp_ppm):
+            return
+        nucleus = (self.recipe or {}).get("nucleus", "")
+        if self._remembered_site_defaults(nucleus, name):
+            return                     # what worked last time wins
+        try:
+            from larmor import estimate
+            vals = estimate.start_values(
+                name, self.exp_ppm, self.exp_amp, nucleus,
+                float((self.recipe or {}).get("larmor_frequency_MHz", 0.0) or 0.0),
+                centre_ppm=centre_ppm)
+        except Exception:                                  # noqa: BLE001
+            return
+        for k, v in vals.items():
+            if k in params:
+                params[k]["value"] = float(v)
+
     @staticmethod
     def _remembered_site_defaults(nucleus: str, model: str) -> dict:
         import json
@@ -2736,6 +2758,7 @@ class MainWindow(QMainWindow):
                               "vary": p.vary, "min": p.min, "max": p.max,
                               "expr": None}
         self._seed_nucleus_defaults(name, params)
+        self._seed_from_data(name, params, ppm)
         params["isotropic_chemical_shift_ppm"]["value"] = ppm
         params["amplitude"]["value"] = amp or 1.0
         n = len(self.recipe["sites"])
