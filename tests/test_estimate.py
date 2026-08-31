@@ -100,3 +100,32 @@ def test_start_values_land_in_the_right_ballpark():
         estimate.band_width_ppm(x, y)[1], rel=1e-6)
     # a flat/empty trace asks for nothing rather than inventing a number
     assert estimate.start_values("quad_ct", x, np.zeros_like(x), "81Br", 216.0) == {}
+
+
+def test_czjzek_grid_ceiling_follows_the_requested_sigma():
+    """Fixing the kernel's spectral window was not enough: its (Cq, eta) GRID
+    also stopped at 25 MHz, so a Czjzek distribution with weight above that
+    saturated -- 81Br stuck at ~1013 ppm however large sigma got, against
+    1488 ppm of real data."""
+    assert engine.kernel_cq_max(10.0) == 25.0
+    assert engine.kernel_cq_max(30.0) == 50.0
+    assert engine.kernel_cq_max(300.0) == 400.0
+
+    x = np.linspace(-8000.0, 8000.0, 4001)
+
+    def width(sigma):
+        rec = Recipe(nucleus="81Br", larmor_frequency_MHz=216.0,
+                     spin_rate_Hz=0.0,
+                     sites=[SiteModel(model="czjzek", label="c", params={
+                         "isotropic_chemical_shift_ppm": Param(0.0),
+                         "sigma_Cq_MHz": Param(float(sigma)),
+                         "shift_fwhm_ppm": Param(50.0),
+                         "line_fwhm_ppm": Param(0.0),
+                         "amplitude": Param(1.0)})])
+        gx, gy, _ = engine.simulate(rec, exp_ppm=x)
+        return estimate.band_width_ppm(gx, gy)[1]
+
+    w5, w10, w20 = width(5.0), width(10.0), width(20.0)
+    assert w10 > 1.5 * w5                      # kept growing past the old wall
+    assert w20 > 1.5 * w10
+    assert w10 > 1400.0                        # can now reach real 81Br widths

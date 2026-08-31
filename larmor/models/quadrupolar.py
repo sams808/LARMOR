@@ -116,11 +116,14 @@ def _render_czjzek(v: dict, ctx: SimContext) -> np.ndarray:
     from larmor import engine
 
     sw, ref = engine.kernel_window(ctx.x_ppm, ctx.larmor_MHz)
+    cq_max = engine.kernel_cq_max(5.0 * float(v.get("sigma_Cq_MHz", 2.0)))
     kernel = engine.build_kernel(
         ctx.nucleus, ctx.larmor_MHz, ctx.spin_rate_Hz, sw_Hz=sw,
         npts=min(int(engine.KERNEL_SETTINGS["npts"]
                      * max(1.0, sw / engine.KERNEL_MIN_SW_HZ)), 16384),
-        ref_offset_ppm=ref)
+        ref_offset_ppm=ref, cq_max_MHz=cq_max,
+        n_cq=max(engine.KERNEL_SETTINGS["n_cq"],
+                 int(engine.KERNEL_SETTINGS["n_cq"] * cq_max / 25.0)))
     y = kernel.weights(v["sigma_Cq_MHz"]) @ kernel.K
     y = _broaden_shift(kernel.x_ppm, y, v["isotropic_chemical_shift_ppm"],
                        _czjzek_fwhm(v))
@@ -164,11 +167,15 @@ def _render_ext_czjzek(v: dict, ctx: SimContext) -> np.ndarray:
     from larmor import engine
 
     sw, ref = engine.kernel_window(ctx.x_ppm, ctx.larmor_MHz)
+    cq_max = engine.kernel_cq_max(2.5 * float(v.get("Cq_MHz", 5.0))
+                                  * (1.0 + float(v.get("eps", 0.3))))
     kernel = engine.build_kernel(
         ctx.nucleus, ctx.larmor_MHz, ctx.spin_rate_Hz, sw_Hz=sw,
         npts=min(int(engine.KERNEL_SETTINGS["npts"]
                      * max(1.0, sw / engine.KERNEL_MIN_SW_HZ)), 16384),
-        ref_offset_ppm=ref)
+        ref_offset_ppm=ref, cq_max_MHz=cq_max,
+        n_cq=max(engine.KERNEL_SETTINGS["n_cq"],
+                 int(engine.KERNEL_SETTINGS["n_cq"] * cq_max / 25.0)))
     # the dominant tensor must share the pdf grid's unit system (MHz here)
     dominant = {"Cq": v["Cq_MHz"], "eta": v["eta"]}
     res = ExtCzjzekDistribution(dominant, eps=max(v["eps"], 1e-3)).pdf(

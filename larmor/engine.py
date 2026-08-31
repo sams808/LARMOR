@@ -121,6 +121,22 @@ KERNEL_MIN_SW_HZ = 150000.0
 #: how much wider than the data the kernel is built, so a pattern can spill
 #: past the fit window without being clipped
 KERNEL_SPAN_MARGIN = 1.25
+#: the kernel's (Cq, eta) GRID ceiling. Fixing the spectral window alone was
+#: not enough: the grid stopped at 25 MHz, so a Czjzek distribution whose
+#: weight lies above that could not be represented and the pattern saturated
+#: (81Br: 1013 ppm however large sigma got, against 1488 ppm of real data).
+#: Quantised to a ladder so the cache holds a handful of kernels rather than
+#: one per optimiser step.
+CQ_MAX_LADDER = (25.0, 50.0, 100.0, 200.0, 400.0)
+
+
+def kernel_cq_max(needed_MHz: float) -> float:
+    """Smallest ladder step covering ``needed_MHz`` (the largest Cq the model
+    puts real weight on)."""
+    for step in CQ_MAX_LADDER:
+        if needed_MHz <= step:
+            return step
+    return CQ_MAX_LADDER[-1]
 
 
 def kernel_window(x_ppm, larmor_MHz: float) -> tuple[float, float]:
