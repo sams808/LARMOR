@@ -31,13 +31,25 @@ def test_residual_noise_ratio():
 
 def test_per_nucleus_seed():
     from PySide6.QtCore import QSettings
-    QSettings("LARMOR", "app").setValue("siteDefaults", "{}")   # literature-default path
-    w = _win()
-    w.recipe = {"nucleus": "27Al", "sites": []}
-    p = {"sigma_Cq_MHz": {"value": 0}, "shift_fwhm_ppm": {"value": 0},
-         "eta": {"value": 0}}
-    w._seed_nucleus_defaults("czjzek", p)
-    assert p["sigma_Cq_MHz"]["value"] == 1.5
+
+    # this key holds the shape parameters the user's own fits have taught the
+    # app; LARMOR_NO_SESSION does not cover a DIRECT write, so clearing it
+    # without restoring destroys real work on every test run
+    s = QSettings("LARMOR", "app")
+    saved = s.value("siteDefaults")
+    try:
+        s.setValue("siteDefaults", "{}")        # the literature-default path
+        w = _win()
+        w.recipe = {"nucleus": "27Al", "sites": []}
+        p = {"sigma_Cq_MHz": {"value": 0}, "shift_fwhm_ppm": {"value": 0},
+             "eta": {"value": 0}}
+        w._seed_nucleus_defaults("czjzek", p)
+        assert p["sigma_Cq_MHz"]["value"] == 1.5
+    finally:
+        if saved is None:
+            s.remove("siteDefaults")
+        else:
+            s.setValue("siteDefaults", saved)
     assert p["shift_fwhm_ppm"]["value"] == 12.0
     # a different nucleus seeds different values
     w.recipe["nucleus"] = "11B"

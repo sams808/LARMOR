@@ -449,7 +449,7 @@ provenance only.
 | Approximation | Where | Impact / mitigation |
 |---|---|---|
 | $(C_Q,\eta)$ kernel grid (80×11 in 1D; 40×6 in 2D) | Czjzek fits | ≤ 0.64 % lineshape RMSD (Fig. 2); raise in *Computing parameters* for demanding cases |
-| `cq_max` (25 MHz 1D / 16 MHz 2D) | Czjzek | truncates the distribution tail for large σ; raise `cq_max` if σ is big (mode $\approx 2\sigma$) |
+| `cq_max` (2D: 16 MHz) | Czjzek | in 2D this truncates the distribution tail for large σ. In 1D the ceiling follows the requested width automatically (`engine.kernel_cq_max`, a 25–400 MHz ladder), so it needs no manual adjustment there |
 | Discrete quad in 2D snaps to the grid | `quad_ct`/`quad_csa` MQMAS | crystalline 2D $C_Q/\eta$ grid-limited (~0.4 MHz); use 1D `quad_ct` (exact) for precise crystalline $C_Q$ |
 | Parameter rounding for the sim cache | all mrsimulator paths | $C_Q$ to 1 kHz, $\eta$ to 0.001 — negligible vs experimental error |
 | 5-point Gaussian for dCS / σζ | Czjzek 2D, csa_czjzek | coarse but adequate for a smooth Gaussian |
@@ -522,7 +522,7 @@ contributions (Sandland Eq. 2)."*
    ratios with the χ² profile (*Errors Analysis*) rather than the covariance
    alone.
 2. **Czjzek glasses** — report σ, $\sqrt{\langle P_Q^2\rangle}$, and dCS
-   rather than a single $C_Q$; check that `cq_max` covers the distribution if
+   rather than a single $C_Q$; in 2D check that `cq_max` covers the distribution if
    σ is large (mode $\approx 2\sigma$).
 3. **MQMAS** — confirm the fitted F1 reference offset β is small; the fitted
    $\delta_\text{iso}$ is the chemical shift and $C_Q/P_Q$ the quadrupolar
