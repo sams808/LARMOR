@@ -235,6 +235,13 @@ the extrapolation dialog collects them.
 `.png`/`.svg`/`.pdf` next to a base name you choose — the same composite the
 right-click *Export figure / Send to studio* menu offers per panel.
 
+**Intensity across the sweep** (WCPMG): the swept pulse also imprints an
+*amplitude* weighting — near-flat mid-band, rolling off at the sweep edges.
+After sending the spectrum to the workbench, **Process ▸ WURST excitation
+profile…** divides the computed WURST-N weighting out (enter the sweep width,
+e.g. 2000 kHz; the correction is clamped at a floor so edge noise is not
+amplified). Do this before quantifying anything across a wide pattern.
+
 ## 3 · Recommended workflow
 
 1. **Open the raw `fid`** of the QCPMG EXPNO.

@@ -60,3 +60,45 @@ def test_twopoint_bg_rejects_coincident_points():
     s = P.from_processed(x, x + 0j, 100.0)
     with pytest.raises(ValueError):
         P.op_twopoint_bg(s, x1=1.0, y1=0.0, x2=1.0, y2=5.0)
+
+
+class TestWurstCorrect:
+    """A4: the amplitude half of swept-pulse physics (the phase half --
+    autophase's p2 -- has been in for a while)."""
+
+    def test_profile_shape(self):
+        from larmor.processing import wurst_profile
+
+        x = np.linspace(-500.0, 500.0, 2001)
+        w = wurst_profile(x, 216.0, 0.0, 2.0 * 216.0 * 500.0 / 1e3,  # exact span
+                          n=80.0, floor=0.05)
+        centre = w[np.abs(x) < 100]
+        assert np.all(centre > 0.999)              # flat over the middle
+        assert w[0] == 0.05 and w[-1] == 0.05      # clamped at the edges
+        # monotone roll-off from centre to edge above the floor
+        half = w[x >= 0]
+        assert np.all(np.diff(half) < 1e-9)
+
+    def test_divide_out_restores_flat_intensity(self):
+        from larmor.processing import Spectrum1D, apply, wurst_profile
+
+        x = np.linspace(-400.0, 400.0, 1601)
+        sweep_khz = 216.0 * 800.0 / 1e3            # sweep spans the window
+        w = wurst_profile(x, 216.0, 0.0, sweep_khz, n=80.0, floor=0.10)
+        true = np.ones_like(x)
+        s = Spectrum1D(x_ppm=x, y=true * w, sfo1_MHz=216.0,
+                       sw_Hz=216.0 * 800.0, domain="freq")
+        out = apply(s, [{"op": "wurst_correct", "centre_ppm": 0.0,
+                         "sweep_kHz": sweep_khz, "n": 80.0, "floor": 0.10}])
+        above = w > 0.10 + 1e-12                   # only where not clamped
+        assert np.allclose(out.y[above].real, 1.0, atol=1e-9)
+
+    def test_requires_frequency_domain(self):
+        import pytest as _pytest
+
+        from larmor.processing import Spectrum1D, op_wurst_correct
+
+        s = Spectrum1D(x_ppm=None, y=np.zeros(8, complex), sfo1_MHz=216.0,
+                       sw_Hz=1000.0, domain="time")
+        with _pytest.raises(ValueError, match="frequency-domain"):
+            op_wurst_correct(s, centre_ppm=0.0, sweep_kHz=100.0)

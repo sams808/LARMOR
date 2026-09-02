@@ -394,6 +394,48 @@ def op_extract(s: Spectrum1D, hi_ppm: float, lo_ppm: float) -> Spectrum1D:
     return s
 
 
+def wurst_profile(ppm: "np.ndarray", sfo1_MHz: float, centre_ppm: float,
+                  sweep_kHz: float, n: float = 80.0,
+                  floor: float = 0.10) -> "np.ndarray":
+    """Amplitude weighting a WURST-N sweep imprints across its band.
+
+    A linear chirp visits each frequency at one moment of the pulse, so the
+    frequency-domain weighting IS the pulse's amplitude envelope read at
+    that moment: WURST-N has A(t) = 1 - |cos(pi t / tau_p)|^N, t in
+    [0, tau_p], which maps to W(nu) = 1 - |cos(pi f)|^N with f the
+    fractional position of nu across the sweep. Outside the sweep, and
+    wherever W falls below ``floor`` (relative), the returned profile is
+    clamped to ``floor`` -- dividing by less would amplify noise, not signal.
+    For large N (WURST-80 is typical) the profile is near-flat over ~90 % of
+    the band and only the outer edges are corrected.
+    """
+    x = np.asarray(ppm, float)
+    if sfo1_MHz <= 0 or sweep_kHz <= 0:
+        return np.ones_like(x)
+    half_ppm = (sweep_kHz * 1e3 / 2.0) / sfo1_MHz
+    f = (x - (centre_ppm - half_ppm)) / (2.0 * half_ppm)   # 0..1 across sweep
+    w = 1.0 - np.abs(np.cos(np.pi * np.clip(f, 0.0, 1.0))) ** float(n)
+    w[(f < 0.0) | (f > 1.0)] = 0.0
+    floor = float(np.clip(floor, 1e-3, 1.0))
+    return np.maximum(w, floor)
+
+
+def op_wurst_correct(s: Spectrum1D, centre_ppm: float, sweep_kHz: float,
+                     n: float = 80.0, floor: float = 0.10) -> Spectrum1D:
+    """Divide out the WURST/chirp excitation profile (see wurst_profile), so
+    intensities across a swept-excitation wideline pattern (WCPMG and
+    friends) are comparable and quantification means something. LARMOR
+    already fits the QUADRATIC PHASE such a sweep imprints (autophase p2);
+    this is the amplitude half of the same physics. Frequency domain only."""
+    if s.domain != "freq" or s.x_ppm is None:
+        raise ValueError("wurst_correct applies to a frequency-domain "
+                         "spectrum")
+    w = wurst_profile(s.x_ppm, s.sfo1_MHz, centre_ppm, sweep_kHz,
+                      n=n, floor=floor)
+    s.y = s.y / w
+    return s
+
+
 def op_scale(s: Spectrum1D, factor: float = 1.0) -> Spectrum1D:
     s.y = s.y * factor
     return s
@@ -591,6 +633,7 @@ OPS = {
     "ft": op_ft,
     # frequency domain
     "phase": op_phase,
+    "wurst_correct": op_wurst_correct,
     "autophase": op_autophase,
     "baseline": op_baseline,
     "iterbaseline": op_iterbaseline,

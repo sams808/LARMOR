@@ -107,6 +107,15 @@ $$S_\text{corr}(\nu) = S(\nu)\,e^{i(\phi_0+\phi_1(\nu-\nu_\text{pivot})/\text{SW
   cross-correlation, or subtract an average reference (ssNake *Subtract
   Averages*). Full background subtraction with least-squares scaling is
   **Process ▸ Subtract a spectrum** (see **Multi-dataset**).
+- `wurst_correct` — divide out a WURST/chirp sweep's excitation profile
+  (centre, sweep width, order N, floor); **Process ▸ WURST excitation
+  profile…**. The amplitude half of swept-pulse physics — autophase's p2
+  handles the phase half.
+- Patterns wider than one acquisition window: **Tools ▸ Stitch
+  frequency-stepped (VOCS) spectra…** combines sub-spectra acquired at
+  stepped transmitter offsets (skyline or coverage-weighted average, with a
+  per-edge trim for the excitation roll-off) into one spectrum, and records
+  the sources in the recipe's provenance.
 - **pick peaks** — threshold + parabolic interpolation → peak list, and
   *Decomposition ▸ Add a line at every peak*.
 

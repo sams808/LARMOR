@@ -1120,3 +1120,72 @@ def test_session_is_a_file_not_the_registry(win, qapp, tmp_path, monkeypatch):
     win._persist_session()
     assert not f.exists() and win._session_timer.isActive()
     win._session_timer.stop()
+
+
+def test_vocs_dialog_stitches_to_workbench(win, qapp, tmp_path, monkeypatch):
+    """A3: three offset sub-spectra -> the VOCS dialog stitches them and the
+    workbench receives the combined pattern with its provenance."""
+    from PySide6.QtWidgets import QFileDialog
+
+    from larmor.desktop.vocs_dialog import VocsDialog
+    from larmor.io import spectra
+
+    def gauss(x, c, w, a):
+        return a * np.exp(-4 * np.log(2) * ((x - c) / w) ** 2)
+
+    paths = []
+    for i, centre in enumerate((-400.0, 0.0, 400.0)):
+        x = np.linspace(centre - 320.0, centre + 320.0, 641)
+        y = gauss(x, -300.0, 150.0, 1.0) + gauss(x, 250.0, 120.0, 0.7)
+        f = tmp_path / f"off{i}.csv"
+        spectra.write_csv(f, x, y, {"nucleus": "81Br",
+                                    "larmor_MHz": 216.0})
+        paths.append(str(f))
+
+    dlg = VocsDialog(win)
+    got = {}
+    dlg.applied.connect(lambda p, a, n, s: got.update(
+        ppm=np.asarray(p), amp=np.asarray(a), notes=n, sources=s))
+    monkeypatch.setattr(QFileDialog, "getOpenFileNames",
+                        staticmethod(lambda *a, **k: (paths, "")))
+    dlg._add()
+    assert dlg.btnApply.isEnabled()
+    dlg._apply()
+    assert got["ppm"].size > 100 and len(got["sources"]) == 3
+    assert got["ppm"][0] < -600 and got["ppm"][-1] > 600
+
+    win._vocs_to_workbench(got["ppm"], got["amp"], got["notes"],
+                           got["sources"])
+    assert win.exp_ppm.size == got["ppm"].size
+    assert win.recipe["provenance"]["vocs_sources"] == got["sources"]
+    assert win.recipe["mas_uncertain"] is True
+    dlg.close()
+
+
+def test_wurst_correct_divides_profile_and_records_provenance(
+        win, qapp, tmp_path, monkeypatch):
+    """A4: Process > WURST excitation profile divides the on-screen spectrum
+    by the computed sweep weighting and records the parameters."""
+    from PySide6.QtWidgets import QDialog
+
+    from larmor.processing import wurst_profile
+
+    data = tmp_path / "sample.csv"
+    _write_csv_spectrum(data)
+    win.load_source(str(data), keep_fit=False)
+    qapp.processEvents()
+    before = win.exp_amp.copy()
+    sfo = win.recipe["larmor_frequency_MHz"]
+
+    monkeypatch.setattr(QDialog, "exec", lambda self: QDialog.Accepted)
+    win.open_wurst_correct()
+
+    prov = win.recipe["provenance"]["wurst_correct"]
+    w = wurst_profile(win.exp_ppm, sfo, prov["centre_ppm"],
+                      prov["sweep_kHz"], n=prov["n"], floor=prov["floor"])
+    assert np.allclose(win.exp_amp, before / w, rtol=1e-12)
+    # the profile is non-trivial: flat mid-sweep, clamped at the floor edges
+    assert w.max() == pytest.approx(1.0, abs=1e-6)
+    assert w.min() == pytest.approx(prov["floor"])
+    win.undo(); qapp.processEvents()                 # and it is undoable
+    assert np.allclose(win.exp_amp, before)

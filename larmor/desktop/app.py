@@ -416,6 +416,8 @@ class MainWindow(QMainWindow):
         m_proc.addSeparator()
         self._add(m_proc, "Subtract a spectrum (&background)…",
                   self.open_subtract)
+        self._add(m_proc, "&WURST excitation profile…  (divide out the sweep)",
+                  self.open_wurst_correct)
 
         m_dec = mb.addMenu("&Decomposition")
         # --- build the model ---
@@ -559,6 +561,8 @@ class MainWindow(QMainWindow):
                   self.open_per_site_relaxation)
         m_tools.addSection("Advanced experiments")
         self._add(m_tools, "QCPMG (echo train → spectrum)…", self.open_qcpmg)
+        self._add(m_tools, "Stitch frequency-stepped (&VOCS) spectra…",
+                  self.open_vocs)
         self._add(m_tools, "QCPMG: infinite-field δiso (2 fields)…",
                   self.open_qcpmg_fields)
         self._add(m_tools, "QCPMG: batch infinite-field δiso…",
@@ -3921,6 +3925,75 @@ class MainWindow(QMainWindow):
 
         FigureDialog(self, self.source_path, self.recipe).exec()
 
+    def open_wurst_correct(self):
+        """Process > WURST excitation profile: divide the current spectrum by
+        the computed WURST-N sweep weighting so intensities across a swept
+        wideline pattern are comparable. The amplitude half of swept-pulse
+        physics; autophase's p2 is the phase half. Recorded in the recipe's
+        provenance."""
+        from PySide6.QtWidgets import (QDialog, QDialogButtonBox,
+                                       QDoubleSpinBox, QFormLayout)
+
+        from larmor.processing import wurst_profile
+
+        if not self.exp_ppm.size:
+            self.statusBar().showMessage("load a spectrum first")
+            return
+        sfo = float((self.recipe or {}).get("larmor_frequency_MHz", 0.0) or 0.0)
+        if sfo <= 0:
+            QMessageBox.warning(self, "WURST profile",
+                                "the Larmor frequency is needed — set it in "
+                                "Experiment parameters first")
+            return
+        dlg = QDialog(self)
+        dlg.setWindowTitle("WURST excitation profile")
+        form = QFormLayout(dlg)
+        span_khz = float(np.ptp(self.exp_ppm)) * sfo / 1e3
+        centre = QDoubleSpinBox(); centre.setRange(-1e6, 1e6)
+        centre.setDecimals(1); centre.setSuffix(" ppm")
+        centre.setValue(float(0.5 * (self.exp_ppm.max() + self.exp_ppm.min())))
+        form.addRow("sweep centre (carrier)", centre)
+        sweep = QDoubleSpinBox(); sweep.setRange(1.0, 100000.0)
+        sweep.setDecimals(1); sweep.setSuffix(" kHz")
+        sweep.setValue(round(span_khz, 1))
+        sweep.setToolTip("the WURST pulse's total sweep width (e.g. 2000 kHz "
+                         "for a 2 MHz WCPMG sweep)")
+        form.addRow("sweep width", sweep)
+        order = QDoubleSpinBox(); order.setRange(2.0, 200.0)
+        order.setDecimals(0); order.setValue(80.0)
+        order.setToolTip("the N in WURST-N (envelope 1 − |cos(πt/τ)|^N)")
+        form.addRow("WURST order N", order)
+        floor = QDoubleSpinBox(); floor.setRange(1.0, 100.0)
+        floor.setDecimals(0); floor.setSuffix(" %"); floor.setValue(10.0)
+        floor.setToolTip("never divide by less than this fraction of full "
+                         "excitation — dividing further amplifies edge noise")
+        form.addRow("correction floor", floor)
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.accepted.connect(dlg.accept); bb.rejected.connect(dlg.reject)
+        form.addRow(bb)
+        if dlg.exec() != QDialog.Accepted:
+            return
+        self.snapshot()
+        w = wurst_profile(self.exp_ppm, sfo, float(centre.value()),
+                          float(sweep.value()), n=float(order.value()),
+                          floor=float(floor.value()) / 100.0)
+        self.exp_amp = self.exp_amp / w
+        self.view.set_experiment(self.exp_ppm, self.exp_amp)
+        if self.recipe is not None:
+            prov = dict(self.recipe.get("provenance") or {})
+            prov["wurst_correct"] = {
+                "centre_ppm": float(centre.value()),
+                "sweep_kHz": float(sweep.value()),
+                "n": float(order.value()),
+                "floor": float(floor.value()) / 100.0}
+            self.recipe["provenance"] = prov
+        if self.recipe and self.recipe.get("sites"):
+            self.request_simulation()
+        self._update_sn(); self._refresh_overlays()
+        self.statusBar().showMessage(
+            f"WURST profile divided out ({sweep.value():.0f} kHz sweep, "
+            f"N={order.value():.0f}) — File ▸ Save spectrum as… to keep it")
+
     def open_subtract(self):
         from larmor.desktop.subtract_dialog import SubtractDialog
 
@@ -4594,6 +4667,36 @@ class MainWindow(QMainWindow):
         # processing sessions accumulate here until Compute
         dlg = shared_fields_dialog(self, nuc, cur)
         dlg.show(); dlg.raise_(); dlg.activateWindow()
+
+    def open_vocs(self):
+        """Tools > Stitch frequency-stepped (VOCS): sub-spectra acquired at
+        stepped transmitter offsets combine into one wideline pattern."""
+        from larmor.desktop.vocs_dialog import VocsDialog
+
+        dlg = VocsDialog(self)
+        dlg.applied.connect(self._vocs_to_workbench)
+        dlg.exec()
+
+    def _vocs_to_workbench(self, ppm, amp, notes, sources):
+        first = sources[0] if sources else ""
+        name = Path(first).parent.name or "VOCS"
+        self._display_1d(np.asarray(ppm, float), np.asarray(amp, float),
+                         (self.recipe or {}).get("nucleus", ""),
+                         (self.recipe or {}).get("larmor_frequency_MHz", 0.0),
+                         0.0, f"{name} (VOCS stitch)", first)
+        # a stitched pattern is a DERIVED spectrum: record how it was made
+        self.recipe["notes"] = list(notes)
+        self.recipe["provenance"] = {
+            "vocs_sources": [str(s_) for s_ in sources],
+            "vocs_note": notes[0] if notes else ""}
+        # stitched wideline patterns are static experiments in practice, but
+        # the pieces' metadata was not inspected here -- leave the rate as
+        # the experiment dialog's problem and flag it for confirmation
+        self.recipe["mas_uncertain"] = True
+        self._update_exp_label()
+        self.statusBar().showMessage(
+            f"stitched {len(sources)} sub-spectra — set nucleus/field/rate "
+            "in Experiment parameters, then fit")
 
     def open_qcpmg(self):
         from larmor.desktop.qcpmg_dialog import QcpmgDialog
