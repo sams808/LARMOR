@@ -173,9 +173,17 @@ def parallel_map(fn, items: list, *, max_workers: int | None = None,
 
     if executor is not None:
         _run(executor)
-    else:
+    elif max_workers is None:
         # the shared pool, NOT a throwaway one: pool startup is a fresh
         # interpreter per worker on Windows, and callers like the error
         # dialogs invoke parallel_map repeatedly
-        _run(shared_pool(max_workers))
+        _run(shared_pool(None))
+    else:
+        # an EXPLICIT worker count is a contract (a test pinning dispatch
+        # behaviour, a user restricting cores): honour it exactly with a
+        # dedicated pool rather than quietly handing over the shared pool
+        # at whatever width it happens to be
+        workers = max(1, min(max_workers, n))
+        with ProcessPoolExecutor(max_workers=workers) as pool:
+            _run(pool)
     return results
