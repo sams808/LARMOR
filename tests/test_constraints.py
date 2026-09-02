@@ -106,18 +106,33 @@ def test_constrained_fit_caalglass():
     assert result.rmsd < 0.01  # constrained, so worse than free (0.0025) but still good
 
 
-@pytest.mark.slow
 def test_bad_constraint_is_diagnosed():
-    """A ratio that fights the data drives parameters to bounds -- LARMOR
-    must say so instead of silently returning a fit without uncertainties."""
-    dm = fxmla.read(require(CAALGLASS))
-    recipe, _ = fxmla.to_recipe(dm)
-    recipe.sites[1].params["amplitude"].expr = "0.5 * s0.amplitude"  # too big
-    recipe.sites[1].params["shift_fwhm_ppm"].expr = "s0.shift_fwhm_ppm"
+    """A bound that fights the data pins a parameter -- LARMOR must say so
+    instead of silently returning a fit without uncertainties.
 
-    result = fitmod.fit(recipe, dm.spectrum.ppm, dm.spectrum.amplitude,
-                        window_ppm=(150.0, -80.0))
-    assert result.at_bounds, "expected at-bound parameters to be reported"
+    Rewritten 2026-09, twice. The original relied on WHERE a bad amplitude
+    ratio drove the CaAlGlass refit; once that file's path broke (silent
+    skip) the solver drifted to converging above the sigma floor unpinned.
+    A capped-amplitude variant on the same real data was no better: the
+    stored fxmla amplitudes are not LARMOR's least-squares optimum (the
+    import constant is calibrated on one other fit), so the capped site
+    happily moved DOWN. Synthetic data makes the conflict airtight: one
+    Gaussian of known amplitude, the model's amplitude capped at half of
+    it, everything else held at truth -- the ceiling is the only lever and
+    the optimum sits unambiguously above it."""
+    x = np.linspace(-60.0, 60.0, 2001)
+    true_amp = 10.0
+    y = true_amp * np.exp(-4 * np.log(2) * (x / 8.0) ** 2)
+
+    recipe = Recipe(nucleus="27Al", larmor_frequency_MHz=130.32, sites=[
+        SiteModel(model="gauss_lor", label="g", params={
+            "isotropic_chemical_shift_ppm": Param(0.0, vary=False),
+            "shift_fwhm_ppm": Param(8.0, vary=False),
+            "amplitude": Param(3.0, min=0.0, max=0.5 * true_amp),
+            "gl": Param(1.0, vary=False)})])
+
+    result = fitmod.fit(recipe, x, y)
+    assert any(n.startswith("s0.amplitude") for n in result.at_bounds),         result.at_bounds
     assert any("at a bound" in n for n in recipe.notes)
     # covariance retry with pinned boundary params should recover error bars
     assert result.lmfit_result.errorbars

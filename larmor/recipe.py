@@ -13,6 +13,14 @@ from pathlib import Path
 
 RECIPE_VERSION = 1
 
+#: schema migrations: {from_version: transform(dict) -> dict}. A recipe at
+#: version v is passed through _MIGRATIONS[v], then _MIGRATIONS[v+1], ...
+#: until it reaches RECIPE_VERSION; each step appends a note. Recipes from
+#: other people's machines are now in circulation, so the day the schema
+#: changes, the hook must already exist -- the version field was previously
+#: written and then discarded on load.
+_MIGRATIONS: dict = {}
+
 
 @dataclass
 class Param:
@@ -115,7 +123,18 @@ class Recipe:
     @classmethod
     def from_dict(cls, d: dict) -> "Recipe":
         d = dict(d)
-        d.pop("larmor_recipe_version", None)
+        version = d.pop("larmor_recipe_version", None)
+        migration_notes: list[str] = []
+        if isinstance(version, int) and version < RECIPE_VERSION:
+            v = version
+            while v < RECIPE_VERSION:
+                step = _MIGRATIONS.get(v)
+                if step is None:
+                    break                        # nothing to do for this hop
+                d = step(d)
+                migration_notes.append(
+                    f"recipe migrated from schema v{v} to v{v + 1}")
+                v += 1
         sites = []
         for s in d.pop("sites", []):
             s = dict(s)   # never mutate the caller's dicts
@@ -137,6 +156,8 @@ class Recipe:
         recipe.fit_window_ppm = tuple(window) if window else None
         if extra_note:
             recipe.notes.append(extra_note)
+        for n in migration_notes:
+            recipe.notes.append(n)
         return recipe
 
     @classmethod

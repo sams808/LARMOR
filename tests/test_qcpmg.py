@@ -475,8 +475,7 @@ def test_overlay_pair_puts_both_traces_on_one_scale():
 # data is not on this machine, but the expected values stay here so the
 # protocol is documented either way.
 
-_DATA = pathlib.Path(
-    r"C:\Users\samso\Desktop\WSU_work\NMR\MagLab\DATA\35Cl_2025-12")
+from conftest import MAGLAB_35CL as _DATA  # noqa: E402 (rooted at LARMOR_TEST_DATA)
 
 #: EXPNO -> (sample, published ssNake T in s)  [xlsx 'T2' sheet]
 _PUBLISHED = {1: ("LAW3CL0CA", 1.446e-05), 3: ("LAW3CL4CA", 6.381e-05),

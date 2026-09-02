@@ -24,3 +24,4 @@ dist/
 
 # reference PDFs kept locally, not distributed
 examples/bib/
+packaging/.buildenv/

@@ -246,6 +246,15 @@ _GRID_RESTRICTABLE = frozenset({
     "spectrum",                                                    # interpolates a reference trace pointwise
 })
 
+#: the audited complement: models that MUST simulate on the full experimental
+#: grid (render_single_site derives its cached simulation from the axis
+#: endpoints and convolves with zero-padded edges), plus "function" (an
+#: arbitrary user expression, unknowable). Together with _GRID_RESTRICTABLE
+#: this must partition the registry -- tests/test_model_tables.py enforces it.
+_GRID_FULL_REQUIRED = frozenset({
+    "quad_ct", "quad_first", "quad_csa", "csa_mas", "csa_czjzek", "function",
+})
+
 
 def grid_restrictable(recipe: Recipe) -> bool:
     """True if every site's model tolerates simulating on a window-restricted

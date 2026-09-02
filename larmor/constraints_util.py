@@ -142,6 +142,15 @@ def remap_exprs_after_move(sites: list, old_to_new: dict) -> None:
 #: several to the observed peak width) and can legitimately be far narrower
 #: — e.g. published 11B BO3 fits with dCS = 2.5 ppm.
 _PEAK_FWHM_MODELS = ("gauss_lor", "gl_norm", "voigt")
+#: everything else: shift_fwhm_ppm is a shift-DISTRIBUTION width (dCS) or the
+#: model has no peak-width notion at all; the Eden floor must NOT apply.
+#: tests/test_model_tables.py enforces that the two tuples partition the
+#: registry, so a new model states its case explicitly.
+_NOT_PEAK_FWHM_MODELS = (
+    "jmultiplet", "sidebands", "czjzek", "ext_czjzek", "amorphous",
+    "quad_ct", "quad_first", "quad_csa", "csa_mas", "csa_czjzek",
+    "spectrum", "function",
+)
 _SHIFT_KEYS = ("isotropic_chemical_shift_ppm", "position_ppm")
 
 

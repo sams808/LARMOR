@@ -54,6 +54,16 @@ _ANALYTIC_MODELS = frozenset({
     "spectrum", "function",
 })
 
+#: models that simulate on a DISCRETE grid and therefore need the coarse
+#: SIMULATED_DIFF_STEP. Every registered model must appear in exactly one of
+#: these two sets -- tests/test_model_tables.py enforces the partition, so
+#: adding a model without deciding its Jacobian step fails a test instead of
+#: silently getting the wrong derivative.
+_SIMULATED_MODELS = frozenset({
+    "czjzek", "ext_czjzek", "amorphous", "quad_ct", "quad_first",
+    "quad_csa", "csa_mas", "csa_czjzek",
+})
+
 #: relative finite-difference step for simulated (grid-based) models. At
 #: scipy's default ~1.5e-8 the Jacobian of a Czjzek model is pure grid noise:
 #: on a real 81Br dataset a step 1.3e6 times larger changed the model only 9x

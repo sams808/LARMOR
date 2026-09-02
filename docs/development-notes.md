@@ -20,7 +20,7 @@ series workflows, uncertainties, and reproducible figures.
 
 **Size.** 112 Python modules, ~33k lines under `larmor/`: 58 modules / ~13.8k
 lines of Qt-free core, 41 modules / ~18.5k lines of desktop, plus
-`larmor/xfact/` (13 modules, an easter egg). Tests: 65 files, 678 collected.
+`larmor/xfact/` (13 modules, an easter egg). Tests: 67 files, ~712 collected.
 
 **The split.** Everything outside `larmor/desktop/` and `larmor/xfact/` is
 Qt-free — verified by importing all 71 core modules and finding no PySide6 in
@@ -77,10 +77,14 @@ scipy 1.17.1, PySide6 6.11.1, pyqtgraph 0.14.0. `pyproject.toml` pins
   but `setdefault` means an **inherited value wins**. If either is already
   exported in your shell, tests will use it and may open real windows or read
   your real session.
-- **`LARMOR_NO_SESSION` guards five write paths**: session restore
-  (`app.py:4536`), `paths.remembered_dir`/`remember_dir`,
-  `_remember_site_defaults`, and the QCPMG dialog geometry. It does **not**
-  protect anything a test writes to `QSettings` directly.
+- **`LARMOR_NO_SESSION` guards the session read AND write paths**
+  (`_restore_session`, `_persist_session`/`_flush_session` — the write
+  side was unguarded until 0.11.1, so every test that called `snapshot()`
+  polluted the developer's real session), plus
+  `paths.remembered_dir`/`remember_dir`, `_remember_site_defaults`, and
+  the QCPMG dialog geometry. It does **not** protect anything a test
+  writes to `QSettings` directly. The session itself now lives in
+  `%LOCALAPPDATA%/LARMOR/session.json` (debounced 5 s), not the registry.
 - **QSettings hygiene is the recurring test bug.** Copy the pattern in
   `test_desktop.py:847`, `test_ui_extras.py:766` or `test_qcpmg_dialog.py:288`:
   read the old value, write, restore in a `finally`, and `remove()` the key if
@@ -90,17 +94,22 @@ scipy 1.17.1, PySide6 6.11.1, pyqtgraph 0.14.0. `pyproject.toml` pins
 
 ### Test data lives outside the repo
 
-`tests/conftest.py` hard-codes eleven absolute paths under `C:\Users\samso\`,
-and `tests/test_qcpmg.py:478` adds the MagLab 35Cl set. `require()` **skips**
-rather than fails when they are missing, so:
+`tests/conftest.py` roots every real dataset at **`LARMOR_TEST_DATA`**
+(default: the original dev machine's home) and keeps the full manifest in
+`ALL_DATASETS`; the MagLab 35Cl set rides the same root. `require()` **skips**
+rather than fails when data is missing, so:
 
 - on the development machine: 663 passed, 15 skipped
 - on a machine with none of that data: 639 passed, 39 skipped, **still green**
 
-That means the entire real-data integration layer — including the
-published-value acceptance tests — vanishes silently elsewhere. Any CI added
-later validates far less than a local run. When judging whether a change is
-safe, check that the real-data tests actually ran.
+The real-data integration layer — including the published-value
+acceptance tests — vanishes elsewhere, but no longer silently: a
+`pytest_terminal_summary` hook prints a red **"LARMOR real-data layer:
+INCOMPLETE"** banner naming each missing dataset (and a green "complete" line
+when all are present). The banner earned its keep the day it landed: both
+CaAlGlass fxmla acceptance files had been moved to `Desktop/larmor_tests/`
+and their tests had been skipping silently on the dev machine itself. When
+judging whether a change is safe, check the banner.
 
 ---
 
@@ -206,10 +215,16 @@ each other, and omission from each degrades behaviour silently.
 6. `constraints_util._PEAK_FWHM_MODELS` (`:144`) — only for peak-FWHM-aware
    constraints.
 
-**There is a hard test gate**:
+**There are hard test gates**:
 `tests/test_lineshapes_help.py::test_lineshapes_manual_covers_every_model`
 fails unless the model's name appears in backticks in
-`larmor/help/lineshapes.md`.
+`larmor/help/lineshapes.md` — and since 0.11.2, `tests/test_model_tables.py`
+fails unless the model is explicitly placed in BOTH sides of four of the
+tables above (`fit._ANALYTIC_MODELS`/`_SIMULATED_MODELS`,
+`engine._GRID_RESTRICTABLE`/`_GRID_FULL_REQUIRED`,
+`estimate._WIDTH_KEY`/`_NO_WIDTH_SEED`,
+`constraints_util._PEAK_FWHM_MODELS`/`_NOT_PEAK_FWHM_MODELS`), so the silent
+omissions in items 2–4 and 6 of the list above are no longer possible.
 
 ---
 
@@ -245,8 +260,10 @@ Ordered by how likely they are to mislead someone.
    `kernel_cq_max`. "eta steps" (`:229`) is never passed to the Czjzek render
    at all, so `build_kernel`'s default `n_eta = 11` always wins. Both look
    like working controls.
-2. **`make_context` builds a full kernel just to get an axis**, so a
-   cold-cache Czjzek fit pays for at least two kernel builds.
+2. ~~`make_context` builds a full kernel just to get an axis~~ **fixed in
+   0.11.1**: `engine.kernel_axis_ppm` derives the axis arithmetically
+   (against `Isotope.B0_to_ref_freq`, NOT `larmor_MHz` — 0.08 % apart),
+   and a test asserts `make_context` never calls `build_kernel`.
 3. **QCPMG provenance is dropped on "Send to fit".** The dialog emits 21
    `qcpmg_*` keys; the only receiver (`app._fid_to_workbench`) reads five of
    them and `Recipe` has no field to hold the rest. The processing record
@@ -257,9 +274,12 @@ Ordered by how likely they are to mislead someone.
    (`io/fxmla.py:284`), export uses 3.92 (`io/export.py:131`). No test
    exercises an import → export round trip, and the file the export constant
    was calibrated on is not in the repo and no longer on the machine.
-5. **Version fields are write-only.** `RECIPE_VERSION` is written and then
-   discarded on load; the project bundle's version is a bare literal never
-   read. There is no migration hook for a future schema change.
+5. ~~Version fields are write-only~~ **fixed in 0.11.2**:
+   `recipe._MIGRATIONS` runs on load with a note per hop, and
+   `open_project` warns when a bundle is newer than
+   `PROJECT_BUNDLE_VERSION`. The migrations dict is empty until the first
+   schema change — the point was to have the hook before files from
+   other machines meet it.
 6. **`AMORPH_CQ_MAX` is duplicated as a literal** in `io/fxmla.py:385`;
    raising the model's bound would leave imported dmfit Amorphous lines
    truncated at 6 MHz.
@@ -271,7 +291,8 @@ Ordered by how likely they are to mislead someone.
    sessions.
 9. **`docs/validation.md:452`** still advises raising `cq_max` for large σ in
    1D — stale since the ladder replaced the fixed ceiling.
-10. **`README.md:111`** says "about 600 tests"; the collected count is 678.
+10. ~~README test count stale~~ kept current (README says ~700; 712
+    collected at 0.11.2).
 
 Genuinely open work is in `docs/roadmap.md`. The largest structural items:
 `app.py` is a 4.7k-line monolith, and there is no CI — so every "suite green"

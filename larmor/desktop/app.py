@@ -36,6 +36,9 @@ from larmor.desktop.plot import SpectrumView
 from larmor.desktop.table import LinesTable
 from larmor.recipe import Recipe
 
+#: project-bundle (.larproj.json) schema version -- was a write-only literal
+PROJECT_BUNDLE_VERSION = 1
+
 
 
 
@@ -1913,7 +1916,8 @@ class MainWindow(QMainWindow):
         if not path:
             return
         self._sync_active()
-        out = {"larmor_project_version": 1, "active": self.active_ws,
+        out = {"larmor_project_version": PROJECT_BUNDLE_VERSION,
+               "active": self.active_ws,
                "workspaces": []}
         n2d = 0
         for ws in self.workspaces:
@@ -1958,6 +1962,14 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             QMessageBox.warning(self, "Open project", f"cannot read: {exc}")
             return
+        bundle_v = data.get("larmor_project_version", 1)
+        if isinstance(bundle_v, int) and bundle_v > PROJECT_BUNDLE_VERSION:
+            QMessageBox.information(
+                self, "Open project",
+                f"This project was saved by a newer LARMOR (bundle v"
+                f"{bundle_v}, this build reads v{PROJECT_BUNDLE_VERSION}). "
+                "Opening anyway; anything this version does not understand "
+                "will be ignored.")
         wss = data.get("workspaces", [])
         if not wss:
             self.statusBar().showMessage("no spectra in this project")

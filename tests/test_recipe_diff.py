@@ -29,3 +29,27 @@ def test_diff_handles_missing_site():
     site1 = [r for r in rows if r["site"] == 1]
     assert site1 and all(r["reference"] is None for r in site1)
     assert all(r["delta"] is None for r in site1)
+
+
+def test_recipe_migrations_run_and_are_noted(monkeypatch):
+    """D4: larmor_recipe_version is READ on load -- a recipe at an older
+    schema version is passed through the _MIGRATIONS chain, each hop noted.
+    (The field used to be written and then discarded.)"""
+    from larmor import recipe as R
+
+    def bump_v0(d):
+        d = dict(d)
+        d["sample"] = d.get("sample", "") + " [migrated]"
+        return d
+
+    monkeypatch.setattr(R, "RECIPE_VERSION", 1)
+    monkeypatch.setitem(R._MIGRATIONS, 0, bump_v0)
+    d = R.Recipe(sample="x", nucleus="27Al").to_dict()
+    d["larmor_recipe_version"] = 0
+    r = R.Recipe.from_dict(d)
+    assert r.sample == "x [migrated]"
+    assert any("migrated from schema v0 to v1" in n for n in r.notes)
+
+    # a current-version recipe passes through untouched, no note
+    r2 = R.Recipe.from_dict(R.Recipe(sample="y", nucleus="27Al").to_dict())
+    assert r2.sample == "y" and not any("migrated" in n for n in r2.notes)

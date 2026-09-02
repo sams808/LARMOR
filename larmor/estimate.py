@@ -36,6 +36,13 @@ _WIDTH_KEY = {
     "voigt": ("gauss_fwhm_ppm", False),
 }
 
+#: models with NOTHING to seed from a band width: a spectrum component's
+#: breadth is its reference trace, a function line's is the user expression.
+#: With _WIDTH_KEY this must partition the registry
+#: (tests/test_model_tables.py), so a new model without a decision here
+#: fails a test instead of silently starting from table defaults.
+_NO_WIDTH_SEED = frozenset({"spectrum", "function"})
+
 
 def band_width_ppm(ppm: np.ndarray, amp: np.ndarray,
                    centre_ppm: float | None = None, frac: float = 0.5
