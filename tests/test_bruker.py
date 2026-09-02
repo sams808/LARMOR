@@ -73,6 +73,14 @@ class TestResolveMas:
         rate, unc = bruker._resolve_mas({"PULPROG": "qcpmg"}, "")
         assert rate == bruker.MAS_FALLBACK_HZ and unc is True
 
+    def test_positive_masr_under_static_pulprog_is_flagged(self):
+        # the real MagLab 81Br WCPMG set: a static probe, MASR left at the
+        # previous session's 14 kHz -- the rate still wins (a hint does not
+        # prove static) but it must not load silently as MAS
+        rate, unc = bruker._resolve_mas(
+            {"MASR": 14000, "PULPROG": "<WCPMG.jk>"}, "81 Br\n0 Ca Br")
+        assert rate == pytest.approx(14000.0) and unc is True
+
     def test_masr_zero_against_title_rate_is_flagged(self):
         # controller says not spinning, operator typed 20 kHz: a disagreement
         rate, unc = bruker._resolve_mas({"MASR": 0}, "MAS 20 kHz")

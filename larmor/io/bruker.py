@@ -368,7 +368,11 @@ def _resolve_mas(acqus: dict, title: str) -> tuple[float, bool]:
     - no MASR, pulse program looks static (wcpmg/wurst/static) -> static,
       flagged (technique hints, does not prove).
     - a positive rate always wins over static hints, but MASR = 0 against a
-      title rate is a real disagreement and is flagged.
+      title rate is a real disagreement and is flagged -- and so is a
+      positive MASR under a static pulse program (wcpmg/wurst): on a
+      static probe the rotor controller is not connected and MASR is
+      whatever the previous MAS session left behind (measured: the MagLab
+      81Br WCPMG set records MASR=14000 for five static acquisitions).
     """
     cands = []
     masr = acqus.get("MASR")
@@ -388,7 +392,7 @@ def _resolve_mas(acqus: dict, title: str) -> tuple[float, bool]:
         # ambiguous if two sources disagree by more than 2 % -- and a recorded
         # MASR of 0 against a title rate is just as much a disagreement
         uncertain = ((max(cands) - min(cands)) > 0.02 * max(cands)
-                     or masr_zero or static_title)
+                     or masr_zero or static_title or static_pp)
         return rate, uncertain
 
     if masr_zero:
