@@ -124,6 +124,7 @@ class FitWorker(QThread, _StoppableFit):
     failed = Signal(str)
     progress = Signal(int, float)                # (iteration, residual rms)
     frame = Signal(object, object, int)          # (x_ppm, y_model, iteration)
+    kernel_progress = Signal(int, int)           # (chunk done, chunks total)
 
     def __init__(self, recipe_dict, ppm, amp, window, animate=False):
         super().__init__()
@@ -134,18 +135,27 @@ class FitWorker(QThread, _StoppableFit):
 
     def run(self):
         try:
+            from larmor import engine
             from larmor import fit as fitmod
 
             recipe = Recipe.from_dict(self.recipe_dict)
             frame_cb = ((lambda x, y, it: self.frame.emit(x, y, it))
                         if self.animate else None)
-            result = fitmod.fit(recipe, self.ppm, self.amp,
-                                window_ppm=self.window, tol=_fit_tol(),
-                                iter_cb=_emit_progress(
-                                    self.progress, lambda: self._stop,
-                                    converge_frac=(_fit_tol() / 100.0) or None),
-                                frame_cb=frame_cb)
+            # a cold wideline kernel build (~23 s) now reports its chunks
+            # and honours the same Stop button as the fit itself
+            with engine.kernel_build_feedback(
+                    cb=lambda i, n: self.kernel_progress.emit(i, n),
+                    cancel=lambda: self._stop):
+                result = fitmod.fit(recipe, self.ppm, self.amp,
+                                    window_ppm=self.window, tol=_fit_tol(),
+                                    iter_cb=_emit_progress(
+                                        self.progress, lambda: self._stop,
+                                        converge_frac=(_fit_tol() / 100.0)
+                                        or None),
+                                    frame_cb=frame_cb)
             self.done.emit(result, self._stop_mode)
+        except engine.KernelBuildCancelled:
+            self.failed.emit("cancelled while building the lineshape kernel")
         except Exception as exc:
             self.failed.emit(str(exc))
 
@@ -179,6 +189,7 @@ class Fit2DWorker(QThread, _StoppableFit):
 class SimWorker(QThread):
     done = Signal(object, object, object)
     failed = Signal(str)
+    kernel_progress = Signal(int, int)           # (chunk done, chunks total)
 
     def __init__(self, recipe_dict, exp_ppm):
         super().__init__()
@@ -192,7 +203,10 @@ class SimWorker(QThread):
             recipe = Recipe.from_dict(self.recipe_dict)
             params = fitmod._make_params(recipe)
             fitmod._apply_params(recipe, params)
-            x, total, per_site = engine.simulate(recipe, exp_ppm=self.exp_ppm)
+            with engine.kernel_build_feedback(
+                    cb=lambda i, n: self.kernel_progress.emit(i, n)):
+                x, total, per_site = engine.simulate(recipe,
+                                                     exp_ppm=self.exp_ppm)
             self.done.emit(x, total, per_site)
         except Exception as exc:
             self.failed.emit(str(exc))
@@ -3263,6 +3277,13 @@ class MainWindow(QMainWindow):
         self._persist_session()
 
     # ------------------------------------------------------------- simulate
+    def _kernel_progress_tick(self, done: int, total: int):
+        """A cold Czjzek kernel build in a worker (~23 s wideline) reports
+        its chunks here -- previously indistinguishable from a hang."""
+        self.statusBar().showMessage(
+            f"building lineshape kernel — {done}/{total}"
+            + ("  (done)" if done >= total else " …"), 4000)
+
     def request_simulation(self):
         if getattr(self, "_cofit", None) is not None and self._cofit_active():
             self._cofit_timer.start()             # live preview on both panels
@@ -3283,6 +3304,7 @@ class MainWindow(QMainWindow):
                                      self.exp_ppm)
         self._sim_worker.done.connect(self._sim_done)
         self._sim_worker.failed.connect(self._on_sim_failed)
+        self._sim_worker.kernel_progress.connect(self._kernel_progress_tick)
         self._busy_timer.start()          # arm the busy cue for a slow sim
         self._sim_worker.start()
 
@@ -3351,6 +3373,7 @@ class MainWindow(QMainWindow):
                                      self.exp_ppm, self.exp_amp, (hi, lo),
                                      animate=animate)
         self._fit_worker.progress.connect(self._progress_tick)
+        self._fit_worker.kernel_progress.connect(self._kernel_progress_tick)
         self._fit_worker.done.connect(self._fit_done)
         self._fit_worker.failed.connect(self._fit_failed)
         if animate:
@@ -4783,6 +4806,11 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, ev):
         self._flush_session()
+        try:
+            from larmor.parallel import shutdown_shared_pool
+            shutdown_shared_pool()
+        except Exception:
+            pass
         super().closeEvent(ev)
 
     def _restore_session(self):

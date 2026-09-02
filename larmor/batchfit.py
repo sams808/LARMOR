@@ -336,10 +336,8 @@ def batch_error_analysis(result: BatchFitResult, data: list[tuple], *,
 
     pool = None
     if parallel:
-        from concurrent.futures import ProcessPoolExecutor
-
-        from larmor.parallel import default_worker_count
-        pool = ProcessPoolExecutor(max_workers=max_workers or default_worker_count())
+        from larmor.parallel import shared_pool
+        pool = shared_pool(max_workers)
 
     try:
         n = len(result.recipes)
@@ -388,8 +386,7 @@ def batch_error_analysis(result: BatchFitResult, data: list[tuple], *,
             if progress:
                 progress(k + 1, n, 0, 1)
     finally:
-        if pool is not None:
-            pool.shutdown(wait=True)
+        pass        # the SHARED pool outlives this run (larmor.parallel)
 
     result.error_detail[method] = detail
     result.error_method = method

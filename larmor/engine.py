@@ -45,6 +45,109 @@ KERNEL_CACHE_BUDGET_MB = 1024.0
 _CACHE_KEEP_MIN = 4
 
 
+class KernelBuildCancelled(RuntimeError):
+    """Raised out of build_kernel when the registered cancel check fired."""
+
+
+#: process-wide kernel-build feedback: {"cb": progress(done, total) | None,
+#: "cancel": () -> bool | None}. A 23 s wideline build inside a worker
+#: thread was indistinguishable from a hang; the build now runs in chunks
+#: and reports between them. Set via kernel_build_feedback().
+_BUILD_FEEDBACK = {"cb": None, "cancel": None}
+
+
+class kernel_build_feedback:
+    """Context manager registering progress/cancel hooks for kernel builds
+    on this thread's process (workers each have their own module copy)."""
+
+    def __init__(self, cb=None, cancel=None):
+        self._new = {"cb": cb, "cancel": cancel}
+
+    def __enter__(self):
+        self._old = dict(_BUILD_FEEDBACK)
+        _BUILD_FEEDBACK.update(self._new)
+        return self
+
+    def __exit__(self, *exc):
+        _BUILD_FEEDBACK.update(self._old)
+        return False
+
+
+#: on-disk kernel cache. A wideline kernel costs ~23 s to simulate and its
+#: key is a clean tuple of physical parameters, so re-opening a dataset
+#: tomorrow -- or in a fresh WORKER PROCESS (Windows spawn starts every
+#: Monte-Carlo/batch worker with an empty in-memory cache) -- should load it
+#: in milliseconds instead. Files are versioned by mrsimulator release; the
+#: whole folder is bounded by mtime. LARMOR_NO_SESSION disables it (tests).
+KERNEL_DISK_CACHE_MB = 2048.0
+
+
+def _disk_cache_dir():
+    import os
+    from pathlib import Path
+
+    if os.environ.get("LARMOR_NO_SESSION"):
+        return None
+    base = os.environ.get("LOCALAPPDATA") or str(Path.home())
+    d = Path(base) / "LARMOR" / "kernels"
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return None
+    return d
+
+
+def _disk_key_file(key: tuple):
+    import hashlib
+
+    d = _disk_cache_dir()
+    if d is None:
+        return None
+    import mrsimulator
+
+    stamp = f"{key!r}|mrsim={mrsimulator.__version__}"
+    return d / (hashlib.sha1(stamp.encode()).hexdigest() + ".npz")
+
+
+def _disk_load(key: tuple):
+    f = _disk_key_file(key)
+    if f is None or not f.exists():
+        return None
+    try:
+        with np.load(f, allow_pickle=False) as z:
+            kernel = CzjzekKernel(x_ppm=z["x_ppm"], K=z["K"],
+                                  cq_grid_MHz=z["cq"], eta_grid=z["eta"])
+        f.touch()                                # refresh mtime for the LRU
+        return kernel
+    except Exception:                            # corrupt/truncated: rebuild
+        try:
+            f.unlink()
+        except OSError:
+            pass
+        return None
+
+
+def _disk_store(key: tuple, kernel: "CzjzekKernel") -> None:
+    f = _disk_key_file(key)
+    if f is None:
+        return
+    try:
+        tmp = f.with_suffix(".tmp.npz")
+        np.savez(tmp, x_ppm=kernel.x_ppm, K=kernel.K,
+                 cq=kernel.cq_grid_MHz, eta=kernel.eta_grid)
+        tmp.replace(f)                           # atomic; racing writers OK
+        # bound the folder: drop oldest files past the byte budget
+        d = f.parent
+        files = sorted(d.glob("*.npz"), key=lambda x: x.stat().st_mtime)
+        total = sum(x.stat().st_size for x in files)
+        while files and total > KERNEL_DISK_CACHE_MB * 1e6:
+            victim = files.pop(0)
+            total -= victim.stat().st_size
+            victim.unlink()
+    except OSError:
+        pass
+
+
 def clear_kernel_cache():
     _KERNEL_CACHE.clear()
 
@@ -99,6 +202,10 @@ def build_kernel(nucleus: str, larmor_MHz: float, spin_rate_Hz: float,
     if key in _KERNEL_CACHE:
         _KERNEL_CACHE.move_to_end(key)             # LRU freshness
         return _KERNEL_CACHE[key]
+    kernel = _disk_load(key)
+    if kernel is not None:
+        _cache_put(key, kernel)
+        return kernel
 
     from mrsimulator import Simulator
     from mrsimulator.method.lib import BlochDecayCTSpectrum
@@ -126,24 +233,44 @@ def build_kernel(nucleus: str, larmor_MHz: float, spin_rate_Hz: float,
             count=npts, spectral_width=sw_Hz,
             reference_offset=ref_offset_ppm * larmor_MHz)],
     )
-    sim = Simulator(spin_systems=systems, methods=[method])
-    sim.config.decompose_spectrum = "spin_system"
-    sim.config.number_of_sidebands = 4
-    sim.run()
-
-    ds = sim.methods[0].simulation
-    coords = ds.x[0].coordinates
-    x = coords.value if str(coords.unit) == "ppm" else coords.to("Hz").value / larmor_MHz
-    # float32: the basis is a simulation on a coarse (Cq, eta) grid whose own
-    # quantisation dwarfs 1e-7 relative precision; halves memory AND the
-    # weights @ K multiply in every residual evaluation. Example-fit RMSDs
-    # verified unchanged to <0.1 % against float64.
-    K = np.array([np.asarray(dv.components[0].real, dtype=np.float32)
-                  for dv in ds.y])
+    # the (Cq, eta) systems are simulated in CHUNKS so a 23 s wideline build
+    # can report progress and be cancelled between chunks (each system is
+    # independent; per-chunk outputs concatenate in grid order). Verified
+    # bit-identical to the old monolithic run in tests/test_engine_fit.py.
+    cb = _BUILD_FEEDBACK.get("cb")
+    cancel = _BUILD_FEEDBACK.get("cancel")
+    n_chunks = min(8, len(systems)) if (cb or cancel) else 1
+    bounds = np.linspace(0, len(systems), n_chunks + 1).astype(int)
+    rows, x = [], None
+    for ci in range(n_chunks):
+        if cancel is not None and cancel():
+            raise KernelBuildCancelled(
+                f"kernel build cancelled at chunk {ci}/{n_chunks}")
+        chunk = systems[bounds[ci]:bounds[ci + 1]]
+        if not chunk:
+            continue
+        sim = Simulator(spin_systems=chunk, methods=[method])
+        sim.config.decompose_spectrum = "spin_system"
+        sim.config.number_of_sidebands = 4
+        sim.run()
+        ds = sim.methods[0].simulation
+        coords = ds.x[0].coordinates
+        x = (coords.value if str(coords.unit) == "ppm"
+             else coords.to("Hz").value / larmor_MHz)
+        # float32: the basis is a simulation on a coarse (Cq, eta) grid whose
+        # own quantisation dwarfs 1e-7 relative precision; halves both memory
+        # AND the weights @ K multiply in every residual evaluation.
+        # Example-fit RMSDs verified unchanged to <0.1 % against float64.
+        rows.extend(np.asarray(dv.components[0].real, dtype=np.float32)
+                    for dv in ds.y)
+        if cb is not None:
+            cb(ci + 1, n_chunks)
+    K = np.array(rows)
     order = np.argsort(x)
     kernel = CzjzekKernel(x_ppm=np.asarray(x)[order], K=K[:, order],
                           cq_grid_MHz=cq_grid, eta_grid=eta_grid)
     _cache_put(key, kernel)
+    _disk_store(key, kernel)
     return kernel
 
 

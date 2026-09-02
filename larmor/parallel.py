@@ -35,6 +35,54 @@ from concurrent.futures import Future, ProcessPoolExecutor, as_completed
 MIN_ITEMS_FOR_PROCESSES = 8
 
 
+def _warm_worker():
+    """Pool initializer: pay the heavy imports once per WORKER instead of
+    inside the first task (Windows spawn starts each worker as a bare
+    interpreter; importing mrsimulator there costs seconds). The kernel
+    cache stays per-process, but the on-disk kernel cache (engine._disk_load)
+    means a worker's first Czjzek evaluation loads a ready kernel instead of
+    simulating it."""
+    try:
+        import mrsimulator  # noqa: F401
+        import larmor.engine  # noqa: F401
+        import larmor.fit  # noqa: F401
+    except Exception:
+        pass                    # a worker that can't warm still works
+
+
+_SHARED_POOL: ProcessPoolExecutor | None = None
+_SHARED_POOL_WORKERS = 0
+
+
+def shared_pool(max_workers: int | None = None) -> ProcessPoolExecutor:
+    """The one process pool the whole app reuses.
+
+    Monte Carlo, chi-square profiles and batch fitting each used to spin up
+    (and tear down) their own ProcessPoolExecutor -- on Windows every worker
+    of every pool re-imported the scientific stack from scratch. The shared
+    pool is created on first use, kept for the life of the process, and
+    grown (recreated) if a caller asks for more workers than it has."""
+    global _SHARED_POOL, _SHARED_POOL_WORKERS
+    want = max(1, max_workers or default_worker_count())
+    if _SHARED_POOL is not None and want > _SHARED_POOL_WORKERS:
+        _SHARED_POOL.shutdown(wait=False, cancel_futures=True)
+        _SHARED_POOL = None
+    if _SHARED_POOL is None:
+        _SHARED_POOL = ProcessPoolExecutor(max_workers=want,
+                                           initializer=_warm_worker)
+        _SHARED_POOL_WORKERS = want
+    return _SHARED_POOL
+
+
+def shutdown_shared_pool():
+    """App exit / test teardown."""
+    global _SHARED_POOL, _SHARED_POOL_WORKERS
+    if _SHARED_POOL is not None:
+        _SHARED_POOL.shutdown(wait=False, cancel_futures=True)
+        _SHARED_POOL = None
+        _SHARED_POOL_WORKERS = 0
+
+
 def default_worker_count() -> int:
     """Leave one core free for the UI/event loop -- a run that claims every
     last core makes the window itself sluggish while it's in flight."""
@@ -126,7 +174,8 @@ def parallel_map(fn, items: list, *, max_workers: int | None = None,
     if executor is not None:
         _run(executor)
     else:
-        workers = max(1, min(max_workers or default_worker_count(), n))
-        with ProcessPoolExecutor(max_workers=workers) as pool:
-            _run(pool)
+        # the shared pool, NOT a throwaway one: pool startup is a fresh
+        # interpreter per worker on Windows, and callers like the error
+        # dialogs invoke parallel_map repeatedly
+        _run(shared_pool(max_workers))
     return results

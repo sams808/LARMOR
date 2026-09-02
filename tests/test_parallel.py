@@ -119,3 +119,24 @@ def test_default_worker_count_leaves_one_core_free(monkeypatch):
     assert parallel.default_worker_count() == 1     # never below 1
     monkeypatch.setattr(parallel.os, "cpu_count", lambda: None)
     assert parallel.default_worker_count() == 1
+
+
+def test_shared_pool_is_reused_and_growable():
+    """B7: parallel_map without an explicit executor uses ONE process-wide
+    pool (Monte Carlo / chi2 / batch used to spin up and tear down their
+    own; on Windows every worker re-imported the stack). Asking for more
+    workers grows it; shutdown clears it."""
+    from larmor import parallel as P
+
+    P.shutdown_shared_pool()
+    try:
+        p1 = P.shared_pool(2)
+        assert P.shared_pool(2) is p1                   # reused
+        assert P.shared_pool(1) is p1                   # smaller ask reuses too
+        p2 = P.shared_pool(3)
+        assert p2 is not p1                             # grown -> recreated
+        r = P.parallel_map(_square, list(range(12)), max_workers=3)
+        assert r == [i * i for i in range(12)]
+        assert P.shared_pool(3) is p2                   # map used the shared one
+    finally:
+        P.shutdown_shared_pool()

@@ -1,4 +1,11 @@
+import os
+
 import numpy as np
+
+# engine tests build (tiny) kernels; never let them write the real
+# on-disk kernel cache under %LOCALAPPDATA% (B5) -- the two disk-cache
+# tests below opt back in with their own tmp LOCALAPPDATA
+os.environ.setdefault("LARMOR_NO_SESSION", "1")
 import pytest
 
 from larmor import engine
@@ -276,3 +283,99 @@ def test_kernel_basis_is_float32():
     assert k.K.dtype == np.float32
     y = k.weights(2.0) @ k.K                 # the fit-path multiply
     assert y.dtype == np.float64 and np.all(np.isfinite(y))
+
+
+def test_kernel_disk_cache_round_trip(monkeypatch, tmp_path):
+    """B5: a built kernel persists to disk and a cold in-memory cache loads
+    it back bin-identical -- this is what spares a fresh worker process (or
+    tomorrow's session) the ~23 s wideline rebuild. Gated off under
+    LARMOR_NO_SESSION so the suite itself exercises it only via this
+    explicit opt-in."""
+    from collections import OrderedDict
+
+    from larmor import engine
+
+    monkeypatch.delenv("LARMOR_NO_SESSION", raising=False)
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setattr(engine, "_KERNEL_CACHE", OrderedDict())
+
+    k1 = engine.build_kernel("27Al", 130.32, 12500.0, sw_Hz=150000.0,
+                             npts=128, ref_offset_ppm=30.0,
+                             cq_max_MHz=6.0, n_cq=3, n_eta=3)
+    files = list((tmp_path / "LARMOR" / "kernels").glob("*.npz"))
+    assert len(files) == 1
+
+    # cold memory, warm disk: must come back identical without simulating
+    monkeypatch.setattr(engine, "_KERNEL_CACHE", OrderedDict())
+
+    def boom(*a, **k):
+        raise AssertionError("simulated despite a disk hit")
+
+    import mrsimulator
+    monkeypatch.setattr(mrsimulator, "Simulator", boom)
+    k2 = engine.build_kernel("27Al", 130.32, 12500.0, sw_Hz=150000.0,
+                             npts=128, ref_offset_ppm=30.0,
+                             cq_max_MHz=6.0, n_cq=3, n_eta=3)
+    assert np.array_equal(k1.K, k2.K)
+    assert np.array_equal(k1.x_ppm, k2.x_ppm)
+
+    # a corrupt file is discarded and rebuilt, not fatal
+    files[0].write_bytes(b"garbage")
+    monkeypatch.setattr(engine, "_KERNEL_CACHE", OrderedDict())
+    monkeypatch.undo()  # restore Simulator for the rebuild
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.delenv("LARMOR_NO_SESSION", raising=False)
+    monkeypatch.setattr(engine, "_KERNEL_CACHE", OrderedDict())
+    k3 = engine.build_kernel("27Al", 130.32, 12500.0, sw_Hz=150000.0,
+                             npts=128, ref_offset_ppm=30.0,
+                             cq_max_MHz=6.0, n_cq=3, n_eta=3)
+    assert np.array_equal(k1.K, k3.K)
+
+
+def test_kernel_disk_cache_off_under_no_session(monkeypatch, tmp_path):
+    from collections import OrderedDict
+
+    from larmor import engine
+
+    monkeypatch.setenv("LARMOR_NO_SESSION", "1")
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setattr(engine, "_KERNEL_CACHE", OrderedDict())
+    engine.build_kernel("27Al", 130.32, 12500.0, sw_Hz=150000.0,
+                        npts=128, ref_offset_ppm=30.0,
+                        cq_max_MHz=6.0, n_cq=3, n_eta=3)
+    assert not (tmp_path / "LARMOR" / "kernels").exists()
+
+
+def test_kernel_build_chunked_is_identical_and_cancellable(monkeypatch):
+    """B4: with feedback hooks registered the (Cq, eta) systems simulate in
+    chunks -- output must be BIT-identical to the monolithic run, progress
+    must count up, and a cancel between chunks must abort cleanly."""
+    from collections import OrderedDict
+
+    from larmor import engine
+
+    args = dict(sw_Hz=150000.0, npts=128, ref_offset_ppm=30.0,
+                cq_max_MHz=6.0, n_cq=5, n_eta=3)
+    monkeypatch.setattr(engine, "_KERNEL_CACHE", OrderedDict())
+    mono = engine.build_kernel("27Al", 130.32, 12500.0, **args)
+
+    seen = []
+    monkeypatch.setattr(engine, "_KERNEL_CACHE", OrderedDict())
+    with engine.kernel_build_feedback(cb=lambda i, n: seen.append((i, n))):
+        chunked = engine.build_kernel("27Al", 130.32, 12500.0, **args)
+    assert seen and seen[-1][0] == seen[-1][1] > 1
+    assert np.array_equal(mono.K, chunked.K)
+    assert np.array_equal(mono.x_ppm, chunked.x_ppm)
+
+    monkeypatch.setattr(engine, "_KERNEL_CACHE", OrderedDict())
+    calls = {"n": 0}
+
+    def cancel_after_two():
+        calls["n"] += 1
+        return calls["n"] > 2
+
+    with pytest.raises(engine.KernelBuildCancelled):
+        with engine.kernel_build_feedback(cancel=cancel_after_two):
+            engine.build_kernel("27Al", 130.32, 12500.0, **args)
+    # nothing half-built may enter the caches
+    assert len(engine._KERNEL_CACHE) == 0
