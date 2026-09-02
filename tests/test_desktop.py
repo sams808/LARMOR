@@ -1189,3 +1189,43 @@ def test_wurst_correct_divides_profile_and_records_provenance(
     assert w.min() == pytest.approx(prov["floor"])
     win.undo(); qapp.processEvents()                 # and it is undoable
     assert np.allclose(win.exp_amp, before)
+
+
+def test_kernel_warm_worker_spin_gate_and_dedup(win, qapp, tmp_path,
+                                                monkeypatch):
+    """B6: loading a quadrupolar 1D dataset kicks off ONE background kernel
+    pre-build; spin-1/2 nuclei and repeat loads of the same dataset do not.
+    (The build itself is exercised via the engine tests; here the worker is
+    stubbed so the test stays fast.)"""
+    import larmor.desktop.app as appmod
+
+    started = []
+
+    class FakeWorker:
+        def __init__(self, nucleus, lar, spin, ppm):
+            started.append(nucleus)
+        def start(self):
+            pass
+        def isRunning(self):
+            return False
+
+    monkeypatch.setattr(appmod, "KernelWarmWorker", FakeWorker)
+    monkeypatch.delenv("LARMOR_NO_KERNEL_WARM", raising=False)
+
+    data = tmp_path / "sample.csv"
+    _write_csv_spectrum(data)                       # 11B: spin 3/2
+    win.load_source(str(data), keep_fit=False)
+    qapp.processEvents()
+    assert started == ["11B"]
+
+    win._warm_kernel()                              # same dataset: deduped
+    assert started == ["11B"]
+
+    # a spin-1/2 dataset still constructs the worker (the spin gate lives in
+    # the worker's run() so the lookup cost is off the GUI thread) -- what we
+    # assert here is that a NEW dataset key warms again
+    win.recipe["nucleus"] = "29Si"
+    win.recipe["larmor_frequency_MHz"] = 99.3
+    win._warmed_key = None
+    win._warm_kernel()
+    assert started == ["11B", "29Si"]

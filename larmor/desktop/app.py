@@ -186,6 +186,45 @@ class Fit2DWorker(QThread, _StoppableFit):
             self.failed.emit(str(exc))
 
 
+class KernelWarmWorker(QThread):
+    """Pre-build the default Czjzek kernel in the background while the user
+    is still placing lines. The nucleus, field, spin rate and window are all
+    known the moment a spectrum opens; waiting until the first Simulate
+    meant eating the whole build (up to ~23 s wideline, cold) right at the
+    click. Failures are silent -- this is an optimisation, never a feature.
+    Worst case is a race with an explicit early Simulate building the same
+    kernel twice; both land in the cache, last write wins, nothing wrong."""
+
+    def __init__(self, nucleus, larmor_MHz, spin_rate_Hz, exp_ppm):
+        super().__init__()
+        self._args = (nucleus, float(larmor_MHz), float(spin_rate_Hz),
+                      np.asarray(exp_ppm, float))
+
+    def run(self):
+        try:
+            from larmor import engine
+            from larmor.nuclei import all_isotopes
+
+            nucleus, lar, spin_hz, exp_ppm = self._args
+            iso = next((i for i in all_isotopes() if i.symbol == nucleus),
+                       None)
+            if iso is None or iso.spin < 1.0 or lar <= 0:
+                return                     # spin-1/2 (or unknown): no kernel
+            sw, ref = engine.kernel_window(exp_ppm, lar)
+            npts = min(int(engine.KERNEL_SETTINGS["npts"]
+                           * max(1.0, sw / engine.KERNEL_MIN_SW_HZ)), 16384)
+            # exactly the kernel a fresh czjzek site (default sigma 2 MHz ->
+            # ladder step 25) asks for on its first render
+            engine.build_kernel(
+                nucleus, lar, spin_hz, sw_Hz=sw, npts=npts,
+                ref_offset_ppm=ref,
+                cq_max_MHz=engine.kernel_cq_max(5.0 * 2.0),
+                n_cq=engine.KERNEL_SETTINGS["n_cq"],
+                n_eta=int(engine.KERNEL_SETTINGS["n_eta"]))
+        except Exception:                                  # noqa: BLE001
+            pass
+
+
 class SimWorker(QThread):
     done = Signal(object, object, object)
     failed = Signal(str)
@@ -2330,6 +2369,7 @@ class MainWindow(QMainWindow):
         self._refresh_overlays()
         self._register_ws("1d")
         self._persist_session()
+        self._warm_kernel()             # background pre-build (B6)
 
     def _load_nonfittable(self, path: str) -> bool:
         """Display a 2D dataset or a raw fid/ser without rejecting it.
@@ -2657,6 +2697,29 @@ class MainWindow(QMainWindow):
             self._update_exp_label(); self._update_enabled()
         self._register_ws("2d")
 
+    def _warm_kernel(self):
+        """Start (at most one) background kernel pre-build for the current
+        dataset -- see KernelWarmWorker."""
+        if os.environ.get("LARMOR_NO_KERNEL_WARM"):
+            return                      # tests / benchmarking opt-out
+        rec = self.recipe or {}
+        nucleus = rec.get("nucleus", "")
+        lar = float(rec.get("larmor_frequency_MHz", 0.0) or 0.0)
+        if not nucleus or lar <= 0 or not len(self.exp_ppm):
+            return
+        key = (nucleus, round(lar, 3),
+               round(float(rec.get("spin_rate_Hz", 0.0) or 0.0)),
+               len(self.exp_ppm))
+        if getattr(self, "_warmed_key", None) == key:
+            return
+        w = getattr(self, "_warm_worker", None)
+        if w is not None and w.isRunning():
+            return                      # one at a time; next load re-checks
+        self._warmed_key = key
+        self._warm_worker = KernelWarmWorker(
+            nucleus, lar, rec.get("spin_rate_Hz", 0.0) or 0.0, self.exp_ppm)
+        self._warm_worker.start()
+
     def _display_1d(self, ppm, amp, nucleus, larmor, masr, title, expno):
         """Put a bare 1D spectrum on the workbench (no fit), ready to fit."""
         from larmor.recipe import Recipe
@@ -2680,6 +2743,7 @@ class MainWindow(QMainWindow):
         self._update_paddles(); self._update_exp_label(); self._update_enabled()
         self._refresh_overlays(); self._update_sn()
         self._register_ws("1d")
+        self._warm_kernel()             # background pre-build (B6)
 
     def _trace_to_workbench(self, ppm, amp, label):
         """A 1D trace pulled out of the 2D view becomes a NEW workspace, so the
