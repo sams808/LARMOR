@@ -20,6 +20,54 @@ def site_color(i: int) -> str:
     return series[i % len(series)]
 
 
+class ScaledAxis(pg.AxisItem):
+    """A bottom axis that can DISPLAY the ppm-space data in kHz or MHz.
+
+    Wideline patterns are read and reported in kHz from the reference, so the
+    axis must speak that language -- but every plotted coordinate (curves,
+    paddles, zones, markers) stays in ppm, the app's one internal unit. Only
+    the tick VALUES are transformed, and the ticks are chosen round in the
+    display unit (pyqtgraph's own setScale() keeps ppm-round ticks, which
+    lands kHz labels like 43.2 / 86.4)."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._factor = 1.0                    # display value = ppm * factor
+
+    def set_factor(self, factor: float):
+        self._factor = float(factor) if factor else 1.0
+        self.picture = None
+        self.update()
+
+    def tickValues(self, minVal, maxVal, size):
+        f = self._factor
+        if f == 1.0:
+            return super().tickValues(minVal, maxVal, size)
+        vals = super().tickValues(minVal * f, maxVal * f, size)
+        return [(spacing / f, [v / f for v in ticks])
+                for spacing, ticks in vals]
+
+    def tickStrings(self, values, scale, spacing):
+        f = self._factor
+        if f == 1.0:
+            return super().tickStrings(values, scale, spacing)
+        return super().tickStrings([v * f for v in values], scale, spacing * f)
+
+
+#: display-axis units: label text and the factor from (ppm, sfo_MHz) -- the
+#: ppm -> Hz convention is nu = delta * SFO (convert.ppm_to_Hz)
+AXIS_UNITS = ("ppm", "kHz", "MHz")
+
+
+def axis_factor(unit: str, sfo_MHz: float) -> float:
+    """display value = ppm * factor. 1.0 for ppm or when SFO is unknown."""
+    if unit == "kHz" and sfo_MHz > 0:
+        return sfo_MHz / 1000.0
+    if unit == "MHz" and sfo_MHz > 0:
+        return sfo_MHz / 1e6
+    return 1.0
+
+
 class AnchoredViewBox(pg.ViewBox):
     """A ViewBox whose wheel-zoom keeps the data point **under the cursor** fixed.
 
@@ -63,9 +111,12 @@ class SpectrumView(pg.PlotWidget):
 
     def __init__(self, parent=None):
         t = theme.active()
-        super().__init__(parent, background=t.plot_bg, viewBox=AnchoredViewBox())
+        super().__init__(parent, background=t.plot_bg, viewBox=AnchoredViewBox(),
+                         axisItems={"bottom": ScaledAxis(orientation="bottom")})
         pi = self.getPlotItem()
         pi.invertX(True)                              # ppm convention
+        self._axis_unit = "ppm"                       # display unit only
+        self._axis_sfo_MHz = 0.0
         tick_font = QFont()
         tick_font.setPointSize(9)
         for name in ("bottom", "left"):
@@ -212,7 +263,7 @@ class SpectrumView(pg.PlotWidget):
         pi.getAxis("top").setPen(pg.mkPen(t.axis_minor))
         pi.getAxis("right").setPen(pg.mkPen(t.axis_minor))
         label_style = {"color": t.axis, "font-size": "10pt"}
-        self.setLabel("bottom", "chemical shift", units="ppm", **label_style)
+        self._apply_axis_label(label_style)
         # never let pyqtgraph SI-prefix a ppm axis ("kppm" is not a unit)
         pi.getAxis("bottom").enableAutoSIPrefix(False)
         self.setLabel("left", "intensity", **label_style)
@@ -234,6 +285,27 @@ class SpectrumView(pg.PlotWidget):
         if ph is not None and ph.isVisible():
             ph.setStyleSheet(f"color: {t.text_dim}; font-size: 13px; "
                              "background: transparent;")
+
+    # ---------- axis display unit ----------
+    def set_axis_unit(self, unit: str, sfo_MHz: float):
+        """Display the bottom axis in ppm, kHz or MHz. Data, paddles, zones
+        and every plotted coordinate stay in ppm; only tick labels change."""
+        self._axis_unit = unit if unit in AXIS_UNITS else "ppm"
+        self._axis_sfo_MHz = float(sfo_MHz or 0.0)
+        ax = self.getPlotItem().getAxis("bottom")
+        if isinstance(ax, ScaledAxis):
+            ax.set_factor(axis_factor(self._axis_unit, self._axis_sfo_MHz))
+        t = theme.active()
+        self._apply_axis_label({"color": t.axis, "font-size": "10pt"})
+
+    def _apply_axis_label(self, label_style: dict):
+        unit = self._axis_unit
+        if unit != "ppm" and self._axis_sfo_MHz > 0:
+            self.setLabel("bottom", "frequency offset", units=unit,
+                          **label_style)
+        else:
+            self.setLabel("bottom", "chemical shift", units="ppm",
+                          **label_style)
 
     # ---------- drag & drop ----------
     def dragEnterEvent(self, ev):

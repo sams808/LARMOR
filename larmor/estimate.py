@@ -75,7 +75,8 @@ def band_width_ppm(ppm: np.ndarray, amp: np.ndarray,
 
 
 def _model_width(model: str, key: str, val: float, nucleus: str,
-                 larmor_MHz: float, eta: float, span_ppm: float) -> float:
+                 larmor_MHz: float, eta: float, span_ppm: float,
+                 spin_rate_Hz: float = 0.0) -> float:
     """FWHM (ppm) of ``model`` when ``key`` is set to ``val``. 0.0 when the
     pattern does not fit inside ``span_ppm`` (so a caller can widen)."""
     from larmor import engine
@@ -94,7 +95,7 @@ def _model_width(model: str, key: str, val: float, nucleus: str,
         params["shift_fwhm_ppm"] = Param(max(span_ppm * 0.002, 0.5))
     params[key] = Param(float(val))
     rec = Recipe(nucleus=nucleus, larmor_frequency_MHz=larmor_MHz,
-                 spin_rate_Hz=0.0,
+                 spin_rate_Hz=float(spin_rate_Hz),
                  sites=[SiteModel(model=model, label="r", params=params)])
     x = np.linspace(-span_ppm, span_ppm, 3001)
     try:
@@ -113,13 +114,23 @@ def _model_width(model: str, key: str, val: float, nucleus: str,
 
 def cq_for_width(fwhm_ppm: float, nucleus: str, larmor_MHz: float,
                  eta: float = 0.6, *, model: str = "quad_ct",
-                 key: str = "Cq_MHz") -> float:
+                 key: str = "Cq_MHz", spin_rate_Hz: float = 0.0) -> float:
     """The value of ``key`` that makes ``model`` a pattern ``fwhm_ppm`` wide.
 
     Solved by bisection on the model itself rather than an analytic formula:
     the breadth is monotone in the coupling for every model here, but a
     Czjzek sigma and a discrete Cq are not related by any fixed factor, and
     the convolved shift distribution rides along with both.
+
+    ``spin_rate_Hz`` matters: the probe used to be hard-coded static, which
+    seeded a static dataset correctly but under-seeded MAS data -- a static
+    second-order CT pattern is broader than the MAS one for the same Cq (the
+    measured ratio at the calibration fraction runs 1.5-3.2x for eta 0.3-1),
+    and breadth goes as Cq^2, so MAS seeds landed up to ~1.8x low. There is
+    no reliable fixed conversion factor (the ratio collapses to 0.4 at
+    eta = 0, where the static pattern is one dominant horn), so the probe now
+    simply simulates at the experiment's own rate; a MAS quad_ct probe costs
+    well under a second at this grid size.
     """
     if fwhm_ppm <= 0 or larmor_MHz <= 0:
         return 0.0
@@ -127,7 +138,8 @@ def cq_for_width(fwhm_ppm: float, nucleus: str, larmor_MHz: float,
     lo, hi = 0.05, 200.0
 
     def w(v):
-        return _model_width(model, key, v, nucleus, larmor_MHz, eta, span)
+        return _model_width(model, key, v, nucleus, larmor_MHz, eta, span,
+                            spin_rate_Hz)
 
     w_lo, w_hi = w(lo), w(hi)
     if w_lo <= 0:
@@ -155,7 +167,8 @@ def cq_for_width(fwhm_ppm: float, nucleus: str, larmor_MHz: float,
 
 
 def start_values(model: str, ppm, amp, nucleus: str, larmor_MHz: float,
-                 centre_ppm: float | None = None) -> dict:
+                 centre_ppm: float | None = None,
+                 spin_rate_Hz: float = 0.0) -> dict:
     """Starting parameter values for a new ``model`` site, measured from the
     spectrum. Returns only the keys the data justifies; the caller keeps the
     model's own defaults for everything else."""
@@ -179,7 +192,8 @@ def start_values(model: str, ppm, amp, nucleus: str, larmor_MHz: float,
     # right ballpark -- the fit refines it from there.
     _, breadth = band_width_ppm(ppm, amp, centre_ppm, frac=CALIB_FRAC)
     cq = cq_for_width(max(breadth, fwhm), nucleus, larmor_MHz,
-                      model="quad_ct", key="Cq_MHz")
+                      model="quad_ct", key="Cq_MHz",
+                      spin_rate_Hz=spin_rate_Hz)
     if cq <= 0:
         return {"shift_fwhm_ppm": float(fwhm)}
     if key == "sigma_Cq_MHz":

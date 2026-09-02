@@ -341,25 +341,63 @@ def _read_title(pdata: Path) -> str:
 #: user is warned in the app). 35714 Hz is a common 27Al fast-MAS rate here.
 MAS_FALLBACK_HZ = 35714.0
 
+#: pulse-program fragments that imply a STATIC (non-spinning) experiment.
+#: Conservative on purpose: qcpmg alone is NOT here (MAS-QCPMG is a real
+#: technique), nor are echo sequences (used under MAS all the time).
+_STATIC_PULPROGS = ("wcpmg", "wurst", "static")
+
+#: operator words in the title that declare a static experiment
+_STATIC_TITLE_RE = re.compile(r"\bstati(?:c|que)\b", re.IGNORECASE)
+
 
 def _resolve_mas(acqus: dict, title: str) -> tuple[float, bool]:
-    """Resolve the MAS rate from all available sources. If several disagree,
-    take the highest; if none are found, fall back to MAS_FALLBACK_HZ. Returns
-    (rate_Hz, uncertain) where uncertain flags a guess or a disagreement so the
-    app can warn (red indicator)."""
+    """Resolve the MAS rate from all available sources. Returns
+    (rate_Hz, uncertain) where uncertain flags a guess or a disagreement so
+    the app can warn (red indicator). rate_Hz == 0.0 means STATIC.
+
+    A recorded ``MASR = 0`` used to fall through to the 35 714 Hz fallback,
+    so a static wideline dataset (e.g. 81Br WCPMG on glass) was silently
+    simulated as fast MAS -- a static second-order CT pattern is ~2x the MAS
+    width for the same Cq, so every downstream number was wrong, not merely
+    unconfirmed. Static is now a first-class outcome:
+
+    - MASR present and 0 -> static; certain when the title or the pulse
+      program corroborates, else flagged for the user to confirm.
+    - no MASR, title says static/statique -> static, certain (operator-typed,
+      trusted exactly like an operator-typed "MAS 20 kHz").
+    - no MASR, pulse program looks static (wcpmg/wurst/static) -> static,
+      flagged (technique hints, does not prove).
+    - a positive rate always wins over static hints, but MASR = 0 against a
+      title rate is a real disagreement and is flagged.
+    """
     cands = []
     masr = acqus.get("MASR")
+    masr_zero = masr is not None and float(masr) == 0.0
     if masr is not None and float(masr) > 0:
         cands.append(float(masr))
     m = re.search(r"MASR?\s*[=:]?\s*([\d.]+)\s*kHz", title or "", re.IGNORECASE)
     if m:
         cands.append(float(m.group(1)) * 1000.0)
-    if not cands:
-        return MAS_FALLBACK_HZ, True
-    rate = max(cands)
-    # ambiguous if two sources disagree by more than 2 %
-    uncertain = (max(cands) - min(cands)) > 0.02 * max(cands)
-    return rate, uncertain
+
+    pulprog = str(acqus.get("PULPROG", "")).strip().strip('<>').lower()
+    static_title = bool(_STATIC_TITLE_RE.search(title or ""))
+    static_pp = any(s in pulprog for s in _STATIC_PULPROGS)
+
+    if cands:
+        rate = max(cands)
+        # ambiguous if two sources disagree by more than 2 % -- and a recorded
+        # MASR of 0 against a title rate is just as much a disagreement
+        uncertain = ((max(cands) - min(cands)) > 0.02 * max(cands)
+                     or masr_zero or static_title)
+        return rate, uncertain
+
+    if masr_zero:
+        return 0.0, not (static_title or static_pp)
+    if static_title:
+        return 0.0, False
+    if static_pp:
+        return 0.0, True
+    return MAS_FALLBACK_HZ, True
 
 
 def _meta_1d(acqus: dict, title: str, expno: Path) -> dict:

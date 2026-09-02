@@ -999,3 +999,65 @@ def test_add_current_spectrum_line_cancelled_adds_nothing(win, qapp, tmp_path,
     monkeypatch.setattr(QDialog, "exec", lambda self: QDialog.Rejected)
     win.add_current_spectrum_line()
     assert len(win.recipe["sites"]) == before
+
+
+def test_axis_unit_khz_display(win, qapp, tmp_path, monkeypatch):
+    """View > Axis unit: kHz relabels the bottom axis with ROUND kHz ticks
+    (display value = ppm * SFO / 1000) while every plotted coordinate stays
+    in ppm; switching back restores the ppm labelling."""
+    from larmor.desktop.plot import ScaledAxis, axis_factor
+
+    data = tmp_path / "sample.csv"
+    _write_csv_spectrum(data)
+    win.load_source(str(data), keep_fit=False)
+    qapp.processEvents()
+
+    ax = win.view.getPlotItem().getAxis("bottom")
+    assert isinstance(ax, ScaledAxis)
+    sfo = win.recipe["larmor_frequency_MHz"]        # 160.46
+
+    win._set_axis_unit("kHz")
+    f = axis_factor("kHz", sfo)
+    assert ax._factor == pytest.approx(f)
+    # ticks must be round in the DISPLAY unit, not in ppm
+    vals = ax.tickValues(-60.0, 100.0, 800)
+    major = vals[0][1]
+    assert major, "no major ticks"
+    for v in major:
+        disp = v * f
+        assert abs(disp - round(disp, 6)) < 1e-9 or \
+            abs(disp * 10 - round(disp * 10)) < 1e-6, disp
+    # tick STRINGS speak kHz: each real (round-in-kHz) tick renders exactly
+    spacing = vals[0][0]
+    strs = ax.tickStrings(major, 1.0, spacing)
+    for v, txt in zip(major, strs):
+        assert float(txt) == pytest.approx(v * f, abs=1e-6), (v, txt)
+    # the cursor formatter leads with the unit and keeps ppm visible
+    assert "kHz" in win._format_x(100.0) and "ppm" in win._format_x(100.0)
+
+    win._set_axis_unit("ppm")
+    assert ax._factor == 1.0
+    assert win._format_x(100.0) == "100.00 ppm"
+
+
+def test_integrals_dialog_reports_fwhm_khz_when_sfo_known(win, qapp, tmp_path):
+    from larmor.desktop.integrate_dialog import IntegralsDialog
+
+    data = tmp_path / "sample.csv"
+    ppm, amp = _write_csv_spectrum(data)
+    dlg = IntegralsDialog(win, ppm, amp, sfo_MHz=160.46)
+    try:
+        heads = [dlg.table.horizontalHeaderItem(j).text()
+                 for j in range(dlg.table.columnCount())]
+        assert heads[-1] == "FWHM (kHz)"
+        dlg._recompute()
+        assert dlg.table.rowCount() >= 1
+        fwhm_ppm = float(dlg.table.item(0, 4).text())
+        fwhm_khz = float(dlg.table.item(0, 5).text())
+        assert fwhm_khz == pytest.approx(fwhm_ppm * 160.46 / 1000.0, abs=2e-3)
+        # without an SFO the column is absent (plain solution-style use)
+        dlg2 = IntegralsDialog(win, ppm, amp)
+        assert dlg2.table.columnCount() == 5
+        dlg2.close()
+    finally:
+        dlg.close()

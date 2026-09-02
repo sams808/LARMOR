@@ -19,12 +19,15 @@ REGION_COLORS = ["#0e7c86", "#d62728", "#2ca02c", "#9467bd", "#e377c2",
 
 
 class IntegralsDialog(QDialog):
-    def __init__(self, parent, ppm, amp):
+    def __init__(self, parent, ppm, amp, sfo_MHz: float = 0.0):
         super().__init__(parent)
         self.setWindowTitle("Integrals & measurements")
         self.resize(900, 620)
         self.ppm = np.asarray(ppm, float)
         self.amp = np.asarray(amp, float)
+        #: Larmor frequency; > 0 adds a FWHM (kHz) column -- what a wideline
+        #: pattern is reported in (fwhm_hz convention: Hz = ppm * SFO)
+        self.sfo_MHz = float(sfo_MHz or 0.0)
         self.regions: list[pg.LinearRegionItem] = []
 
         v = QVBoxLayout(self)
@@ -49,9 +52,12 @@ class IntegralsDialog(QDialog):
         self.plot.plot(self.ppm, self.amp, pen=pg.mkPen("#1a2831", width=1.2))
         v.addWidget(self.plot, 1)
 
-        self.table = QTableWidget(0, 5)
-        self.table.setHorizontalHeaderLabels(
-            ["region (ppm)", "integral", "%", "centre (ppm)", "FWHM (ppm)"])
+        headers = ["region (ppm)", "integral", "%", "centre (ppm)",
+                   "FWHM (ppm)"]
+        if self.sfo_MHz > 0:
+            headers.append("FWHM (kHz)")
+        self.table = QTableWidget(0, len(headers))
+        self.table.setHorizontalHeaderLabels(headers)
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.setMaximumHeight(180)
         v.addWidget(self.table)
@@ -96,14 +102,22 @@ class IntegralsDialog(QDialog):
             vals = [f"{hi:.2f} … {lo:.2f}", f"{row['integral']:.4g}",
                     f"{row['percent']:.1f}", f"{row['centre']:.2f}",
                     f"{row['fwhm']:.2f}"]
+            if self.sfo_MHz > 0:
+                vals.append(f"{row['fwhm'] * self.sfo_MHz / 1000.0:.3f}")
             for j, val in enumerate(vals):
                 self.table.setItem(i, j, QTableWidgetItem(val))
 
     def _csv(self):
-        lines = ["hi_ppm,lo_ppm,integral,percent,centre_ppm,fwhm_ppm"]
+        header = "hi_ppm,lo_ppm,integral,percent,centre_ppm,fwhm_ppm"
+        if self.sfo_MHz > 0:
+            header += ",fwhm_khz"
+        lines = [header]
         for row in self._rows():
             hi, lo = row["range"]
-            lines.append(f"{hi:.3f},{lo:.3f},{row['integral']:.6g},"
-                         f"{row['percent']:.3f},{row['centre']:.3f},{row['fwhm']:.3f}")
+            line = (f"{hi:.3f},{lo:.3f},{row['integral']:.6g},"
+                    f"{row['percent']:.3f},{row['centre']:.3f},{row['fwhm']:.3f}")
+            if self.sfo_MHz > 0:
+                line += f",{row['fwhm'] * self.sfo_MHz / 1000.0:.4f}"
+            lines.append(line)
         QApplication.clipboard().setText("\n".join(lines))
         self.hint.setText("copied CSV to clipboard")

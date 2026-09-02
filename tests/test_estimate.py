@@ -129,3 +129,31 @@ def test_czjzek_grid_ceiling_follows_the_requested_sigma():
     assert w10 > 1.5 * w5                      # kept growing past the old wall
     assert w20 > 1.5 * w10
     assert w10 > 1400.0                        # can now reach real 81Br widths
+
+
+def test_seed_probe_respects_the_experiment_spin_rate():
+    """The width->Cq probe used to be hard-coded static, under-seeding MAS
+    data: reproducing the same measured breadth under MAS needs a larger Cq
+    than under static (MAS narrows the second-order pattern). Same synthetic
+    spectrum, two rates -> the MAS seed must come out larger."""
+    from larmor.recipe import Param, Recipe, SiteModel
+    from larmor import engine
+
+    # a realistic wide 81Br CT pattern, simulated STATIC as the "data"
+    p = {"isotropic_chemical_shift_ppm": Param(0.0), "Cq_MHz": Param(30.0),
+         "eta": Param(0.5), "shift_fwhm_ppm": Param(20.0),
+         "amplitude": Param(1.0)}
+    r = Recipe(nucleus="81Br", larmor_frequency_MHz=216.0, spin_rate_Hz=0.0,
+               sites=[SiteModel("quad_ct", "s", p)])
+    x = np.linspace(-4000, 4000, 4001)
+    gx, y, _ = engine.simulate(r, exp_ppm=x)
+
+    static_seed = estimate.start_values("quad_ct", gx, y, "81Br", 216.0,
+                                        spin_rate_Hz=0.0)
+    mas_seed = estimate.start_values("quad_ct", gx, y, "81Br", 216.0,
+                                     spin_rate_Hz=20000.0)
+    assert static_seed and mas_seed
+    # the static probe against static data must land near the true 30 MHz
+    assert static_seed["Cq_MHz"] == pytest.approx(30.0, rel=0.35)
+    # and the MAS probe must ask for MORE coupling for the same breadth
+    assert mas_seed["Cq_MHz"] > static_seed["Cq_MHz"]

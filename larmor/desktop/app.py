@@ -256,7 +256,8 @@ class MainWindow(QMainWindow):
         self.view.paddle_released.connect(self.on_paddle_released)
         self.view.file_dropped.connect(self.load_source)
         self.view.cursor_moved.connect(
-            lambda x, y: self.pos_label.setText(f"x: {x:.2f} ppm   y: {y:.4g}"))
+            lambda x, y: self.pos_label.setText(
+                f"x: {self._format_x(x)}   y: {y:.4g}"))
         self.view.calibrate_picked.connect(self.on_calibrate_picked)
         self.view.measure_changed.connect(self.on_measure_changed)
         self.view2d.slice_to_fit.connect(self._trace_to_workbench)
@@ -514,6 +515,8 @@ class MainWindow(QMainWindow):
         m_view.addSeparator()
         self._build_theme_menu(m_view)
         self._build_textsize_menu(m_view)
+        m_view.addSeparator()
+        self._build_axis_unit_menu(m_view)
         m_view.addSeparator()
         self._add(m_view, "&Back to 2D map", self.back_to_2d, "Ctrl+2")
         self._add(m_view, "Zoom to sites", self.zoom_sites)
@@ -818,7 +821,9 @@ class MainWindow(QMainWindow):
         if not self.exp_ppm.size:
             self.statusBar().showMessage("open a 1D spectrum first")
             return
-        IntegralsDialog(self, self.exp_ppm, self.exp_amp).exec()
+        IntegralsDialog(self, self.exp_ppm, self.exp_amp,
+                        sfo_MHz=float((self.recipe or {}).get(
+                            "larmor_frequency_MHz", 0.0) or 0.0)).exec()
 
     def open_nmr_table(self):
         from larmor.desktop.utilities import NmrTableDialog
@@ -1267,6 +1272,54 @@ class MainWindow(QMainWindow):
         self.actUndo.setEnabled(bool(self.undo_stack))
         self.actRedo.setEnabled(bool(self.redo_stack))
 
+    # ------------------------------------------------------------- axis unit
+    def _build_axis_unit_menu(self, m_view):
+        """View > Axis unit: ppm (default), kHz, MHz. Wideline patterns are
+        read and reported in kHz from the reference; display only — every
+        internal coordinate stays ppm."""
+        from PySide6.QtGui import QActionGroup
+
+        from larmor.desktop.plot import AXIS_UNITS
+
+        self._axis_unit = str(QSettings("LARMOR", "app").value(
+            "axisUnit", "ppm") or "ppm")
+        if self._axis_unit not in AXIS_UNITS:
+            self._axis_unit = "ppm"
+        m = m_view.addMenu("Axis &unit")
+        group = QActionGroup(self)
+        group.setExclusive(True)
+        self._axis_unit_actions = {}
+        for unit, label in (("ppm", "δ (&ppm)"),
+                            ("kHz", "&kHz  (offset from 0 ppm)"),
+                            ("MHz", "&MHz  (offset from 0 ppm)")):
+            a = QAction(label, self)
+            a.setCheckable(True)
+            a.setChecked(unit == self._axis_unit)
+            a.triggered.connect(lambda _=False, u=unit: self._set_axis_unit(u))
+            group.addAction(a)
+            m.addAction(a)
+            self._axis_unit_actions[unit] = a
+
+    def _set_axis_unit(self, unit: str):
+        self._axis_unit = unit
+        if not os.environ.get("LARMOR_NO_SESSION"):
+            QSettings("LARMOR", "app").setValue("axisUnit", unit)
+        self._apply_axis_unit()
+
+    def _apply_axis_unit(self):
+        sfo = float((self.recipe or {}).get("larmor_frequency_MHz", 0.0) or 0.0)
+        self.view.set_axis_unit(getattr(self, "_axis_unit", "ppm"), sfo)
+
+    def _format_x(self, x_ppm: float) -> str:
+        """A cursor/readout position in the display unit (always with ppm)."""
+        sfo = float((self.recipe or {}).get("larmor_frequency_MHz", 0.0) or 0.0)
+        unit = getattr(self, "_axis_unit", "ppm")
+        if unit == "kHz" and sfo > 0:
+            return f"{x_ppm * sfo / 1e3:.3f} kHz ({x_ppm:.2f} ppm)"
+        if unit == "MHz" and sfo > 0:
+            return f"{x_ppm * sfo / 1e6:.5f} MHz ({x_ppm:.2f} ppm)"
+        return f"{x_ppm:.2f} ppm"
+
     # ------------------------------------------------------------- experiment
     def _update_exp_label(self):
         if not self.recipe:
@@ -1280,18 +1333,24 @@ class MainWindow(QMainWindow):
             f"{self.recipe.get('nucleus', '?')} · "
             f"{self.recipe.get('larmor_frequency_MHz', 0):.3f} MHz · {mas}{sr_txt}")
         self._update_mas_label()
+        self._apply_axis_unit()          # SFO may have changed with the dataset
 
     def _update_mas_label(self):
         """Red bottom-right MAS indicator when the spin rate was guessed or the
         sources disagreed. Cleared once the user confirms it (Experiment dialog)."""
         rate = (self.recipe or {}).get("spin_rate_Hz", 0.0) or 0.0
         if self.recipe and self.recipe.get("mas_uncertain"):
-            self.mas_label.setText(f"⚠ MAS {rate:.0f} Hz — check!")
+            self.mas_label.setText("⚠ assumed static — check!" if rate == 0
+                                   else f"⚠ MAS {rate:.0f} Hz — check!")
             self.mas_label.setToolTip(
-                "The MAS rate was missing or the acqus/title sources disagreed, "
-                "so LARMOR guessed (highest found, or 35714 Hz). Double-click "
-                "here (or the experiment strip) to open Experiment parameters "
-                "and clear this warning.")
+                ("The dataset looks static (MASR recorded as 0, or a wideline "
+                 "pulse program) but no second source confirms it, so LARMOR "
+                 "assumed static (0 Hz). "
+                 if rate == 0 else
+                 "The MAS rate was missing or the acqus/title sources "
+                 "disagreed, so LARMOR guessed (highest found, or 35714 Hz). ")
+                + "Double-click here (or the experiment strip) to open "
+                  "Experiment parameters and clear this warning.")
             self.mas_label.setVisible(True)
         else:
             self.mas_label.setVisible(False)
@@ -2711,7 +2770,9 @@ class MainWindow(QMainWindow):
             vals = estimate.start_values(
                 name, self.exp_ppm, self.exp_amp, nucleus,
                 float((self.recipe or {}).get("larmor_frequency_MHz", 0.0) or 0.0),
-                centre_ppm=centre_ppm)
+                centre_ppm=centre_ppm,
+                spin_rate_Hz=float(
+                    (self.recipe or {}).get("spin_rate_Hz", 0.0) or 0.0))
         except Exception:                                  # noqa: BLE001
             return
         for k, v in vals.items():
@@ -3691,7 +3752,9 @@ class MainWindow(QMainWindow):
         dppm = abs(p1 - p2)
         msg = f"Δ = {dppm:.3f} ppm"
         if larmor:
-            msg += f"   {dppm * larmor:.1f} Hz"
+            dhz = dppm * larmor
+            msg += (f"   {dhz / 1000.0:.3f} kHz" if dhz >= 1000.0
+                    else f"   {dhz:.1f} Hz")
         msg += f"   ({p1:.2f} → {p2:.2f} ppm)"
         self.statusBar().showMessage(msg)
 
