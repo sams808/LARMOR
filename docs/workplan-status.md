@@ -91,7 +91,10 @@ In the order I would do them:
    a static ⁸¹Br WQCPMG walkthrough (QCPMG dialog → send → Read static
    pattern → fit → infinite-field δiso is the arc; PBi data conventions are
    in Sam's memory notes).
-10. **G5 — split app.py** (L, riskiest last): ~4.9k lines. Suggested cuts:
+10. **E6 — pyflakes as a gate** (S): curate the ~55 cosmetic findings once
+    (the deliberate re-exports get explicit exemptions), then keep the count
+    at zero so a real finding is visible. Easy to fold into any tranche.
+11. **G5 — split app.py** (L, riskiest last): ~4.9k lines. Suggested cuts:
     menus/actions builder, session/workspace persistence, the
     add-line/seeding block, processing glue. Keep `MainWindow` as a facade so
     tests and `_win`-style fixtures keep working; move in small verified
