@@ -426,7 +426,7 @@ def _write_report(path: Path, entries, table: BatchTable, plot_links, warnings):
               "montecarlo": "Monte-Carlo (parametric bootstrap)"}.get(
         table.error_method, table.error_method)
     lines = [
-        f"# LARMOR batch fit report",
+        "# LARMOR batch fit report",
         "",
         f"*{len(entries)} fits · {len(table.rows)} sites · generated "
         f"{date.today().isoformat()}*",

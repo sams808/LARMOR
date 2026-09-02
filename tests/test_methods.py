@@ -1,7 +1,6 @@
 """Copy-ready outputs: LaTeX results table + methods sentence."""
 from larmor.recipe import Recipe, SiteModel, Param
 from larmor import methods, quantify
-import numpy as np
 
 
 def _czjzek_recipe():

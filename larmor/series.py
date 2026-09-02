@@ -297,6 +297,6 @@ def analyze_per_site(expno: str | Path, recipe, kind: str | None = None,
             beta_err=(float(p["beta"].stderr)
                       if stretched and p["beta"].stderr else None),
             curve=curve, label=site.label or f"s{i}",
-            notes=[f"per-site decomposition (NNLS on fixed lineshapes)",
+            notes=["per-site decomposition (NNLS on fixed lineshapes)",
                    f"delays from {src}"]))
     return results

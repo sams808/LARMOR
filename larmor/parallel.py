@@ -42,12 +42,13 @@ def _warm_worker():
     cache stays per-process, but the on-disk kernel cache (engine._disk_load)
     means a worker's first Czjzek evaluation loads a ready kernel instead of
     simulating it."""
-    try:
-        import mrsimulator  # noqa: F401
-        import larmor.engine  # noqa: F401
-        import larmor.fit  # noqa: F401
-    except Exception:
-        pass                    # a worker that can't warm still works
+    import importlib
+
+    for name in ("mrsimulator", "larmor.engine", "larmor.fit"):
+        try:
+            importlib.import_module(name)
+        except Exception:
+            pass                # a worker that can't warm still works
 
 
 _SHARED_POOL: ProcessPoolExecutor | None = None

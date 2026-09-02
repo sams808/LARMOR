@@ -58,7 +58,7 @@ def test_read_delays_vclist(tmp_path):
 def test_per_site_separates_two_overlapping_t1():
     """THE point of per-site analysis: two overlapping lines with different
     T1. A single integration window would return one meaningless average."""
-    from larmor.engine import gauss_lor, make_context, simulate_site
+    from larmor.engine import make_context, simulate_site
 
     ppm = np.linspace(-40, 40, 1500)
     recipe = Recipe(nucleus="27Al", larmor_frequency_MHz=195.5, spin_rate_Hz=0,
@@ -98,8 +98,6 @@ def test_per_site_separates_two_overlapping_t1():
 
 
 def test_fit_slice_amplitudes_is_nonnegative():
-    from larmor.engine import make_context, simulate_site
-
     ppm = np.linspace(-20, 20, 500)
     recipe = Recipe(nucleus="27Al", larmor_frequency_MHz=195.5, spin_rate_Hz=0,
                     sites=[SiteModel(model="gauss_lor", params={

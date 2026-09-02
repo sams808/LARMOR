@@ -6,7 +6,6 @@ from __future__ import annotations
 import numpy as np
 import pyqtgraph as pg
 from larmor.desktop import theme
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QApplication, QDialog, QHBoxLayout, QLabel, QPushButton, QTableWidget,
     QTableWidgetItem, QVBoxLayout,

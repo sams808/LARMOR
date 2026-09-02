@@ -148,7 +148,7 @@ class ExperimentDialog(QDialog):
         try:
             from larmor.io import bruker
 
-            ref = bruker.resolve(path)
+            bruker.resolve(path)        # raises on a non-Bruker path
             data = bruker.read(path)
             self.sr.setValue(float(data.meta.get("sr_hz", 0.0)))
         except Exception:

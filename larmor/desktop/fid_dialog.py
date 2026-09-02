@@ -7,15 +7,12 @@ workbench (1D) or the 2D viewer.
 """
 from __future__ import annotations
 
-from pathlib import Path
-
-import numpy as np
 import pyqtgraph as pg
 from larmor.desktop import theme
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
-    QApplication, QComboBox, QDialog, QDoubleSpinBox, QFileDialog, QHBoxLayout,
-    QLabel, QPushButton, QSpinBox, QVBoxLayout, QWidget,
+    QComboBox, QDialog, QDoubleSpinBox, QFileDialog, QHBoxLayout,
+    QLabel, QPushButton, QSpinBox, QVBoxLayout,
 )
 
 

@@ -138,7 +138,7 @@ def test_get_resolves_aesthetic_theme_names_too():
 
 def test_palette_builds_for_every_theme():
     from PySide6.QtWidgets import QApplication
-    app = QApplication.instance() or QApplication([])   # noqa: F841
+    QApplication.instance() or QApplication([])
     for name in list(T.names()) + T.aesthetic_names():
         pal = T.palette(T.get(name))
         assert pal is not None

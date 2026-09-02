@@ -71,7 +71,7 @@ def test_constrained_fit_synthetic():
     r.sites[1].params["amplitude"].expr = "0.5 * s0.amplitude"
     r.sites[1].params["shift_fwhm_ppm"].expr = "s0.shift_fwhm_ppm"
 
-    result = fitmod.fit(r, x, y)
+    fitmod.fit(r, x, y)
     a0 = r.sites[0].params["amplitude"]
     a1 = r.sites[1].params["amplitude"]
     assert a0.value == pytest.approx(200.0, rel=0.02)

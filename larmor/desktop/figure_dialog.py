@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import tempfile
 from pathlib import Path
 
 from PySide6.QtCore import Qt
@@ -67,7 +66,9 @@ class FigureDialog(QDialog):
     def load_templates(self):
         if not self.source_path:
             return
-        from larmor.figures import STYLES  # noqa: F401  (import check)
+        import importlib
+
+        importlib.import_module("larmor.figures")   # fail early if the renderer is broken
 
         p = Path(self.source_path)
         templates: dict[str, dict] = {}

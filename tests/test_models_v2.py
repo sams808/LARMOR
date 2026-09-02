@@ -82,7 +82,7 @@ def test_fit_zones_union():
 
     r = _two_gauss_recipe()
     r.fit_zones = [[25.0, 5.0], [-5.0, -25.0]]   # around each real peak only
-    result = fitmod.fit(r, x, y)
+    fitmod.fit(r, x, y)
     a0 = r.sites[0].params["amplitude"].value
     a1 = r.sites[1].params["amplitude"].value
     assert a0 == pytest.approx(100.0, rel=0.05)   # artifact ignored
@@ -207,7 +207,6 @@ def test_sidebands_manifold():
 def test_function_fit_model():
     """A user y(x; a,b,c,d) expression fits, and the expression round-trips."""
     import numpy as np
-    from larmor import engine
     x = np.linspace(-50, 50, 600)
     truth = 2.5 * np.exp(-((x - 10) / 6) ** 2)
     r = Recipe(nucleus="1H", larmor_frequency_MHz=100.0, sites=[SiteModel(

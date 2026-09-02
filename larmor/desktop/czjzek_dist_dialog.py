@@ -3,7 +3,6 @@ Turns the width σ into the physical P(C_Q) it stands for; see larmor.czjzek_dis
 and the Lineshapes manual (Czjzek section)."""
 from __future__ import annotations
 
-import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (

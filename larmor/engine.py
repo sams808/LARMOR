@@ -19,8 +19,34 @@ import numpy as np
 
 from larmor import models as model_registry
 from larmor.models.base import SimContext
-from larmor.models.analytic import gauss_lor  # noqa: F401  (back-compat export)
+from larmor.models.analytic import gauss_lor  # back-compat export, see __all__
 from larmor.recipe import Recipe, SiteModel
+
+__all__ = [
+    "Axis",
+    "CQ_MAX_LADDER",
+    "CzjzekKernel",
+    "KERNEL_CACHE_BUDGET_MB",
+    "KERNEL_DISK_CACHE_MB",
+    "KERNEL_MIN_SW_HZ",
+    "KERNEL_SETTINGS",
+    "KERNEL_SPAN_MARGIN",
+    "KernelBuildCancelled",
+    "build_kernel",
+    "clear_kernel_cache",
+    "gauss_lor",
+    "grid_restrictable",
+    "kernel_axis_ppm",
+    "kernel_build_feedback",
+    "kernel_cache_info",
+    "kernel_cq_max",
+    "kernel_window",
+    "make_context",
+    "needs_kernel",
+    "simulate",
+    "simulate_site",
+    "site_width_margin",
+]
 
 #: kernels in most-recently-used order (kept bounded; see _cache_put). A
 #: plain dict here only ever grew: one 81Br wideline kernel is ~58 MB

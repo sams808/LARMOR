@@ -40,7 +40,6 @@ def test_quad_ct_physics():
 
 
 def test_quantify_fractions():
-    x = np.linspace(-100, 100, 2000)
     recipe = Recipe(nucleus="27Al", larmor_frequency_MHz=195.5, spin_rate_Hz=0,
                     sites=[
         SiteModel(model="gauss_lor", label="a", params={

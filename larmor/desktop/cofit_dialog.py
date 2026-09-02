@@ -228,8 +228,6 @@ class CofitDialog(QDialog):
     }
 
     def _build_param_rows(self):
-        from PySide6.QtWidgets import QTableWidgetItem
-
         self._row_map = []
         rows = []
         for si, site in enumerate(self.base_recipe.get("sites", [])):

@@ -1095,8 +1095,6 @@ def test_session_is_a_file_not_the_registry(win, qapp, tmp_path, monkeypatch):
     """C2: the session persists to LOCALAPPDATA/LARMOR/session.json (atomic
     write), never to QSettings; the write path is gated on LARMOR_NO_SESSION
     (it was unguarded, so the test suite itself polluted the registry)."""
-    import larmor.desktop.app as appmod
-
     fake_home = tmp_path / "appdata"
     monkeypatch.setenv("LOCALAPPDATA", str(fake_home))
     data = tmp_path / "sample.csv"

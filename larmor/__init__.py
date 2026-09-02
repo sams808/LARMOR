@@ -7,4 +7,6 @@ and a fast kernel-based fitting engine with real parameter uncertainties.
 
 __version__ = "0.12.1"
 
-from larmor.recipe import Param, SiteModel, Recipe  # noqa: F401
+from larmor.recipe import Param, SiteModel, Recipe
+
+__all__ = ["__version__", "Param", "SiteModel", "Recipe"]

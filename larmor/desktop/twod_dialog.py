@@ -1,13 +1,11 @@
 """2D MQMAS viewer and fit dialog: contour display with projections."""
 from __future__ import annotations
 
-from pathlib import Path
-
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QApplication, QComboBox, QDialog, QDoubleSpinBox, QFileDialog,
+    QDialog, QDoubleSpinBox, QFileDialog,
     QHBoxLayout, QLabel, QPushButton, QVBoxLayout,
 )
 

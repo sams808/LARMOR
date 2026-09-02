@@ -617,10 +617,9 @@ def test_send_to_fit_keeps_the_full_qcpmg_record(qapp, monkeypatch):
             "qcpmg_referenced": True, "qcpmg_T2_s": 1.4e-3,
             "qcpmg_T2_err_s": 1e-4, "qcpmg_matched_lb_Hz": 227.0}
 
-    win = _win(qapp, monkeypatch) if "_win" in globals() else None
-    if win is None:
-        from larmor.desktop.app import MainWindow
-        win = MainWindow()
+    from larmor.desktop.app import MainWindow
+
+    win = MainWindow()
     try:
         win._fid_to_workbench(np.linspace(-1000, 1000, 64),
                               np.zeros(64), meta)

@@ -1,5 +1,4 @@
 """Varian/Agilent (VnmrJ) reader: nucleus naming + referenced ppm axis."""
-import numpy as np
 import pytest
 
 from larmor.io import varian

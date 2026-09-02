@@ -1,6 +1,4 @@
 """QCPMG processing: period detection, spikelets, and echo coaddition."""
-import pathlib
-
 import numpy as np
 import pytest
 

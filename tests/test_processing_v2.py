@@ -66,7 +66,6 @@ def test_lp_rejects_short_fid():
 # ---------------------------------------------------------------- whole echo
 def test_swap_echo_and_symmetric_apodization():
     n, sw = 512, 10000.0
-    t = np.arange(n) / sw
     top = 128
     echo = np.exp(-np.abs(np.arange(n) - top) / 40.0).astype(complex)
     s = processing.Spectrum1D(x_ppm=None, y=echo, sfo1_MHz=100.0, sw_Hz=sw,
