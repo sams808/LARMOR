@@ -156,6 +156,16 @@ amplitude and a small shift. Use it to subtract a known impurity or a separately
 measured phase whose lineshape you don't want to parameterise. The number that
 comes out is the amount of that reference present, not a set of NMR parameters.
 
+The amplitude is **unbounded, so it may be negative** — the case that needs it is
+a shifted copy of the spectrum itself, used to cancel a satellite-transition or
+spinning-sideband manifold that repeats at the MAS rate (shift = ν_rot / SFO ppm).
+**Decomposition ▸ Add a copy of this spectrum…** does exactly that from the trace
+on screen, at ±νrot. Two cautions with a copy of the *same* data: it is degenerate
+with the rest of the model if both its amplitude and its shift are free (the copy
+alone can reproduce the whole spectrum at amplitude 1, shift 0), so the shift is
+held fixed by default; and its noise enters the model, so quote areas from the
+lineshape components, not from the copy.
+
 ---
 
 ## 2 · Quadrupolar lineshapes (ordered sites)

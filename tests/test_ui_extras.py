@@ -7,6 +7,10 @@ import numpy as np
 import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+# this module's figure-export test states LARMOR_NO_SESSION as its
+# precondition but used to inherit it from whichever sibling module was
+# collected first, so running this file alone read the real QSettings
+os.environ.setdefault("LARMOR_NO_SESSION", "1")
 
 pytest.importorskip("PySide6")
 from PySide6.QtWidgets import QApplication, QTreeWidgetItem  # noqa: E402

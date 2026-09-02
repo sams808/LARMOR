@@ -420,6 +420,9 @@ class MainWindow(QMainWindow):
                   self.add_function_line)
         self._add(m_dec, "Add background &spectrum…  (fit another spectrum)",
                   self.add_background_spectrum)
+        self._add(m_dec, "Add a &copy of this spectrum…  (shifted — satellite "
+                         "/ sideband manifold)",
+                  self.add_current_spectrum_line)
         self._add(m_dec, "Add fit &zone", self.add_zone)
         self._add(m_dec, "Clear zones", self.clear_zones)
         m_dec.addSeparator()
@@ -2883,7 +2886,10 @@ class MainWindow(QMainWindow):
         if not path:
             return
         try:
-            _r, ppm, amp, *_ = _load_any(path)
+            # load_any returns (ppm, amp, recipe, meta, warnings) -- unpacking it
+            # as (recipe, ppm, amp, ...) put the recipe DICT into `amp` and threw
+            # a TypeError out of the slot, so no background could ever be added
+            ppm, amp, *_ = _load_any(path)
         except Exception:
             try:
                 from larmor.io import bruker
@@ -2895,25 +2901,125 @@ class MainWindow(QMainWindow):
             except Exception as exc:
                 QMessageBox.warning(self, "Background spectrum", f"cannot read: {exc}")
                 return
-        ppm = np.asarray(ppm, float); amp = np.asarray(amp, float)
-        amp = amp / (np.max(np.abs(amp)) or 1.0)         # unit peak
+        try:
+            ppm = np.asarray(ppm, float).ravel()
+            amp = np.asarray(amp, float).ravel()
+        except (TypeError, ValueError) as exc:
+            QMessageBox.warning(self, "Background spectrum", f"cannot read: {exc}")
+            return
+        if ppm.size < 2 or amp.size != ppm.size:
+            QMessageBox.warning(self, "Background spectrum",
+                                "that file does not hold a 1D spectrum")
+            return
         self.snapshot()
+        # start the amplitude near the data's peak so it is on-scale
+        self._append_spectrum_site(
+            ppm, amp, f"bg-{len(self.recipe['sites'])}",
+            amplitude=(float(np.max(np.abs(self.exp_amp)))
+                       if self.exp_amp.size else 1.0))
+        self.statusBar().showMessage(
+            f"added background spectrum '{Path(path).name}' — Fit scales and "
+            "shifts it")
+
+    def _append_spectrum_site(self, ppm, amp, label: str, amplitude: float,
+                              shift_ppm: float = 0.0, shift_vary: bool = True):
+        """Append a "spectrum" component carrying (ppm, amp) as its reference
+        trace, normalised to unit peak. Shared by BOTH entry points -- a file
+        on disk and the spectrum currently on screen -- so the two can never
+        drift apart in how the site is built."""
+        ppm = np.asarray(ppm, float)
+        amp = np.asarray(amp, float)
+        amp = amp / (np.max(np.abs(amp)) or 1.0)         # unit peak
         m = model_registry.get("spectrum")
         params = {p.name: {"value": p.default, "stderr": None, "vary": p.vary,
                            "min": p.min, "max": p.max, "expr": None}
                   for p in m.params}
-        # start the amplitude near the data's peak so it is on-scale
-        params["amplitude"]["value"] = float(np.max(np.abs(self.exp_amp))
-                                              if self.exp_amp.size else 1.0)
-        n = len(self.recipe["sites"])
+        params["amplitude"]["value"] = float(amplitude)
+        params["shift_ppm"]["value"] = float(shift_ppm)
+        params["shift_ppm"]["vary"] = bool(shift_vary)
         self.recipe["sites"].append({
-            "model": "spectrum", "label": f"bg-{n}",
+            "model": "spectrum", "label": label,
             "ref": {"ppm": ppm.tolist(), "amp": amp.tolist()},
             "params": params})
         self.on_structure_changed()
+
+    def add_current_spectrum_line(self):
+        """Add the spectrum CURRENTLY ON SCREEN as a fit component: a rigidly
+        shifted copy of the data itself.
+
+        That is how a satellite-transition or spinning-sideband manifold is
+        removed without parameterising a lineshape for it -- the manifold
+        repeats the whole pattern at ±νrot, so a shifted copy of the measured
+        spectrum models it directly.
+
+        Unlike "Add background spectrum…" this takes the PROCESSED trace as
+        displayed (baseline, phase, ppm referencing, QCPMG output). Re-opening
+        the file from disk would give the unprocessed one, which is not what
+        has to cancel. The copy is a snapshot: re-processing the workbench
+        afterwards does not update it.
+        """
+        from PySide6.QtWidgets import (QComboBox, QDialog, QDialogButtonBox,
+                                       QDoubleSpinBox, QFormLayout)
+
+        if self.recipe is None or self.exp_amp.size < 2:
+            self.statusBar().showMessage("open a spectrum first")
+            return
+        nu_r = float(self.recipe.get("spin_rate_Hz", 0) or 0)
+        lar = float(self.recipe.get("larmor_frequency_MHz", 0) or 0)
+        nur_ppm = (nu_r / lar) if (nu_r > 0 and lar > 0) else 0.0
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Add a copy of this spectrum")
+        form = QFormLayout(dlg)
+        combo = QComboBox()
+        if nur_ppm:
+            combo.addItem(f"+νrot   ({nur_ppm:+.4g} ppm)", nur_ppm)
+            combo.addItem(f"−νrot   ({-nur_ppm:+.4g} ppm)", -nur_ppm)
+        combo.addItem("custom", None)
+        form.addRow("shift the copy by", combo)
+        span = float(np.ptp(self.exp_ppm)) if self.exp_ppm.size else 1e4
+        spin = QDoubleSpinBox()
+        spin.setRange(-10.0 * max(span, 1.0), 10.0 * max(span, 1.0))
+        spin.setDecimals(4)
+        spin.setSuffix(" ppm")
+        spin.setValue(nur_ppm)
+        form.addRow("shift", spin)
+        combo.currentIndexChanged.connect(
+            lambda i: (spin.setValue(float(combo.itemData(i)))
+                       if combo.itemData(i) is not None else None))
+
+        hold = QCheckBox("hold the shift fixed while fitting")
+        hold.setChecked(True)
+        hold.setToolTip(
+            "A copy of the SAME data is degenerate with the rest of the model "
+            "when its amplitude AND its shift are both free — the copy alone "
+            "reproduces the whole spectrum at amplitude 1, shift 0. Holding "
+            "the shift at the sideband spacing keeps it a sideband component.")
+        form.addRow(hold)
+        form.addRow(QLabel(
+            f"νrot = {nur_ppm:.4g} ppm  ({nu_r / 1000:.1f} kHz at {lar:.2f} MHz)"
+            if nur_ppm else
+            "no MAS rate on this dataset — the shift below is used as typed"))
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.accepted.connect(dlg.accept)
+        bb.rejected.connect(dlg.reject)
+        form.addRow(bb)
+        if dlg.exec() != QDialog.Accepted:
+            return
+
+        shift = float(spin.value())
+        fixed = hold.isChecked()
+        self.snapshot()
+        # a satellite/sideband manifold is a FRACTION of the centre band, so
+        # start well below the data's peak rather than at it (as the on-disk
+        # background path does, where the reference is a different spectrum)
+        self._append_spectrum_site(
+            self.exp_ppm, self.exp_amp, f"copy-{len(self.recipe['sites'])}",
+            amplitude=0.1 * float(np.max(np.abs(self.exp_amp))),
+            shift_ppm=shift, shift_vary=not fixed)
         self.statusBar().showMessage(
-            f"added background spectrum '{Path(path).name}' — Fit scales and "
-            "shifts it")
+            f"added a copy of this spectrum shifted by {shift:+.4g} ppm — Fit "
+            + ("scales it (shift held)" if fixed else "scales and re-shifts it"))
 
     def add_site_2d(self, f2_ppm: float, f1_ppm: float):
         """Place a 2D site from a click on the contour: the isotropic shift

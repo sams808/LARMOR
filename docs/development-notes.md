@@ -180,7 +180,7 @@ comments in the source explain them; this is the index.
 | **`setMenuEnabled(False)` destroys the pyqtgraph menu** | `plot.py:269`, `batchfit_dialog.py:559` | Custom context-menu items vanish after the first toggle; re-attach every time |
 | **`keyboardTracking(False)` on every spinbox** in the QCPMG dialog | `qcpmg_dialog.py:161` | Typing "293" acts on "29" and clamps the echo top; one point of top moved T₂ by up to 7400 % |
 | **`PARAM_COLUMNS` must keep its automatic fallback column** | `table.py:102` | Without it a model's parameters become fitted-but-invisible, as Amorphous ΔC_Q was |
-| **`load_any` returns `(ppm, amp, recipe, meta, warnings)`** | `app.py:2331` | It was once unpacked as `(recipe, ppm, amp, …)`; every overlay format except raw Bruker silently failed |
+| **`load_any` returns `(ppm, amp, recipe, meta, warnings)`** | `app.py:2331`, `app.py:2889` | It was once unpacked as `(recipe, ppm, amp, …)`; every overlay format except raw Bruker silently failed. The same slip survived in `add_background_spectrum` until it was found in use: the recipe dict landed in `amp`, `np.asarray(..., float)` raised a `TypeError` out of the Qt slot, and no background/reference spectrum could ever be added. Grep every `_load_any(` call site when this shape changes |
 
 ---
 

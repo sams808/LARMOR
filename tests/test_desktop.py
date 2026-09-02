@@ -866,3 +866,136 @@ def test_set_aesthetic_override_applies_live_and_normal_restores_it(win):
     finally:
         settings.setValue("appearanceOverride", original_override)
         win._set_theme(original_theme)
+
+
+def _write_csv_spectrum(path, centres=((0.0, 3.0, 1.0), (15.0, 5.0, 0.45))):
+    """A tiny CSV spectrum with the metadata header io/spectra reads."""
+    ppm = np.linspace(-60.0, 100.0, 512)
+    amp = np.zeros_like(ppm)
+    for c, w, a in centres:
+        amp += a * np.exp(-4 * np.log(2) * ((ppm - c) / w) ** 2)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("# LARMOR spectrum\n# nucleus=11B\n"
+                "# larmor_MHz=160.46\n# spin_rate_Hz=20000.0\n")
+        f.write("ppm,intensity\n")
+        for x, y in zip(ppm, amp):
+            f.write(f"{x},{y}\n")
+    return ppm, amp
+
+
+def test_add_background_spectrum_attaches_a_real_trace(win, qapp, tmp_path,
+                                                       monkeypatch):
+    """Decomposition ▸ Add background spectrum on a recipe that already has
+    lines. load_any returns (ppm, amp, recipe, ...); unpacking it as
+    (recipe, ppm, amp, ...) put the recipe DICT into `amp`, so np.asarray(...,
+    float) raised out of the slot and nothing was ever added."""
+    from PySide6.QtWidgets import QFileDialog
+    from larmor import models as model_registry
+    from larmor.engine import make_context, simulate_site
+    from larmor.recipe import Recipe
+
+    data = tmp_path / "sample.csv"
+    _write_csv_spectrum(data)
+    win.load_source(str(data), keep_fit=False)
+    qapp.processEvents()
+    assert win.exp_amp.size > 0
+
+    for centre in (0.0, 15.0):                 # two ordinary lines first
+        m = model_registry.get("gauss_lor")
+        params = {pd.name: {"value": pd.default, "stderr": None,
+                            "vary": pd.vary, "min": pd.min, "max": pd.max,
+                            "expr": None} for pd in m.params}
+        params["isotropic_chemical_shift_ppm"]["value"] = centre
+        win.recipe["sites"].append(
+            {"model": "gauss_lor", "label": f"L{centre:g}", "params": params})
+    win.on_structure_changed()
+    assert len(win.recipe["sites"]) == 2
+
+    bg = tmp_path / "bg.csv"
+    bg_ppm, _ = _write_csv_spectrum(bg, centres=((-45.0, 4.0, 1.0),))
+    monkeypatch.setattr(QFileDialog, "getOpenFileName",
+                        staticmethod(lambda *a, **k: (str(bg), "")))
+    win.add_background_spectrum()
+
+    sites = win.recipe["sites"]
+    assert len(sites) == 3, "the background spectrum was not added"
+    s = sites[-1]
+    assert s["model"] == "spectrum"
+    assert len(s["ref"]["ppm"]) == bg_ppm.size
+    assert len(s["ref"]["amp"]) == bg_ppm.size
+    assert max(abs(v) for v in s["ref"]["amp"]) == pytest.approx(1.0)
+
+    # and it renders something, both as-is and shifted
+    r = Recipe.from_dict(win.recipe)
+    ctx = make_context(r, exp_ppm=win.exp_ppm)
+    assert np.any(simulate_site(r.sites[-1], ctx) != 0.0)
+    r.sites[-1].params["shift_ppm"].value = 20.0
+    assert np.any(simulate_site(r.sites[-1], ctx) != 0.0)
+
+
+def test_spectrum_component_amplitude_may_be_negative(win, qapp, tmp_path,
+                                                      monkeypatch):
+    """A shifted copy of the same spectrum is how a satellite/sideband manifold
+    is cancelled, so the spectrum component's amplitude must not be clamped at
+    zero the way an ordinary lineshape's is."""
+    from PySide6.QtWidgets import QFileDialog
+
+    data = tmp_path / "sample.csv"
+    _write_csv_spectrum(data)
+    win.load_source(str(data), keep_fit=False)
+    qapp.processEvents()
+
+    monkeypatch.setattr(QFileDialog, "getOpenFileName",
+                        staticmethod(lambda *a, **k: (str(data), "")))
+    win.add_background_spectrum()
+    assert win.recipe["sites"][-1]["params"]["amplitude"]["min"] is None
+
+
+def test_add_current_spectrum_line_uses_the_processed_on_screen_trace(
+        win, qapp, tmp_path, monkeypatch):
+    """Decomposition ▸ Add a copy of this spectrum: the reference trace must be
+    the PROCESSED data as displayed (re-reading the file would give the raw
+    one, which is not what has to cancel), the shift must default to the MAS
+    sideband spacing, and it must be held fixed — a copy of the same data with
+    a free amplitude AND a free shift is degenerate with the whole model."""
+    from PySide6.QtWidgets import QDialog
+
+    data = tmp_path / "sample.csv"
+    _write_csv_spectrum(data)
+    win.load_source(str(data), keep_fit=False)
+    qapp.processEvents()
+
+    # a marker that exists only in the on-screen trace, never in the file
+    win.exp_amp = win.exp_amp.copy()
+    win.exp_amp[10] = 99.0
+
+    monkeypatch.setattr(QDialog, "exec", lambda self: QDialog.Accepted)
+    win.add_current_spectrum_line()
+
+    s = win.recipe["sites"][-1]
+    assert s["model"] == "spectrum"
+    ref_amp = np.asarray(s["ref"]["amp"], float)
+    assert ref_amp.size == win.exp_ppm.size
+    assert int(np.argmax(np.abs(ref_amp))) == 10, "not the on-screen trace"
+    assert abs(ref_amp).max() == pytest.approx(1.0)          # unit peak
+
+    nur_ppm = (win.recipe["spin_rate_Hz"]
+               / win.recipe["larmor_frequency_MHz"])
+    assert s["params"]["shift_ppm"]["value"] == pytest.approx(nur_ppm, rel=1e-3)
+    assert s["params"]["shift_ppm"]["vary"] is False         # held by default
+    assert s["params"]["amplitude"]["vary"] is True
+
+
+def test_add_current_spectrum_line_cancelled_adds_nothing(win, qapp, tmp_path,
+                                                          monkeypatch):
+    from PySide6.QtWidgets import QDialog
+
+    data = tmp_path / "sample.csv"
+    _write_csv_spectrum(data)
+    win.load_source(str(data), keep_fit=False)
+    qapp.processEvents()
+    before = len(win.recipe["sites"])
+
+    monkeypatch.setattr(QDialog, "exec", lambda self: QDialog.Rejected)
+    win.add_current_spectrum_line()
+    assert len(win.recipe["sites"]) == before

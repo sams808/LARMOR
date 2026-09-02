@@ -41,7 +41,11 @@ register(Model(
                 "(background, impurity, or reference), scaled by amplitude and "
                 "rigidly shiftable in ppm",
     params=(
-        ParamDef("amplitude", "amp", 1.0, "", "scale factor", min=0.0),
+        # amplitude is deliberately UNBOUNDED (no min=0): a shifted copy of the
+        # same spectrum is used to cancel a satellite/spinning-sideband
+        # manifold, which needs a NEGATIVE scale. Constrain it to >= 0 from the
+        # table when a component must stay additive.
+        ParamDef("amplitude", "amp", 1.0, "", "scale factor (may be negative)"),
         ParamDef("shift_ppm", "sh", 0.0, "ppm", "rigid ppm shift"),
     ),
     render=_placeholder,

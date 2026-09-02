@@ -169,6 +169,20 @@ cost:
 The full physics, equations and literature for each are in the **Lineshapes —
 models & physics** reference (**? ▸ Lineshapes**).
 
+**Spectrum components have two entry points**, both on the **Decomposition**
+menu:
+
+- **Add background spectrum…** — a spectrum from disk (an empty rotor, an
+  impurity, a separately measured phase).
+- **Add a copy of this spectrum…** — the trace **currently on screen**,
+  processed exactly as displayed, offered shifted by ±νrot. That is how a
+  satellite-transition or spinning-sideband manifold is taken out: the manifold
+  repeats the whole pattern at the MAS rate, so a shifted copy of the measured
+  spectrum models it with no lineshape to parameterise. The shift is held fixed
+  by default (a copy of the same data with a free amplitude *and* a free shift
+  is degenerate with the rest of the model), and the copy is a snapshot —
+  re-processing the workbench afterwards does not update it.
+
 ---
 
 ## 4 · Measure & export
