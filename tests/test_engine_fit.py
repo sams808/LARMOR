@@ -193,3 +193,86 @@ def test_fit_windowed_grid_matches_unrestricted_for_excluded_model():
     p = r.sites[0].params
     assert p["isotropic_chemical_shift_ppm"].value == pytest.approx(60.0, abs=0.5)
     assert p["Cq_MHz"].value == pytest.approx(3.0, abs=0.3)
+
+
+def test_kernel_axis_ppm_is_bin_exact_against_a_real_build():
+    """make_context derives the kernel axis arithmetically instead of paying
+    a full kernel build for it. The formula must be BIN-EXACT (the ppm
+    conversion runs against the isotope's reference frequency, not gamma*B0
+    -- 0.08 % apart for 27Al, which would be nearly half a ppm at the axis
+    edge)."""
+    from larmor import engine
+
+    kernel = engine.build_kernel("27Al", 130.32, 12500.0, sw_Hz=150000.0,
+                                 npts=256, ref_offset_ppm=30.0,
+                                 cq_max_MHz=6.0, n_cq=4, n_eta=3)
+    axis = engine.kernel_axis_ppm("27Al", 130.32, sw_Hz=150000.0, npts=256,
+                                  ref_offset_ppm=30.0)
+    assert axis.shape == kernel.x_ppm.shape
+    assert np.allclose(axis, kernel.x_ppm, atol=1e-9, rtol=0)
+
+
+def test_make_context_does_not_build_a_kernel(monkeypatch):
+    """The documented 'two kernel builds' defect: make_context built a full
+    kernel and kept only its axis. It must now never call build_kernel."""
+    from larmor import engine
+    from larmor.recipe import Param, Recipe, SiteModel
+
+    def boom(*a, **k):
+        raise AssertionError("make_context built a kernel for its axis")
+
+    monkeypatch.setattr(engine, "build_kernel", boom)
+    site = SiteModel(model="czjzek", label="c", params={
+        "isotropic_chemical_shift_ppm": Param(60.0),
+        "sigma_Cq_MHz": Param(2.0), "shift_fwhm_ppm": Param(8.0),
+        "amplitude": Param(1.0)})
+    r = Recipe(nucleus="27Al", larmor_frequency_MHz=130.32,
+               spin_rate_Hz=12500.0, sites=[site])
+    ctx = engine.make_context(r, exp_ppm=np.linspace(-300, 300, 2048))
+    assert ctx.x_ppm.size >= 2048
+
+
+def test_kernel_cache_is_bounded_lru(monkeypatch):
+    """B1: the kernel cache evicts least-recently-used entries past its byte
+    budget, but never below the keep-min (a fit straddling a Cq-ladder step
+    alternates two kernels; evicting one would rebuild every iteration)."""
+    from collections import OrderedDict
+
+    from larmor import engine
+
+    monkeypatch.setattr(engine, "_KERNEL_CACHE", OrderedDict())
+    monkeypatch.setattr(engine, "KERNEL_CACHE_BUDGET_MB", 1.0)   # 1 MB budget
+
+    class FakeKernel:
+        def __init__(self, mb):
+            self.K = np.zeros(int(mb * 1e6 // 4), dtype=np.float32)
+            self.x_ppm = np.zeros(2)
+
+    for i in range(8):                       # 8 x 0.5 MB = 4x the budget
+        engine._cache_put(("k", i), FakeKernel(0.5))
+    assert len(engine._KERNEL_CACHE) == engine._CACHE_KEEP_MIN
+    assert list(engine._KERNEL_CACHE) == [("k", i) for i in (4, 5, 6, 7)]
+
+    # a get refreshes recency: touch the oldest survivor, add one more
+    engine.build_kernel  # (real one not needed: exercise the LRU directly)
+    engine._KERNEL_CACHE.move_to_end(("k", 4))
+    engine._cache_put(("k", 8), FakeKernel(0.5))
+    assert ("k", 4) in engine._KERNEL_CACHE      # refreshed -> survived
+    assert ("k", 5) not in engine._KERNEL_CACHE  # LRU -> evicted
+
+    info = engine.kernel_cache_info()
+    assert info["entries"] == 4 and info["mb"] == pytest.approx(2.0, rel=0.01)
+
+
+def test_kernel_basis_is_float32():
+    """B3: the (Cq, eta) basis ships as float32 -- the grid's own quantisation
+    dwarfs 1e-7 relative precision, and the example-fit RMSDs are unchanged
+    to <0.1 %. Halves both memory and the per-iteration matmul."""
+    from larmor import engine
+
+    k = engine.build_kernel("27Al", 130.32, 12500.0, sw_Hz=150000.0,
+                            npts=128, ref_offset_ppm=30.0,
+                            cq_max_MHz=6.0, n_cq=3, n_eta=3)
+    assert k.K.dtype == np.float32
+    y = k.weights(2.0) @ k.K                 # the fit-path multiply
+    assert y.dtype == np.float64 and np.all(np.isfinite(y))

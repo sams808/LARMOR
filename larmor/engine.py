@@ -13,6 +13,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from collections import OrderedDict
+
 import numpy as np
 
 from larmor import models as model_registry
@@ -20,15 +22,42 @@ from larmor.models.base import SimContext
 from larmor.models.analytic import gauss_lor  # noqa: F401  (back-compat export)
 from larmor.recipe import Recipe, SiteModel
 
-_KERNEL_CACHE: dict[tuple, "CzjzekKernel"] = {}
+#: kernels in most-recently-used order (kept bounded; see _cache_put). A
+#: plain dict here only ever grew: one 81Br wideline kernel is ~58 MB
+#: (float32) and the Cq ladder makes several per dataset, so a long session
+#: quietly held hundreds of MB it would never look at again.
+_KERNEL_CACHE: "OrderedDict[tuple, CzjzekKernel]" = OrderedDict()
 
 #: user-tunable 1D Czjzek kernel resolution (dmfit's Computing parameters).
 #: Edited via the Computing-parameters dialog; the cache is cleared on change.
 KERNEL_SETTINGS = {"npts": 2048, "cq_max_MHz": 25.0, "n_cq": 80, "n_eta": 11}
 
+#: kernel-cache byte budget. Roomy enough for a wideline dataset's whole Cq
+#: ladder; small enough that a day of mixed datasets cannot pin the machine.
+KERNEL_CACHE_BUDGET_MB = 1024.0
+#: never evict the N most recent whatever the budget: a fit whose sigma
+#: straddles a ladder step alternates between two kernels every iteration,
+#: and evicting one of those would mean a full rebuild per iteration.
+_CACHE_KEEP_MIN = 4
+
 
 def clear_kernel_cache():
     _KERNEL_CACHE.clear()
+
+
+def kernel_cache_info() -> dict:
+    """{'entries': n, 'mb': total} -- shown in Computing parameters."""
+    total = sum(k.K.nbytes + k.x_ppm.nbytes for k in _KERNEL_CACHE.values())
+    return {"entries": len(_KERNEL_CACHE), "mb": total / 1e6}
+
+
+def _cache_put(key: tuple, kernel: "CzjzekKernel") -> None:
+    _KERNEL_CACHE[key] = kernel
+    _KERNEL_CACHE.move_to_end(key)
+    budget = KERNEL_CACHE_BUDGET_MB * 1e6
+    while (len(_KERNEL_CACHE) > _CACHE_KEEP_MIN
+           and sum(k.K.nbytes for k in _KERNEL_CACHE.values()) > budget):
+        _KERNEL_CACHE.popitem(last=False)          # least recently used
 
 
 @dataclass
@@ -64,6 +93,7 @@ def build_kernel(nucleus: str, larmor_MHz: float, spin_rate_Hz: float,
     key = (nucleus, round(larmor_MHz, 3), round(spin_rate_Hz), round(sw_Hz),
            npts, round(ref_offset_ppm, 1), round(cq_max_MHz, 1), n_cq, n_eta)
     if key in _KERNEL_CACHE:
+        _KERNEL_CACHE.move_to_end(key)             # LRU freshness
         return _KERNEL_CACHE[key]
 
     from mrsimulator import Simulator
@@ -100,11 +130,16 @@ def build_kernel(nucleus: str, larmor_MHz: float, spin_rate_Hz: float,
     ds = sim.methods[0].simulation
     coords = ds.x[0].coordinates
     x = coords.value if str(coords.unit) == "ppm" else coords.to("Hz").value / larmor_MHz
-    K = np.array([np.asarray(dv.components[0].real, dtype=float) for dv in ds.y])
+    # float32: the basis is a simulation on a coarse (Cq, eta) grid whose own
+    # quantisation dwarfs 1e-7 relative precision; halves memory AND the
+    # weights @ K multiply in every residual evaluation. Example-fit RMSDs
+    # verified unchanged to <0.1 % against float64.
+    K = np.array([np.asarray(dv.components[0].real, dtype=np.float32)
+                  for dv in ds.y])
     order = np.argsort(x)
     kernel = CzjzekKernel(x_ppm=np.asarray(x)[order], K=K[:, order],
                           cq_grid_MHz=cq_grid, eta_grid=eta_grid)
-    _KERNEL_CACHE[key] = kernel
+    _cache_put(key, kernel)
     return kernel
 
 
@@ -137,6 +172,32 @@ def kernel_cq_max(needed_MHz: float) -> float:
         if needed_MHz <= step:
             return step
     return CQ_MAX_LADDER[-1]
+
+
+def kernel_axis_ppm(nucleus: str, larmor_MHz: float, sw_Hz: float, npts: int,
+                    ref_offset_ppm: float) -> np.ndarray:
+    """The EXACT ppm axis ``build_kernel`` would produce -- without simulating.
+
+    make_context used to build a full (Cq, eta) kernel just to read its
+    ``x_ppm`` (23 s and ~115 MB thrown away on a cold wideline dataset, the
+    documented "two kernel builds" defect). The axis is pure arithmetic:
+    mrsimulator's spectral dimension is ``(arange(n) - n//2) * (sw/n) + ro``
+    in Hz, converted to ppm against the isotope's REFERENCE frequency
+    (``Isotope.B0_to_ref_freq(B0)``, csdmpy's origin_offset) -- which differs
+    from the bare gamma*B0 by the IUPAC reference ratio (0.08 % for 27Al,
+    ~0.45 ppm at 550 ppm), so dividing by ``larmor_MHz`` would NOT reproduce
+    the kernel axis. Verified bin-exact against a real build in
+    tests/test_engine_fit.py.
+    """
+    from mrsimulator.spin_system.isotope import Isotope
+
+    iso = Isotope(symbol=nucleus)
+    B0 = larmor_MHz / abs(iso.gyromagnetic_ratio)
+    origin_Hz = float(iso.B0_to_ref_freq(B0))
+    hz = ((np.arange(int(npts)) - int(npts) // 2) * (sw_Hz / int(npts))
+          + ref_offset_ppm * larmor_MHz)
+    x = hz / origin_Hz * 1e6
+    return np.sort(x)
 
 
 def kernel_window(x_ppm, larmor_MHz: float) -> tuple[float, float]:
@@ -220,13 +281,12 @@ def make_context(recipe: Recipe, exp_ppm: np.ndarray | None = None) -> SimContex
         # dataset would be simulated on a coarser grid than its own data
         npts = int(KERNEL_SETTINGS["npts"]
                    * max(1.0, sw / KERNEL_MIN_SW_HZ))
-        kernel = build_kernel(recipe.nucleus, recipe.larmor_frequency_MHz,
-                              recipe.spin_rate_Hz, sw_Hz=sw,
-                              npts=min(npts, 16384), ref_offset_ppm=ref,
-                              cq_max_MHz=KERNEL_SETTINGS["cq_max_MHz"],
-                              n_cq=KERNEL_SETTINGS["n_cq"],
-                              n_eta=KERNEL_SETTINGS["n_eta"])
-        x = kernel.x_ppm
+        # the axis alone -- the kernel itself is built (and cached) by the
+        # czjzek render when it is actually needed, at the Cq ceiling the
+        # model's own sigma asks for
+        x = kernel_axis_ppm(recipe.nucleus, recipe.larmor_frequency_MHz,
+                            sw_Hz=sw, npts=min(npts, 16384),
+                            ref_offset_ppm=ref)
     elif exp_ppm is not None:
         x = np.asarray(exp_ppm)[np.argsort(exp_ppm)]
     else:

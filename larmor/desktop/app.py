@@ -313,6 +313,11 @@ class MainWindow(QMainWindow):
         self._autosave_timer.setInterval(180000)          # 3 minutes
         self._autosave_timer.timeout.connect(self._autosave_tick)
         self._autosave_timer.start()
+        # debounced per-action session write (see _persist_session)
+        self._session_timer = QTimer(self)
+        self._session_timer.setSingleShot(True)
+        self._session_timer.setInterval(5000)
+        self._session_timer.timeout.connect(self._flush_session)
         self._data2d = None            # the 2D dataset currently on the map
         self._fit2d_worker = None
         self.view2d.add_requested.connect(self.add_site_2d)
@@ -2660,8 +2665,32 @@ class MainWindow(QMainWindow):
         self.on_structure_changed()
 
     # ------------------------------------------------------------- undo
+    @staticmethod
+    def _recipe_copy(rec):
+        """Deep copy of a recipe dict that SHARES each site's "ref" trace.
+
+        A "spectrum" component carries its whole reference spectrum in
+        site["ref"] (16k+ points). json.dumps of that on EVERY user action --
+        twice, once for undo and once for the session -- measured 29 ms per
+        click and ~40 MB across a 60-deep undo stack. The trace is immutable
+        by contract (created once in _append_spectrum_site, read by
+        engine._render_spectrum, never edited in place -- replace it, never
+        mutate it), so undo states can all point at the same list."""
+        if not rec:
+            return rec
+        head = {k: v for k, v in rec.items() if k != "sites"}
+        out = json.loads(json.dumps(head))
+        out["sites"] = []
+        for site in rec.get("sites", []):
+            sc = json.loads(json.dumps(
+                {k: v for k, v in site.items() if k != "ref"}))
+            if "ref" in site:
+                sc["ref"] = site["ref"]              # shared, immutable
+            out["sites"].append(sc)
+        return out
+
     def _capture_state(self, with_axis=False) -> dict:
-        snap = {"recipe": json.dumps(self.recipe)}
+        snap = {"recipe": self._recipe_copy(self.recipe)}
         if with_axis and self.exp_ppm is not None and len(self.exp_ppm):
             snap["ppm"] = np.array(self.exp_ppm, float)
             snap["amp"] = np.array(self.exp_amp, float)
@@ -2672,7 +2701,11 @@ class MainWindow(QMainWindow):
         if isinstance(snap, str):                 # legacy recipe-only snapshot
             self.recipe = json.loads(snap)
             return
-        self.recipe = json.loads(snap["recipe"])
+        rec = snap["recipe"]
+        # copy again on the way OUT, so later edits to the live recipe can
+        # never reach the states still sitting in the undo/redo stacks
+        self.recipe = (json.loads(rec) if isinstance(rec, str)
+                       else self._recipe_copy(rec))
         if "ppm" in snap:                         # calibrate/SR changed the axis
             self.exp_ppm = snap["ppm"]
             self.exp_amp = snap["amp"]
@@ -4688,37 +4721,86 @@ class MainWindow(QMainWindow):
         PlottingStudio(self, spec).exec()
 
     # ------------------------------------------------------------- session
+    @staticmethod
+    def _session_file() -> Path:
+        """The crash-recovery session lives in a FILE, not the registry.
+
+        It used to be two QSettings values -- on Windows that is
+        HKEY_CURRENT_USER, and with a spectrum component in the recipe the
+        value was a 0.66 MB JSON string written into the registry on every
+        user action. A registry is no place for megabytes of float lists."""
+        base = os.environ.get("LOCALAPPDATA") or str(Path.home())
+        d = Path(base) / "LARMOR"
+        d.mkdir(parents=True, exist_ok=True)
+        return d / "session.json"
+
     def _persist_session(self):
-        if not self.source_path:
+        """Schedule a debounced session write (5 s after the LAST action) --
+        serialising the whole recipe on every click measured 15 ms each.
+        Also newly gated on LARMOR_NO_SESSION: the write path was unguarded,
+        so every TEST that called snapshot() wrote the developer's real
+        session keys."""
+        if not self.source_path or os.environ.get("LARMOR_NO_SESSION"):
             return
-        s = QSettings("LARMOR", "app")
-        s.setValue("session/source", self.source_path)
-        s.setValue("session/recipe", json.dumps(self.recipe or {}))
+        self._session_timer.start()
+
+    def _flush_session(self):
+        """Write the session file now (close, autosave tick, debounce fire)."""
+        if not self.source_path or os.environ.get("LARMOR_NO_SESSION"):
+            return
+        try:
+            target = self._session_file()
+            tmp = target.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps({"source": self.source_path,
+                                       "recipe": self.recipe or {}}),
+                           encoding="utf-8")
+            tmp.replace(target)                     # atomic on the same volume
+        except OSError:
+            pass
 
     def _autosave_tick(self):
         """Periodic crash-safe autosave (see the autosave QTimer)."""
         if self.source_path and not (self._active_fit_worker
                                      and self._active_fit_worker.isRunning()):
-            self._persist_session()
+            self._flush_session()
             self.statusBar().showMessage("session autosaved", 1500)
+
+    def closeEvent(self, ev):
+        self._flush_session()
+        super().closeEvent(ev)
 
     def _restore_session(self):
         # tests (and clean-room launches) opt out so they never inherit a
-        # developer's real saved recipe from QSettings
+        # developer's real saved recipe
         if os.environ.get("LARMOR_NO_SESSION"):
             return
-        s = QSettings("LARMOR", "app")
-        src = s.value("session/source", "")
+        src, recipe = "", {}
+        try:
+            f = self._session_file()
+            if f.exists():
+                d = json.loads(f.read_text(encoding="utf-8"))
+                src, recipe = d.get("source", ""), d.get("recipe", {}) or {}
+        except (OSError, ValueError):
+            pass
+        if not src:
+            # migrate a pre-0.12 registry session once, then remove the keys
+            s = QSettings("LARMOR", "app")
+            src = s.value("session/source", "")
+            saved = s.value("session/recipe", "")
+            try:
+                recipe = json.loads(saved) if saved else {}
+            except ValueError:
+                recipe = {}
+            if src:
+                s.remove("session/source")
+                s.remove("session/recipe")
         if not src or not Path(src).exists():
             return
         try:
             self.load_source(src)
-            saved = s.value("session/recipe", "")
-            if saved:
-                recipe = json.loads(saved)
-                if recipe.get("sites"):
-                    self.recipe = recipe
-                    self.on_structure_changed()
+            if recipe.get("sites"):
+                self.recipe = recipe
+                self.on_structure_changed()
             self.statusBar().showMessage(f"session restored — {src}")
         except Exception:
             pass

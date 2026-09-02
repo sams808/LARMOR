@@ -7,7 +7,6 @@ Both share the same physics engine (mrsimulator BlochDecayCTSpectrum):
 from __future__ import annotations
 
 import numpy as np
-from scipy.ndimage import gaussian_filter1d
 
 from larmor.models.base import Model, ParamDef, SimContext, register
 #: upper bound offered for a discrete Cq. 40 MHz was arbitrary and too low
@@ -25,6 +24,7 @@ def _broaden_shift(x: np.ndarray, y: np.ndarray, pos_ppm: float,
     dppm = abs(x[1] - x[0])
     sigma_pts = fwhm_ppm * FWHM_TO_SIGMA / dppm
     if sigma_pts > 0.05:
+        from scipy.ndimage import gaussian_filter1d   # deferred: startup cost
         y = gaussian_filter1d(y, sigma_pts, mode="constant")
     return y
 
@@ -82,6 +82,7 @@ def _broaden_shift_pv(x: np.ndarray, y: np.ndarray, pos_ppm: float,
     g_fwhm = float(np.hypot(max(gauss_fwhm_ppm, 0.0), gl * lor_fwhm_ppm))
     sigma_pts = g_fwhm * FWHM_TO_SIGMA / dppm
     if sigma_pts > 0.05:
+        from scipy.ndimage import gaussian_filter1d   # deferred: startup cost
         y = gaussian_filter1d(y, sigma_pts, mode="constant")
     l_fwhm = (1.0 - gl) * lor_fwhm_ppm
     if l_fwhm > 0.5 * dppm:

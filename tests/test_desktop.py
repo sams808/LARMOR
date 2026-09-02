@@ -1061,3 +1061,62 @@ def test_integrals_dialog_reports_fwhm_khz_when_sfo_known(win, qapp, tmp_path):
         dlg2.close()
     finally:
         dlg.close()
+
+
+def test_undo_snapshots_share_reference_traces(win, qapp, tmp_path, monkeypatch):
+    """C1: a spectrum component's "ref" trace is shared across undo states
+    (it is immutable by contract), not re-serialised on every action — and
+    undo/redo still round-trips parameter edits correctly."""
+    from PySide6.QtWidgets import QFileDialog
+
+    data = tmp_path / "sample.csv"
+    _write_csv_spectrum(data)
+    win.load_source(str(data), keep_fit=False)
+    qapp.processEvents()
+    monkeypatch.setattr(QFileDialog, "getOpenFileName",
+                        staticmethod(lambda *a, **k: (str(data), "")))
+    win.add_background_spectrum()
+    ref = win.recipe["sites"][-1]["ref"]
+
+    win.snapshot()
+    snap = win.undo_stack[-1]
+    assert snap["recipe"]["sites"][-1]["ref"] is ref      # shared, not copied
+    # but params are deep-copied: editing the live recipe leaves undo intact
+    win.recipe["sites"][-1]["params"]["amplitude"]["value"] = 123.0
+    assert snap["recipe"]["sites"][-1]["params"]["amplitude"]["value"] != 123.0
+
+    win.undo(); qapp.processEvents()
+    assert win.recipe["sites"][-1]["params"]["amplitude"]["value"] != 123.0
+    win.redo(); qapp.processEvents()
+    assert win.recipe["sites"][-1]["params"]["amplitude"]["value"] == 123.0
+
+
+def test_session_is_a_file_not_the_registry(win, qapp, tmp_path, monkeypatch):
+    """C2: the session persists to LOCALAPPDATA/LARMOR/session.json (atomic
+    write), never to QSettings; the write path is gated on LARMOR_NO_SESSION
+    (it was unguarded, so the test suite itself polluted the registry)."""
+    import larmor.desktop.app as appmod
+
+    fake_home = tmp_path / "appdata"
+    monkeypatch.setenv("LOCALAPPDATA", str(fake_home))
+    data = tmp_path / "sample.csv"
+    _write_csv_spectrum(data)
+    win.load_source(str(data), keep_fit=False)
+    qapp.processEvents()
+
+    # under LARMOR_NO_SESSION (test default) nothing is written at all
+    win._flush_session()
+    assert not (fake_home / "LARMOR" / "session.json").exists()
+
+    monkeypatch.delenv("LARMOR_NO_SESSION", raising=False)
+    win._flush_session()
+    f = fake_home / "LARMOR" / "session.json"
+    assert f.exists()
+    d = json.loads(f.read_text(encoding="utf-8"))
+    assert d["source"] == str(data)
+    assert d["recipe"]["nucleus"] == "11B"
+    # and the debounce path schedules rather than writing synchronously
+    f.unlink()
+    win._persist_session()
+    assert not f.exists() and win._session_timer.isActive()
+    win._session_timer.stop()

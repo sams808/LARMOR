@@ -141,6 +141,12 @@ class SpectrumView(pg.PlotWidget):
         self._resid_zero.setVisible(False)
         self.addItem(self._resid_zero)
         pi.getAxis("left").setStyle(tickTextWidth=48, autoExpandTextSpace=False)
+        # peak-mode downsampling + clip-to-view: a zero-filled wideline
+        # spectrum is 64k points, and repainting every one of them on every
+        # pan made the window crawl. "peak" keeps min AND max per screen
+        # column, so noise spikes and sharp horns stay honest.
+        for c in (self._exp, self._model, self._resid):
+            self._tune_curve(c)
         self._components: list[pg.PlotDataItem] = []
         self._markers: list[pg.InfiniteLine] = []
         self._add_mode: str | None = None
@@ -285,6 +291,12 @@ class SpectrumView(pg.PlotWidget):
         if ph is not None and ph.isVisible():
             ph.setStyleSheet(f"color: {t.text_dim}; font-size: 13px; "
                              "background: transparent;")
+
+    @staticmethod
+    def _tune_curve(item):
+        """Downsampling + view clipping for a data-carrying curve."""
+        item.setDownsampling(auto=True, method="peak")
+        item.setClipToView(True)
 
     # ---------- axis display unit ----------
     def set_axis_unit(self, unit: str, sfo_MHz: float):
@@ -661,6 +673,7 @@ class SpectrumView(pg.PlotWidget):
         # components: reuse items, add/remove as needed
         while len(self._components) < len(per_site):
             item = self.plot([], [])
+            self._tune_curve(item)
             self._components.append(item)
         while len(self._components) > len(per_site):
             self.removeItem(self._components.pop())
@@ -683,6 +696,7 @@ class SpectrumView(pg.PlotWidget):
         for x, y, color, label in overlays:
             item = self.plot(x, y, pen=pg.mkPen(color, width=1.1),
                              name=label, antialias=True)
+            self._tune_curve(item)
             item.setZValue(-10)
             self._overlay_items.append(item)
 
