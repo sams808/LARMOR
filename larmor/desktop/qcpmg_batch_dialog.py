@@ -103,7 +103,9 @@ class QcpmgBatchFieldsDialog(QDialog):
         self.spin.setSingleStep(1.0); self.spin.setDecimals(1)
         self.spin.setValue(_spin_of(self._nucleus))
         self.eta = QDoubleSpinBox(); self.eta.setRange(0.0, 1.0)
-        self.eta.setSingleStep(0.05); self.eta.setValue(0.7)
+        self.eta.setSingleStep(0.05)
+        from larmor.qcpmg_fields import DEFAULT_ETA
+        self.eta.setValue(DEFAULT_ETA)
         self.eta.setToolTip("η is not determined by centres of gravity; 0.7 "
                             "is the conventional choice")
         self.lblNuc = QLabel(f"nucleus <b>{self._nucleus or '—'}</b>")

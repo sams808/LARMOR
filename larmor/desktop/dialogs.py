@@ -224,7 +224,13 @@ class ComputingParamsDialog(QDialog):
 
         form.addRow(QLabel("<b>1D Czjzek kernel</b>"))
         self.npts = spin(e["npts"], 256, 65536); form.addRow("computed points", self.npts)
-        self.cqmax = spin(e["cq_max_MHz"], 2, 60, 1); form.addRow("Cq max (MHz)", self.cqmax)
+        # NO "Cq max" control in 1D: the ceiling is automatic (a 25-400 MHz
+        # ladder follows each model's requested width). The old spinbox wrote
+        # a setting whose only reader threw its kernel away -- a decorative
+        # physics control is worse than none.
+        auto = QLabel("automatic (25–400 MHz ladder follows the model width)")
+        auto.setStyleSheet(f"color: {theme.active().text_dim};")
+        form.addRow("Cq max (1D)", auto)
         self.ncq = spin(e["n_cq"], 10, 200); form.addRow("Cq steps", self.ncq)
         self.neta = spin(e["n_eta"], 3, 41); form.addRow("η steps", self.neta)
         form.addRow(QLabel("<b>MQMAS kernel</b>"))
@@ -234,6 +240,12 @@ class ComputingParamsDialog(QDialog):
         self.mneta = spin(m["n_eta"], 3, 21); form.addRow("η steps (2D)", self.mneta)
         self.mcqmax = spin(m["cq_max_MHz"], 2, 40, 1); form.addRow("Cq max (2D, MHz)", self.mcqmax)
 
+        info = engine.kernel_cache_info()
+        cache = QLabel(f"kernel cache: {info['entries']} kernel(s), "
+                       f"{info['mb']:.0f} MB held "
+                       f"(budget {engine.KERNEL_CACHE_BUDGET_MB:.0f} MB, LRU)")
+        cache.setStyleSheet(f"color: {theme.active().text_dim};")
+        form.addRow(cache)
         note = QLabel("More steps/points = more accurate but slower; a change "
                       "rebuilds the kernels on the next fit.")
         note.setWordWrap(True); note.setStyleSheet(f"color: {theme.active().text_dim};")
@@ -244,7 +256,7 @@ class ComputingParamsDialog(QDialog):
 
     def _accept(self):
         self.engine.KERNEL_SETTINGS.update(
-            npts=int(self.npts.value()), cq_max_MHz=float(self.cqmax.value()),
+            npts=int(self.npts.value()),
             n_cq=int(self.ncq.value()), n_eta=int(self.neta.value()))
         self.twod.MQMAS_SETTINGS.update(
             n2=int(self.n2.value()), n1=int(self.n1.value()),

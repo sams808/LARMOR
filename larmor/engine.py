@@ -30,7 +30,11 @@ _KERNEL_CACHE: "OrderedDict[tuple, CzjzekKernel]" = OrderedDict()
 
 #: user-tunable 1D Czjzek kernel resolution (dmfit's Computing parameters).
 #: Edited via the Computing-parameters dialog; the cache is cleared on change.
-KERNEL_SETTINGS = {"npts": 2048, "cq_max_MHz": 25.0, "n_cq": 80, "n_eta": 11}
+#: NOTE: no cq_max here -- the 1D ceiling is AUTOMATIC (kernel_cq_max's
+#: ladder follows each model's own width request). A user "Cq max" knob
+#: existed for months and did nothing: its only reader built a kernel that
+#: make_context immediately discarded.
+KERNEL_SETTINGS = {"npts": 2048, "n_cq": 80, "n_eta": 11}
 
 #: kernel-cache byte budget. Roomy enough for a wideline dataset's whole Cq
 #: ladder; small enough that a day of mixed datasets cannot pin the machine.

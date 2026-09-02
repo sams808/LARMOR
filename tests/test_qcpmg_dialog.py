@@ -595,3 +595,41 @@ def test_split_offset_is_set_on_load_and_resets_with_the_period(qapp, tmp_path,
     d.period.setValue(100)                            # a different period
     assert d.offset.value() == 0                      # the old offset is void
     d.close()
+
+
+def test_send_to_fit_keeps_the_full_qcpmg_record(qapp, monkeypatch):
+    """D2: the dialog emits ~21 qcpmg_* keys; the workbench used to keep 5
+    and the recipe had nowhere for the rest -- the processing record of a
+    published wideline fit vanished. It now lands in Recipe.provenance and
+    round-trips through save/load."""
+    import json
+
+    from larmor.recipe import Recipe
+
+    meta = {"expno": "X/1", "title": "t", "nucleus": "81Br",
+            "larmor_MHz": 216.0, "spin_rate_Hz": 0.0,
+            "qcpmg_period_pts": 293, "qcpmg_split_offset": 4,
+            "qcpmg_echo_top": 147, "qcpmg_realign": False,
+            "qcpmg_magnitude": False, "qcpmg_n_echoes": 128,
+            "qcpmg_lb_Hz": 0.0, "qcpmg_gb_Hz": 0.0,
+            "qcpmg_p0_deg": 12.0, "qcpmg_p1_deg": 0.0,
+            "qcpmg_p2_deg": -8.0, "qcpmg_carrier_ppm": -300.0,
+            "qcpmg_referenced": True, "qcpmg_T2_s": 1.4e-3,
+            "qcpmg_T2_err_s": 1e-4, "qcpmg_matched_lb_Hz": 227.0}
+
+    win = _win(qapp, monkeypatch) if "_win" in globals() else None
+    if win is None:
+        from larmor.desktop.app import MainWindow
+        win = MainWindow()
+    try:
+        win._fid_to_workbench(np.linspace(-1000, 1000, 64),
+                              np.zeros(64), meta)
+        prov = win.recipe["provenance"]
+        assert {k: v for k, v in meta.items()
+                if k.startswith("qcpmg_")} == prov
+        # and it survives the file format
+        r2 = Recipe.from_dict(json.loads(json.dumps(win.recipe)))
+        assert r2.provenance["qcpmg_p2_deg"] == -8.0
+        assert r2.provenance["qcpmg_split_offset"] == 4
+    finally:
+        win.close()

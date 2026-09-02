@@ -23,6 +23,7 @@ from pathlib import Path
 import numpy as np
 
 from larmor.recipe import Param, Recipe, SiteModel, sha256_of
+from larmor.models.quadrupolar import AMORPH_CQ_MAX
 
 
 @dataclass
@@ -273,6 +274,16 @@ def _parse_simp_block(root: ET.Element) -> DmfitSpectrum | None:
 #: The Phase 0 empirical convention: mrsimulator sigma = dmfit sCZ_CQ / 2.
 SCZ_TO_SIGMA = 0.5
 
+#: dmfit CzSimple <amp> / LARMOR czjzek peak amplitude. One constant, used in
+#: BOTH directions (import divides, export multiplies), so a LARMOR->dmfit->
+#: LARMOR round trip is the identity. Calibrated on CaAlGlass.fxmla's
+#: dominant line (dmfit amp 6492.7 <-> LARMOR peak 1656.7). Measured before
+#: the import side existed: replaying the raw import against the file's own
+#: spectrum needed a best-fit global rescale of 0.241 ~= 1/3.92 -- imported
+#: Czjzek overlays were ~4x too tall, silently absorbed by every refit's
+#: amplitude pre-scale and only visible on a replay-without-fit.
+DMFIT_CZSIMPLE_AMP_RATIO = 3.92
+
 #: dmfit's "Amorphous" amp scales the integrated AREA (its Gaus/Lor amp is the
 #: peak). To make an imported Amorphous line overlay at the correct height
 #: relative to the Gaus/Lor lines, convert the area amp to a peak amp:
@@ -356,7 +367,10 @@ def to_recipe(dm: DmfitFile, dimension: int = 0) -> tuple[Recipe, list[str]]:
                         abs(line.params["dCS"].value) if "dCS" in line.params else 10.0,
                         min=0.1,
                     ),
-                    "amplitude": Param(line.params["amp"].value, min=0.0),
+                    # dmfit amp -> LARMOR peak (see DMFIT_CZSIMPLE_AMP_RATIO)
+                    "amplitude": Param(
+                        line.params["amp"].value / DMFIT_CZSIMPLE_AMP_RATIO,
+                        min=0.0),
                 },
             )
             recipe.sites.append(site)
@@ -382,8 +396,12 @@ def to_recipe(dm: DmfitFile, dimension: int = 0) -> tuple[Recipe, list[str]]:
                 params={
                     "isotropic_chemical_shift_ppm": Param(p["pos"].value),
                     # dmfit stores CQ and FWHM_CQ in kHz; LARMOR uses MHz
-                    "Cq_MHz": Param(min(p["CQ"].value / 1000.0, 6.0),
-                                    min=0.05, max=6.0),
+                    # bound shared with the model itself (was a bare 6.0
+                    # here: raising the model's ceiling would have silently
+                    # truncated imported dmfit Amorphous lines)
+                    "Cq_MHz": Param(min(p["CQ"].value / 1000.0,
+                                        AMORPH_CQ_MAX),
+                                    min=0.05, max=AMORPH_CQ_MAX),
                     "eta": Param(p.get("etaQ", DmfitParam(0.0)).value,
                                  min=0.0, max=1.0),
                     "Cq_fwhm_MHz": Param(

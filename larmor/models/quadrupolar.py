@@ -124,7 +124,8 @@ def _render_czjzek(v: dict, ctx: SimContext) -> np.ndarray:
                      * max(1.0, sw / engine.KERNEL_MIN_SW_HZ)), 16384),
         ref_offset_ppm=ref, cq_max_MHz=cq_max,
         n_cq=max(engine.KERNEL_SETTINGS["n_cq"],
-                 int(engine.KERNEL_SETTINGS["n_cq"] * cq_max / 25.0)))
+                 int(engine.KERNEL_SETTINGS["n_cq"] * cq_max / 25.0)),
+        n_eta=int(engine.KERNEL_SETTINGS["n_eta"]))
     y = kernel.weights(v["sigma_Cq_MHz"]) @ kernel.K
     y = _broaden_shift(kernel.x_ppm, y, v["isotropic_chemical_shift_ppm"],
                        _czjzek_fwhm(v))
@@ -145,8 +146,14 @@ register(Model(
     params=(
         ParamDef("isotropic_chemical_shift_ppm", "pos", 0.0, "ppm",
                  "isotropic chemical shift"),
+        # max: the kernel's Cq ladder tops out at 400 MHz and the render
+        # requests 5*sigma of headroom, so sigma beyond 80 MHz cannot be
+        # represented -- it saturated into a plain Gaussian that LOOKED
+        # converged. At the bound the fit's at-bounds diagnosis fires
+        # instead. (The largest published glass sigmas are ~20 MHz.)
         ParamDef("sigma_Cq_MHz", "sigma", 2.0, "MHz",
-                 "Czjzek width parameter (mode of |Cq| = 2 sigma)", min=0.05),
+                 "Czjzek width parameter (mode of |Cq| = 2 sigma)",
+                 min=0.05, max=80.0),
         ParamDef("shift_fwhm_ppm", "dCS", 10.0, "ppm",
                  "isotropic-shift distribution FWHM (dmfit dCS; diagonal in 2D)",
                  min=0.1),
@@ -176,7 +183,8 @@ def _render_ext_czjzek(v: dict, ctx: SimContext) -> np.ndarray:
                      * max(1.0, sw / engine.KERNEL_MIN_SW_HZ)), 16384),
         ref_offset_ppm=ref, cq_max_MHz=cq_max,
         n_cq=max(engine.KERNEL_SETTINGS["n_cq"],
-                 int(engine.KERNEL_SETTINGS["n_cq"] * cq_max / 25.0)))
+                 int(engine.KERNEL_SETTINGS["n_cq"] * cq_max / 25.0)),
+        n_eta=int(engine.KERNEL_SETTINGS["n_eta"]))
     # the dominant tensor must share the pdf grid's unit system (MHz here)
     dominant = {"Cq": v["Cq_MHz"], "eta": v["eta"]}
     res = ExtCzjzekDistribution(dominant, eps=max(v["eps"], 1e-3)).pdf(

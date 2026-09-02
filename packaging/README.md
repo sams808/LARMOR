@@ -5,13 +5,30 @@ target machine. Users launch it by double-clicking the exe.
 
 ## Build
 
+**Build from a pip venv on a python.org Python — NOT from the conda env.**
+Two hard-won findings (2026-09-02):
+
+1. conda-forge PySide6 keeps its C++ runtime (`shiboken6*.dll`,
+   `pyside6*.dll`, the Qt DLLs) in `Library/bin/`, outside site-packages —
+   PyInstaller's PySide6 hooks expect the pip wheel layout and collect
+   NOTHING, so the frozen exe dies at `import Shiboken` on any machine.
+2. A venv whose base is the conda python does not help: conda's Python
+   registers `Library/bin` on the DLL search path, so pip-PySide6's pyds
+   bind conda's (different-version) Qt DLLs — "specified procedure could
+   not be found" at import, inside the venv itself.
+
 ```
-conda activate larmor
-pip install pyinstaller
-pyinstaller packaging/larmor.spec --noconfirm
+py -3.11 -m venv packaging/.buildenv
+packaging\.buildenv\Scripts\python -m pip install ".[desktop]" pyinstaller
+packaging\.buildenv\Scripts\python -m PyInstaller packaging/larmor.spec --noconfirm
 ```
 
-The result is `dist/LARMOR/` (~500 MB, dominated by scipy/mrsimulator/PySide6).
+(`.[desktop]` matters: PySide6/pyqtgraph are an optional extra, and a bare
+`pip install .` builds a 241 MB bundle with no Qt in it at all.)
+
+The result is `dist/LARMOR/` (~350 MB from the pip stack). Smoke-tested by
+launching `LARMOR.exe` with `QT_QPA_PLATFORM=offscreen`: the event loop must
+run and `~/LARMOR_crash.log` must stay absent/empty.
 Zip that folder to distribute, or wrap it with an installer (Inno Setup /
 NSIS) for a Start-menu entry.
 

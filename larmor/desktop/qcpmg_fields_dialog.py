@@ -68,7 +68,9 @@ class QcpmgFieldsDialog(QDialog):
         top.addSpacing(16)
         top.addWidget(QLabel("η (assumed)"))
         self.eta = QDoubleSpinBox(); self.eta.setRange(0.0, 1.0)
-        self.eta.setSingleStep(0.05); self.eta.setValue(0.7)
+        self.eta.setSingleStep(0.05)
+        from larmor.qcpmg_fields import DEFAULT_ETA
+        self.eta.setValue(DEFAULT_ETA)
         self.eta.setToolTip("η is not determined by two centres of gravity; "
                             "0.7 is the conventional choice (Stebbins & Du 2002)")
         top.addWidget(self.eta)

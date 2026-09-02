@@ -121,14 +121,13 @@ def export_fxmla(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
     return text
 
 
-#: LARMOR peak-amp → dmfit CzSimple <amp> factor for Czjzek lines. dmfit's amp
-#: is larger than LARMOR's rendered peak by a roughly constant factor (LARMOR's
-#: Czjzek rendering is broader / lower-peaked for the same area). Calibrated to
-#: CaAlGlass.fxmla's dominant, best-determined line (LARMOR peak 1656.7 ↔ dmfit
-#: amp 6492.7 = 3.92). Gauss/Lorentz lines need no conversion (ratio ≈ 1).
-#: NOTE: derived from one ²⁷Al glass at 195 MHz — may want per-nucleus/field
-#: refinement if a different system exports mis-scaled.
-_DMFIT_CZJZEK_AMP_FACTOR = 3.92
+#: LARMOR peak-amp → dmfit CzSimple <amp>: the SAME constant the importer
+#: divides by (larmor.io.fxmla.DMFIT_CZSIMPLE_AMP_RATIO), so the round trip
+#: is the identity — the two sides used to carry independently-calibrated
+#: numbers (3.92 out, nothing in). Gauss/Lorentz lines need no conversion
+#: (ratio ≈ 1). NOTE: calibrated on one ²⁷Al glass at 195 MHz — verify if a
+#: different system exports mis-scaled.
+from larmor.io.fxmla import DMFIT_CZSIMPLE_AMP_RATIO as _DMFIT_CZJZEK_AMP_FACTOR  # noqa: E402,E501
 
 
 def _czjzek_amp_scales(recipe, exp_ppm) -> dict:

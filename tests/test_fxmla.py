@@ -155,3 +155,45 @@ def test_read_new_format_csdm_fxmla_with_invalid_xml(tmp_path):
     assert s.model == "czjzek"
     assert s.params["sigma_Cq_MHz"].value == pytest.approx(2378.29 / 2000.0)
     assert s.params["isotropic_chemical_shift_ppm"].value == pytest.approx(64.58)
+
+
+def test_dmfit_czjzek_round_trip_is_identity(tmp_path):
+    """D3: import and export used to carry independently calibrated
+    amplitude constants (nothing in, 3.92 out), so LARMOR -> dmfit -> LARMOR
+    multiplied every Czjzek amplitude by 3.92 -- and the raw IMPORT overlay
+    was ~4x too tall (best global rescale 0.241 on CaAlGlass, hidden by
+    every refit's amplitude pre-scale). One shared constant now serves both
+    directions; the round trip must be the identity."""
+    from larmor.io import export
+
+    dm = fxmla.read(require(CAALGLASS))
+    r1, _ = fxmla.to_recipe(dm)
+    ppm, amp = dm.spectrum.ppm, dm.spectrum.amplitude
+
+    out = tmp_path / "rt.fxmla"
+    export.export_fxmla(r1, ppm, amp, out)
+    r2, _ = fxmla.to_recipe(fxmla.read(out))
+
+    assert len(r1.sites) == len(r2.sites)
+    for s1, s2 in zip(r1.sites, r2.sites):
+        a1 = s1.params["amplitude"].value
+        a2 = s2.params["amplitude"].value
+        assert a2 == pytest.approx(a1, rel=1e-6), (s1.label, s1.model, a1, a2)
+
+
+def test_dmfit_czjzek_import_overlays_at_data_scale():
+    """The import must land ON the data without a refit: replaying the raw
+    imported recipe against the file's own spectrum needs no more than a
+    ~10 % global rescale (it needed 4.1x before the shared constant)."""
+    import numpy as np
+
+    from larmor import engine
+
+    dm = fxmla.read(require(CAALGLASS))
+    r1, _ = fxmla.to_recipe(dm)
+    ppm, amp = dm.spectrum.ppm, dm.spectrum.amplitude
+    x, tot, _ = engine.simulate(r1, exp_ppm=ppm)
+    model = np.interp(ppm, x, tot)
+    sel = (ppm > -80) & (ppm < 150)
+    scale = float(amp[sel] @ model[sel] / (model[sel] @ model[sel]))
+    assert 0.9 < scale < 1.1, scale

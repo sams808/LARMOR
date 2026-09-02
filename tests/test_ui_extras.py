@@ -1036,3 +1036,39 @@ def test_figure_exports_remember_their_folder(qapp, tmp_path, monkeypatch):
             s.remove(paths.FIGURE_DIR_KEY)
         else:
             s.setValue(paths.FIGURE_DIR_KEY, old)
+
+
+def test_computing_params_controls_are_all_wired(qapp, monkeypatch):
+    """D1: the Computing-parameters dialog had two decorative controls -- a
+    'Cq max (MHz)' whose setting nothing read (the 1D ceiling is the
+    automatic ladder) and an 'η steps' that never reached the Czjzek
+    render. The knob is gone (replaced by an explanatory label + a live
+    cache readout) and η steps now genuinely changes the built kernel."""
+    from larmor import engine
+    from larmor.desktop.dialogs import ComputingParamsDialog
+    from larmor.models.base import SimContext
+    from larmor.models.quadrupolar import _render_czjzek
+
+    assert "cq_max_MHz" not in engine.KERNEL_SETTINGS
+
+    dlg = ComputingParamsDialog(None)
+    assert not hasattr(dlg, "cqmax")
+    old = dict(engine.KERNEL_SETTINGS)
+    try:
+        dlg.neta.setValue(5)
+        dlg._accept()
+        assert engine.KERNEL_SETTINGS["n_eta"] == 5
+
+        # the wired path: the kernel the render builds carries the new n_eta
+        ctx = SimContext(nucleus="27Al", larmor_MHz=130.32,
+                         spin_rate_Hz=12500.0,
+                         x_ppm=np.linspace(-120, 160, 512))
+        engine.clear_kernel_cache()
+        v = {"isotropic_chemical_shift_ppm": 60.0, "sigma_Cq_MHz": 1.5,
+             "shift_fwhm_ppm": 5.0, "line_fwhm_ppm": 0.0, "amplitude": 1.0}
+        _render_czjzek(v, ctx)
+        (key, kernel), = engine._KERNEL_CACHE.items()
+        assert kernel.eta_grid.size == 5
+    finally:
+        engine.KERNEL_SETTINGS.update(old)
+        engine.clear_kernel_cache()

@@ -30,13 +30,20 @@ from dataclasses import dataclass, field
 import numpy as np
 
 
+#: conventional assumed eta for the two-field extrapolation (Stebbins &
+#: Du 2002). The dialogs seed their spinboxes from THIS constant, so the
+#: call sites can no longer drift apart; the user's spinbox still
+#: overrides per analysis.
+DEFAULT_ETA = 0.7
+
+
 def _spin_factor(spin: float) -> float:
     """[I(I+1) − 3/4] / [I²(2I−1)²] for the CT second-order shift."""
     I = float(spin)
     return (I * (I + 1) - 0.75) / (I ** 2 * (2 * I - 1) ** 2)
 
 
-def cq_from_slope(slope_ppm_MHz2: float, spin: float, eta: float = 0.7) -> float:
+def cq_from_slope(slope_ppm_MHz2: float, spin: float, eta: float = DEFAULT_ETA) -> float:
     """Invert Eq. (1): C_Q (MHz) from the slope of δcg vs 1/ν0² (ppm·MHz²).
 
     slope = −(10⁶/40)·C_Q²(3+η²)·[spin factor]  →  C_Q = √(−slope / A),
@@ -48,7 +55,7 @@ def cq_from_slope(slope_ppm_MHz2: float, spin: float, eta: float = 0.7) -> float
 
 
 def dcg_at_field(delta_iso_ppm: float, cq_MHz: float, larmor_MHz: float,
-                 spin: float, eta: float = 0.7) -> float:
+                 spin: float, eta: float = DEFAULT_ETA) -> float:
     """Forward Eq. (1): predicted δcg (ppm) at a given Larmor frequency."""
     A = (1.0e6 / 40.0) * (3.0 + eta ** 2) * _spin_factor(spin)
     return delta_iso_ppm - A * cq_MHz ** 2 / larmor_MHz ** 2
@@ -82,7 +89,7 @@ class InfiniteFieldResult:
 
 
 def infinite_field_diso(points: list[FieldPoint], spin: float,
-                        eta: float = 0.7) -> InfiniteFieldResult:
+                        eta: float = DEFAULT_ETA) -> InfiniteFieldResult:
     """Fit δcg = δiso + slope·(1/ν0²) across fields and return δiso, C_Q, P_Q.
 
     Needs ≥ 2 fields. With exactly 2 the line is exact (errors from the δcg
@@ -171,7 +178,7 @@ def centre_of_gravity(ppm: np.ndarray, amp: np.ndarray,
     return float((ppm * a).sum() / s) if s > 0 else float("nan")
 
 
-def fit_samples(rows, spin: float, eta: float = 0.7
+def fit_samples(rows, spin: float, eta: float = DEFAULT_ETA
                 ) -> dict[str, "InfiniteFieldResult | str"]:
     """Extrapolate SEVERAL samples at once.
 

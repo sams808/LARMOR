@@ -233,3 +233,16 @@ def test_csa_czjzek_broadens_with_disorder():
     w = lambda y: int((y > y.max() / 2).sum())
     assert w(y_dist) > w(y_single)
     assert y_dist.max() == pytest.approx(1.0, abs=0.01)
+
+
+def test_czjzek_sigma_has_a_representable_ceiling():
+    """D6: sigma_Cq_MHz had NO upper bound and could run away past what the
+    kernel's Cq ladder (<= 400 MHz, built at 5*sigma) can represent -- the
+    lineshape saturated into a plain Gaussian that looked converged. The
+    bound puts the runaway at a reportable at-bounds pin instead."""
+    from larmor import models
+    from larmor.engine import CQ_MAX_LADDER
+
+    pd = {p.name: p for p in models.get("czjzek").params}["sigma_Cq_MHz"]
+    assert pd.max is not None
+    assert pd.max * 5.0 <= CQ_MAX_LADDER[-1]

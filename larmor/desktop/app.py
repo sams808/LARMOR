@@ -1866,7 +1866,11 @@ class MainWindow(QMainWindow):
             nucleus=meta.get("nucleus", ""),
             larmor_frequency_MHz=meta.get("larmor_MHz", 0.0),
             spin_rate_Hz=(meta.get("spin_rate_Hz") or meta.get("masr_Hz") or 0.0),
-            mas_uncertain=bool(meta.get("mas_uncertain", False))).to_dict()
+            mas_uncertain=bool(meta.get("mas_uncertain", False)),
+            # the FULL processing record (every qcpmg_* key) rides along so a
+            # saved fit of a QCPMG spectrum still says how it was made
+            provenance={k: v for k, v in meta.items()
+                        if k.startswith("qcpmg_")}).to_dict()
         self.hidden.clear(); self.undo_stack.clear(); self.redo_stack.clear()
         self.view.set_experiment(self.exp_ppm, self.exp_amp)
         self.view.set_title(self.recipe.get("sample") or "processed FID")

@@ -63,6 +63,10 @@ You can type the period as **points or Hz** — they stay in sync. Two health
 scores sit in the readout: **echo-repeat** (does the train actually repeat at
 this period?) and **alignment**. Both collapse when the period is wrong.
 
+> ⚠️ **Changing the period resets the split offset to 0**, clears the echo
+> exclusions and resets the echo counts — including when **Find period** sets
+> it. Press **Centre echo** afterwards to re-derive the offset.
+
 #### Split offset
 
 Acquisition does not always begin half an echo before the first top. The
@@ -80,8 +84,16 @@ FWHM by 24 %.
 
 ### 2 · Echo & top
 
-All echoes overlaid, plus **first vs last** — the ssNake validation that the
-split is right: their features (and the flat tail) must line up.
+All echoes overlaid (the first **60**, to keep the plot readable — a long
+train's remaining echoes only re-trace the same shape), plus **first vs
+last** — the ssNake validation that the split is right: their features (and
+the flat tail) must line up.
+
+**realign echo tops before summing** (checkbox): each echo is shifted so its
+own maximum lands on the shared top before the coherent sum. Use it when a
+drifting field or timing jitter visibly staggers the tops in this overlay;
+leave it off otherwise — realigning also lines up noise, which slightly
+biases the summed echo.
 
 **Drag the vertical line onto the echo top** (this is ssNake's "Pos *N*"); the
 numeric field follows, and vice versa. A dotted line marks the block centre as
@@ -150,6 +162,13 @@ two samples needs a first-order phase to compensate it exactly, and up to
 Beyond about ±200°, the period or the top is genuinely wrong: go back to
 stage 1 (**Find period**) and stage 2 (**Auto**).
 
+**Phasing runs once automatically on load**: on an unphased spectrum the
+tallest feature is a noise sliver, and stage 6 would happily report a δ_CG
+from it. The automatic pass is exactly the **Autophase** button (p0/p1, then
+p0/p1/p2, keeping the quadratic only if it cuts the negative area by more
+than 25 %); type into the phase fields or press Autophase again to override
+it at any time.
+
 #### When p0/p1 is not enough: the second-order phase
 
 A **frequency-swept refocusing pulse** — WURST or chirp, as in WURST-CPMG
@@ -206,6 +225,15 @@ defined; tens of ppm means the edges are running down a tail and should be
 placed by hand (the dialog says so).
 
 ---
+
+**→ infinite-field δiso…** (stage 6) sends this dataset's (field, δ_CG,
+FWHM) straight into the multi-field extrapolation dialog — the primary route
+into §4 below: process each field's dataset, press this button on each, and
+the extrapolation dialog collects them.
+
+**Export figure package…** writes the assembled six-stage figure as
+`.png`/`.svg`/`.pdf` next to a base name you choose — the same composite the
+right-click *Export figure / Send to studio* menu offers per panel.
 
 ## 3 · Recommended workflow
 

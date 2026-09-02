@@ -110,6 +110,13 @@ class Recipe:
     #: hold them at the user's values (dmfit-style manual referencing).
     mqmas_f1_ref_vary: bool = True
     notes: list[str] = field(default_factory=list)
+    #: how the spectrum was DERIVED, when it did not come straight off the
+    #: instrument -- e.g. the full QCPMG processing record (all qcpmg_* keys:
+    #: period, split offset, echo top, realign, apodization, phases, T2...).
+    #: Free-form {str: scalar}; written into the saved recipe so a published
+    #: wideline fit carries its processing method. Previously the dialog
+    #: emitted 21 keys, the workbench kept 5, and the rest vanished.
+    provenance: dict = field(default_factory=dict)
 
     # ---------- serialization ----------
     def to_dict(self) -> dict:

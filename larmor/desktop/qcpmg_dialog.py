@@ -1330,6 +1330,8 @@ class QcpmgDialog(QDialog):
             f"# source={self.source}",
             f"# period_pts={per}  source={self._period_src}  tau_echo_s={tau:.9g}",
             f"# echo_top={top}  echoes={ech.shape[0]}  drop_first={self.dropFirst.value()}",
+            f"# split_offset_pts={self.offset.value()}  "
+            f"realign={self.chkRealign.isChecked()}",
             f"# decay_mode={mode}  offset_fitted={self.useOffset.isChecked()}",
         ]
         if f is not None and f.ok:
@@ -1342,7 +1344,8 @@ class QcpmgDialog(QDialog):
             f"# LB_applied_Hz={self.lb.value():.9g}  GB_applied_Hz={self.gb.value():.9g}",
             f"# t2_weighted={self.t2w.isChecked()}  zerofill={self.zf.currentText()}",
             f"# spectrum_mode={'magnitude(mc)' if self.magMode.isChecked() else 'absorption'}",
-            f"# p0_deg={self.p0.value():.9g}  p1_deg={self.p1.value():.9g}",
+            f"# p0_deg={self.p0.value():.9g}  p1_deg={self.p1.value():.9g}  "
+            f"p2_deg={self.p2.value():.9g}",
             f"# carrier_ppm={self._carrier:.9g}  referenced={self._referenced}",
         ]
         if getattr(self, "_cg", None) is not None:
