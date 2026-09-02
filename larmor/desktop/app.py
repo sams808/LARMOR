@@ -602,6 +602,8 @@ class MainWindow(QMainWindow):
         self._add(m_tools, "QCPMG (echo train → spectrum)…", self.open_qcpmg)
         self._add(m_tools, "Stitch frequency-stepped (&VOCS) spectra…",
                   self.open_vocs)
+        self._add(m_tools, "&Read static pattern (C_Q, η)…  (three markers, "
+                           "no fit)", self.open_staticct)
         self._add(m_tools, "QCPMG: infinite-field δiso (2 fields)…",
                   self.open_qcpmg_fields)
         self._add(m_tools, "QCPMG: batch infinite-field δiso…",
@@ -4731,6 +4733,53 @@ class MainWindow(QMainWindow):
         # processing sessions accumulate here until Compute
         dlg = shared_fields_dialog(self, nuc, cur)
         dlg.show(); dlg.raise_(); dlg.activateWindow()
+
+    def open_staticct(self):
+        """Tools > Read static pattern: C_Q, η, δiso from the positions of
+        the two horns and the informative edge of a static CT powder
+        pattern — a measurement, not a fit."""
+        from larmor.desktop.staticct_dialog import StaticCtDialog
+        from larmor.nuclei import all_isotopes
+
+        if not self.exp_ppm.size:
+            self.statusBar().showMessage("load a spectrum first")
+            return
+        nucleus = (self.recipe or {}).get("nucleus", "")
+        lar = float((self.recipe or {}).get("larmor_frequency_MHz", 0.0) or 0.0)
+        iso = next((i for i in all_isotopes() if i.symbol == nucleus), None)
+        if iso is None or iso.spin < 1.0 or lar <= 0:
+            QMessageBox.warning(
+                self, "Read static pattern",
+                "Needs a half-integer quadrupolar nucleus and a Larmor "
+                "frequency — set them in Experiment parameters.")
+            return
+        dlg = StaticCtDialog(self, self.exp_ppm, self.exp_amp, nucleus,
+                             iso.spin, lar)
+        dlg.seed_site.connect(self._staticct_seed)
+        dlg.exec()
+
+    def _staticct_seed(self, cq_MHz: float, eta: float, diso_ppm: float):
+        """Turn a static-pattern reading into a quad_ct starting site."""
+        if self.recipe is None:
+            return
+        self.snapshot()
+        m = model_registry.get("quad_ct")
+        params = {p.name: {"value": p.default, "stderr": None, "vary": p.vary,
+                           "min": p.min, "max": p.max, "expr": None}
+                  for p in m.params}
+        params["isotropic_chemical_shift_ppm"]["value"] = float(diso_ppm)
+        params["Cq_MHz"]["value"] = float(cq_MHz)
+        params["eta"]["value"] = float(eta)
+        if self.exp_amp.size:
+            params["amplitude"]["value"] = float(np.max(np.abs(self.exp_amp)))
+        n = len(self.recipe["sites"])
+        self.recipe["sites"].append({"model": "quad_ct",
+                                     "label": f"read-{n}", "params": params})
+        self.on_structure_changed()
+        self.statusBar().showMessage(
+            f"added quad_ct from the reading: C_Q {cq_MHz:.2f} MHz, "
+            f"η {eta:.2f}, δiso {diso_ppm:.1f} ppm — refine with Fit if "
+            "the lineshape supports it")
 
     def open_vocs(self):
         """Tools > Stitch frequency-stepped (VOCS): sub-spectra acquired at

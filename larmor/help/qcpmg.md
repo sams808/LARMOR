@@ -235,6 +235,15 @@ the extrapolation dialog collects them.
 `.png`/`.svg`/`.pdf` next to a base name you choose — the same composite the
 right-click *Export figure / Send to studio* menu offers per panel.
 
+**Reading C_Q and η without a fit**: for a static CT pattern with visible
+structure, **Tools ▸ Read static pattern (C_Q, η)…** puts three draggable
+markers on the spectrum — the two divergent horns and the step-like outer
+limit — and reports (C_Q, η, P_Q, δiso) from their positions alone, with the
+feature mismatch as its honesty figure. That reading can seed a `quad_ct`
+line in one click. It is the classic singularity measurement: defensible at
+a single field where a full lineshape fit is not, and a good cross-check on
+δ_CG.
+
 **Intensity across the sweep** (WCPMG): the swept pulse also imprints an
 *amplitude* weighting — near-flat mid-band, rolling off at the sweep edges.
 After sending the spectrum to the workbench, **Process ▸ WURST excitation

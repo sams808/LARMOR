@@ -1229,3 +1229,47 @@ def test_kernel_warm_worker_spin_gate_and_dedup(win, qapp, tmp_path,
     win._warmed_key = None
     win._warm_kernel()
     assert started == ["11B", "29Si"]
+
+
+def test_staticct_dialog_reads_a_simulated_pattern(win, qapp, monkeypatch):
+    """A8 end-to-end: markers placed on a simulated static 81Br pattern's
+    true features produce a reading near the truth, and seeding creates a
+    quad_ct site carrying it."""
+    from larmor import engine
+    from larmor.desktop.staticct_dialog import StaticCtDialog
+    from larmor.recipe import Param, Recipe, SiteModel
+    from larmor.staticct import ct_static_features
+
+    cq, eta, diso, lar = 30.0, 0.5, -300.0, 216.0
+    site = SiteModel(model="quad_ct", label="s", params={
+        "isotropic_chemical_shift_ppm": Param(diso), "Cq_MHz": Param(cq),
+        "eta": Param(eta), "shift_fwhm_ppm": Param(10.0),
+        "amplitude": Param(1.0)})
+    r = Recipe(nucleus="81Br", larmor_frequency_MHz=lar, spin_rate_Hz=0.0,
+               sites=[site])
+    x = np.linspace(-5200, 3000, 8001)
+    gx, y, _ = engine.simulate(r, exp_ppm=x)
+
+    win._display_1d(gx, np.clip(y, 0, None), "81Br", lar, 0.0, "sim", "sim")
+    qapp.processEvents()
+
+    dlg = StaticCtDialog(win, win.exp_ppm, win.exp_amp, "81Br", 1.5, lar)
+    dlg.seed_site.connect(win._staticct_seed)   # what open_staticct wires
+    f = ct_static_features(cq, eta, 1.5, lar)
+    dists = [min(abs(e - h) for h in f.horns) for e in f.edges]
+    dlg.horn_a.setValue(f.horns[0] + diso)
+    dlg.horn_b.setValue(f.horns[1] + diso)
+    dlg.edge.setValue(f.edges[int(np.argmax(dists))] + diso)
+    qapp.processEvents()
+    assert dlg.reading is not None and dlg.reading.ok
+    assert dlg.reading.Cq_MHz == pytest.approx(cq, rel=0.05)
+    assert dlg.reading.eta == pytest.approx(eta, abs=0.05)
+
+    n_before = len(win.recipe["sites"])
+    dlg._seed()
+    sites = win.recipe["sites"]
+    assert len(sites) == n_before + 1
+    got = sites[-1]["params"]
+    assert got["Cq_MHz"]["value"] == pytest.approx(cq, rel=0.05)
+    assert got["eta"]["value"] == pytest.approx(eta, abs=0.05)
+    dlg.close()
