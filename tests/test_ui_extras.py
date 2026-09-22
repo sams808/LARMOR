@@ -732,7 +732,7 @@ def test_czjzek_display_convention_rescales_cell_and_header(qapp):
     try:
         rec = _czjzek_recipe_dict(sigma=1.0)
         for mode, k in [("sigma", 1.0), ("cq2", 2.0), ("dmfit", 4.0),
-                        ("pq", 5.0 ** 0.5)]:
+                        ("pq", 2.0 * 5.0 ** 0.5)]:
             table.set_czjzek_display(mode)
             t.rebuild(rec, set())
             col = 2 + t._used_keys.index("sigma_Cq_MHz")
@@ -944,7 +944,7 @@ def test_mixed_model_recipe_gets_one_cell_per_own_parameter(qapp):
 
     from larmor.desktop.table import LinesTable
     names = ["gauss_lor", "voigt", "jmultiplet", "czjzek", "quad_csa",
-             "amorphous", "spectrum"]
+             "amorphous", "spectrum", "czjzek_d", "czjzek_corr", "exchange2"]
     sites = [_one_site_recipe(n)["sites"][0] for n in names]
     rec = {"nucleus": "27Al", "larmor_frequency_MHz": 130.32,
            "spin_rate_Hz": 20000.0, "sites": sites}

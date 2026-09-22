@@ -152,10 +152,14 @@ def _site_columns(site: dict, errors: dict) -> list[tuple[str, float, float | No
         s = P["sigma_Cq_MHz"]["value"]
         se = errors.get("sigma_Cq_MHz")
         from larmor.czjzek_dist import rms_pq
+        # d = 5 for czjzek / czjzek_corr; czjzek_d carries its own d, and
+        # √⟨P_Q²⟩ = 2√d·σ is linear in σ so the error propagates by the same
+        # factor (σ_Cz = sCZ_CQ = 2σ is the Czjzek-paper width, not the mode)
+        d = float((P.get("czjzek_d") or {}).get("value", 5.0))
         out.append(("σ (MHz)", s, se))
-        out.append(("C_Q=2σ (MHz)", 2.0 * s, (2.0 * se) if se else None))
-        out.append(("√⟨P_Q²⟩ (MHz)", rms_pq(s),
-                    (5.0 ** 0.5 * se) if se else None))
+        out.append(("sCZ_CQ=2σ (MHz)", 2.0 * s, (2.0 * se) if se else None))
+        out.append(("√⟨P_Q²⟩ (MHz)", rms_pq(s, d),
+                    rms_pq(se, d) if se else None))
     if "Cq_MHz" in P:                             # discrete / amorphous
         out.append(("C_Q (MHz)", P["Cq_MHz"]["value"], errors.get("Cq_MHz")))
     for ek in ("eta", "etaQ", "eta_q"):
@@ -172,6 +176,13 @@ def _site_columns(site: dict, errors: dict) -> list[tuple[str, float, float | No
                    ("lorentz_fwhm_ppm", "Lorentz FWHM (ppm)")):
         if wk in P:
             out.append((wl, P[wk]["value"], errors.get(wk)))
+    # general-d / correlated Czjzek and two-site exchange
+    for ek, el in (("czjzek_d", "d (Czjzek)"),
+                   ("shift_slope_ppm_per_MHz", "dδ/dC_Q (ppm/MHz)"),
+                   ("split_ppm", "Δδ (ppm)"), ("pop_a", "p_A"),
+                   ("k_ex_hz", "k_ex (s⁻¹)")):
+        if ek in P:
+            out.append((el, P[ek]["value"], errors.get(ek)))
     return out
 
 

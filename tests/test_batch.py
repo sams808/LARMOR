@@ -50,10 +50,12 @@ def test_czjzek_columns_propagate_errors():
     errs = {"isotropic_chemical_shift_ppm": 0.2, "sigma_Cq_MHz": 0.05,
             "shift_fwhm_ppm": 0.3}
     cols = dict((h, (v, e)) for h, v, e in batch._site_columns(site, errs))
-    assert cols["C_Q=2σ (MHz)"] == pytest.approx((3.2, 0.1))
+    # 2σ is dmfit's sCZ_CQ = the Czjzek-paper σ_Cz (not the mode of |C_Q|)
+    assert cols["sCZ_CQ=2σ (MHz)"] == pytest.approx((3.2, 0.1))
+    # √⟨P_Q²⟩ = √5·σ_Cz = 2√5·σ in the stored (mrsimulator) σ
     v, e = cols["√⟨P_Q²⟩ (MHz)"]
-    assert v == pytest.approx(np.sqrt(5) * 1.6)
-    assert e == pytest.approx(np.sqrt(5) * 0.05)
+    assert v == pytest.approx(2.0 * np.sqrt(5) * 1.6)
+    assert e == pytest.approx(2.0 * np.sqrt(5) * 0.05)
 
 
 def test_run_batch_writes_table_and_report(tmp_path):

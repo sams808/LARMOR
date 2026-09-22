@@ -161,6 +161,9 @@ cost:
 | **Voigt (true)** | separable Gaussian ⊗ Lorentzian broadening |
 | **J-multiplet** | scalar J splitting to *n* equivalent spins |
 | **Czjzek / ext. Czjzek** | amorphous quadrupolar sites (glasses) |
+| **Czjzek, general d** | dmfit-style d fits; testing whether d = 5 is justified (the GIM ≡ Czjzek at d = 5) |
+| **Czjzek + δiso–C_Q correlation** | glasses whose isotropic shift tracks C_Q (tilted MQMAS ridges) |
+| **Two-site exchange** | chemical exchange between two isotropic sites (VT series → Arrhenius) |
 | **Amorphous** | BO₃ in ¹¹B; a well-defined C_Q with modest Gaussian disorder |
 | **Quad CT / 1st / +CSA** | crystalline quadrupolar sites |
 | **CSA powder** | spin-½ shielding anisotropy (+ sidebands) |

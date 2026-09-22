@@ -20,7 +20,8 @@ def test_lineshapes_manual_covers_every_model():
         assert f"`{m['name']}`" in raw, f"model {m['name']} not in lineshapes.md"
     for token in ("Czjzek", "d'Espinose", "Central Limit Theorem",
                   "quadrupolar product", "Haeberlen", "mrsimulator",
-                  "Sam Soudani"):
+                  "Le Caër", "Gaussian Isotropic Model", "Gutowsky",
+                  "McConnell", "Sam Soudani"):
         assert token in flat, f"missing: {token}"
 
 

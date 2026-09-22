@@ -51,7 +51,7 @@ def ftol_from_pct(pct) -> float | None:
 #: quantisation swamps the true derivative at a ~1e-8 relative step.
 _ANALYTIC_MODELS = frozenset({
     "gauss_lor", "gl_norm", "voigt", "jmultiplet", "sidebands",
-    "spectrum", "function",
+    "spectrum", "function", "exchange2",
 })
 
 #: models that simulate on a DISCRETE grid and therefore need the coarse
@@ -60,8 +60,8 @@ _ANALYTIC_MODELS = frozenset({
 #: adding a model without deciding its Jacobian step fails a test instead of
 #: silently getting the wrong derivative.
 _SIMULATED_MODELS = frozenset({
-    "czjzek", "ext_czjzek", "amorphous", "quad_ct", "quad_first",
-    "quad_csa", "csa_mas", "csa_czjzek",
+    "czjzek", "czjzek_d", "czjzek_corr", "ext_czjzek", "amorphous",
+    "quad_ct", "quad_first", "quad_csa", "csa_mas", "csa_czjzek",
 })
 
 #: relative finite-difference step for simulated (grid-based) models. At

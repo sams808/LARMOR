@@ -357,22 +357,31 @@ def to_recipe(dm: DmfitFile, dimension: int = 0) -> tuple[Recipe, list[str]]:
     for i, line in enumerate(dim.lines):
         if line.model_name == "CzSimple":
             scz_khz = line.params["sCZ_CQ"].value
-            site = SiteModel(
-                model="czjzek",
-                label=line.name or f"CzSimple-{i}",
-                params={
-                    "isotropic_chemical_shift_ppm": Param(line.params["pos"].value),
-                    "sigma_Cq_MHz": Param(scz_khz * SCZ_TO_SIGMA / 1000.0, min=0.05),
-                    "shift_fwhm_ppm": Param(
-                        abs(line.params["dCS"].value) if "dCS" in line.params else 10.0,
-                        min=0.1,
-                    ),
-                    # dmfit amp -> LARMOR peak (see DMFIT_CZSIMPLE_AMP_RATIO)
-                    "amplitude": Param(
-                        line.params["amp"].value / DMFIT_CZSIMPLE_AMP_RATIO,
-                        min=0.0),
-                },
-            )
+            params = {
+                "isotropic_chemical_shift_ppm": Param(line.params["pos"].value),
+                "sigma_Cq_MHz": Param(scz_khz * SCZ_TO_SIGMA / 1000.0, min=0.05),
+                "shift_fwhm_ppm": Param(
+                    abs(line.params["dCS"].value) if "dCS" in line.params else 10.0,
+                    min=0.1,
+                ),
+                # dmfit amp -> LARMOR peak (see DMFIT_CZSIMPLE_AMP_RATIO)
+                "amplitude": Param(
+                    line.params["amp"].value / DMFIT_CZSIMPLE_AMP_RATIO,
+                    min=0.0),
+            }
+            model = "czjzek"
+            # dmfit's <d> is Czjzek's dimensionality: d = 5 (the default) is
+            # the plain czjzek model; anything else is LARMOR's czjzek_d
+            d_par = line.params.get("d")
+            if d_par is not None and abs(float(d_par.value) - 5.0) > 1e-6:
+                d_val = min(max(float(d_par.value), 1.0), 5.0)
+                model = "czjzek_d"
+                params["czjzek_d"] = Param(d_val, vary=False, min=1.0, max=5.0)
+                warnings.append(
+                    f"CzSimple line {line.name or i}: d = {d_par.value:g} "
+                    "imported as czjzek_d (general-d Czjzek)")
+            site = SiteModel(model=model, label=line.name or f"CzSimple-{i}",
+                             params=params)
             recipe.sites.append(site)
         elif line.model_name == "Gaus/Lor":
             site = SiteModel(

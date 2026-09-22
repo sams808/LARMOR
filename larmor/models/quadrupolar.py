@@ -1,8 +1,14 @@
-"""Quadrupolar models: Czjzek distribution and discrete second-order CT sites.
+"""Quadrupolar models: Czjzek distributions and discrete second-order CT sites.
 
-Both share the same physics engine (mrsimulator BlochDecayCTSpectrum):
+All share the same physics engine (mrsimulator BlochDecayCTSpectrum):
   - czjzek reweights a precomputed (Cq, eta) kernel -- fast in fits
-  - quad_ct simulates one site on demand with an LRU cache -- exact in Cq/eta
+  - czjzek_d: the same kernel with Czjzek's dimensionality d as a parameter
+    (d = 5 == czjzek == Le Caer & Brand's Gaussian Isotropic Model; dmfit
+    CzSimple's <d>)
+  - czjzek_corr: d = 5 weights, each C_Q group translated by a linear
+    (delta_iso, C_Q) correlation about the mean C_Q (slope 0 == czjzek)
+  - ext_czjzek / amorphous: other reweightings of the same kernel
+  - quad_ct etc. simulate one site on demand with an LRU cache -- exact in Cq/eta
 """
 from __future__ import annotations
 
@@ -113,12 +119,25 @@ def _gaussian_weight(grid: np.ndarray, mean: float, fwhm: float) -> np.ndarray:
 # --------------------------------------------------------------------------
 # Czjzek distribution (kernel-reweighting; kernel built once in larmor.engine)
 
-def _render_czjzek(v: dict, ctx: SimContext) -> np.ndarray:
+#: how far, in units of the stored sigma, the (Cq, eta) kernel grid must reach
+#: for a Czjzek family model. The stored sigma is mrsimulator's, whose
+#: distribution has sigma_Cz = 2 sigma: the |Cq| marginal peaks at 3.73 sigma
+#: and 21.3 % of the d = 5 mass lies beyond 5 sigma (4.5e-5 beyond 10 sigma).
+#: The old 5-sigma request dropped -- and renormalised away -- a fifth of the
+#: distribution whenever 5 sigma sat just under a ladder step. Shared by
+#: czjzek, czjzek_d and czjzek_corr so the three ask for ONE cached kernel and
+#: their identities (d = 5, slope = 0) hold exactly.
+CZJZEK_KERNEL_HEADROOM = 10.0
+
+
+def _kernel_for(ctx: SimContext, needed_cq_MHz: float):
+    """The cached (Cq, eta) CT basis covering ``ctx`` up to ``needed_cq_MHz``
+    (quantised to engine.CQ_MAX_LADDER), at the engine's resolution rules."""
     from larmor import engine
 
     sw, ref = engine.kernel_window(ctx.x_ppm, ctx.larmor_MHz)
-    cq_max = engine.kernel_cq_max(5.0 * float(v.get("sigma_Cq_MHz", 2.0)))
-    kernel = engine.build_kernel(
+    cq_max = engine.kernel_cq_max(float(needed_cq_MHz))
+    return engine.build_kernel(
         ctx.nucleus, ctx.larmor_MHz, ctx.spin_rate_Hz, sw_Hz=sw,
         npts=min(int(engine.KERNEL_SETTINGS["npts"]
                      * max(1.0, sw / engine.KERNEL_MIN_SW_HZ)), 16384),
@@ -126,15 +145,26 @@ def _render_czjzek(v: dict, ctx: SimContext) -> np.ndarray:
         n_cq=max(engine.KERNEL_SETTINGS["n_cq"],
                  int(engine.KERNEL_SETTINGS["n_cq"] * cq_max / 25.0)),
         n_eta=int(engine.KERNEL_SETTINGS["n_eta"]))
-    y = kernel.weights(v["sigma_Cq_MHz"]) @ kernel.K
-    y = _broaden_shift(kernel.x_ppm, y, v["isotropic_chemical_shift_ppm"],
-                       _czjzek_fwhm(v))
+
+
+def _finish(kernel, y: np.ndarray, v: dict, ctx: SimContext) -> np.ndarray:
+    """Peak-normalise to the site amplitude and move from the kernel axis to
+    the context axis (no interpolation when they coincide)."""
     peak = y.max()
     y = v["amplitude"] * (y / peak) if peak > 0 else y
     if kernel.x_ppm.shape == ctx.x_ppm.shape and \
             np.allclose(kernel.x_ppm, ctx.x_ppm):
         return y
     return np.interp(ctx.x_ppm, kernel.x_ppm, y, left=0.0, right=0.0)
+
+
+def _render_czjzek(v: dict, ctx: SimContext) -> np.ndarray:
+    kernel = _kernel_for(
+        ctx, CZJZEK_KERNEL_HEADROOM * float(v.get("sigma_Cq_MHz", 2.0)))
+    y = kernel.weights(v["sigma_Cq_MHz"]) @ kernel.K
+    y = _broaden_shift(kernel.x_ppm, y, v["isotropic_chemical_shift_ppm"],
+                       _czjzek_fwhm(v))
+    return _finish(kernel, y, v, ctx)
 
 
 register(Model(
@@ -147,13 +177,15 @@ register(Model(
         ParamDef("isotropic_chemical_shift_ppm", "pos", 0.0, "ppm",
                  "isotropic chemical shift"),
         # max: the kernel's Cq ladder tops out at 400 MHz and the render
-        # requests 5*sigma of headroom, so sigma beyond 80 MHz cannot be
+        # requests 10*sigma of headroom (CZJZEK_KERNEL_HEADROOM: 21 % of the
+        # mass lies beyond 5 sigma), so sigma beyond 40 MHz cannot be
         # represented -- it saturated into a plain Gaussian that LOOKED
         # converged. At the bound the fit's at-bounds diagnosis fires
         # instead. (The largest published glass sigmas are ~20 MHz.)
         ParamDef("sigma_Cq_MHz", "sigma", 2.0, "MHz",
-                 "Czjzek width parameter (mode of |Cq| = 2 sigma)",
-                 min=0.05, max=80.0),
+                 "Czjzek width parameter (mrsimulator sigma; sigma_Cz = "
+                 "dmfit sCZ_CQ = 2 sigma; mode of |Cq| = 3.7 sigma)",
+                 min=0.05, max=40.0),
         ParamDef("shift_fwhm_ppm", "dCS", 10.0, "ppm",
                  "isotropic-shift distribution FWHM (dmfit dCS; diagonal in 2D)",
                  min=0.1),
@@ -172,19 +204,8 @@ register(Model(
 def _render_ext_czjzek(v: dict, ctx: SimContext) -> np.ndarray:
     from mrsimulator.models import ExtCzjzekDistribution
 
-    from larmor import engine
-
-    sw, ref = engine.kernel_window(ctx.x_ppm, ctx.larmor_MHz)
-    cq_max = engine.kernel_cq_max(2.5 * float(v.get("Cq_MHz", 5.0))
-                                  * (1.0 + float(v.get("eps", 0.3))))
-    kernel = engine.build_kernel(
-        ctx.nucleus, ctx.larmor_MHz, ctx.spin_rate_Hz, sw_Hz=sw,
-        npts=min(int(engine.KERNEL_SETTINGS["npts"]
-                     * max(1.0, sw / engine.KERNEL_MIN_SW_HZ)), 16384),
-        ref_offset_ppm=ref, cq_max_MHz=cq_max,
-        n_cq=max(engine.KERNEL_SETTINGS["n_cq"],
-                 int(engine.KERNEL_SETTINGS["n_cq"] * cq_max / 25.0)),
-        n_eta=int(engine.KERNEL_SETTINGS["n_eta"]))
+    kernel = _kernel_for(ctx, 2.5 * float(v.get("Cq_MHz", 5.0))
+                         * (1.0 + float(v.get("eps", 0.3))))
     # the dominant tensor must share the pdf grid's unit system (MHz here)
     dominant = {"Cq": v["Cq_MHz"], "eta": v["eta"]}
     res = ExtCzjzekDistribution(dominant, eps=max(v["eps"], 1e-3)).pdf(
@@ -197,12 +218,7 @@ def _render_ext_czjzek(v: dict, ctx: SimContext) -> np.ndarray:
     y = w @ kernel.K
     y = _broaden_shift(kernel.x_ppm, y, v["isotropic_chemical_shift_ppm"],
                        _czjzek_fwhm(v))
-    peak = y.max()
-    y = v["amplitude"] * (y / peak) if peak > 0 else y
-    if kernel.x_ppm.shape == ctx.x_ppm.shape and \
-            np.allclose(kernel.x_ppm, ctx.x_ppm):
-        return y
-    return np.interp(ctx.x_ppm, kernel.x_ppm, y, left=0.0, right=0.0)
+    return _finish(kernel, y, v, ctx)
 
 
 register(Model(
@@ -228,6 +244,141 @@ register(Model(
         ParamDef("amplitude", "amp", 1.0, "", "peak height", min=0.0),
     ),
     render=_render_ext_czjzek,
+))
+
+
+# --------------------------------------------------------------------------
+# Czjzek, general d: Czjzek's dimensionality as a parameter (dmfit CzSimple <d>)
+#
+# Le Caer & Brand's Gaussian Isotropic Model (five i.i.d. Gaussian components
+# of the traceless symmetric EFG tensor) IS the d = 5 Czjzek distribution that
+# mrsimulator's CzjzekDistribution implements, so a separate "GIM" model would
+# be byte-identical to `czjzek`; their extended GIM is `ext_czjzek`. What
+# mrsimulator does not offer is Czjzek's exponent d - 1 as a free parameter,
+# which dmfit exposes as CzSimple's <d> box. This model adds it on the shared
+# kernel through czjzek_dist.czjzek_weights, which reproduces
+# CzjzekKernel.weights at d = 5 -- so czjzek_d at d = 5 renders exactly as
+# czjzek on the same cached kernel. The parameter is named czjzek_d (not d):
+# the `function` model already owns a parameter literally called d, and
+# table columns, labels and multi-field sharing are keyed by parameter name.
+
+def _render_czjzek_d(v: dict, ctx: SimContext) -> np.ndarray:
+    from larmor import czjzek_dist
+
+    sigma = float(v.get("sigma_Cq_MHz", 2.0))
+    kernel = _kernel_for(ctx, CZJZEK_KERNEL_HEADROOM * sigma)
+    w = czjzek_dist.czjzek_weights(sigma, float(v.get("czjzek_d", 5.0)),
+                                   kernel.cq_grid_MHz, kernel.eta_grid)
+    y = w @ kernel.K
+    y = _broaden_shift(kernel.x_ppm, y, v["isotropic_chemical_shift_ppm"],
+                       _czjzek_fwhm(v))
+    return _finish(kernel, y, v, ctx)
+
+
+register(Model(
+    name="czjzek_d",
+    label="Czjzek, general d  (GIM at d = 5)",
+    description="Czjzek distribution with Czjzek's dimensionality d as a "
+                "parameter (dmfit CzSimple <d>). d = 5 is the fully isotropic "
+                "Gaussian Isotropic Model == the plain czjzek model; d < 5 is "
+                "an empirical, more constrained family.",
+    needs_quadrupolar=True,
+    params=(
+        ParamDef("isotropic_chemical_shift_ppm", "pos", 0.0, "ppm",
+                 "isotropic chemical shift"),
+        ParamDef("sigma_Cq_MHz", "sigma", 2.0, "MHz",
+                 "Czjzek width parameter (mrsimulator sigma; sigma_Cz = "
+                 "dmfit sCZ_CQ = 2 sigma)",
+                 min=0.05, max=40.0),
+        ParamDef("czjzek_d", "d", 5.0, "",
+                 "Czjzek dimensionality d (5 = GIM/standard Czjzek; set 3-4 "
+                 "before freeing it)", min=1.0, max=5.0, vary=False),
+        ParamDef("shift_fwhm_ppm", "dCS", 10.0, "ppm",
+                 "isotropic-shift distribution FWHM (dmfit dCS)", min=0.1),
+        ParamDef("line_fwhm_ppm", "line", 0.0, "ppm",
+                 "round point/line broadening (dmfit wid)", min=0.0),
+        ParamDef("amplitude", "amp", 1.0, "", "peak height", min=0.0),
+    ),
+    render=_render_czjzek_d,
+))
+
+
+# --------------------------------------------------------------------------
+# Czjzek + correlated isotropic shift: delta_iso = pos + slope (C_Q - <C_Q>)
+#
+# Real glasses correlate the isotropic shift with the quadrupolar coupling
+# (17O, 23Na, 27Al MQMAS: Vermillion 1998, Clark 2004, Vasconcelos 2013). The
+# kernel rows are eta-major, so one eta-summed subspectrum per C_Q group is
+# formed (80 rows on the 25 MHz step, not 880), each translated by the
+# correlated shift and summed; the residual dCS and line broadening follow.
+
+def _shift_sum(x: np.ndarray, Y: np.ndarray, shifts: np.ndarray,
+               weights: np.ndarray | None = None, tol: float = 1e-6
+               ) -> np.ndarray:
+    """Sum the rows of ``Y`` (each sampled on the ascending axis ``x``) after
+    translating row q by ``shifts[q]`` along x -- linear interpolation, zero
+    outside the axis, the primitive _broaden_shift uses. When ``weights`` is
+    given, rows below ``tol`` times the largest weight are skipped (they
+    carry no visible intensity)."""
+    x = np.asarray(x, float)
+    Y = np.asarray(Y, float)
+    shifts = np.asarray(shifts, float)
+    keep = np.ones(Y.shape[0], dtype=bool)
+    if weights is not None:
+        weights = np.asarray(weights, float)
+        keep = weights >= tol * (weights.max() if weights.size else 0.0)
+    out = np.zeros(x.shape[0])
+    for q in np.flatnonzero(keep):
+        out += np.interp(x - shifts[q], x, Y[q], left=0.0, right=0.0)
+    return out
+
+
+def _render_czjzek_corr(v: dict, ctx: SimContext) -> np.ndarray:
+    sigma = float(v.get("sigma_Cq_MHz", 2.0))
+    kernel = _kernel_for(ctx, CZJZEK_KERNEL_HEADROOM * sigma)
+    n_eta, n_cq = kernel.eta_grid.size, kernel.cq_grid_MHz.size
+    # kernel rows follow np.meshgrid(cq, eta, indexing='xy').ravel(): eta-major
+    W = kernel.weights(sigma).reshape(n_eta, n_cq)
+    # one eta-summed subspectrum per C_Q: the shift correlates with C_Q only
+    Y = np.einsum("eq,eqx->qx", W, kernel.K.reshape(n_eta, n_cq, -1))
+    wq = W.sum(axis=0)
+    cq_mean = float(wq @ kernel.cq_grid_MHz)
+    pos = float(v["isotropic_chemical_shift_ppm"])
+    slope = float(v.get("shift_slope_ppm_per_MHz", 0.0))
+    # pivot at <C_Q>: pos stays the ensemble-MEAN shift for any slope and the
+    # centre of gravity is slope-invariant (sum_q wq (C_Q - <C_Q>) = 0), so
+    # pos and slope are decorrelated in the fit
+    shifts = pos + slope * (kernel.cq_grid_MHz - cq_mean)
+    y = _shift_sum(kernel.x_ppm, Y, shifts, weights=wq)
+    y = _broaden_shift(kernel.x_ppm, y, 0.0, _czjzek_fwhm(v))
+    return _finish(kernel, y, v, ctx)
+
+
+register(Model(
+    name="czjzek_corr",
+    label="Czjzek + δiso–C_Q correlation",
+    description="Czjzek (d = 5) distribution whose isotropic shift depends "
+                "linearly on C_Q about the ensemble mean: δiso = pos + "
+                "slope·(C_Q − ⟨C_Q⟩), plus a residual Gaussian shift "
+                "distribution dCS. slope = 0 is the plain Czjzek model.",
+    needs_quadrupolar=True,
+    params=(
+        ParamDef("isotropic_chemical_shift_ppm", "pos", 0.0, "ppm",
+                 "ensemble-mean isotropic chemical shift"),
+        ParamDef("sigma_Cq_MHz", "sigma", 2.0, "MHz",
+                 "Czjzek width parameter (mrsimulator sigma; sigma_Cz = "
+                 "dmfit sCZ_CQ = 2 sigma)",
+                 min=0.05, max=40.0),
+        ParamDef("shift_slope_ppm_per_MHz", "slope", 0.0, "ppm/MHz",
+                 "dδiso/dC_Q about the mean C_Q (0 = plain Czjzek)",
+                 min=-50.0, max=50.0),
+        ParamDef("shift_fwhm_ppm", "dCS", 5.0, "ppm",
+                 "residual shift-distribution FWHM at fixed C_Q", min=0.1),
+        ParamDef("line_fwhm_ppm", "line", 0.0, "ppm",
+                 "round point/line broadening (dmfit wid)", min=0.0),
+        ParamDef("amplitude", "amp", 1.0, "", "peak height", min=0.0),
+    ),
+    render=_render_czjzek_corr,
 ))
 
 
@@ -276,12 +427,7 @@ def _render_amorphous(v: dict, ctx: SimContext) -> np.ndarray:
     y = _broaden_shift_pv(kernel.x_ppm, y, v["isotropic_chemical_shift_ppm"],
                           v.get("shift_fwhm_ppm", 0.0),
                           v.get("line_fwhm_ppm", 0.0), v.get("gl", 0.0))
-    peak = y.max()
-    y = v["amplitude"] * (y / peak) if peak > 0 else y
-    if kernel.x_ppm.shape == ctx.x_ppm.shape and \
-            np.allclose(kernel.x_ppm, ctx.x_ppm):
-        return y
-    return np.interp(ctx.x_ppm, kernel.x_ppm, y, left=0.0, right=0.0)
+    return _finish(kernel, y, v, ctx)
 
 
 register(Model(

@@ -22,6 +22,8 @@ CALIB_FRAC = 0.10
 
 _WIDTH_KEY = {
     "czjzek": ("sigma_Cq_MHz", True),
+    "czjzek_d": ("sigma_Cq_MHz", True),        # seeds exactly like czjzek
+    "czjzek_corr": ("sigma_Cq_MHz", True),     # (shared sigma rescale path)
     "ext_czjzek": ("Cq_MHz", True),
     "quad_ct": ("Cq_MHz", True),
     "quad_csa": ("Cq_MHz", True),
@@ -34,6 +36,7 @@ _WIDTH_KEY = {
     "csa_mas": ("shift_fwhm_ppm", False),
     "csa_czjzek": ("shift_fwhm_ppm", False),
     "voigt": ("gauss_fwhm_ppm", False),
+    "exchange2": ("lorentz_fwhm_ppm", False),
 }
 
 #: models with NOTHING to seed from a band width: a spectrum component's
@@ -191,6 +194,12 @@ def start_values(model: str, ppm, amp, nucleus: str, larmor_MHz: float,
         if model == "voigt":                   # split the width between both
             out["gauss_fwhm_ppm"] = float(fwhm * 0.7)
             out["lorentz_fwhm_ppm"] = float(fwhm * 0.4)
+        if model == "exchange2":
+            # an exchange line is fitted because the band is broader (or
+            # doubled) than a single line: put the two sites across it and
+            # give each a fraction of the observed width
+            out = {"lorentz_fwhm_ppm": float(fwhm * 0.3),
+                   "split_ppm": float(fwhm * 0.6)}
         return out
     _, breadth = band_width_ppm(ppm, amp, centre_ppm, frac=CALIB_FRAC)
     # probe with quad_ct always: it is the plain second-order CT pattern all

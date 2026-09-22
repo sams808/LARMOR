@@ -8,7 +8,11 @@ from __future__ import annotations
 _MODEL_PHRASE = {
     "gauss_lor": "Gauss/Lorentz lines",
     "czjzek": "a Czjzek distribution of quadrupolar parameters",
+    "czjzek_d": "a generalised (d-parameter) Czjzek distribution",
+    "czjzek_corr": "a Czjzek distribution with a correlated (δiso, C_Q) "
+                   "shift dependence",
     "ext_czjzek": "an extended (Gaussian-isotropic) Czjzek distribution",
+    "exchange2": "two-site Bloch–McConnell exchange lineshapes",
     "quad_ct": "second-order quadrupolar central-transition lineshapes",
     "quad_csa": "combined quadrupolar + CSA lineshapes",
     "quad_first": "first-order quadrupolar lineshapes with spinning sidebands",
@@ -22,9 +26,15 @@ _COLS = [
     ("isotropic_chemical_shift_ppm", "δiso (ppm)", "{:.2f}"),
     ("Cq_MHz", "C_Q (MHz)", "{:.2f}"),
     ("sigma_Cq_MHz", "σ(C_Q) (MHz)", "{:.2f}"),
+    ("czjzek_d", "d", "{:.2f}"),
+    ("shift_slope_ppm_per_MHz", "dδ/dC_Q (ppm/MHz)", "{:.2f}"),
     ("eta", "η", "{:.2f}"),
     ("shift_fwhm_ppm", "FWHM (ppm)", "{:.1f}"),
     ("line_fwhm_ppm", "FWHM (ppm)", "{:.1f}"),
+    ("split_ppm", "Δδ (ppm)", "{:.2f}"),
+    ("pop_a", "p_A", "{:.2f}"),
+    ("k_ex_hz", "k_ex (s⁻¹)", "{:.3g}"),
+    ("lorentz_fwhm_ppm", "Lorentz FWHM (ppm)", "{:.1f}"),
 ]
 
 
@@ -97,17 +107,20 @@ def methods_sentence(recipe: dict, error_method: str = "covariance") -> str:
                else "a Monte-Carlo (parametric bootstrap) analysis")
     field_txt = f" (Larmor frequency {field:.1f} MHz)" if field else ""
     # a Czjzek width is quoted in four incompatible conventions across the
-    # literature (σ / 2σ / dmfit's displayed CQ = 4σ / P_Q = √5σ) — a paper
-    # that names its convention costs one sentence and saves every reader
-    # a factor-of-4 ambiguity, so the generated Methods text always does
+    # literature (σ / σ_Cz = sCZ_CQ = 2σ / dmfit's displayed CQ = 4σ /
+    # P_Q = 2√5·σ) — a paper that names its convention costs one sentence and
+    # saves every reader a factor-of-4 ambiguity, so the generated Methods
+    # text always does
     czjzek_txt = ""
-    if any(s.get("model") in ("czjzek", "ext_czjzek", "csa_czjzek")
+    if any(s.get("model") in ("czjzek", "czjzek_d", "czjzek_corr",
+                              "ext_czjzek", "csa_czjzek")
            for s in sites):
         czjzek_txt = (
             " Czjzek widths are reported as the distribution parameter σ "
-            "(mrsimulator convention) together with the rms quadrupolar "
-            "product P_Q = √5·σ; for comparison, dmfit's displayed CQ for "
-            "the same fit corresponds to 4σ (2 × sCZ_CQ)."
+            "(mrsimulator convention; the Czjzek-paper width is σ_Cz = 2σ) "
+            "together with the rms quadrupolar product P_Q = 2√5·σ "
+            "(= √5·σ_Cz); for comparison, dmfit's displayed CQ for the same "
+            "fit corresponds to 4σ (2 × sCZ_CQ)."
         )
     return (
         f"The {nucleus} MAS NMR spectra{field_txt} were deconvoluted into "

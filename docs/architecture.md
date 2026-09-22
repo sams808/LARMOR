@@ -30,9 +30,9 @@ linear prediction, applied live or absolute from an unprocessed base) plus
 `baseline.py` for the iterative baseline corrector.
 
 Lineshape models live in `larmor/models/` behind a registry (`REGISTRY`,
-15 models at the time of writing: gauss_lor, voigt, czjzek, ext_czjzek,
-quad_ct, quad_csa, quad_first, csa_mas, csa_czjzek, amorphous, sidebands,
-jmultiplet, spectrum, function, gl_norm). Models are nucleus-agnostic; spin
+18 models at the time of writing: gauss_lor, gl_norm, voigt, jmultiplet,
+sidebands, exchange2, czjzek, czjzek_d, czjzek_corr, ext_czjzek, amorphous,
+quad_ct, quad_csa, quad_first, csa_mas, csa_czjzek, spectrum, function). Models are nucleus-agnostic; spin
 and gyromagnetic ratio are resolved from the isotope symbol at simulation
 time. `engine.py` builds and caches the simulation kernels (see performance
 below) and `recipe.py` defines the `Recipe`/`SiteModel` structures that

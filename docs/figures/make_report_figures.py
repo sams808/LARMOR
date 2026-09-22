@@ -179,7 +179,8 @@ def fig3():
     from larmor import czjzek_dist as cd
     fig, (axA, axB) = plt.subplots(1, 2, figsize=(9.2, 3.7))
 
-    # Panel A: P(Cq) marginals, mode = 2 sigma
+    # Panel A: P(Cq) marginals in the STORED (mrsimulator) sigma; the width in
+    # Czjzek's formula is sigma_Cz = 2 sigma, so the mode sits at ~3.7 sigma
     for sigma, col in ((1.0, BLUE), (1.8, GREEN), (3.0, VERM)):
         cq = cd.suggested_cq_axis(sigma, 1400)
         p = cd.marginal_cq(sigma, cq)
@@ -188,12 +189,14 @@ def fig3():
                  label=r"$\sigma$ = %.1f MHz" % sigma)
         mode = cq[int(np.argmax(cd.marginal_cq(sigma, cq)))]
         axA.plot([mode], [1.0], "v", color=col, ms=7, zorder=4)
-        axA.annotate(r"$\approx\!2\sigma$", (mode, 1.02), color=col, fontsize=8.5,
-                     ha="center")
-    axA.set_xlim(0, 12)
+        axA.annotate(r"$\approx\!3.7\sigma$", (mode, 1.02), color=col,
+                     fontsize=8.5, ha="center")
+    axA.set_xlim(0, 25)
+    axA.set_ylim(0, 1.12)
     axA.set_xlabel(r"$C_Q$  (MHz)")
     axA.set_ylabel(r"$P(C_Q)$  (norm.)")
-    axA.set_title(r"(a) Czjzek $P(C_Q)$ — mode of $|C_Q|=2\sigma$")
+    axA.set_title(r"(a) Czjzek $P(C_Q)$ — mode of $|C_Q|\approx 3.7\sigma$"
+                  r" ($1.87\,\sigma_{Cz}$)")
     axA.legend(loc="upper right")
 
     # Panel B: numerical invariants vs analytic lines
@@ -202,30 +205,32 @@ def fig3():
     for s in sig:
         cq = cd.suggested_cq_axis(s, 2000)
         mode_num.append(cq[int(np.argmax(cd.marginal_cq(s, cq)))])
-        # numerical sqrt(<PQ^2>) from the 2D pdf (integrate the full tail out to
-        # ~8 sigma so the RMS is not truncated); czjzek_pdf meshes 1-D axes ->
-        # returns shape (len(eta), len(cq))
-        cq_full = np.linspace(0, 8 * s, 3000)
+        # numerical sqrt(<PQ^2>) from the 2D pdf (integrate the full tail out
+        # to 14 sigma = 7 sigma_Cz so the RMS is not truncated); czjzek_pdf
+        # meshes 1-D axes -> returns shape (len(eta), len(cq))
+        cq_full = np.linspace(0, 14 * s, 3000)
         eta = np.linspace(0, 1, 81)
         w = cd.czjzek_pdf(s, cq_full, eta)
         CQ, ET = np.meshgrid(cq_full, eta)             # (len(eta), len(cq))
         pq2 = CQ ** 2 * (1 + ET ** 2 / 3.0)
         rms_num.append(np.sqrt((w * pq2).sum() / w.sum()))
     ss = np.linspace(0, 4.2, 50)
-    axB.plot(ss, np.sqrt(5) * ss, color=VERM, lw=1.5, ls=(0, (4, 3)),
-             label=r"$\sqrt{5}\,\sigma = \sqrt{\langle P_Q^2\rangle}$ (exact)")
+    axB.plot(ss, 2 * np.sqrt(5) * ss, color=VERM, lw=1.5, ls=(0, (4, 3)),
+             label=r"$2\sqrt{5}\,\sigma = \sqrt{5}\,\sigma_{Cz}"
+                   r" = \sqrt{\langle P_Q^2\rangle}$ (exact)")
     axB.plot(ss, 2 * ss, color=BLUE, lw=1.2, ls=(0, (1, 2)),
-             label=r"$2\sigma$ (dmfit width)")
+             label=r"$2\sigma = \sigma_{Cz}$ (dmfit sCZ_CQ)")
     axB.scatter(sig, rms_num, s=30, facecolor=VERM, edgecolor="white",
                 linewidth=0.5, zorder=3, marker="s",
                 label=r"numerical $\sqrt{\langle P_Q^2\rangle}$")
     axB.scatter(sig, mode_num, s=28, facecolor=BLUE, edgecolor="white",
-                linewidth=0.5, zorder=3, label=r"numerical mode ($\approx\!1.85\sigma$)")
-    axB.set_xlim(0, 4.2); axB.set_ylim(0, 10)
-    axB.set_xlabel(r"$\sigma$  (MHz)")
+                linewidth=0.5, zorder=3,
+                label=r"numerical mode of $|C_Q|$ ($\approx\!3.7\sigma$)")
+    axB.set_xlim(0, 4.2); axB.set_ylim(0, 20)
+    axB.set_xlabel(r"$\sigma$  (MHz, stored / mrsimulator)")
     axB.set_ylabel("characteristic width (MHz)")
     axB.set_title("(b) Czjzek invariants (numerical = analytic)")
-    axB.legend(loc="upper left")
+    axB.legend(loc="upper left", fontsize=8)
     save(fig, "fig3_czjzek_distribution.png")
 
 

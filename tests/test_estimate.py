@@ -102,11 +102,13 @@ def test_start_values_land_in_the_right_ballpark():
     assert estimate.start_values("quad_ct", x, np.zeros_like(x), "81Br", 216.0) == {}
 
 
+@pytest.mark.slow
 def test_czjzek_grid_ceiling_follows_the_requested_sigma():
     """Fixing the kernel's spectral window was not enough: its (Cq, eta) GRID
     also stopped at 25 MHz, so a Czjzek distribution with weight above that
     saturated -- 81Br stuck at ~1013 ppm however large sigma got, against
-    1488 ppm of real data."""
+    1488 ppm of real data. (Builds three static 81Br kernels at the 10-sigma
+    headroom -- 50/100/200 MHz ladder steps, ~1 min -- hence slow.)"""
     assert engine.kernel_cq_max(10.0) == 25.0
     assert engine.kernel_cq_max(30.0) == 50.0
     assert engine.kernel_cq_max(300.0) == 400.0

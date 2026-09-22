@@ -42,10 +42,11 @@ wheels and the install fails; see INSTALL.md if that happens to you.
 
 **Fitting.** Drag components directly on the spectrum (position, amplitude, width
 handles), or edit them in a parameter table with per-parameter fix/bounds/links.
-Fifteen lineshape models are available, from plain Gauss/Lorentz, Voigt and
-J-multiplets through Czjzek, extended Czjzek, dmfit's "Amorphous" Gaussian
-disorder, second-order quadrupolar, quad+CSA and CSA powder patterns, to external
-spectra used as backgrounds. The quadrupolar models take the nucleus and field
+Eighteen lineshape models are available, from plain Gauss/Lorentz, Voigt and
+J-multiplets through Czjzek (also with a free dimensionality d), a correlated
+shift–C_Q Czjzek, extended Czjzek, dmfit's "Amorphous" Gaussian disorder,
+second-order quadrupolar, quad+CSA and CSA powder patterns, two-site chemical
+exchange, to external spectra used as backgrounds. The quadrupolar models take the nucleus and field
 from the data, so there is nothing special to do for a new isotope. Fit windows
 can be a union of regions, dmfit-style, and a multi-start "Auto fit" helps with
 awkward starting points.

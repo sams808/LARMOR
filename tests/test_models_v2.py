@@ -236,12 +236,21 @@ def test_csa_czjzek_broadens_with_disorder():
 
 def test_czjzek_sigma_has_a_representable_ceiling():
     """D6: sigma_Cq_MHz had NO upper bound and could run away past what the
-    kernel's Cq ladder (<= 400 MHz, built at 5*sigma) can represent -- the
-    lineshape saturated into a plain Gaussian that looked converged. The
-    bound puts the runaway at a reportable at-bounds pin instead."""
+    kernel's Cq ladder (<= 400 MHz, built at 10*sigma since the headroom fix:
+    21 % of the mass lies beyond 5*sigma) can represent -- the lineshape
+    saturated into a plain Gaussian that looked converged. The bound puts the
+    runaway at a reportable at-bounds pin instead."""
     from larmor import models
     from larmor.engine import CQ_MAX_LADDER
+    from larmor.models.quadrupolar import CZJZEK_KERNEL_HEADROOM
 
-    pd = {p.name: p for p in models.get("czjzek").params}["sigma_Cq_MHz"]
-    assert pd.max is not None
-    assert pd.max * 5.0 <= CQ_MAX_LADDER[-1]
+    assert CZJZEK_KERNEL_HEADROOM == 10.0
+    # every Czjzek-family model (whatever carries a sigma_Cq_MHz) shares the
+    # same kernel request rule, so the same ceiling must hold for each
+    family = [n for n in models.REGISTRY
+              if "sigma_Cq_MHz" in models.get(n).param_names]
+    assert "czjzek" in family
+    for name in family:
+        pd = {p.name: p for p in models.get(name).params}["sigma_Cq_MHz"]
+        assert pd.max is not None, name
+        assert pd.max * CZJZEK_KERNEL_HEADROOM <= CQ_MAX_LADDER[-1], name
