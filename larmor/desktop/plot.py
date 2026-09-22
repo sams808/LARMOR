@@ -8,6 +8,7 @@ import pyqtgraph as pg
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
 
+from larmor import cellparse
 from larmor.desktop import theme
 
 #: fallback categorical palette (used before a theme is applied / in headless code)
@@ -152,6 +153,12 @@ class SpectrumView(pg.PlotWidget):
         self._add_mode: str | None = None
         self.show_components = True
         self.show_residual = True
+        # component names: pinned at each maximum (View > Component labels)
+        # or shown for the component under the cursor when not pinned
+        self.show_labels = False
+        self._comp_labels: list[pg.TextItem] = []
+        self._comp_data: list[tuple] = []      # (site, x, y, text) visible
+        self._hover_label: pg.TextItem | None = None
 
         self.scene().sigMouseClicked.connect(self._on_click)
         self.scene().sigMouseMoved.connect(self._on_move)
@@ -345,6 +352,8 @@ class SpectrumView(pg.PlotWidget):
         if self.sceneBoundingRect().contains(scene_pos):
             p = vb.mapSceneToView(scene_pos)
             self.cursor_moved.emit(float(p.x()), float(p.y()))
+            if not self.show_labels:
+                self._hover_component(float(p.x()))
 
     # ---------- add mode ----------
     def set_add_mode(self, model_name: str | None):
@@ -542,7 +551,8 @@ class SpectrumView(pg.PlotWidget):
         return vals
 
     # ---------- literature shift-range overlay (assignment guide) ----------
-    def set_ref_ranges(self, ranges: list[dict] | None, citation: str = ""):
+    def set_ref_ranges(self, ranges: list[dict] | None, citation: str = "",
+                       positions: list[dict] | None = None):
         """Draw (or clear, with None/[]) labeled, NON-interactive shaded
         δiso spans — the literature assignment guide (View ▸ Literature
         shift ranges). Each entry: {label, lo_ppm, hi_ppm, quad, note};
@@ -551,6 +561,9 @@ class SpectrumView(pg.PlotWidget):
         for item in getattr(self, "_ref_items", []):
             self.removeItem(item)
         self._ref_items: list = []
+        if not ranges and not positions:
+            return
+        self._draw_ref_positions(positions or [])
         if not ranges:
             return
         t = theme.active()
@@ -587,6 +600,27 @@ class SpectrumView(pg.PlotWidget):
         vb = self.getPlotItem().getViewBox()
         vb.sigRangeChanged.connect(self._refresh_ref_labels)
         self._ref_meta = list(ranges)
+
+    def _draw_ref_positions(self, positions: list[dict]):
+        """Reported single positions (e.g. crystalline fluorides) as dotted
+        ticks with a compound label, cleared together with the ranges."""
+        t = theme.active()
+        for k, r in enumerate(positions):
+            line = pg.InfiniteLine(
+                pos=float(r["ppm"]), angle=90, movable=False,
+                pen=pg.mkPen(t.text_dim, width=1, style=Qt.DotLine))
+            line.setZValue(-18)
+            tip = f"{r['label']}: {r['ppm']:g} ppm"
+            if r.get("note"):
+                tip += f"\n{r['note']}"
+            if r.get("_citation"):
+                tip += f"\n{r['_citation']}"
+            line.setToolTip(tip)
+            line.label = pg.InfLineLabel(
+                line, r["label"], position=0.97 - 0.04 * (k % 4),
+                color=t.text_dim, movable=False)
+            self.addItem(line)
+            self._ref_items.append(line)
 
     def _place_ref_label(self, label, r: dict, k: int):
         vb = self.getPlotItem().getViewBox()
@@ -656,6 +690,8 @@ class SpectrumView(pg.PlotWidget):
             for c in self._components:
                 self.removeItem(c)
             self._components.clear()
+            self._comp_data = []
+            self._refresh_comp_labels()
             return
         self._model.setData(x, total)
 
@@ -677,6 +713,9 @@ class SpectrumView(pg.PlotWidget):
             self._components.append(item)
         while len(self._components) > len(per_site):
             self.removeItem(self._components.pop())
+        self._comp_data = []
+        xa = np.asarray(x, float)
+        order = np.argsort(xa)
         for i, ys in enumerate(per_site):
             item = self._components[i]
             if self.show_components and i not in hidden:
@@ -684,8 +723,66 @@ class SpectrumView(pg.PlotWidget):
                 item.setPen(pg.mkPen(col, width=1.3, style=Qt.DashLine))
                 fill = pg.mkColor(col); fill.setAlpha(28)
                 item.setData(x, ys, fillLevel=0.0, fillBrush=pg.mkBrush(fill))
+                name = labels[i] if i < len(labels) and labels[i] else ""
+                text = cellparse.index_to_letter(i) + (f" \u00b7 {name}" if name else "")
+                ya = np.asarray(ys, float)
+                if ya.shape == xa.shape and ya.size:
+                    self._comp_data.append((i, xa[order], ya[order], text))
             else:
                 item.setData([], [])
+        self._refresh_comp_labels()
+
+    # ---------- component labels ----------
+    def set_show_labels(self, on: bool):
+        """Pin every visible component's letter and name at its maximum
+        (View > Component labels). Off, the name still appears for the
+        component under the cursor."""
+        self.show_labels = bool(on)
+        if self.show_labels and self._hover_label is not None:
+            self._hover_label.setVisible(False)
+        self._refresh_comp_labels()
+
+    def _refresh_comp_labels(self):
+        for it in self._comp_labels:
+            self.removeItem(it)
+        self._comp_labels.clear()
+        if not self.show_labels:
+            return
+        for i, cx, cy, text in self._comp_data:
+            j = int(np.argmax(cy))
+            if not np.isfinite(cy[j]) or cy[j] <= 0:
+                continue
+            lab = pg.TextItem(text, color=site_color(i), anchor=(0.5, 1.0))
+            lab.setZValue(30)
+            self.addItem(lab)
+            lab.setPos(float(cx[j]), float(cy[j]))
+            self._comp_labels.append(lab)
+
+    def _hover_component(self, x: float):
+        """Name the tallest component under the cursor (labels not pinned)."""
+        best = None
+        for i, cx, cy, text in self._comp_data:
+            if x < cx[0] or x > cx[-1]:
+                continue
+            yi = float(np.interp(x, cx, cy))
+            top = float(np.max(cy))
+            if top <= 0 or yi < 0.05 * top:
+                continue
+            if best is None or yi > best[1]:
+                best = (i, yi, text)
+        if best is None:
+            if self._hover_label is not None:
+                self._hover_label.setVisible(False)
+            return
+        i, yi, text = best
+        if self._hover_label is None:
+            self._hover_label = pg.TextItem("", anchor=(0.5, 1.0))
+            self._hover_label.setZValue(31)
+            self.addItem(self._hover_label)
+        self._hover_label.setColor(pg.mkColor(site_color(i)))
+        self._hover_label.setText(text)
+        self._hover_label.setPos(x, yi)
+        self._hover_label.setVisible(True)
 
     # ---------- comparison overlays ----------
     def set_overlays(self, overlays: list[tuple]):

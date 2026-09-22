@@ -41,6 +41,9 @@ REFS: dict[str, str] = {
     "kiczenski2002": ("Kiczenski & Stebbins 2002, J. Non-Cryst. Solids 306, "
                       "160 (19F in crystalline fluorides/oxyfluorides)"),
     "stebbins2000f": ("Stebbins & Zheng 2000, 19F in silicate glasses"),
+    "bureau1997": ("Bureau, Silly, Buzaré & Emery 1997, Chem. Phys. 216, 57 "
+                   "(superposition model: 19F δiso of the MF, MF2, MF3, MF4 "
+                   "crystalline fluorides)"),
 }
 
 CITATION = REFS["eden2023"]          # module default (27Al/11B/29Si/31P data)
@@ -158,6 +161,63 @@ REF_RANGES: dict[str, list[dict]] = {
          "ref": "baasner2014"},
     ],
 }
+
+
+#: nucleus -> list of {label, ppm, note, ref}: REPORTED SINGLE POSITIONS of
+#: reference compounds (drawn as ticks, not bands). For 19F these are the
+#: simple crystalline fluorides ordered by cation valence -- the ladder a
+#: fluoride glass or an F-doped oxide glass is read against: an F- in a
+#: mixed cation environment lands between the corresponding pure fluorides
+#: (the superposition model of Bureau et al. 1997). Values vs CFCl3, +-2 ppm
+#: between sources; multi-site compounds list each site.
+REF_POSITIONS: dict[str, list[dict]] = {
+    "19F": [
+        # MF (alkali)
+        {"label": "LiF", "ppm": -204.0, "note": "M(I) fluoride", "ref": "bureau1997"},
+        {"label": "NaF", "ppm": -224.0, "note": "M(I) fluoride; −225 in Kiczenski 2002",
+         "ref": "bureau1997"},
+        {"label": "KF", "ppm": -133.0, "note": "M(I) fluoride", "ref": "bureau1997"},
+        {"label": "RbF", "ppm": -88.0, "note": "M(I) fluoride", "ref": "bureau1997"},
+        {"label": "CsF", "ppm": -11.0, "note": "M(I) fluoride", "ref": "bureau1997"},
+        # MF2 (alkaline earth and divalent)
+        {"label": "BeF2", "ppm": -194.0, "note": "M(II) fluoride (approx.)",
+         "ref": "bureau1997"},
+        {"label": "MgF2", "ppm": -197.0, "note": "M(II) fluoride", "ref": "bureau1997"},
+        {"label": "CaF2", "ppm": -108.0, "note": "M(II) fluoride; F–Ca(4)",
+         "ref": "bureau1997"},
+        {"label": "SrF2", "ppm": -87.0, "note": "M(II) fluoride", "ref": "bureau1997"},
+        {"label": "BaF2", "ppm": -14.0, "note": "M(II) fluoride", "ref": "bureau1997"},
+        {"label": "ZnF2", "ppm": -203.0, "note": "M(II) fluoride", "ref": "bureau1997"},
+        {"label": "CdF2", "ppm": -192.0, "note": "M(II) fluoride", "ref": "bureau1997"},
+        {"label": "PbF2", "ppm": -20.0, "note": "β-PbF2; α-PbF2 has a second site near −57",
+         "ref": "bureau1997"},
+        {"label": "SnF2", "ppm": -46.0, "note": "several sites −41 … −51",
+         "ref": "bureau1997"},
+        # MF3 (trivalent)
+        {"label": "ScF3", "ppm": -36.0, "note": "M(III) fluoride", "ref": "bureau1997"},
+        {"label": "YF3", "ppm": -57.0, "note": "M(III) fluoride, site 1 (site 2 at −68)",
+         "ref": "bureau1997"},
+        {"label": "YF3", "ppm": -68.0, "note": "M(III) fluoride, site 2", "ref": "bureau1997"},
+        {"label": "LaF3", "ppm": 25.0, "note": "M(III) fluoride, site 1 (site 2 at −23)",
+         "ref": "bureau1997"},
+        {"label": "LaF3", "ppm": -23.0, "note": "M(III) fluoride, site 2", "ref": "bureau1997"},
+        {"label": "AlF3", "ppm": -172.0, "note": "M(III) fluoride", "ref": "bureau1997"},
+        {"label": "GaF3", "ppm": -171.0, "note": "M(III) fluoride", "ref": "bureau1997"},
+        {"label": "InF3", "ppm": -209.0, "note": "M(III) fluoride", "ref": "bureau1997"},
+        # MF4 (tetravalent): multi-site, quoted as the centre of the reported spread
+        {"label": "ThF4", "ppm": 80.0, "note": "M(IV) fluoride, sites +63 … +98",
+         "ref": "bureau1997"},
+        {"label": "TiF4", "ppm": 15.0, "note": "M(IV) fluoride, sites +30 … −2",
+         "ref": "bureau1997"},
+        {"label": "ZrF4", "ppm": -50.0, "note": "M(IV) fluoride, sites −27 … −71 (CeF4 similar)",
+         "ref": "bureau1997"},
+    ],
+}
+
+
+def positions_for(nucleus: str | None) -> list[dict]:
+    """Reported single reference positions for a nucleus ([] when none)."""
+    return list(REF_POSITIONS.get((nucleus or "").strip(), ()))
 
 
 def ranges_for(nucleus: str | None) -> list[dict]:

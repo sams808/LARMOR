@@ -5,11 +5,12 @@ footer. This is the primary model editor, faithful to dmfit's 'Fit
 Parameters' window."""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QEvent, Qt, Signal
 from PySide6.QtGui import QAction, QColor
 from PySide6.QtWidgets import (
-    QCheckBox, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit,
-    QMenu, QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QAbstractItemView, QCheckBox, QHBoxLayout, QHeaderView, QInputDialog,
+    QLabel, QLineEdit, QMenu, QPushButton, QTableWidget, QTableWidgetItem,
+    QVBoxLayout, QWidget,
 )
 
 from larmor import cellparse
@@ -353,6 +354,10 @@ class LinesTable(QWidget):
         self.table.setAlternatingRowColors(True)
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._context_menu)
+        # a click on the letter / model cell selects the whole line, so the
+        # keyboard (Delete, Ctrl+D, Ctrl+H) has an unambiguous target
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table.installEventFilter(self)
         v.addWidget(self.table, 1)
 
         foot = QHBoxLayout()
@@ -383,13 +388,33 @@ class LinesTable(QWidget):
             "0.5B  ·  A+20 [50..80].   pin ☑ = fixed   ·   "
             + ("scroll = nudge" if scroll_nudge_enabled()
                else "scroll-nudge off (View ▸ Scroll edits values)")
-            + "   ·   right-click for menus")
+            + "   ·   right-click for menus   ·   Delete removes the "
+            "selected line (Ctrl+Z undoes)")
         self.hint.setStyleSheet(f"color: {theme.active().text_dim}; font-size: 10px; padding: 2px 4px;")
         self.hint.setWordWrap(True)
         v.addWidget(self.hint)
         self._recipe: dict | None = None
 
     # ------------------------------------------------------------------
+    def eventFilter(self, obj, ev):
+        """Keyboard on the table body (not inside a value editor): Delete
+        removes the selected line, Ctrl+D duplicates it, Ctrl+H hides or
+        shows it. Every action is undoable, so none asks first."""
+        if obj is self.table and ev.type() == QEvent.KeyPress and self._recipe:
+            row = self.table.currentRow()
+            if 0 <= row < len(self._recipe.get("sites", [])):
+                key, ctrl = ev.key(), bool(ev.modifiers() & Qt.ControlModifier)
+                if key in (Qt.Key_Delete, Qt.Key_Backspace) and not ctrl:
+                    self.structure.emit(row, "remove")
+                    return True
+                if ctrl and key == Qt.Key_D:
+                    self.structure.emit(row, "duplicate")
+                    return True
+                if ctrl and key == Qt.Key_H:
+                    self.structure.emit(row, "visibility")
+                    return True
+        return super().eventFilter(obj, ev)
+
     def rebuild(self, recipe: dict | None, hidden: set[int]):
         self._recipe = recipe
         t = self.table

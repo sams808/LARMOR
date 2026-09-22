@@ -537,6 +537,15 @@ class MainWindow(QMainWindow):
                                   checkable=True, checked=True)
         self.actComp = self._add(m_view, "Components", self._toggle_comp,
                                  checkable=True, checked=True)
+        self.actLabels = self._add(
+            m_view, "Component &labels  (pin names on the plot)",
+            self._toggle_labels, checkable=True,
+            checked=bool(QSettings("LARMOR", "app").value(
+                "compLabels", False, type=bool)))
+        self.actLabels.setToolTip(
+            "write each component's letter and name at its maximum; when "
+            "off, hovering a component still shows its name")
+        self.view.set_show_labels(self.actLabels.isChecked())
         self.actPaddles = self._add(m_view, "Show paddles", self._toggle_paddles,
                                     checkable=True, checked=True)
         self.actAnimateFit = QAction("Animate fits", self)
@@ -796,7 +805,8 @@ class MainWindow(QMainWindow):
         import copy
 
         from PySide6.QtWidgets import (
-            QComboBox, QDialog, QDialogButtonBox, QFormLayout, QSpinBox)
+            QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout,
+            QSpinBox)
 
         if not self.recipe or not self.recipe.get("sites"):
             self.statusBar().showMessage("add or fit a line first")
@@ -834,13 +844,23 @@ class MainWindow(QMainWindow):
         form.addRow("sidebands backward (−νrot)", bwd)
         form.addRow(QLabel(f"spacing νrot = {nur_ppm:.3g} ppm  "
                            f"({nu_r / 1000:.1f} kHz)"))
+        link = QCheckBox("link to the parent line: position = parent ± k·νrot, "
+                         "every shape parameter equal to the parent's; only "
+                         "the amplitude is free")
+        link.setChecked(True)
+        link.setToolTip("a sideband IS the parent line displaced by k·νrot: "
+                        "fitting its position and width independently only "
+                        "adds parameters the data cannot tell apart. Untick "
+                        "for free copies (the previous behaviour).")
+        form.addRow(link)
         bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         bb.accepted.connect(dlg.accept); bb.rejected.connect(dlg.reject)
         form.addRow(bb)
         if dlg.exec() != QDialog.Accepted:
             return
 
-        base = self.recipe["sites"][combo.currentData()]
+        base_i = combo.currentData()
+        base = self.recipe["sites"][base_i]
         bname = base.get("label") or base["model"]
         self.snapshot()
         added = []
@@ -851,13 +871,27 @@ class MainWindow(QMainWindow):
                 pos = s["params"]["isotropic_chemical_shift_ppm"]
                 pos["value"] = float(pos["value"] + sign * k * nur_ppm)
                 pos["stderr"] = None
+                if link.isChecked():
+                    for pname, p in s["params"].items():
+                        p["stderr"] = None
+                        if pname == "amplitude":
+                            p["expr"] = None
+                            p["vary"] = True
+                            p["value"] = float(p["value"]) * 0.3 ** k
+                        elif pname == "isotropic_chemical_shift_ppm":
+                            p["expr"] = (f"s{base_i}.isotropic_chemical_shift_ppm"
+                                         f" + ({sign * k * nur_ppm:.6g})")
+                        else:
+                            p["expr"] = f"s{base_i}.{pname}"
                 added.append(s)
         if not added:
             return
         self.recipe["sites"].extend(added)
         self.on_structure_changed()
         self.statusBar().showMessage(
-            f"added {len(added)} sideband line(s) of {bname} at ±νrot")
+            f"added {len(added)} sideband line(s) of {bname} at ±νrot"
+            + (" — position and shape linked to the parent, amplitudes free"
+               if link.isChecked() else ""))
 
     def _active_plot_widget(self):
         return (self.view2d.glw if self.central_stack.currentWidget() is self.view2d
@@ -1122,9 +1156,10 @@ class MainWindow(QMainWindow):
             self.actRefRanges.isChecked()
         nucleus = (self.recipe or {}).get("nucleus", "") if self.recipe else ""
         ranges = refranges.ranges_for(nucleus) if on else []
-        for r in ranges:                       # per-entry primary citation
+        positions = refranges.positions_for(nucleus) if on else []
+        for r in ranges + positions:           # per-entry primary citation
             r["_citation"] = refranges.citation_for(r)
-        self.view.set_ref_ranges(ranges, refranges.CITATION)
+        self.view.set_ref_ranges(ranges, refranges.CITATION, positions)
         if on and nucleus and not ranges:
             self.statusBar().showMessage(
                 f"no literature ranges compiled for {nucleus} yet — see "
@@ -1721,6 +1756,10 @@ class MainWindow(QMainWindow):
     def _toggle_comp(self, on):
         self.view.show_components = on
         self.request_simulation()
+
+    def _toggle_labels(self, on):
+        QSettings("LARMOR", "app").setValue("compLabels", bool(on))
+        self.view.set_show_labels(on)
 
     def _toggle_paddles(self, on):
         self.view.show_paddles(on)

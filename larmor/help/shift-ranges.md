@@ -101,7 +101,21 @@ as a ± 10 ppm guide band:
 | F–Na(n) | ≈ −225 | NaF −225 |
 
 Baasner 2014 (peralkaline Na/Ca aluminosilicate glasses); crystal anchors
-from Kiczenski & Stebbins 2002. In F-rich multicomponent glasses expect
+from Kiczenski & Stebbins 2002.
+
+The overlay also draws the **crystalline fluoride ladder** as dotted ticks:
+the simple MF, MF₂, MF₃ and MF₄ fluorides, whose ¹⁹F shift is set by the
+cation (Bureau *et al.* 1997 superposition model). An F⁻ shared between two
+cation types resonates between the two pure fluorides, so the ladder is how
+a fluoride glass or an F-doped oxide glass is read. Values vs CFCl₃, ±2 ppm
+between sources:
+
+| Valence | Compound: δ (ppm) |
+|---|---|
+| M(I) | LiF −204 · NaF −224 · KF −133 · RbF −88 · CsF −11 |
+| M(II) | BeF₂ ≈ −194 · MgF₂ −197 · CaF₂ −108 · SrF₂ −87 · BaF₂ −14 · ZnF₂ −203 · CdF₂ −192 · β-PbF₂ −20 · SnF₂ −41…−51 |
+| M(III) | ScF₃ −36 · YF₃ −57 / −68 · LaF₃ +25 / −23 · AlF₃ −172 · GaF₃ −171 · InF₃ −209 |
+| M(IV) | ThF₄ +63…+98 · TiF₄ +30…−2 · ZrF₄ (CeF₄) −27…−71 | In F-rich multicomponent glasses expect
 crystalline NaF/CaF₂/cryolite contributions on top of the glassy species —
 sharp lines at the anchor positions are a crystallization warning, not a
 new glass species (see e.g. McCloy et al. 2024 on F-loaded
@@ -127,6 +141,9 @@ aluminoborosilicates, where CaF₂/NaF/Na₃AlF₆ appear from ≈2 mol% F).
   (2002) — ¹⁹F in crystalline fluorides/oxyfluorides.
 - J. F. Stebbins, Q. Zheng (2000) — ¹⁹F in silicate glasses; the
   NaF(aq)/CFCl₃ referencing note.
+- B. Bureau, G. Silly, J.-Y. Buzaré, J. Emery, *Chem. Phys.* **216**, 57
+  (1997) — superposition model for the ¹⁹F isotropic shift of ionic
+  fluorides (MF … MF₄ series).
 - J. S. McCloy *et al.*, *Inorg. Chem.* (2024) — F speciation and
   crystallization in complex aluminoborosilicate glasses.
 

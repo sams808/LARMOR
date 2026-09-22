@@ -47,6 +47,25 @@ def test_new_nuclei_values_are_sourced_sanely():
     assert centers == [-225.0, -188.0, -168.0, -146.0, -113.0]
 
 
+def test_19f_fluoride_ladder_positions():
+    """The crystalline MF..MF4 ladder (Bureau 1997): single positions vs
+    CFCl3, sourced, ordered by cation as the superposition model reads."""
+    pos = refranges.positions_for("19F")
+    by = {}
+    for r in pos:
+        assert r["ref"] in refranges.REFS and r["note"], r
+        assert -240 < r["ppm"] < 120, r
+        by.setdefault(r["label"], []).append(r["ppm"])
+    assert by["NaF"] == [-224.0] and by["LiF"] == [-204.0]
+    assert by["CaF2"] == [-108.0] and by["BaF2"] == [-14.0]
+    assert by["KF"] == [-133.0] and by["CsF"] == [-11.0]
+    assert sorted(by["LaF3"]) == [-23.0, 25.0]      # two-site fluoride
+    # the alkali ladder runs Cs -> Rb -> K -> Li -> Na towards shielding
+    assert by["CsF"] > by["RbF"] > by["KF"] > by["LiF"] > by["NaF"]
+    assert refranges.positions_for("27Al") == []
+    assert refranges.positions_for(None) == []
+
+
 def test_ranges_for_normalizes_and_defaults_empty():
     assert refranges.ranges_for("27Al")
     assert refranges.ranges_for(" 27Al ")          # stray whitespace tolerated
@@ -85,5 +104,14 @@ def test_spectrum_view_draws_and_clears_ref_ranges():
     assert "Ed\u00e9n 2023" in regions[0].toolTip()
 
     v.set_ref_ranges(None)                              # clears completely
+    assert v._ref_items == []
+
+    # 19F: five glass bands plus the crystalline ladder as ticks
+    f_pos = refranges.positions_for("19F")
+    v.set_ref_ranges(refranges.ranges_for("19F"), refranges.CITATION, f_pos)
+    ticks = [i for i in v._ref_items if isinstance(i, pg.InfiniteLine)]
+    assert len(ticks) == len(f_pos) and all(not t.movable for t in ticks)
+    assert any("NaF" in t.toolTip() for t in ticks)
+    v.set_ref_ranges(None)
     assert v._ref_items == []
     v.close()
