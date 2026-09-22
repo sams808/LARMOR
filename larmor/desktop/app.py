@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget, QHBoxLayout,
 )
 
+from larmor import cellparse
 from larmor import models as model_registry
 from larmor.desktop.panels import ProcessingPanel
 from larmor.desktop import theme
@@ -497,6 +498,8 @@ class MainWindow(QMainWindow):
         self._rebuild_apply_recipe()
         self._add(m_dec, "Add a line at every &peak…  (auto peak-pick)",
                   self.autopick_lines)
+        self._add(m_dec, "&Label lines from literature ranges  (Al[4], BO3, …)",
+                  self.label_from_literature)
         self._add(m_dec, "Add spinning &sidebands…  (of a fitted line)",
                   self.add_sidebands)
         self._add(m_dec, "Add f&unction line…  (y = f(x; a,b,c,d))",
@@ -3147,6 +3150,46 @@ class MainWindow(QMainWindow):
                 {"model": "gauss_lor", "label": f"pk-{n}", "params": params})
         self.on_structure_changed()
         self.statusBar().showMessage(f"added {len(peaks)} lines at peaks")
+
+    def label_from_literature(self):
+        """Decomposition > Label lines from literature ranges: name every
+        auto-labelled line after the literature species whose band holds its
+        position (View > Literature shift ranges data); user-typed labels are
+        kept and reported."""
+        from larmor import refranges
+
+        if not self.recipe or not self.recipe.get("sites"):
+            self.statusBar().showMessage("add or fit lines first")
+            return
+        nucleus = self.recipe.get("nucleus", "")
+        if not (refranges.ranges_for(nucleus) or refranges.positions_for(nucleus)):
+            self.statusBar().showMessage(
+                f"no literature ranges compiled for {nucleus or '?'} — see "
+                "Help ▸ Literature shift ranges")
+            return
+        changed, kept, unmatched = [], [], []
+        self.snapshot()
+        for i, s in enumerate(self.recipe["sites"]):
+            p = s.get("params", {}).get("isotropic_chemical_shift_ppm")
+            if not p:
+                continue
+            hit = refranges.assign(nucleus, float(p["value"]))
+            letter = cellparse.index_to_letter(i)
+            if hit is None:
+                unmatched.append(letter)
+            elif refranges.is_auto_label(s.get("label")):
+                s["label"] = hit["label"]
+                changed.append(f"{letter}={hit['label']}")
+            else:
+                kept.append(f"{letter} ({s['label']} → {hit['label']}?)")
+        self.on_structure_changed()
+        msg = (f"labelled {len(changed)}: " + ", ".join(changed)) if changed \
+            else "no auto-labelled line falls in a literature band"
+        if kept:
+            msg += "  ·  kept your own: " + ", ".join(kept)
+        if unmatched:
+            msg += "  ·  outside every band: " + ", ".join(unmatched)
+        self.statusBar().showMessage(msg, 12000)
 
     def predict_at_field(self):
         """Simulate the current model at a different field (teaching/planning:

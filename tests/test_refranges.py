@@ -66,6 +66,72 @@ def test_19f_fluoride_ladder_positions():
     assert refranges.positions_for(None) == []
 
 
+def test_assign_reads_a_position_into_a_species():
+    """A line's position maps to the literature band that holds it (the
+    narrowest of overlapping bands), or to a reported compound within
+    POSITION_TOLERANCE_PPM; auto-generated labels are recognised."""
+    al = refranges.assign("27Al", 65.0)
+    assert al["label"] == "Al[4]" and al["kind"] == "range"
+    assert refranges.assign("27Al", 38.0)["label"] == "Al[5]"
+    assert refranges.assign("27Al", 200.0) is None
+    b = refranges.assign("11B", 0.5)
+    assert b["label"].startswith("B[4]")
+    f = refranges.assign("19F", -224.0)          # NaF sits inside the F-Na(n) band
+    assert f["kind"] == "range" and f["label"] == "F\u2013Na(n)"
+    f2 = refranges.assign("19F", -12.0)          # only the ladder reaches here
+    assert f2["kind"] == "position" and f2["label"] == "CsF"
+    assert refranges.assign("19F", 60.0) is None  # nothing within tolerance
+    assert refranges.assign("7Li", 0.0) is None
+
+    for auto in ("", None, "Czjzek-3", "pk-0", "read-1", "HB-2", "line-copy",
+                 "Al-copy", "A+1sb", "pk-0-1sb"):
+        assert refranges.is_auto_label(auto), auto
+    for own in ("AlIV", "Al[4]", "Q3 site", "B4 ring", "s0 main"):
+        assert not refranges.is_auto_label(own), own
+
+
+def test_label_lines_from_literature_in_the_app():
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    os.environ["LARMOR_NO_SESSION"] = "1"
+    pytest.importorskip("PySide6")
+    import numpy as np
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+    from larmor.desktop.app import MainWindow
+    from larmor.recipe import Param, Recipe, SiteModel
+
+    win = MainWindow()
+    try:
+        x = np.linspace(-50.0, 120.0, 601)
+        win._display_1d(x, np.exp(-((x - 65.0) / 5.0) ** 2), "27Al", 130.3,
+                        14000.0, "t", "x")
+        rec = Recipe(nucleus="27Al", larmor_frequency_MHz=130.3,
+                     spin_rate_Hz=14000.0, sites=[
+            SiteModel(model="gauss_lor", label="pk-0", params={
+                "isotropic_chemical_shift_ppm": Param(65.0),
+                "shift_fwhm_ppm": Param(5.0), "amplitude": Param(1.0),
+                "gl": Param(0.5)}),
+            SiteModel(model="gauss_lor", label="my octahedral", params={
+                "isotropic_chemical_shift_ppm": Param(5.0),
+                "shift_fwhm_ppm": Param(5.0), "amplitude": Param(1.0),
+                "gl": Param(0.5)}),
+            SiteModel(model="gauss_lor", label="pk-2", params={
+                "isotropic_chemical_shift_ppm": Param(110.0),
+                "shift_fwhm_ppm": Param(5.0), "amplitude": Param(1.0),
+                "gl": Param(0.5)})]).to_dict()
+        win.recipe["sites"] = rec["sites"]
+        win.on_structure_changed()
+        win.label_from_literature()
+        labels = [s["label"] for s in win.recipe["sites"]]
+        assert labels == ["Al[4]", "my octahedral", "pk-2"]
+        msg = win.statusBar().currentMessage()
+        assert "A=Al[4]" in msg and "kept your own" in msg and "outside" in msg
+        win.undo()
+        assert win.recipe["sites"][0]["label"] == "pk-0"
+    finally:
+        win.close()
+
+
 def test_ranges_for_normalizes_and_defaults_empty():
     assert refranges.ranges_for("27Al")
     assert refranges.ranges_for(" 27Al ")          # stray whitespace tolerated

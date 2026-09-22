@@ -22,6 +22,8 @@ Qt-free and testable; the desktop overlay is only a consumer.
 """
 from __future__ import annotations
 
+import re
+
 #: citation keys — every REF_RANGES entry's ``ref`` resolves here
 REFS: dict[str, str] = {
     "eden2023": ("Edén 2023, J. Magn. Reson. Open 16–17, 100112 "
@@ -225,6 +227,40 @@ def ranges_for(nucleus: str | None) -> list[dict]:
     ('27Al', '11B', …); [] when none are compiled — callers show nothing
     rather than guessing."""
     return list(REF_RANGES.get((nucleus or "").strip(), ()))
+
+
+#: how close (ppm) a line must sit to a reported single position to be
+#: read as that compound (the sources' own scatter is a few ppm)
+POSITION_TOLERANCE_PPM = 8.0
+
+#: labels the app generates itself ("Czjzek-3", "pk-0", "read-1", "HB-2",
+#: "line-copy", "A+1sb") -- safe to overwrite with a species name
+_AUTO_LABEL_RE = re.compile(r"^(\S+-\d+|.*-copy|.*[+-]\d+sb)$")
+
+
+def is_auto_label(label: str | None) -> bool:
+    """True when a site label is empty or one the app generated itself."""
+    if not label or not str(label).strip():
+        return True
+    return bool(_AUTO_LABEL_RE.match(str(label).strip()))
+
+
+def assign(nucleus: str | None, ppm: float) -> dict | None:
+    """The literature species a line at ``ppm`` falls in: the range whose
+    band contains it (the narrowest when several overlap), else the nearest
+    reported single position within POSITION_TOLERANCE_PPM. Returns the
+    entry with an added ``kind`` ("range" / "position"), or None."""
+    x = float(ppm)
+    hits = [r for r in ranges_for(nucleus) if r["lo_ppm"] <= x <= r["hi_ppm"]]
+    if hits:
+        best = min(hits, key=lambda r: r["hi_ppm"] - r["lo_ppm"])
+        return {**best, "kind": "range"}
+    pos = positions_for(nucleus)
+    if pos:
+        near = min(pos, key=lambda r: abs(r["ppm"] - x))
+        if abs(near["ppm"] - x) <= POSITION_TOLERANCE_PPM:
+            return {**near, "kind": "position"}
+    return None
 
 
 def citation_for(entry: dict) -> str:
