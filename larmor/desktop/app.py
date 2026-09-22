@@ -20,7 +20,8 @@ import sys
 from pathlib import Path
 
 import numpy as np
-from PySide6.QtCore import QSettings, Qt, QThread, QTimer, Signal
+from PySide6.QtCore import (QFileSystemWatcher, QSettings, Qt, QThread, QTimer,
+                            Signal)
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QDockWidget, QFileDialog, QLabel, QMainWindow,
@@ -273,6 +274,17 @@ class MainWindow(QMainWindow):
         self._fit_to_screen(1440, 900)
 
         self.source_path: str | None = None
+        # File > Watch the source file: reload on change, debounced (a
+        # spectrometer writes 1r in several steps; TopSpin replaces the file,
+        # which drops a per-file watch, so the parent folder is watched too)
+        self._watcher = QFileSystemWatcher(self)
+        self._watcher.fileChanged.connect(self._watched_changed)
+        self._watcher.directoryChanged.connect(self._watched_changed)
+        self._watch_timer = QTimer(self)
+        self._watch_timer.setSingleShot(True)
+        self._watch_timer.setInterval(600)
+        self._watch_timer.timeout.connect(self._reload_watched)
+        self._watch_path: str | None = None
         self.recipe: dict | None = None
         self.exp_ppm = np.array([])
         self.exp_amp = np.array([])
@@ -410,6 +422,13 @@ class MainWindow(QMainWindow):
                   "Ctrl+F")
         self._add(m_file, "Open &Varian / Agilent…  (.fid folder)",
                   self.open_varian)
+        self.actWatch = self._add(
+            m_file, "&Watch the source file  (auto-reload when it changes, "
+                    "keep the fit)", self._toggle_watch, checkable=True)
+        self.actWatch.setToolTip(
+            "re-open the current spectrum whenever its file is rewritten -- "
+            "e.g. while acquiring on the spectrometer -- keeping the fit "
+            "model so it follows the growing signal")
         m_file.addSeparator()
         self._add(m_file, "Open pro&ject…  (all spectra + fits)", self.open_project)
         self._add(m_file, "Save projec&t…  (all open spectra + fits)",
@@ -894,6 +913,62 @@ class MainWindow(QMainWindow):
             f"added {len(added)} sideband line(s) of {bname} at ±νrot"
             + (" — position and shape linked to the parent, amplitudes free"
                if link.isChecked() else ""))
+
+    # ------------------------------------------------------------- watch
+    def _toggle_watch(self, on: bool):
+        if on and not self.source_path:
+            self.actWatch.setChecked(False)
+            self.statusBar().showMessage("open a spectrum first, then watch it")
+            return
+        self._retarget_watch()
+        self.statusBar().showMessage(
+            f"watching {Path(self.source_path).name}: the spectrum reloads "
+            "when the file changes, the fit is kept" if on
+            else "stopped watching the source file")
+
+    def _watch_targets(self) -> list[str]:
+        """The file(s)/folder(s) whose change means new data: the source
+        itself and its folder (a rewritten file loses its own watch)."""
+        p = Path(self.source_path) if self.source_path else None
+        if p is None or not p.exists():
+            return []
+        if p.is_dir():                     # an EXPNO: the processed data lives below
+            cands = [p / "pdata" / "1" / "1r", p / "pdata" / "1" / "2rr",
+                     p / "fid", p / "ser"]
+            files = [str(c) for c in cands if c.exists()]
+            return files + [str(c.parent) for c in cands if c.exists()] + [str(p)]
+        return [str(p), str(p.parent)]
+
+    def _retarget_watch(self):
+        if self._watcher.files():
+            self._watcher.removePaths(self._watcher.files())
+        if self._watcher.directories():
+            self._watcher.removePaths(self._watcher.directories())
+        self._watch_path = None
+        if getattr(self, "actWatch", None) is None or not self.actWatch.isChecked():
+            return
+        targets = self._watch_targets()
+        if targets:
+            self._watcher.addPaths(targets)
+            self._watch_path = self.source_path
+
+    def _watched_changed(self, *_):
+        if self._watch_path:
+            self._watch_timer.start()
+
+    def _reload_watched(self):
+        path = self._watch_path
+        if not path or not Path(path).exists():
+            return
+        try:
+            self.load_source(path, keep_fit=True)
+            self.statusBar().showMessage(
+                f"reloaded {Path(path).name} (watching for changes)")
+        except Exception as exc:      # the writer may be mid-way: retry later
+            self.statusBar().showMessage(f"reload failed, will retry: {exc}")
+            self._watch_timer.start()
+        finally:
+            self._retarget_watch()    # a replaced file needs a fresh watch
 
     def _active_plot_widget(self):
         return (self.view2d.glw if self.central_stack.currentWidget() is self.view2d
@@ -2380,6 +2455,7 @@ class MainWindow(QMainWindow):
                 recipe[k] = recipe.get(k) or self.recipe.get(k)
 
         self.source_path = path
+        self._retarget_watch()
         self.exp_ppm, self.exp_amp = ppm, amp
         self._proc_base = None
         self.recipe = recipe
