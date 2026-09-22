@@ -213,12 +213,13 @@ class KernelWarmWorker(QThread):
             sw, ref = engine.kernel_window(exp_ppm, lar)
             npts = min(int(engine.KERNEL_SETTINGS["npts"]
                            * max(1.0, sw / engine.KERNEL_MIN_SW_HZ)), 16384)
-            # exactly the kernel a fresh czjzek site (default sigma 2 MHz ->
-            # ladder step 25) asks for on its first render
+            # exactly the kernel a fresh czjzek site (default sigma 2 MHz,
+            # 10 sigma headroom -> ladder step 25) asks for on its first render
+            from larmor.models.quadrupolar import CZJZEK_KERNEL_HEADROOM
             engine.build_kernel(
                 nucleus, lar, spin_hz, sw_Hz=sw, npts=npts,
                 ref_offset_ppm=ref,
-                cq_max_MHz=engine.kernel_cq_max(5.0 * 2.0),
+                cq_max_MHz=engine.kernel_cq_max(CZJZEK_KERNEL_HEADROOM * 2.0),
                 n_cq=engine.KERNEL_SETTINGS["n_cq"],
                 n_eta=int(engine.KERNEL_SETTINGS["n_eta"]))
         except Exception:                                  # noqa: BLE001

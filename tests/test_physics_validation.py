@@ -32,13 +32,39 @@ def test_quad_ct_centroid_matches_analytic_second_order_shift():
 
 
 def test_czjzek_convention_relations_exact():
-    """dmfit sCZ_CQ = 2σ (mode of |Cq|) and √⟨PQ²⟩ = √5·σ (Eq. 7)."""
+    """In the stored (mrsimulator) σ, σ_Cz = dmfit sCZ_CQ = 2σ; the |C_Q|
+    marginal peaks at ≈ 3.73σ (≈ dmfit's displayed CQ = 4σ) and
+    √⟨P_Q²⟩ = √5·σ_Cz = 2√5·σ (d'Espinose 2008 Eq. 7)."""
     from larmor import czjzek_dist as cd
     for sigma in (1.0, 1.8, 3.0):
-        cq = cd.suggested_cq_axis(sigma, 1200)
+        cq = cd.suggested_cq_axis(sigma, 2400)
         mode = cq[int(np.argmax(cd.marginal_cq(sigma, cq)))]
-        assert 1.7 * sigma < mode < 2.1 * sigma           # ≈ 2σ (dmfit sCZ_CQ)
-        assert cd.rms_pq(sigma) == pytest.approx(np.sqrt(5) * sigma)
+        assert 3.5 * sigma < mode < 4.0 * sigma           # ≈ 3.73σ = 1.87σ_Cz
+        assert cd.rms_pq(sigma) == pytest.approx(2.0 * np.sqrt(5) * sigma)
+
+
+def test_czjzek_pdf_matches_kernel_weights():
+    """The pin that makes the convention a tested fact: czjzek_dist's d = 5
+    density on the kernel grid must reproduce the weights the fit engine
+    actually uses (mrsimulator's analytic CzjzekDistribution, whose formula
+    carries ``sigma_ = 2*sigma``), including the halved η = 1 boundary row."""
+    from larmor import czjzek_dist as cd
+    from larmor.engine import CzjzekKernel
+
+    cq = np.linspace(0.05, 25.0, 80)
+    eta = np.linspace(0.0, 1.0, 11)
+    kernel = CzjzekKernel(x_ppm=np.zeros(2), K=np.zeros((880, 2), np.float32),
+                          cq_grid_MHz=cq, eta_grid=eta)
+    for sigma in (1.0, 1.8):
+        w = cd.czjzek_weights(sigma, 5.0, cq, eta)
+        ref = kernel.weights(sigma)
+        assert w.shape == ref.shape == (880,)
+        assert w.sum() == pytest.approx(1.0)
+        assert np.allclose(w, ref, rtol=1e-6, atol=1e-12)
+        # and the closed-form invariant holds on that discrete grid too
+        CQ, ETA = np.meshgrid(cq, eta, indexing="xy")
+        rms = np.sqrt((w * (CQ ** 2 * (1 + ETA ** 2 / 3)).ravel()).sum())
+        assert rms == pytest.approx(cd.rms_pq(sigma), rel=0.02)
 
 
 def test_dipolar_and_efg_constants():

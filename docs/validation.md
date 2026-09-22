@@ -130,8 +130,8 @@ them and §5 validates the two that matter most. All are checked in
 | CT 2nd-order isotropic shift | $\delta_2 = -\dfrac{3}{40}\,\dfrac{I(I+1)-\frac{3}{4}}{I^2(2I-1)^2}\left(\dfrac{P_Q}{\nu_0}\right)^2\times 10^{6}$ | Samoson 1982 / Sandland Eq. 1; validated in [Fig. 1](#fig1) |
 | EFG → $C_Q$ | $C_Q[\text{MHz}] = 234.9647\,Q[\text{barn}]\,V_{zz}[\text{a.u.}]$ | constant exact |
 | Dipolar coupling | $d = \dfrac{\mu_0}{4\pi}\dfrac{\gamma_1\gamma_2\hbar}{r^3}$ | verified ($^{1}$H–$^{1}$H at 1.5 Å = 35.6 kHz) |
-| Czjzek width ↔ dmfit | dmfit `sCZ_CQ` $= 2\sigma$; mode of $\lvert C_Q\rvert \approx 2\sigma$ | verified in [Fig. 3](#fig3) |
-| Czjzek invariant | $\sqrt{\langle P_Q^2\rangle} = \sqrt{5}\,\sigma$ | exact; [Fig. 3](#fig3) |
+| Czjzek width ↔ dmfit | dmfit `sCZ_CQ` $= 2\sigma = \sigma_{Cz}$ (the width in Czjzek's formula; mrsimulator's σ is half of it); mode of $\lvert C_Q\rvert \approx 3.7\sigma = 1.87\,\sigma_{Cz}$ (≈ dmfit's displayed CQ $= 4\sigma$) | verified in [Fig. 3](#fig3); the d = 5 density is pinned to mrsimulator's kernel weights to $10^{-6}$ (`tests/test_physics_validation.py`) |
+| Czjzek invariant | $\sqrt{\langle P_Q^2\rangle} = \sqrt{5}\,\sigma_{Cz} = 2\sqrt{5}\,\sigma$ (chi law, $d$ dof, scale $\sigma_{Cz}$: $\sqrt{d}\,\sigma_{Cz}$ in general) | exact; [Fig. 3](#fig3) |
 | MQMAS F1 shear factor | $c$ measured from reference simulations ($-17/31$ for $^{27}$Al 3Q) | measured, not hard-coded |
 
 $\delta_2 < 0$ always (the second-order quadrupolar interaction shifts the CT
@@ -181,15 +181,20 @@ what makes interactive fitting of glass lineshapes feasible.
 ![Czjzek distribution and invariants](figures/fig3_czjzek_distribution.png)
 
 **Figure 3.** *(a)* The marginal $P(C_Q)$ implied by a fitted width $\sigma$
-(the $d=5$ Czjzek distribution), for three $\sigma$; the mode sits near
-$2\sigma$. *(b)* Numerical checks of the two width relations LARMOR uses to
-translate a fitted $\sigma$ into reportable quantities: the exact invariant
-$\sqrt{\langle P_Q^2\rangle}=\sqrt{5}\,\sigma$ (squares land on the dashed
-line to numerical precision), and the dmfit width $2\sigma$ (the marginal
-mode is the well-known $\approx 1.85\sigma$, slightly below the definitional
-$2\sigma$ width; both are shown). For a glass, quote $\sigma$ and the
-field-independent invariant $\sqrt{\langle P_Q^2\rangle}$ rather than a
-single $C_Q$.
+(the $d=5$ Czjzek distribution in the stored, mrsimulator convention), for
+three $\sigma$; the mode sits at $\approx 3.7\sigma$, i.e. $1.87\,\sigma_{Cz}$
+with $\sigma_{Cz} = 2\sigma$ the width in Czjzek's formula (dmfit's sCZ_CQ).
+*(b)* Numerical checks of the width relations LARMOR uses to translate a
+fitted $\sigma$ into reportable quantities: the exact invariant
+$\sqrt{\langle P_Q^2\rangle}=\sqrt{5}\,\sigma_{Cz}=2\sqrt{5}\,\sigma$ (squares
+land on the dashed line to numerical precision), the dmfit width
+$\sigma_{Cz} = 2\sigma$, and the marginal mode ($\approx 3.7\sigma$, close to
+dmfit's displayed CQ $= 4\sigma$). Earlier versions of this document and of
+LARMOR's read-outs (≤ 0.12.1) placed the mode at $2\sigma$ and quoted
+$\sqrt{5}\,\sigma$ — the invariants of a distribution half as wide as the one
+the fit used (the fit itself and the stored $\sigma$ were correct). For a
+glass, quote $\sigma$ (stating the convention) and the field-independent
+invariant $\sqrt{\langle P_Q^2\rangle}$ rather than a single $C_Q$.
 
 ### 5.4 MQMAS 2D placement and δ_iso recovery <a name="fig4"></a>
 
@@ -449,7 +454,7 @@ provenance only.
 | Approximation | Where | Impact / mitigation |
 |---|---|---|
 | $(C_Q,\eta)$ kernel grid (80×11 in 1D; 40×6 in 2D) | Czjzek fits | ≤ 0.64 % lineshape RMSD (Fig. 2); raise in *Computing parameters* for demanding cases |
-| `cq_max` (2D: 16 MHz) | Czjzek | in 2D this truncates the distribution tail for large σ. In 1D the ceiling follows the requested width automatically (`engine.kernel_cq_max`, a 25–400 MHz ladder), so it needs no manual adjustment there |
+| `cq_max` (2D: 16 MHz) | Czjzek | in 2D this truncates the distribution tail for large σ. In 1D the ceiling follows the requested width automatically (`engine.kernel_cq_max`, a 25–400 MHz ladder, requested at 10σ: 21 % of the d = 5 mass lies beyond 5σ, 4.5·10⁻⁵ beyond 10σ), so it needs no manual adjustment there; σ is bounded at 40 MHz so 10σ never exceeds the ladder |
 | Discrete quad in 2D snaps to the grid | `quad_ct`/`quad_csa` MQMAS | crystalline 2D $C_Q/\eta$ grid-limited (~0.4 MHz); use 1D `quad_ct` (exact) for precise crystalline $C_Q$ |
 | Parameter rounding for the sim cache | all mrsimulator paths | $C_Q$ to 1 kHz, $\eta$ to 0.001 — negligible vs experimental error |
 | 5-point Gaussian for dCS / σζ | Czjzek 2D, csa_czjzek | coarse but adequate for a smooth Gaussian |
@@ -486,8 +491,9 @@ of the Czjzek distribution (validated against a direct ensemble simulation to
 $\delta_\text{iso}$, the Czjzek width σ, an isotropic-shift-distribution
 width dCS, and a residual Lorentzian width. From σ we report the
 field-independent quadrupolar invariant
-$\sqrt{\langle P_Q^2\rangle}=\sqrt{5}\,\sigma$ [and the dmfit-equivalent
-width $2\sigma$] rather than a single $C_Q$."*
+$\sqrt{\langle P_Q^2\rangle}=2\sqrt{5}\,\sigma=\sqrt{5}\,\sigma_{Cz}$ [and the
+dmfit-equivalent width sCZ_CQ $=\sigma_{Cz}=2\sigma$] rather than a single
+$C_Q$."*
 
 **MQMAS.** *"3QMAS spectra were acquired and sheared to the isotropic (δ1)
 convention. Two-dimensional fits were performed in LARMOR, in which the F1
@@ -523,7 +529,7 @@ contributions (Sandland Eq. 2)."*
    alone.
 2. **Czjzek glasses** — report σ, $\sqrt{\langle P_Q^2\rangle}$, and dCS
    rather than a single $C_Q$; in 2D check that `cq_max` covers the distribution if
-   σ is large (mode $\approx 2\sigma$).
+   σ is large (mode $\approx 3.7\sigma$; the 1D kernel reaches 10σ automatically).
 3. **MQMAS** — confirm the fitted F1 reference offset β is small; the fitted
    $\delta_\text{iso}$ is the chemical shift and $C_Q/P_Q$ the quadrupolar
    product.

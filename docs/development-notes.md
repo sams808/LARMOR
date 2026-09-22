@@ -123,7 +123,7 @@ every consumer produces plausible, wrong numbers.
 | ppm ↔ Hz | ν[Hz] = δ[ppm] · SFO[MHz] | `convert.ppm_to_Hz` |
 | Quadrupolar product | P_Q = C_Q·√(1+η²/3) | `convert.pq_from_cq_eta` |
 | CT second-order shift | δ₂ = −(3/40)·[I(I+1)−¾]/[I²(2I−1)²]·(P_Q/ν₀)²·10⁶, **always negative** | `convert.ct_second_order_shift_ppm` |
-| Czjzek width | LARMOR stores **σ**; dmfit's `sCZ_CQ` = **2σ**; dmfit's displayed C_Q = **4σ**; √⟨P_Q²⟩ = **√5·σ** | `desktop/table.py:74` (`CZJZEK_DISPLAYS`) |
+| Czjzek width | LARMOR stores **σ** (mrsimulator's: the std of each EFG component); the width in Czjzek's formula is **σ_Cz = dmfit `sCZ_CQ` = 2σ**; dmfit's displayed C_Q = **4σ** ≈ the mode of \|C_Q\| (3.73σ, exactly the mode of P_Q); √⟨P_Q²⟩ = **2√5·σ** = √5·σ_Cz (general d: √d·σ_Cz) | `czjzek_dist.py`, `desktop/table.py` (`CZJZEK_DISPLAYS`); pinned to mrsimulator's weights in `tests/test_physics_validation.py` |
 | EFG → C_Q | C_Q[MHz] = 234.9647·Q[barn]·V_zz[a.u.] | `convert.cq_from_efg` |
 | Axis | IUPAC δ, increasing to the left | `figures.py`, plot widgets |
 
@@ -148,7 +148,10 @@ automated, in `tests/test_physics_validation.py`:
    **0.5 ppm** for (C_Q, η) = (4.0, 0.3), (2.5, 0.0), (3.0, 0.8). (The document
    claims < 0.03 ppm from a finer sweep; the test is deliberately looser.)
 2. **Czjzek convention relations** — mode of the C_Q marginal within
-   1.7σ–2.1σ, and √⟨P_Q²⟩ = √5·σ exactly.
+   3.5σ–4.0σ (≈ 3.73σ), √⟨P_Q²⟩ = 2√5·σ exactly, and
+   `czjzek_dist.czjzek_weights(σ, d = 5)` ≡ `CzjzekKernel.weights(σ)` on the
+   kernel grid to 1e-6 (the pin that ties every read-out to the distribution
+   the fit actually uses).
 3. **Physical constants** — ¹H–¹H dipolar at 1.5 Å ≈ 35.6 kHz; the EFG
    constant 234.9647.
 
@@ -234,11 +237,16 @@ Worth knowing before concluding "the model cannot fit this".
 
 - **Kernel**: `KERNEL_MIN_SW_HZ = 150000` (a floor), `KERNEL_SPAN_MARGIN = 1.25`,
   `CQ_MAX_LADDER = (25, 50, 100, 200, 400)` MHz, npts hard-capped at 16384 in
-  four places. 2D MQMAS is separate: `twod.MQMAS_SETTINGS` cq_max 16 MHz, 40×6.
+  four places. The Czjzek family requests the ladder step covering
+  `CZJZEK_KERNEL_HEADROOM = 10` × σ (`models/quadrupolar.py`; 21 % of the
+  d = 5 mass lies beyond 5σ, 4.5e-5 beyond 10σ) — the app prewarm uses the
+  same rule. 2D MQMAS is separate: `twod.MQMAS_SETTINGS` cq_max 16 MHz, 40×6.
 - **Parameter bounds**: `CQ_MAX_MHZ = 120` (quad_ct, quad_first, quad_csa,
   ext_czjzek); `AMORPH_CQ_MAX = 6.0`; CSA ζ ±1000 ppm; ≤32 sidebands per side;
-  J-multiplicity ≤12. `czjzek.sigma_Cq_MHz` has **no upper bound** and can run
-  away to absurd values, degenerating into a plain Gaussian.
+  J-multiplicity ≤12. `czjzek.sigma_Cq_MHz` ≤ **40 MHz** (10σ against the
+  400 MHz ladder top; `tests/test_models_v2.py` pins the product for every
+  model carrying a `sigma_Cq_MHz`) — at the bound the at-bounds diagnosis
+  fires instead of the lineshape saturating into a plain Gaussian.
 - **Interop**: `io/fxmla.py` converts only three dmfit line models (CzSimple,
   Gaus/Lor, Amorphous) and skips the rest with a warning.
   `refranges.py` covers exactly 8 nuclei and gives a status hint, never a guess,
@@ -289,10 +297,32 @@ Ordered by how likely they are to mislead someone.
 8. **`figures.py` does not close figure handles**, triggering matplotlib's
    ">20 figures" warning in the studio tests; a memory-growth risk in long
    sessions.
-9. **`docs/validation.md:452`** still advises raising `cq_max` for large σ in
-   1D — stale since the ladder replaced the fixed ceiling.
+9. ~~`docs/validation.md:452` still advises raising `cq_max` for large σ in
+   1D~~ **fixed with G4**: the row now states the 1D rule (ladder at 10σ,
+   σ ≤ 40 MHz).
 10. ~~README test count stale~~ kept current (README says ~700; 712
     collected at 0.11.2).
+11. ~~**Czjzek read-outs were a factor 2 low.**~~ **fixed with G4** (first
+    commit). The kernel weights are mrsimulator's, whose formula carries
+    `sigma_ = 2*sigma`: the stored σ is HALF the width in Czjzek's formula
+    (σ_Cz = dmfit sCZ_CQ = 2σ). `czjzek_dist.py`, the P(C_Q) dialog
+    ("mode 2σ"), `batch.py`'s √⟨P_Q²⟩ column, `methods.py`, the table's
+    P_Q display (√5·σ) and `docs/validation.md` all described a distribution
+    half as wide as the one the fit used. Measured against mrsimulator's own
+    density: marginal mode 3.73σ (not 2σ), √⟨P_Q²⟩ = 4.472σ = 2√5·σ (not
+    √5·σ), 21.3 % of the mass beyond 5σ, 4.5e-5 beyond 10σ; for d = 2..5 the
+    rms equals √d·σ_Cz exactly (chi law). Fits, stored σ, recipes and the
+    dmfit relations (sCZ_CQ = 2σ, CQ = 4σ) were right throughout; only the
+    interpretation changed. `czjzek_weights(σ, 5)` is now pinned to
+    `CzjzekKernel.weights(σ)` to 1e-6.
+12. ~~**Czjzek kernel headroom truncated the distribution.**~~ **fixed with
+    G4** (first commit). `_render_czjzek` requested a (C_Q, η) grid to 5σ,
+    beyond which 21.3 % of the d = 5 mass lies; whenever 5σ sat just under a
+    ladder step (σ ≈ 4–5, 8–10, 16–20 MHz — the heavy-halide range) a fifth
+    of the distribution was dropped and renormalised away, biasing σ upward
+    there. Requests are now 10σ (`CZJZEK_KERNEL_HEADROOM`), σ max 80 → 40,
+    and the app prewarm follows the same rule. The pCABS anchors
+    (²⁷Al σ ≈ 1.5, ¹¹B σ ≈ 1: 10σ ≤ 25) keep their kernel and their RMSDs.
 
 Genuinely open work is in `docs/roadmap.md`. The largest structural items:
 `app.py` is a 4.7k-line monolith, and there is no CI — so every "suite green"

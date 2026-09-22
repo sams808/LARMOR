@@ -3,6 +3,7 @@ Turns the width σ into the physical P(C_Q) it stands for; see larmor.czjzek_dis
 and the Lineshapes manual (Czjzek section)."""
 from __future__ import annotations
 
+import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -26,8 +27,11 @@ class CzjzekDistDialog(QDialog):
                  and "sigma_Cq_MHz" in s.get("params", {})]
         v.addWidget(QLabel(
             "The Czjzek width σ stands for a whole distribution of quadrupolar "
-            "couplings, P(C_Q) ∝ C_Q⁴·⟨η terms⟩·exp(−C_Q²/2σ²) — it peaks near "
-            "C_Q = 2σ. √⟨P_Q²⟩ = √5·σ is the invariant to report for a glass."))
+            "couplings, P(C_Q) ∝ C_Q^(d−1)·⟨η terms⟩·exp(−C_Q²/2σ_Cz²) with "
+            "σ_Cz = 2σ (dmfit's sCZ_CQ; mrsimulator's σ is half the Czjzek-paper "
+            "width). The |C_Q| marginal peaks near 3.7σ (≈ dmfit's displayed "
+            "CQ = 4σ). √⟨P_Q²⟩ = 2√5·σ = √5·σ_Cz is the invariant to report for "
+            "a glass."))
         v.itemAt(0).widget().setWordWrap(True)
 
         plot = pg.PlotWidget(background=theme.active().plot_bg)
@@ -46,12 +50,13 @@ class CzjzekDistDialog(QDialog):
             p = marginal_cq(sigma, cq)
             name = s.get("label") or f"site {i}"
             plot.plot(cq, p, pen=pg.mkPen(site_color(i), width=1.8), name=name)
-            # mark the mode (2σ) and √⟨P_Q²⟩
+            # mark the mode of the marginal where it actually is (≈ 3.7σ)
+            mode = float(cq[int(np.argmax(p))])
             plot.addItem(pg.InfiniteLine(
-                pos=2 * sigma, angle=90,
+                pos=mode, angle=90,
                 pen=pg.mkPen(site_color(i), width=1, style=Qt.DotLine)))
             lines.append(f"<b style='color:{site_color(i)}'>{name}</b>: "
-                         f"σ={sigma:.3g} MHz · mode C_Q≈{2*sigma:.3g} · "
+                         f"σ={sigma:.3g} MHz · mode C_Q≈{mode:.3g} · "
                          f"√⟨P_Q²⟩={rms_pq(sigma):.3g} MHz")
 
         summary = QLabel("<br>".join(lines) if lines

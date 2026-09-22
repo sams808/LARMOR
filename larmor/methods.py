@@ -97,17 +97,20 @@ def methods_sentence(recipe: dict, error_method: str = "covariance") -> str:
                else "a Monte-Carlo (parametric bootstrap) analysis")
     field_txt = f" (Larmor frequency {field:.1f} MHz)" if field else ""
     # a Czjzek width is quoted in four incompatible conventions across the
-    # literature (σ / 2σ / dmfit's displayed CQ = 4σ / P_Q = √5σ) — a paper
-    # that names its convention costs one sentence and saves every reader
-    # a factor-of-4 ambiguity, so the generated Methods text always does
+    # literature (σ / σ_Cz = sCZ_CQ = 2σ / dmfit's displayed CQ = 4σ /
+    # P_Q = 2√5·σ) — a paper that names its convention costs one sentence and
+    # saves every reader a factor-of-4 ambiguity, so the generated Methods
+    # text always does
     czjzek_txt = ""
-    if any(s.get("model") in ("czjzek", "ext_czjzek", "csa_czjzek")
+    if any(s.get("model") in ("czjzek", "czjzek_d", "czjzek_corr",
+                              "ext_czjzek", "csa_czjzek")
            for s in sites):
         czjzek_txt = (
             " Czjzek widths are reported as the distribution parameter σ "
-            "(mrsimulator convention) together with the rms quadrupolar "
-            "product P_Q = √5·σ; for comparison, dmfit's displayed CQ for "
-            "the same fit corresponds to 4σ (2 × sCZ_CQ)."
+            "(mrsimulator convention; the Czjzek-paper width is σ_Cz = 2σ) "
+            "together with the rms quadrupolar product P_Q = 2√5·σ "
+            "(= √5·σ_Cz); for comparison, dmfit's displayed CQ for the same "
+            "fit corresponds to 4σ (2 × sCZ_CQ)."
         )
     return (
         f"The {nucleus} MAS NMR spectra{field_txt} were deconvoluted into "

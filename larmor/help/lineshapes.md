@@ -250,20 +250,33 @@ Gaussians* of width σ, provided the solid is statistically isotropic. Transform
 that 5-D Gaussian to the NMR variables ($\nu_Q$, $\eta$) gives the **joint**
 probability density (d'Espinose de Lacaillerie et al. 2008, Eq. 6; $d = 5$):
 
-$$p(\nu_Q,\eta) = \frac{1}{\sqrt{2\pi}\,\sigma^5}\;\nu_Q^4\;\eta\left(1-\frac{\eta^2}{9}\right)\exp\!\left[-\frac{\nu_Q^2\,(1+\eta^2/3)}{2\sigma^2}\right]$$
+$$p(\nu_Q,\eta) = \frac{1}{\sqrt{2\pi}\,\sigma_{Cz}^5}\;\nu_Q^4\;\eta\left(1-\frac{\eta^2}{9}\right)\exp\!\left[-\frac{\nu_Q^2\,(1+\eta^2/3)}{2\sigma_{Cz}^2}\right]$$
+
+Here $\sigma_{Cz}$ is the width as Czjzek and d'Espinose write it. **It is twice
+the σ LARMOR stores**: mrsimulator's `CzjzekDistribution` (and therefore
+`sigma_Cq_MHz`) uses the standard deviation of each tensor component, and its own
+formula carries $\sigma_{Cz} = 2\sigma$ — the same relation as dmfit's
+*sCZ_CQ* $= 2\sigma$. Every read-out in LARMOR (the P(C_Q) dialog, the batch
+table, the Methods sentence) is written in terms of the stored σ with this factor
+applied; see the conventions section below.
 
 Two features matter. First, ν_Q and η are **not independent** — they are coupled
 through the tensor, exactly as physics demands (a distortion that changes the
 strength also changes the asymmetry). Second, the whole distribution is governed by
-a **single width $\sigma$**. That width fixes the mean-square quadrupolar product
-(their Eq. 7):
+a **single width**. That width fixes the mean-square quadrupolar product
+(their Eq. 7); because $P_Q^2 = C_Q^2(1+\eta^2/3)$ enters only through the
+exponential, $P_Q$ follows a chi law with $d = 5$ degrees of freedom and scale
+$\sigma_{Cz}$, so
 
-$$\left\langle C_Q^2\,(1+\eta^2/3)\right\rangle = \left\langle P_Q^2\right\rangle \;\propto\; \sigma^2$$
+$$\left\langle C_Q^2\,(1+\eta^2/3)\right\rangle = \left\langle P_Q^2\right\rangle = 5\,\sigma_{Cz}^2 = 20\,\sigma^2$$
 
-so the one quantity you can honestly extract from a glass is the **root-mean-square
-quadrupolar product √⟨P_Q²⟩** — a rotational invariant — together with the
-isotropic chemical shift. (Their worked ²⁷Al slag glass: δ_iso = 72.7 ppm,
-σ = 467 kHz ⟶ √⟨P_Q²⟩ = 6.96 MHz, from a *single* Czjzek line.)
+and the one quantity you can honestly extract from a glass is the **root-mean-square
+quadrupolar product √⟨P_Q²⟩ = √5·σ_Cz = 2√5·σ** — a rotational invariant — together
+with the isotropic chemical shift. The mode of the |C_Q| marginal sits at
+≈ 1.87 σ_Cz ≈ 3.7σ (close to dmfit's displayed CQ = 4σ), and the mode of P_Q
+itself is exactly $2\sigma_{Cz} = 4\sigma$. (Their worked ²⁷Al slag glass:
+δ_iso = 72.7 ppm, σ_Cz = 467 kHz in ν_Q units ⟶ √⟨P_Q²⟩ = 6.96 MHz, from a
+*single* Czjzek line.)
 
 The general Czjzek replaces the exponent 4 by **d − 1**, where **d = 5** is the
 fully-isotropic case; a smaller d describes a more constrained (partially ordered)
@@ -311,10 +324,17 @@ fitted parameter σ; none adds information:
 
 | Quantity | = | Who uses it | Example (σ = 1.18 MHz) |
 |---|---|---|---|
-| **σ** | σ | mrsimulator, ssNake, LARMOR's stored value, part of the literature | 1.18 MHz |
-| **C_Q ≈ 2σ** | 2σ | dmfit's *sCZ_CQ* box; ≈ the mode of the \|C_Q\| distribution | 2.36 MHz |
-| **CQ (dmfit)** | 4σ | **what dmfit's `CQ` box displays** (mechanically 2 × sCZ_CQ) — and therefore what many dmfit-based papers report as "C_Q" | 4.73 MHz |
-| **P_Q = √5·σ** | √5·σ ≈ 2.24σ | the rms quadrupolar product √⟨P_Q²⟩ ≡ C̄_Qη — the field-independent invariant Edén's 2023 review compiles in its tables (his Eq. 45) | 2.64 MHz |
+| **σ** | σ | mrsimulator, ssNake, LARMOR's stored value, part of the literature (the standard deviation of each EFG-tensor component) | 1.18 MHz |
+| **σ_Cz = sCZ_CQ = 2σ** | 2σ | the width in Czjzek's and d'Espinose's own formula; dmfit's *sCZ_CQ* box. **Not** the mode of \|C_Q\| (which is ≈ 3.7σ = 1.87 σ_Cz) | 2.36 MHz |
+| **CQ (dmfit)** | 4σ | **what dmfit's `CQ` box displays** (mechanically 2 × sCZ_CQ) — and therefore what many dmfit-based papers report as "C_Q"; ≈ the mode of the \|C_Q\| marginal, and exactly the mode of P_Q | 4.73 MHz |
+| **P_Q = 2√5·σ** | 2√5·σ = √5·σ_Cz ≈ 4.47σ | the rms quadrupolar product √⟨P_Q²⟩ ≡ C̄_Qη — the field-independent invariant Edén's 2023 review compiles in its tables (his Eq. 45) | 5.28 MHz |
+
+> **Read-outs before the convention fix.** LARMOR releases up to 0.12.1
+> displayed and exported P_Q = √5·σ and marked the mode at 2σ — the invariants
+> of a distribution half as wide as the one the fit actually used (the fit,
+> the stored σ, recipes and dmfit interop were correct throughout). A
+> √⟨P_Q²⟩ taken from an older CSV must be doubled to compare with a current
+> one. The scale is now pinned by a test against mrsimulator's own weights.
 
 Practical rules:
 
@@ -328,14 +348,15 @@ Practical rules:
   spectrum in both programs gives identical residuals with exactly these
   factors — see `docs/validation.md`.)
 - **What to put in a paper**: report **σ (state the convention explicitly!)
-  and/or P_Q = √5·σ**, never a bare "C_Q" — a Czjzek site has no single C_Q,
+  and/or P_Q = 2√5·σ**, never a bare "C_Q" — a Czjzek site has no single C_Q,
   and an unlabeled number is unusable by the next reader. P_Q is the safest
   currency: it is a rotational invariant, field-independent, directly
   comparable across studies whatever model they fit, and it is the quantity
   a 3QMAS graphical analysis measures. A Methods sentence like
-  *"Czjzek (d = 5) fits; we report the distribution width σ and the rms
-  quadrupolar product P_Q = √5·σ (dmfit's displayed CQ corresponds to 4σ)"*
-  removes all ambiguity for one sentence of cost.
+  *"Czjzek (d = 5) fits; we report the distribution width σ (mrsimulator
+  convention, σ_Cz = 2σ) and the rms quadrupolar product P_Q = 2√5·σ = √5·σ_Cz
+  (dmfit's displayed CQ corresponds to 4σ)"* removes all ambiguity for one
+  sentence of cost.
 
 **Literature.**
 - G. Czjzek, J. Fink, F. Götz, H. Schmidt, J. M. D. Coey, J.-P. Rebouillat, A.
@@ -396,8 +417,8 @@ Gaussian of width dCS (shift disorder) and a Lorentzian (or pseudo-Voigt) of wid
 lb (residual line broadening).
 
 **Why it is not Czjzek — and when to prefer it.** Czjzek is a *coupled* $d=5$
-distribution: its C_Q marginal peaks at $2\sigma$, is skewed, and **always includes
-$C_Q \to 0$**. That is right for a truly random glassy site (four-coordinate ²⁷Al).
+distribution: its C_Q marginal peaks at $\approx 3.7\sigma$ ($1.87\,\sigma_{Cz}$),
+is skewed, and **always includes $C_Q \to 0$**. That is right for a truly random glassy site (four-coordinate ²⁷Al).
 It is **wrong for trigonal BO₃ boron**, which has a *well-defined* C_Q
 (≈ 2.4–2.8 MHz) with only **modest** disorder — a narrow Gaussian around a **non-zero
 mean**, exactly what Amorphous provides. Fitting BO₃ with Czjzek smears intensity
@@ -492,11 +513,14 @@ rotational invariant is the **quadrupolar product** P_Q = C_Q·√(1+η²/3); fo
 disordered site only P_Q (and its RMS over the distribution) is meaningful.
 ν_Q here denotes the EFG-strength variable of the Czjzek PDF.
 
-**Czjzek width.** LARMOR's `sigma_Cq_MHz` = σ, the width of the EFG-component
-Gaussian expressed in C_Q units. dmfit relation: **sCZ_CQ ≈ 2σ**; mode of |C_Q| ≈
-2σ. Dimensionality d = 5 for a fully isotropic (standard Czjzek) distribution;
-mrsimulator's `CzjzekDistribution` implements this d = 5 case, which is also
-dmfit's default (d = 5).
+**Czjzek width.** LARMOR's `sigma_Cq_MHz` = σ, the standard deviation of each
+EFG-component Gaussian expressed in C_Q units (mrsimulator's convention). The
+width in Czjzek's formula is **σ_Cz = 2σ = dmfit's sCZ_CQ**; dmfit's displayed
+CQ = 4σ; the mode of |C_Q| ≈ 3.7σ (1.87 σ_Cz); √⟨P_Q²⟩ = √d·σ_Cz = 2√d·σ
+(2√5·σ at d = 5). The 1D kernel grid reaches 10σ (only 4.5·10⁻⁵ of the mass lies
+beyond it; 21 % lies beyond 5σ). Dimensionality d = 5 for a fully isotropic
+(standard Czjzek) distribution; mrsimulator's `CzjzekDistribution` implements this
+d = 5 case, which is also dmfit's default (d = 5).
 
 **Shielding (Haeberlen).** δ_iso = (δ_xx+δ_yy+δ_zz)/3; anisotropy ζ = δ_zz − δ_iso;
 asymmetry η_CS = (δ_yy − δ_xx)/ζ, with |δ_zz−δ_iso| ≥ |δ_xx−δ_iso| ≥ |δ_yy−δ_iso|.

@@ -732,7 +732,7 @@ def test_czjzek_display_convention_rescales_cell_and_header(qapp):
     try:
         rec = _czjzek_recipe_dict(sigma=1.0)
         for mode, k in [("sigma", 1.0), ("cq2", 2.0), ("dmfit", 4.0),
-                        ("pq", 5.0 ** 0.5)]:
+                        ("pq", 2.0 * 5.0 ** 0.5)]:
             table.set_czjzek_display(mode)
             t.rebuild(rec, set())
             col = 2 + t._used_keys.index("sigma_Cq_MHz")

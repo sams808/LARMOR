@@ -58,8 +58,9 @@ def _spin_of(nucleus: str | None) -> float:
 
 
 def _czjzek_derived(sigma_MHz: float, spin: float) -> tuple[float, float]:
-    """For a Czjzek σ(Cq): the representative Cq (= 2σ, dmfit's sCZ_CQ, the mode
-    of the |Cq| distribution) and the first-order νQ derived from it."""
+    """For a Czjzek σ(Cq): the representative Cq (= 2σ = dmfit's sCZ_CQ = the
+    Czjzek-paper width σ_Cz -- NOT the mode of |Cq|, which sits at ≈ 3.7σ)
+    and the first-order νQ derived from it."""
     from larmor.convert import nu_q
     cq = 2.0 * sigma_MHz
     return cq, nu_q(cq, spin)
@@ -76,11 +77,12 @@ CZJZEK_DISPLAYS = {
     "sigma":  ("σ(Cq)", 1.0,
                "the fitted Czjzek distribution width (mrsimulator σ)"),
     "cq2":    ("Cq ≈ 2σ", 2.0,
-               "dmfit's sCZ_CQ; ≈ the mode of the |Cq| distribution"),
+               "dmfit's sCZ_CQ = the Czjzek-paper σ_Cz (2σ)"),
     "dmfit":  ("CQ (dmfit) = 4σ", 4.0,
-               "what dmfit's CQ box displays (2×sCZ_CQ)"),
-    "pq":     ("P_Q = √5·σ", 5.0 ** 0.5,
-               "rms quadrupolar product √⟨P_Q²⟩ — field-independent "
+               "what dmfit's CQ box displays (2×sCZ_CQ); ≈ the mode of the "
+               "|Cq| distribution (3.7σ)"),
+    "pq":     ("P_Q = 2√5·σ", 2.0 * 5.0 ** 0.5,
+               "rms quadrupolar product √⟨P_Q²⟩ = √5·σ_Cz — field-independent "
                "invariant (Edén 2023 Eq. 45)"),
 }
 _CZJZEK_MODE = "sigma"
@@ -162,10 +164,14 @@ class _Cell(QWidget):
 
     def __init__(self, p: dict, param_name: str, param_unit: str,
                  this_index: int, n_sites: int, larmor_MHz: float,
-                 spin: float = 2.5):
+                 spin: float = 2.5, site_params: dict | None = None):
         super().__init__()
         self.p = p
         self.spin = spin
+        # the whole site's params (read-only here): a derived read-out can
+        # depend on a SIBLING parameter -- the Czjzek P_Q on czjzek_d's d, the
+        # exchange coalescence rate on split_ppm
+        self.site_params = site_params or {}
         self.ctx = dict(param_name=param_name, param_unit=param_unit,
                         this_index=this_index, n_sites=n_sites,
                         larmor_MHz=larmor_MHz)
@@ -219,16 +225,21 @@ class _Cell(QWidget):
             else:
                 self.derived.setText(f"σ {sigma:.3g}·νQ {nuq:.3g}")
             label, k, desc = CZJZEK_DISPLAYS[mode]
+            from larmor.czjzek_dist import mode_pq, rms_pq
+            d = float(self.site_params.get("czjzek_d", {}).get("value", 5.0))
+            d_txt = f", d = {d:g}" if d != 5.0 else ""
             self.derived.setToolTip(
                 "One fitted width, four literature conventions — the cell "
                 f"currently shows {label} (View ▸ Czjzek width display):\n"
                 f"  σ(Cq)        = {sigma:.4g} MHz  (the fitted parameter; "
-                "stored in recipes/CSVs)\n"
-                f"  Cq ≈ 2σ      = {cq:.4g} MHz  (dmfit sCZ_CQ; mode of |Cq|)\n"
+                "stored in recipes/CSVs; mrsimulator σ)\n"
+                f"  sCZ_CQ = 2σ  = {cq:.4g} MHz  (dmfit sCZ_CQ = the Czjzek-paper "
+                "σ_Cz)\n"
                 f"  CQ (dmfit)   = {4 * sigma:.4g} MHz  (dmfit's CQ box = 4σ "
-                "— what dmfit displays!)\n"
-                f"  P_Q = √5·σ   = {5 ** 0.5 * sigma:.4g} MHz  (rms quadrupolar "
-                "product — field-independent, Edén 2023)\n"
+                "≈ mode of |Cq| at 3.7σ — what dmfit displays!)\n"
+                f"  P_Q = 2√d·σ  = {rms_pq(sigma, d):.4g} MHz  (rms quadrupolar "
+                f"product √⟨P_Q²⟩ = √d·σ_Cz{d_txt} — field-independent, "
+                f"Edén 2023; P_Q mode {mode_pq(sigma, d):.4g} MHz)\n"
                 f"  νQ = 3·Cq / [2I(2I−1)] = {nuq:.4g} MHz   (I = {self.spin:g})\n"
                 "Report σ or P_Q and STATE the convention — see "
                 "Help ▸ Lineshapes ▸ Czjzek width conventions.")
@@ -463,7 +474,7 @@ class LinesTable(QWidget):
                 if key in site["params"]:
                     cell = _Cell(site["params"][key], key,
                                  _param_unit(site["model"], key), i, n, larmor,
-                                 spin)
+                                 spin, site_params=site["params"])
                     cell.edited.connect(self.edited)
                     cell.pinned.connect(self.edited)
                     cell.error.connect(self._cell_error)
