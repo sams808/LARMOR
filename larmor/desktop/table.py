@@ -189,6 +189,10 @@ class _Cell(QWidget):
         lay.addWidget(self.pin)
         self.edit.editingFinished.connect(self._on_edit)
         self.pin.toggled.connect(self._on_pin)
+        # keyboard nudging while the cursor is in the field: Up/Down 2 %,
+        # Shift 10 %, Ctrl 0.2 %, PageUp/PageDown 5 steps -- deliberate, so
+        # always on (unlike the scroll wheel, which is opt-in)
+        self.edit.installEventFilter(self)
         # route right-clicks to the parameter menu instead of the line-edit's
         # own copy/paste menu (which used to swallow them)
         self.edit.setContextMenuPolicy(Qt.NoContextMenu)
@@ -317,13 +321,13 @@ class _Cell(QWidget):
         self.p["vary"] = not checked
         self.pinned.emit()
 
-    def wheelEvent(self, ev):  # scroll on the cell nudges the value (opt-in)
-        if not scroll_nudge_enabled() or self.p.get("expr"):
-            ev.ignore()                      # let the table scroll instead
-            return
-        step = (abs(self.p["value"]) or 1.0) * (
-            0.1 if ev.modifiers() & Qt.ShiftModifier else 0.02)
-        self.p["value"] += step if ev.angleDelta().y() > 0 else -step
+    def nudge(self, direction: int, frac: float = 0.02):
+        """Move the value by +-frac of itself (or of 1 when it is 0),
+        clamped to its bounds; linked (expr) parameters cannot be nudged."""
+        if self.p.get("expr") or direction == 0:
+            return False
+        step = (abs(self.p["value"]) or 1.0) * float(frac)
+        self.p["value"] += step if direction > 0 else -step
         lo, hi = self.p.get("min"), self.p.get("max")
         if lo is not None:
             self.p["value"] = max(self.p["value"], lo)
@@ -332,6 +336,35 @@ class _Cell(QWidget):
         self.edit.setText(self._display_text())
         self._update_derived()
         self.edited.emit()
+        return True
+
+    @staticmethod
+    def _frac_for(mods) -> float:
+        if mods & Qt.ShiftModifier:
+            return 0.10
+        if mods & Qt.ControlModifier:
+            return 0.002
+        return 0.02
+
+    def eventFilter(self, obj, ev):
+        if obj is self.edit and ev.type() == QEvent.KeyPress:
+            key = ev.key()
+            if key in (Qt.Key_Up, Qt.Key_Down):
+                if self.nudge(1 if key == Qt.Key_Up else -1,
+                              self._frac_for(ev.modifiers())):
+                    return True
+            if key in (Qt.Key_PageUp, Qt.Key_PageDown):
+                if self.nudge(1 if key == Qt.Key_PageUp else -1,
+                              5 * self._frac_for(ev.modifiers())):
+                    return True
+        return super().eventFilter(obj, ev)
+
+    def wheelEvent(self, ev):  # scroll on the cell nudges the value (opt-in)
+        if not scroll_nudge_enabled() or self.p.get("expr"):
+            ev.ignore()                      # let the table scroll instead
+            return
+        self.nudge(1 if ev.angleDelta().y() > 0 else -1,
+                   0.1 if ev.modifiers() & Qt.ShiftModifier else 0.02)
 
 
 class LinesTable(QWidget):
@@ -388,8 +421,9 @@ class LinesTable(QWidget):
             "0.5B  ·  A+20 [50..80].   pin ☑ = fixed   ·   "
             + ("scroll = nudge" if scroll_nudge_enabled()
                else "scroll-nudge off (View ▸ Scroll edits values)")
-            + "   ·   right-click for menus   ·   Delete removes the "
-            "selected line (Ctrl+Z undoes)")
+            + "   ·   ↑/↓ in a cell nudges 2 % (Shift 10 %, Ctrl 0.2 %)   ·   "
+            "right-click for menus   ·   Delete removes the selected line "
+            "(Ctrl+Z undoes)")
         self.hint.setStyleSheet(f"color: {theme.active().text_dim}; font-size: 10px; padding: 2px 4px;")
         self.hint.setWordWrap(True)
         v.addWidget(self.hint)

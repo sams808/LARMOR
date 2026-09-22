@@ -1,6 +1,6 @@
-"""Three small workbench comforts: component names on the plot (pinned or on
-hover), keyboard line removal in the parameter table, and sidebands that are
-LINKED to their parent line instead of being free copies."""
+"""Small workbench comforts: component names on the plot (pinned or on
+hover), keyboard line removal and arrow-key nudging in the parameter table,
+and sidebands that are LINKED to their parent line instead of free copies."""
 import os
 
 import numpy as np
@@ -101,6 +101,39 @@ def test_delete_key_removes_the_selected_line(qapp):
     t.table.setCurrentCell(-1, -1)
     QTest.keyClick(t.table, Qt.Key_Delete)
     assert got == []
+    t.close()
+
+
+def test_arrow_keys_nudge_a_parameter_cell(qapp):
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    from larmor.desktop.table import LinesTable
+
+    t = LinesTable()
+    edits = []
+    t.edited.connect(lambda: edits.append(1))
+    rec = _recipe_dict(2)
+    rec["sites"][1]["params"]["shift_fwhm_ppm"]["expr"] = "s0.shift_fwhm_ppm"
+    t.rebuild(rec, set())
+    col = 2 + t._used_keys.index("shift_fwhm_ppm")
+    cell = t.table.cellWidget(0, col)
+    p = rec["sites"][0]["params"]["shift_fwhm_ppm"]
+    QTest.keyClick(cell.edit, Qt.Key_Up)
+    assert p["value"] == pytest.approx(4.0 * 1.02)
+    QTest.keyClick(cell.edit, Qt.Key_Down, Qt.ShiftModifier)
+    assert p["value"] == pytest.approx(4.08 * 0.9)
+    QTest.keyClick(cell.edit, Qt.Key_PageUp)
+    assert p["value"] == pytest.approx(4.08 * 0.9 * 1.10)
+    assert float(cell.edit.text()) == pytest.approx(p["value"], rel=1e-4)
+    assert len(edits) == 3
+    # bounds clamp; a linked parameter is not nudged
+    p["max"] = p["value"]
+    QTest.keyClick(cell.edit, Qt.Key_Up)
+    assert p["value"] == pytest.approx(p["max"])
+    linked = t.table.cellWidget(1, col)
+    before = rec["sites"][1]["params"]["shift_fwhm_ppm"]["value"]
+    QTest.keyClick(linked.edit, Qt.Key_Up)
+    assert rec["sites"][1]["params"]["shift_fwhm_ppm"]["value"] == before
     t.close()
 
 
