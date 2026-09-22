@@ -416,7 +416,7 @@ def error_table(result: BatchFitResult, method: str | None = None) -> list[dict]
                              "value": p.value, "stderr": None, "sigma_pct": None,
                              "ci68_lo": None, "ci68_hi": None,
                              "error_method": method, "model": site.model,
-                             "source_path": ""})
+                             "source_path": "", "index": None})
     for k, rec in enumerate(result.recipes):       # per-spectrum free params
         d = detail[k] if k < len(detail) else {}
         for i, site in enumerate(rec.sites):
@@ -435,14 +435,17 @@ def error_table(result: BatchFitResult, method: str | None = None) -> list[dict]
                                  "value": p.value, "stderr": stderr,
                                  "sigma_pct": pct, "ci68_lo": lo, "ci68_hi": hi,
                                  "error_method": method, "model": site.model,
-                                 "source_path": rec.source_path or ""})
+                                 "source_path": rec.source_path or "",
+                                 "index": k})
         rows.extend(_population_rows(rec, result.labels[k], method,
-                                     {i: d.get((i, "amplitude")) for i in range(len(rec.sites))}))
+                                     {i: d.get((i, "amplitude")) for i in range(len(rec.sites))},
+                                     index=k))
     return rows
 
 
 def _population_rows(rec: Recipe, scope: str, method: str | None,
-                     amp_errors: dict | None = None) -> list[dict]:
+                     amp_errors: dict | None = None,
+                     index: int | None = None) -> list[dict]:
     """Integrated population % rows (one per site) for a single fitted
     recipe, via ``larmor.quantify`` -- the same integral-over-the-window
     computation the Report tool (F6) and Batch fit report use. Excluded
@@ -450,7 +453,10 @@ def _population_rows(rec: Recipe, scope: str, method: str | None,
     ``amp_errors`` maps site index -> a ParamError from a specific error
     method, the population error reported matches THAT method rather than
     whatever stderr happens to already be on the recipe, so it's consistent
-    with the rest of an error_table export. Never raises: a model missing a
+    with the rest of an error_table export. ``index`` is the spectrum's
+    position in the batch, carried on every row because labels
+    (``rec.sample``) may collide and the on-screen table keys its rows by
+    position. Never raises: a model missing a
     param quantify() needs (e.g. an external "spectrum" background site)
     just means no population rows for this spectrum, not a failed export."""
     from copy import deepcopy
@@ -478,7 +484,8 @@ def _population_rows(rec: Recipe, scope: str, method: str | None,
         entry = {"scope": scope, "site": row["site"],
                 "label": site.label or site.model, "param": "population_pct",
                 "value": row["fraction_pct"], "stderr": row["fraction_err_pct"],
-                "model": site.model, "source_path": rec.source_path or ""}
+                "model": site.model, "source_path": rec.source_path or "",
+                "index": index}
         if method is not None:      # error_table's richer schema
             entry.update(sigma_pct=None, ci68_lo=None, ci68_hi=None,
                         error_method=method)
@@ -500,7 +507,8 @@ def shared_table(result: BatchFitResult) -> list[dict]:
                 rows.append({"scope": "shared", "site": f"s{i}",
                              "label": site.label or site.model, "param": pn,
                              "value": p.value, "stderr": p.stderr,
-                             "model": site.model, "source_path": ""})
+                             "model": site.model, "source_path": "",
+                             "index": None})
     for k, rec in enumerate(result.recipes):
         for i, site in enumerate(rec.sites):
             if is_zeroed_out(site.params.get("amplitude")):
@@ -511,6 +519,42 @@ def shared_table(result: BatchFitResult) -> list[dict]:
                                  "label": site.label or site.model, "param": pn,
                                  "value": p.value, "stderr": p.stderr,
                                  "model": site.model,
-                                 "source_path": rec.source_path or ""})
-        rows.extend(_population_rows(rec, result.labels[k], None))
+                                 "source_path": rec.source_path or "",
+                                 "index": k})
+        rows.extend(_population_rows(rec, result.labels[k], None, index=k))
     return rows
+
+
+def pivot_by_spectrum(rows: list[dict], n_spectra: int
+                      ) -> tuple[list[tuple[int, str, str]], dict[tuple[int, tuple], dict]]:
+    """Pivot the long ``shared_table``/``error_table`` rows into one row per
+    spectrum -- the wide view the batch-fit dialog's results table shows, so
+    screen and CSV are built from the SAME rows and cannot disagree.
+
+    Returns ``(columns, cells)``. ``columns`` is the ordered list of
+    ``(site_index, site_label, param)`` triples, in first-seen order (amplitude,
+    released parameters, then population %) and stably grouped by site index,
+    so a site excluded from the first spectrum still lands next to its
+    siblings. ``cells`` maps ``(spectrum_index, column) -> row``; a spectrum
+    whose site is excluded simply has no cell for that column (blank on
+    screen, not 0). Shared rows (``index`` None) never become columns -- they
+    are identical for every spectrum and stay in the status line / the CSV's
+    shared section. Pure Python, Qt-free."""
+    columns: list[tuple[int, str, str]] = []
+    seen: set[tuple[int, str, str]] = set()
+    cells: dict[tuple[int, tuple], dict] = {}
+    for row in rows:
+        k = row.get("index")
+        if not isinstance(k, int) or not 0 <= k < n_spectra:
+            continue
+        try:
+            site_idx = int(str(row["site"])[1:])
+        except (KeyError, ValueError):
+            continue
+        col = (site_idx, row["label"], row["param"])
+        if col not in seen:
+            seen.add(col)
+            columns.append(col)
+        cells[(k, col)] = row
+    columns.sort(key=lambda c: c[0])          # stable: first-seen order within a site
+    return columns, cells

@@ -9,6 +9,9 @@ interruptible worker (Cancel = revert, Stop = keep the last iteration).
 Made to be a proper workbench: NMR-style axes (high→low ppm), mouse zoom,
 independent-vs-shared scale, live component curves, an optional per-fit baseline,
 a completion threshold, and one-click saving of every fit in LARMOR format.
+A results table under the grid (one row per spectrum, sortable) is linked both
+ways to the cells: selecting a row spotlights its spectrum, clicking a spectrum
+finds its row.
 """
 from __future__ import annotations
 
@@ -19,11 +22,12 @@ from pathlib import Path
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import Qt, QThread, Signal
-from PySide6.QtGui import QAction
+from PySide6.QtGui import QAction, QColor
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFileDialog,
-    QGridLayout, QHBoxLayout, QInputDialog, QLabel, QMessageBox, QProgressBar,
-    QPushButton, QScrollArea, QSpinBox, QTabWidget, QVBoxLayout, QWidget,
+    QAbstractItemView, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
+    QDoubleSpinBox, QFileDialog, QGridLayout, QHBoxLayout, QInputDialog, QLabel,
+    QMessageBox, QProgressBar, QPushButton, QScrollArea, QSpinBox, QSplitter,
+    QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
 )
 
 from larmor.desktop import theme
@@ -31,6 +35,31 @@ from larmor.desktop.panels import PARAM_LABELS
 from larmor.desktop.plot import site_color
 
 PER_TAB = 9        # 3×3 grid per tab
+
+#: a cell's idle sample-name label; _apply_highlight restores it after a spotlight
+_TITLE_CSS = "font-size:10px; font-weight:600;"
+#: the flagged-RMSD red -- the same literal as the mixed-nuclei banner and the
+#: cell label (a warning must read as one on every theme, so not a theme role)
+_FLAG_CSS_COLOR = "#c0392b"
+
+
+class _NumItem(QTableWidgetItem):
+    """QTableWidgetItem sorts its text lexicographically ("9.5" > "10.2");
+    this one compares the float stored under ``Qt.UserRole + 1`` so a header
+    click orders numbers. A missing or non-finite key sorts after every
+    number, so blank cells sink to the bottom of an ascending sort."""
+
+    def __lt__(self, other):
+        return _sort_key(self) < _sort_key(other)
+
+
+def _sort_key(item) -> float:
+    v = item.data(Qt.UserRole + 1)
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return float("inf")
+    return f if np.isfinite(f) else float("inf")
 
 
 #: baseline kind (the "Fit baseline…" combo) -> the larmor.processing op that
@@ -149,7 +178,7 @@ class BatchFitDialog(QDialog):
     def __init__(self, parent, paths, model_recipe: dict | None):
         super().__init__(parent)
         self.setWindowTitle("Batch fit — one shared model, amplitudes per spectrum")
-        self.resize(1000, 780)
+        self.resize(1000, 860)
         self._src_paths = [str(p) for p in (paths or [])]
         self._model_sites = ((model_recipe or {}).get("sites") or None)
         self._window = ((model_recipe or {}).get("fit_window_ppm") or None)
@@ -161,6 +190,8 @@ class BatchFitDialog(QDialog):
         self._shared_scale = False
         self._baseline_kind = "None"
         self._excluded: dict[int, set[int]] = {}   # cell index -> excluded site indices
+        self._hl: int | None = None          # spotlighted spectrum (table row <-> grid cell)
+        self._flag_reasons: dict[int, str] = {}   # k -> "RMSD … is an outlier; low S/N"
         self._data = self._load(paths)
 
         v = QVBoxLayout(self)
@@ -186,10 +217,18 @@ class BatchFitDialog(QDialog):
         v.addWidget(self.warnBanner)
         self._update_nuclei_warning()
 
-        # ---- the grid of spectra ----
+        # ---- the grid of spectra, the results table under it ----
+        split = QSplitter(Qt.Vertical)
         self.tabs = QTabWidget()
-        v.addWidget(self.tabs, 1)
+        split.addWidget(self.tabs)
         self._build_grid()
+        self._build_table()                  # self.table: fixed columns until a fit
+        split.addWidget(self.table)
+        split.setCollapsible(0, False)       # the grid can never be dragged shut
+        split.setStretchFactor(0, 3)
+        split.setStretchFactor(1, 1)
+        split.setSizes([560, 160])
+        v.addWidget(split, 1)
 
         # ---- view options ----
         opt = QHBoxLayout()
@@ -202,8 +241,17 @@ class BatchFitDialog(QDialog):
                                   "right-click-drag or scroll to rescale, "
                                   "right-click ▸ View All to reset)")
         self.chkShared.toggled.connect(self._toggle_shared)
+        self.chkTable = QCheckBox("table")
+        self.chkTable.setChecked(True)
+        self.chkTable.setToolTip(
+            "show the results table under the grid — one row per spectrum: "
+            "click a row to spotlight its spectrum (the others dim), click a "
+            "spectrum to find its row; sort any column to bring an outlier to "
+            "the top")
+        self.chkTable.toggled.connect(self._toggle_table)
         opt.addWidget(self.chkComp)
         opt.addWidget(self.chkShared)
+        opt.addWidget(self.chkTable)
         opt.addSpacing(16)
         opt.addWidget(QLabel("baseline:"))
         self.lblBaseline = QLabel("none")
@@ -329,7 +377,9 @@ class BatchFitDialog(QDialog):
         self.btnSave.setEnabled(False)
         self.btnSave.clicked.connect(self._save_individual)
         self.btnTable = bb.addButton("Save table…", QDialogButtonBox.ActionRole)
-        self.btnTable.setToolTip("write a batch_table.csv of shared / per-spectrum values")
+        self.btnTable.setToolTip("write a batch_table.csv of shared / per-spectrum "
+                                 "values — the same numbers as the table under the "
+                                 "grid, in long form")
         self.btnTable.setEnabled(False)
         self.btnTable.clicked.connect(self._save_table)
         self.btnSeries = bb.addButton("Series plot…", QDialogButtonBox.ActionRole)
@@ -352,6 +402,16 @@ class BatchFitDialog(QDialog):
         autorow.addWidget(self.chkAutoRecipes)
         v.addLayout(autorow)
         v.addWidget(bb)
+        # No auto-default button anywhere in the dialog. Enter/Return inside
+        # the table is ignored by QAbstractItemView and lands on the dialog,
+        # which clicks whichever button Qt promoted to default on show -- the
+        # FIRST auto-default push button in the focus chain ("Model from
+        # recipe…" here; Close inside the button box) -- so results could be
+        # discarded or a file dialog opened by a stray Enter. Much likelier
+        # now that a cell click hands the table focus. Space still presses a
+        # focused button.
+        for b in self.findChildren(QPushButton):
+            b.setAutoDefault(False)
         self._update_fit_enabled()
 
     # ------------------------------------------------------------------ load
@@ -389,7 +449,7 @@ class BatchFitDialog(QDialog):
                 cell = QWidget(); cv = QVBoxLayout(cell)
                 cv.setContentsMargins(2, 2, 2, 2); cv.setSpacing(1)
                 title = QLabel(d["sample"])          # sample name, top-left
-                title.setStyleSheet("font-size:10px; font-weight:600;")
+                title.setStyleSheet(_TITLE_CSS)
                 title.setToolTip(f"{d['sample']}"
                                  + (f" · proc {d['proc']}" if d["proc"] else "")
                                  + f" · {d['nucleus']}")
@@ -618,6 +678,12 @@ class BatchFitDialog(QDialog):
     def _cell_clicked(self, k: int, ev):
         cell = self._cells[k]
         if not cell["bl_picking"]:
+            # a plain left click spotlights this spectrum and finds its table
+            # row -- never a drag-zoom (pyqtgraph delivers a click only for a
+            # button that never became a drag); a right click keeps falling
+            # through to the ViewBox menu. Only ev.button() is read here.
+            if ev.button() == Qt.LeftButton:
+                self._select_spectrum(k)
             return
         if ev.button() == Qt.RightButton:
             ev.accept()
@@ -792,6 +858,7 @@ class BatchFitDialog(QDialog):
                     x, np.asarray(ys, float),
                     pen=pg.mkPen(site_color(i), width=1, style=Qt.DashLine))
                 cell["comp"].append(it)
+        self._apply_highlight()       # fresh curves inherit the dim/spotlight state
 
     def _toggle_shared(self, on: bool):
         self._shared_scale = on
@@ -816,6 +883,226 @@ class BatchFitDialog(QDialog):
                 vb.enableAutoRange(axis="y")
                 vb.setXRange(float(d["ppm"].min()), float(d["ppm"].max()),
                              padding=0.02)
+
+    # ------------------------------------------------------------------ table
+    # The results table under the grid and the two-way spotlight link between
+    # its rows and the cells. Row identity is ALWAYS the spectrum index k,
+    # stored under Qt.UserRole on the "#" item of each row (see _row_k): labels
+    # may collide (two procs of one sample) and rows move when a header is
+    # clicked, so neither the label nor the row position can name a spectrum.
+    def _build_table(self):
+        t = self.table = QTableWidget(0, 0)
+        t.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        t.setSelectionBehavior(QAbstractItemView.SelectRows)
+        t.setSelectionMode(QAbstractItemView.SingleSelection)
+        t.setAlternatingRowColors(True)
+        t.verticalHeader().setVisible(False)     # it renumbers by position after a sort
+        t.horizontalHeader().setStretchLastSection(False)
+        # setSortingEnabled(True) sorts by the header's current indicator every
+        # time it is re-enabled after a refill (Qt's default: column 0
+        # descending): start in series order; a header click then takes over
+        # and persists across refills
+        t.horizontalHeader().setSortIndicator(0, Qt.AscendingOrder)
+        t.setMinimumHeight(80)
+        t.itemSelectionChanged.connect(self._on_table_selection)
+        self._fill_table(None)
+
+    def _table_method(self, result) -> str:
+        """The error method the table shows: the combo's pick once it has been
+        computed, else the covariance stderr already on the recipes -- the same
+        choice _refresh_err_status reports, because error_table labels an
+        unstored method while silently falling back to Param.stderr."""
+        m = self.errCombo.currentData()
+        return m if m in (getattr(result, "error_detail", {}) or {}) else "covariance"
+
+    def _fill_table(self, result):
+        """(Re)build the table: the fixed columns (#, sample, proc, S/N, RMSD)
+        always, plus one column per site x parameter once ``result`` exists.
+        Screen and Save table… / Export CSV… come from the same batchfit rows,
+        so they cannot disagree. Keeps the current spotlight."""
+        from larmor import batchfit
+
+        t = self.table
+        t.blockSignals(True)
+        t.setSortingEnabled(False)           # filling while sorting is on scrambles rows
+        has_proc = any(d.get("proc") for d in self._data)
+        fixed = ["#", "sample"] + (["proc"] if has_proc else []) + ["S/N", "RMSD"]
+        if result is None:
+            cols, cells = [], {}
+        else:
+            rows = batchfit.error_table(result, self._table_method(result))
+            cols, cells = batchfit.pivot_by_spectrum(rows, len(result.recipes))
+        headers = fixed + [
+            f"s{i} {label}\n" + ("population %" if pn == "population_pct"
+                                 else PARAM_LABELS.get(pn, pn))
+            for i, label, pn in cols]
+        t.setRowCount(0)
+        t.setColumnCount(len(headers))
+        t.setHorizontalHeaderLabels(headers)
+        t.setRowCount(len(self._data))
+        for k, d in enumerate(self._data):
+            items = []
+            it = _NumItem(str(k + 1))
+            it.setData(Qt.UserRole, k)                        # THE identity
+            it.setData(Qt.UserRole + 1, float(k))
+            it.setToolTip(str(d.get("path", ""))
+                          + (f" · proc {d['proc']}" if d.get("proc") else ""))
+            items.append(it)
+            items.append(QTableWidgetItem(str(d.get("sample", ""))))
+            if has_proc:
+                items.append(QTableWidgetItem(str(d.get("proc", ""))))
+            snr = d.get("snr")
+            snr = float(snr) if _finite(snr) else float("nan")
+            it = _NumItem(f"{snr:.0f}" if np.isfinite(snr) else "")
+            it.setData(Qt.UserRole + 1, snr)
+            items.append(it)
+            if result is None or k >= len(result.rmsd):
+                items.append(_NumItem("—"))
+            else:
+                rmsd = float(result.rmsd[k])
+                it = _NumItem(f"{rmsd:.4f}")
+                it.setData(Qt.UserRole + 1, rmsd)
+                if k in self._flag_reasons:                   # same gate as the cell label
+                    it.setText(f"⚠ {rmsd:.4f}")
+                    it.setForeground(QColor(_FLAG_CSS_COLOR))
+                    it.setToolTip(self._flag_reasons[k])
+                items.append(it)
+            for col in cols:
+                i, _label, pn = col
+                row = cells.get((k, col))
+                if row is None:
+                    it = _NumItem("")
+                    rec = result.recipes[k] if k < len(result.recipes) else None
+                    if (rec is not None and i < len(rec.sites)
+                            and batchfit.is_zeroed_out(
+                                rec.sites[i].params.get("amplitude"))):
+                        it.setToolTip("excluded for this spectrum")
+                else:
+                    value, stderr = row.get("value"), row.get("stderr")
+                    txt = _num(value, ".4g")
+                    if _finite(stderr):
+                        txt += f" ± {float(stderr):.2g}"
+                    it = _NumItem(txt)
+                    if _finite(value):
+                        it.setData(Qt.UserRole + 1, float(value))
+                    it.setForeground(QColor(site_color(i)))
+                    tip = f"{pn} · {row.get('error_method', '')}"
+                    if _finite(row.get("sigma_pct")):
+                        tip += f" · σ {float(row['sigma_pct']):.2g} %"
+                    it.setToolTip(tip)
+                items.append(it)
+            for c, it in enumerate(items):
+                t.setItem(k, c, it)
+        t.setSortingEnabled(True)                # re-sorts by the current indicator
+        t.resizeColumnsToContents()
+        if self._hl is not None:
+            r = self._row_of(self._hl)
+            if r is not None:
+                t.selectRow(r)
+        t.blockSignals(False)
+        self._apply_highlight()
+
+    def _row_k(self, row: int):
+        """Spectrum index of a table row, read from Qt.UserRole on its "#" item
+        -- never the row position (rows move when sorted) or the sample label
+        (two procs of one sample share it). None for an empty row."""
+        it = self.table.item(row, 0)
+        return None if it is None else it.data(Qt.UserRole)
+
+    def _row_of(self, k: int):
+        """The table row currently showing spectrum k (layout- and sort-agnostic)."""
+        for r in range(self.table.rowCount()):
+            if self._row_k(r) == k:
+                return r
+        return None
+
+    def _on_table_selection(self):
+        rows = self.table.selectionModel().selectedRows()
+        self._highlight_cell(self._row_k(rows[0].row()) if rows else None)
+
+    def _select_spectrum(self, k: int):
+        """Cell -> table: select spectrum k's row, scroll it to the centre and
+        hand the table focus, so ↑/↓ then step the spotlight along the series."""
+        r = self._row_of(k)
+        if r is not None:
+            self.table.selectRow(r)          # fires _on_table_selection unless already selected
+            it = self.table.item(r, 0)
+            if it is not None:
+                self.table.scrollToItem(it, QAbstractItemView.PositionAtCenter)
+            if not self.table.isHidden():
+                self.table.setFocus()
+        self._highlight_cell(k)              # idempotent; also covers r is None
+
+    def _highlight_cell(self, k):
+        """Table -> cells: spotlight spectrum k (None clears) and bring its
+        grid page forward."""
+        self._hl = k
+        self._apply_highlight()
+        if k is not None and self.tabs.count():
+            self.tabs.setCurrentIndex(k // PER_TAB)
+        self._selection_status()
+
+    def _apply_highlight(self):
+        """Render self._hl onto the cells: the spotlighted cell gets a 2 px
+        accent frame, an accent title and wider experiment/model pens; every
+        other cell's curves (components included) fade to 35 % opacity --
+        theme-agnostic, and no item is rebuilt. Every key is read with .get()
+        and None-checked because tests stub cells with partial dicts."""
+        t = theme.active()
+        for j, cell in enumerate(self._cells):
+            sel = (self._hl == j)
+            op = 0.35 if (self._hl is not None and not sel) else 1.0
+            exp = cell.get("exp")
+            if exp is not None:
+                exp.setOpacity(op)
+                exp.setPen(pg.mkPen(t.experiment, width=2.0 if sel else 1.0))
+            model = cell.get("model")
+            if model is not None:
+                model.setOpacity(op)
+                model.setPen(pg.mkPen(t.model, width=2.2 if sel else 1.4))
+            for it in cell.get("comp") or []:
+                it.setOpacity(op)
+            plot = cell.get("plot")
+            if plot is not None:
+                plot.getViewBox().setBorder(
+                    pg.mkPen(t.accent, width=2) if sel else None)
+            title = cell.get("title")
+            if title is not None:
+                title.setStyleSheet(_TITLE_CSS + (
+                    f" background:{t.accent}; color:{t.accent_text}; "
+                    "padding:0 3px; border-radius:2px;" if sel else ""))
+
+    def _selection_status(self):
+        """Status line for the spotlight -- the discoverability path for the
+        keyboard and the flag reasons; clearing restores the fit summary."""
+        k = self._hl
+        if k is None:
+            self.status.setText(self._result.summary if self._result is not None
+                                else self._model_status())
+            return
+        d = self._data[k] if k < len(self._data) else {}
+        parts = [f"spectrum {k + 1}/{len(self._data)} “{d.get('sample', '')}”"]
+        if self._result is not None and k < len(self._result.rmsd):
+            parts.append(f"RMSD {self._result.rmsd[k]:.4f}")
+        if k in self._flag_reasons:
+            parts.append("⚠ " + self._flag_reasons[k])
+        if _finite(d.get("snr")):
+            parts.append(f"S/N {float(d['snr']):.0f}")
+        self.status.setText(" · ".join(parts)
+                            + " — ↑/↓ step through the series · Esc clears")
+
+    def _toggle_table(self, on: bool):
+        self.table.setVisible(on)
+
+    def keyPressEvent(self, ev):
+        # the first Esc clears the spotlight (intercepted only while one
+        # exists); the second reaches QDialog and closes, as before
+        if ev.key() == Qt.Key_Escape and self._hl is not None:
+            self.table.clearSelection()      # -> _on_table_selection -> _highlight_cell(None)
+            self._highlight_cell(None)       # also when the table held no selection
+            ev.accept()
+            return
+        super().keyPressEvent(ev)
 
     # ------------------------------------------------------------------ fit
     def _entries(self):
@@ -906,6 +1193,7 @@ class BatchFitDialog(QDialog):
                 self._cells[k]["rmsd"].setText(f"RMSD {result.rmsd[k]:.4f}")
         self._refresh_components()
         flagged = self._flag_quality(result)
+        self._fill_table(result)
         note = " (stopped early)" if mode == "stop" else ""
         if flagged:
             note += f"  ⚠ {len(flagged)} spectrum/spectra flagged (RMSD outlier " \
@@ -920,6 +1208,7 @@ class BatchFitDialog(QDialog):
         mad = float(np.median(np.abs(r - med))) or (0.1 * med + 1e-9)
         hi = med + 3.0 * 1.4826 * mad
         flagged = []
+        self._flag_reasons.clear()            # the table's RMSD column reads these
         for k, cell in enumerate(self._cells):
             if k >= len(result.rmsd):
                 break
@@ -932,9 +1221,11 @@ class BatchFitDialog(QDialog):
             lbl = cell["rmsd"]
             if reasons:
                 flagged.append(k)
+                self._flag_reasons[k] = "; ".join(reasons)
                 lbl.setText(f"⚠ RMSD {r[k]:.4f}")
-                lbl.setStyleSheet("font-size:9px; color:#c0392b; font-weight:600;")
-                lbl.setToolTip("; ".join(reasons))
+                lbl.setStyleSheet(
+                    f"font-size:9px; color:{_FLAG_CSS_COLOR}; font-weight:600;")
+                lbl.setToolTip(self._flag_reasons[k])
             else:
                 lbl.setStyleSheet(
                     f"font-size:9px; color:{theme.active().text_dim};")
@@ -1116,6 +1407,8 @@ class BatchFitDialog(QDialog):
             if self.errN.value() < 40:
                 self.errN.setValue(200)
         self._refresh_err_status()
+        if self._result is not None:          # the table shows what Export CSV… writes
+            self._fill_table(self._result)
 
     def _refresh_err_status(self):
         if self._result is None:
@@ -1220,6 +1513,7 @@ class BatchFitDialog(QDialog):
             self.status.setText(
                 f"{method} errors computed for {len(result.recipes)} spectra")
         self._refresh_err_status()
+        self._fill_table(result)              # parameter cells switch to "value ± err"
         if self._export_after:
             self._export_after = False
             self._write_err_csv(self._export_path)
@@ -1272,6 +1566,18 @@ class BatchFitDialog(QDialog):
 # ---------------------------------------------------------------- module helpers
 def _slug(s: str) -> str:
     return "".join(c if c.isalnum() or c in "-_" else "_" for c in (s or ""))[:80]
+
+
+def _finite(v) -> bool:
+    """True for a real, finite number (None / NaN / non-numeric -> False)."""
+    try:
+        return v is not None and bool(np.isfinite(float(v)))
+    except (TypeError, ValueError):
+        return False
+
+
+def _num(v, fmt: str) -> str:
+    return format(float(v), fmt) if _finite(v) else ""
 
 
 def sample_label(path, rec) -> str:

@@ -1072,3 +1072,300 @@ def test_computing_params_controls_are_all_wired(qapp, monkeypatch):
     finally:
         engine.KERNEL_SETTINGS.update(old)
         engine.clear_kernel_cache()
+
+
+# ---------------------------------------------------------------------------
+# F5: the batch results table under the grid, index-linked both ways to the
+# spectrum cells. Synthetic '# nucleus = 11B' CSVs only (no real data), the
+# dialog built alone and the fit run synchronously through its own worker.
+
+def _batch_dialog(tmp_path, n, noise=None):
+    """A BatchFitDialog over n synthetic 1-site 11B spectra (amplitude and
+    shift vary along the series; ``noise[k]`` is spectrum k's noise sigma,
+    1.5 for all by default) with a matching 1-site model loaded."""
+    from larmor.recipe import Recipe, SiteModel, Param
+    from larmor import engine
+    from larmor.desktop.batchfit_dialog import BatchFitDialog
+
+    x = np.linspace(-20, 60, 600)
+    paths = []
+    for k in range(n):
+        tr = Recipe(nucleus="11B", larmor_frequency_MHz=160.0, spin_rate_Hz=0.0,
+                    sites=[SiteModel(model="gauss_lor", label="A", params={
+                        "isotropic_chemical_shift_ppm": Param(15.0 + 0.1 * k),
+                        "shift_fwhm_ppm": Param(6.0),
+                        "amplitude": Param(100.0 - 5.0 * k),
+                        "gl": Param(1.0, vary=False)})])
+        _, m, _ = engine.simulate(tr, exp_ppm=x)
+        sigma = 1.5 if noise is None else noise[k]
+        d = m + np.random.default_rng(k).normal(0, sigma, x.size)
+        p = tmp_path / f"batch{k:02d}.csv"
+        p.write_text("# nucleus = 11B\n# larmor_MHz = 160\n" +
+                     "\n".join(f"{xi:.4f} {yi:.4f}" for xi, yi in zip(x, d)),
+                     encoding="utf-8")
+        paths.append(str(p))
+    model = {"nucleus": "11B", "larmor_frequency_MHz": 160.0, "spin_rate_Hz": 0.0,
+             "sites": [{"model": "gauss_lor", "label": "A", "params": {
+                 "isotropic_chemical_shift_ppm": {"value": 15.0, "min": 0, "max": 30},
+                 "shift_fwhm_ppm": {"value": 6.0, "min": 0.1},
+                 "amplitude": {"value": 80.0, "min": 0},
+                 "gl": {"value": 1.0, "vary": False}}}]}
+    return BatchFitDialog(None, paths, model)
+
+
+def _fit_batch(dlg):
+    """Run the batch fit synchronously through the dialog's own worker."""
+    from larmor.desktop.batchfit_dialog import _BatchWorker
+
+    w = _BatchWorker(dlg._entries(), (), 0.1)
+    w.done.connect(dlg._done)
+    w.run()
+    assert dlg._result is not None
+    return dlg._result
+
+
+class _Click:
+    """Stub of pyqtgraph's MouseClickEvent with only button() / scenePos() /
+    accept(), like the _RightClick stubs above: the not-picking branch of
+    _cell_clicked must never need more than the button."""
+
+    def __init__(self, button):
+        self._button = button
+
+    def button(self):
+        return self._button
+
+    def scenePos(self):
+        from PySide6.QtCore import QPointF
+        return QPointF(0.0, 0.0)
+
+    def accept(self):
+        pass
+
+
+def _headers(t):
+    return [t.horizontalHeaderItem(c).text() for c in range(t.columnCount())]
+
+
+def _selected_rows(t):
+    return [i.row() for i in t.selectionModel().selectedRows()]
+
+
+def test_batch_table_exists_before_fit_and_fills_after(qapp, tmp_path):
+    """The table is there from construction (fixed columns, RMSD '—') so the
+    link works while setting up; _done refills it with one column per site
+    x parameter from the SAME rows Export CSV… writes, identity intact."""
+    from PySide6.QtCore import Qt
+
+    dlg = _batch_dialog(tmp_path, 2)
+    t = dlg.table
+    assert not t.isHidden()
+    assert t.rowCount() == 2
+    assert _headers(t) == ["#", "sample", "S/N", "RMSD"]     # CSVs: no proc column
+    for k in range(2):
+        assert t.item(k, 0).data(Qt.UserRole) == k
+        assert t.item(k, 0).text() == str(k + 1)
+        assert t.item(k, 1).text() == dlg._data[k]["sample"]
+        assert t.item(k, 3).text() == "—"
+    dlg._cell_clicked(1, _Click(Qt.LeftButton))
+    assert dlg._hl == 1 and _selected_rows(t) == [1]
+
+    res = _fit_batch(dlg)
+    headers = _headers(t)
+    assert headers[:4] == ["#", "sample", "S/N", "RMSD"]
+    assert any(h.startswith("s0 A") for h in headers[4:])
+    assert any(h.endswith("population %") for h in headers[4:])
+    amp_col = headers.index("s0 A\namplitude")
+    assert t.rowCount() == 2
+    for k in range(2):
+        r = dlg._row_of(k)
+        assert t.item(r, 0).data(Qt.UserRole) == k
+        shown = float(t.item(r, amp_col).text().split(" ±")[0])
+        assert shown == pytest.approx(
+            res.recipes[k].sites[0].params["amplitude"].value, rel=1e-3)
+        assert f"{res.rmsd[k]:.4f}" in t.item(r, 3).text()
+    # the spotlight survived the refill
+    assert dlg._hl == 1 and _selected_rows(t) == [dlg._row_of(1)]
+
+
+def test_batch_table_row_selection_spotlights_cell(qapp, tmp_path):
+    from PySide6.QtCore import Qt
+    from larmor.desktop import theme
+
+    dlg = _batch_dialog(tmp_path, 2)
+    res = _fit_batch(dlg)
+    c0, c1 = dlg._cells
+    dlg.table.selectRow(dlg._row_of(1))
+    assert dlg._hl == 1
+    assert c1["plot"].getViewBox().border.style() != Qt.NoPen
+    assert c0["plot"].getViewBox().border.style() == Qt.NoPen
+    assert c1["exp"].opts["pen"].widthF() == pytest.approx(2.0)
+    assert c0["exp"].opts["pen"].widthF() == pytest.approx(1.0)
+    assert c1["model"].opts["pen"].widthF() == pytest.approx(2.2)
+    assert c0["model"].opts["pen"].widthF() == pytest.approx(1.4)
+    assert c0["exp"].opacity() == pytest.approx(0.35)
+    assert c1["exp"].opacity() == pytest.approx(1.0)
+    accent = theme.active().accent
+    assert accent in c1["title"].styleSheet()
+    assert accent not in c0["title"].styleSheet()
+    status = dlg.status.text()
+    assert dlg._data[1]["sample"] in status and "RMSD" in status
+    assert "Esc clears" in status
+
+    dlg.table.clearSelection()
+    assert dlg._hl is None
+    for c in (c0, c1):
+        assert c["plot"].getViewBox().border.style() == Qt.NoPen
+        assert c["exp"].opacity() == pytest.approx(1.0)
+        assert c["exp"].opts["pen"].widthF() == pytest.approx(1.0)
+        assert accent not in c["title"].styleSheet()
+    assert dlg.status.text() == res.summary
+
+
+def test_batch_cell_click_selects_and_scrolls_to_its_row(qapp, tmp_path):
+    from PySide6.QtCore import Qt
+
+    dlg = _batch_dialog(tmp_path, 2)
+    _fit_batch(dlg)
+    t = dlg.table
+    dlg._cell_clicked(1, _Click(Qt.LeftButton))
+    assert _selected_rows(t) == [1]
+    assert t.currentRow() == 1
+    assert dlg._hl == 1
+    # a right click outside picking mode keeps falling through to the menu
+    dlg._cell_clicked(0, _Click(Qt.RightButton))
+    assert _selected_rows(t) == [1] and dlg._hl == 1
+    dlg._cell_clicked(0, _Click(Qt.LeftButton))
+    assert _selected_rows(t) == [0] and dlg._hl == 0
+    assert dlg._cells[1]["plot"].getViewBox().border.style() == Qt.NoPen
+    assert dlg._cells[0]["plot"].getViewBox().border.style() != Qt.NoPen
+
+
+def test_batch_highlight_brings_the_cells_tab_forward(qapp, tmp_path):
+    from PySide6.QtCore import Qt
+
+    dlg = _batch_dialog(tmp_path, 10)             # two pages; no fit needed
+    assert dlg.tabs.count() == 2 and len(dlg._cells) == 10
+    dlg._highlight_cell(9)
+    assert dlg.tabs.currentIndex() == 1
+    assert dlg._cells[9]["plot"].getViewBox().border.style() != Qt.NoPen
+    assert dlg._cells[0]["exp"].opacity() == pytest.approx(0.35)
+    dlg._highlight_cell(0)
+    assert dlg.tabs.currentIndex() == 0
+    dlg._highlight_cell(None)
+    for c in dlg._cells:
+        assert c["plot"].getViewBox().border.style() == Qt.NoPen
+        assert c["exp"].opacity() == pytest.approx(1.0)
+
+
+def test_batch_table_identity_survives_sorting(qapp, tmp_path):
+    """Sort by RMSD descending puts the outlier on top; selecting that row
+    must spotlight the outlier's SPECTRUM (identity = Qt.UserRole k), not
+    whatever spectrum used to sit at row 0."""
+    from PySide6.QtCore import Qt
+    from larmor.desktop.batchfit_dialog import _NumItem
+
+    dlg = _batch_dialog(tmp_path, 3, noise=(1.0, 6.0, 1.5))   # the middle one is bad
+    res = _fit_batch(dlg)
+    t = dlg.table
+    worst = int(np.argmax(res.rmsd))
+    assert worst == 1
+    assert 1 in dlg._flag_reasons and 0 not in dlg._flag_reasons
+    rmsd_col = _headers(t).index("RMSD")
+    for k in range(3):                       # the flag gate is the cell label's
+        txt = t.item(dlg._row_of(k), rmsd_col).text()
+        assert txt.startswith("⚠ ") == (k in dlg._flag_reasons)
+        assert f"{res.rmsd[k]:.4f}" in txt
+
+    t.sortItems(rmsd_col, Qt.DescendingOrder)
+    assert t.item(0, 0).text() == str(worst + 1)
+    t.selectRow(0)
+    assert dlg._hl == worst
+    assert _selected_rows(t) == [0]
+    # the sort persists across a refill and the spotlight follows its spectrum
+    dlg._fill_table(res)
+    assert t.item(0, 0).text() == str(worst + 1)
+    assert dlg._hl == worst and _selected_rows(t) == [0]
+
+    # numeric, not lexicographic; blanks sink to the bottom
+    a = _NumItem("9.5"); a.setData(Qt.UserRole + 1, 9.5)
+    b = _NumItem("10.2"); b.setData(Qt.UserRole + 1, 10.2)
+    assert a < b and not (b < a)
+    blank = _NumItem("")
+    assert a < blank and not (blank < a)
+
+
+def test_batch_escape_clears_selection_before_closing_and_arrows_step(qapp, tmp_path):
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QDialogButtonBox, QPushButton
+
+    dlg = _batch_dialog(tmp_path, 3)
+    dlg.show()                                    # offscreen; key stepping needs a laid-out view
+    try:
+        # Enter can never silently press a button: nothing is auto-default,
+        # so Qt promoted no button to default on show
+        assert all(not b.autoDefault()
+                   for b in dlg.findChild(QDialogButtonBox).buttons())
+        assert not any(b.isDefault() for b in dlg.findChildren(QPushButton))
+
+        dlg._select_spectrum(0)
+        assert dlg._hl == 0
+        assert dlg.focusWidget() is dlg.table     # so the arrows work at once
+        QTest.keyClick(dlg.table, Qt.Key_Down)
+        assert dlg._hl == 1
+        QTest.keyClick(dlg.table, Qt.Key_Down)
+        assert dlg._hl == 2
+        QTest.keyClick(dlg.table, Qt.Key_Up)
+        assert dlg._hl == 1
+
+        rejected = []
+        dlg.rejected.connect(lambda: rejected.append(1))
+        QTest.keyClick(dlg.table, Qt.Key_Escape)  # ignored by the view, reaches the dialog
+        assert dlg._hl is None and rejected == []
+        assert _selected_rows(dlg.table) == []
+        QTest.keyClick(dlg, Qt.Key_Escape)        # QDialog's default is untouched
+        assert rejected == [1]
+    finally:
+        dlg.close()
+
+
+def test_batch_highlight_survives_components_toggle_and_error_refill(qapp, tmp_path):
+    dlg = _batch_dialog(tmp_path, 2)
+    res = _fit_batch(dlg)
+    t = dlg.table
+    t.selectRow(0)
+    assert dlg._hl == 0
+    dlg.chkComp.setChecked(True)                  # rebuilds the component curves
+    assert dlg._cells[0]["comp"] and dlg._cells[1]["comp"]
+    assert all(it.opacity() == pytest.approx(0.35) for it in dlg._cells[1]["comp"])
+    assert all(it.opacity() == pytest.approx(1.0) for it in dlg._cells[0]["comp"])
+
+    # covariance errors through the dialog's own worker path (Compute errors),
+    # the thread joined here instead of run through an event loop
+    dlg.errCombo.setCurrentIndex(0)
+    dlg._compute_errors()
+    assert dlg._err_worker is not None and dlg._err_worker.wait(120_000)
+    dlg._err_done(dlg._result)
+    assert "covariance" in res.error_detail
+    assert t.rowCount() == 2
+    assert _selected_rows(t) == [0] and dlg._hl == 0
+    amp_col = _headers(t).index("s0 A\namplitude")
+    cells = [t.item(r, amp_col) for r in range(2)]
+    assert any(" ± " in c.text() for c in cells)
+    assert all("covariance" in c.toolTip() for c in cells)
+
+
+def test_batch_table_checkbox_hides_and_shows(qapp, tmp_path):
+    from PySide6.QtCore import Qt
+
+    dlg = _batch_dialog(tmp_path, 2)
+    assert dlg.chkTable.isChecked() and not dlg.table.isHidden()
+    dlg.chkTable.setChecked(False)
+    assert dlg.table.isHidden()                   # never isVisible(): the dialog is not shown
+    dlg.table.selectRow(1)                        # the link still works while hidden
+    assert dlg._hl == 1
+    dlg._cell_clicked(0, _Click(Qt.LeftButton))   # ...and never focuses a hidden table
+    assert dlg._hl == 0 and dlg.focusWidget() is not dlg.table
+    dlg.chkTable.setChecked(True)
+    assert not dlg.table.isHidden()
