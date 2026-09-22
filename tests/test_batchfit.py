@@ -520,3 +520,63 @@ def test_batch_fit_should_stop_gives_every_entry_a_result():
     unfit_amp = _start("g2").sites[0].params["amplitude"].value
     assert res.recipes[2].sites[0].params["amplitude"].value == \
         pytest.approx(unfit_amp)
+
+
+def test_table_rows_carry_the_spectrum_index_even_with_duplicate_labels():
+    """F5: the dialog's on-screen batch table keys its rows by the spectrum's
+    position k, never by label -- two procs of one sample share a label. Every
+    per-spectrum row (population rows included) carries ``index`` = k, the
+    shared rows None, and nothing else about the rows changes (the CSV
+    writers enumerate columns by name, so the files are byte-identical)."""
+    x = np.linspace(-20, 60, 800)
+    shifts, amps = [0.0, 0.3, -0.3], [[100, 60], [80, 90], [120, 40]]
+    entries = [(_start("same"), x, _spec(x, sh, am, k), (-10.0, 40.0))
+               for k, (sh, am) in enumerate(zip(shifts, amps))]
+    res = batchfit.batch_fit(entries)
+    assert res.labels == ["same"] * 3                  # the collision is real
+
+    base_keys = {"scope", "site", "label", "param", "value", "stderr",
+                 "model", "source_path"}
+    err_keys = {"error_method", "sigma_pct", "ci68_lo", "ci68_hi"}
+    for rows, extra in ((batchfit.shared_table(res), set()),
+                        (batchfit.error_table(res, "covariance"), err_keys)):
+        assert rows
+        assert all(r["index"] is None for r in rows if r["scope"] == "shared")
+        per = [r for r in rows if r["scope"] != "shared"]
+        assert {r["index"] for r in per} == {0, 1, 2}
+        for k in range(3):
+            amp = [r for r in per if r["index"] == k and r["site"] == "s0"
+                   and r["param"] == "amplitude"]
+            assert len(amp) == 1
+            assert amp[0]["value"] == \
+                res.recipes[k].sites[0].params["amplitude"].value
+        pop = [r for r in per if r["param"] == "population_pct"]
+        assert pop and all(r["index"] is not None for r in pop)
+        for r in rows:
+            assert (base_keys | extra) <= set(r)         # original keys intact
+
+
+def test_pivot_by_spectrum_blanks_excluded_sites_and_orders_columns_by_site():
+    """F5: the wide (one row per spectrum) view of the long rows -- a site
+    excluded from one spectrum has no cell there (blank on screen, not 0)
+    yet still lands next to its siblings in the column order, and shared
+    parameters never become columns."""
+    entries = _entries()
+    entries[1][0].sites[1].params["amplitude"] = Param(
+        0.0, vary=False, min=0.0, max=0.0)
+    res = batchfit.batch_fit(entries)
+    rows = batchfit.shared_table(res)
+    cols, cells = batchfit.pivot_by_spectrum(rows, 3)
+
+    assert cols == [(0, "A", "amplitude"), (0, "A", "population_pct"),
+                    (1, "B", "amplitude"), (1, "B", "population_pct")]
+    amp_b, pop_b = (1, "B", "amplitude"), (1, "B", "population_pct")
+    assert (0, amp_b) in cells and (1, amp_b) not in cells
+    assert (0, pop_b) in cells and (1, pop_b) not in cells
+    assert (2, amp_b) in cells
+    assert [c[0] for c in cols] == sorted(c[0] for c in cols)   # grouped by site
+    assert all(row["index"] == k for (k, _col), row in cells.items())
+    assert "shift_fwhm_ppm" not in {c[2] for c in cols}          # shared: never a column
+    assert cells[(0, amp_b)]["value"] == \
+        res.recipes[0].sites[1].params["amplitude"].value
+    assert batchfit.pivot_by_spectrum(rows, 0) == ([], {})

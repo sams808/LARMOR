@@ -150,6 +150,19 @@ populations change. **Ctrl/Shift-click** the spectra in the Explorer and press
    **components** overlays each site's curve on every fit; **shared scale** puts
    all the plots on one common x/y range for honest comparison (off = each
    auto-scales). Each cell reports its RMSD, updating live after the fit.
+   **…and as a table.** A results table sits under the grid, one row per
+   spectrum: sample, S/N, RMSD and — after a fit — each site's amplitude, any
+   released parameter and its integrated population % (the same numbers
+   **Save table…** / **Export CSV…** write; an excluded component is blank).
+   **Click a row** to spotlight that spectrum in the grid: its frame takes the
+   accent colour, the other cells dim, and its page comes forward. **Click a
+   spectrum** to find its row; the arrow keys then step along the series with
+   the spotlight following. **Sort any column** (click its header) — RMSD
+   descending puts the worst fit on top, so an outlier in a series is one
+   click from the data behind it; a flagged spectrum (RMSD outlier or low
+   S/N) shows its RMSD in red with the reason as a tooltip. **Esc** clears
+   the spotlight; untick **table** to hide it, or drag the divider to trade
+   grid height for table height.
 3. **Baseline, per spectrum.** **Fit baseline…** estimates and subtracts a
    baseline from every spectrum *independently* before fitting — **Polynomial**
    (robust asymmetric, choose the order), **Iterative** (Yon 2020), or a flat
@@ -223,8 +236,10 @@ populations change. **Ctrl/Shift-click** the spectra in the Explorer and press
    each**
    (it prompts in turn, showing the sample and proc number) — each carries the
    errors from the last error-calculation you ran. **Save table…**
-   writes a `batch_table.csv` of the shared and per-spectrum values, **plus
-   each site's integrated population %** (a `population_pct` row per site,
+   writes a `batch_table.csv` of the shared and per-spectrum values — the
+   same numbers as the on-screen table, in long form and with the shared
+   parameters — **plus each site's integrated population %** (a
+   `population_pct` row per site,
    same integral-over-the-window quantification as Report/§5) — the exact
    column the Plotting studio's species-distribution chart wants, without a
    separate export step. An excluded component (above) is left out entirely,
