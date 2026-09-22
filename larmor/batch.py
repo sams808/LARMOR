@@ -176,6 +176,13 @@ def _site_columns(site: dict, errors: dict) -> list[tuple[str, float, float | No
                    ("lorentz_fwhm_ppm", "Lorentz FWHM (ppm)")):
         if wk in P:
             out.append((wl, P[wk]["value"], errors.get(wk)))
+    # general-d / correlated Czjzek and two-site exchange
+    for ek, el in (("czjzek_d", "d (Czjzek)"),
+                   ("shift_slope_ppm_per_MHz", "dδ/dC_Q (ppm/MHz)"),
+                   ("split_ppm", "Δδ (ppm)"), ("pop_a", "p_A"),
+                   ("k_ex_hz", "k_ex (s⁻¹)")):
+        if ek in P:
+            out.append((el, P[ek]["value"], errors.get(ek)))
     return out
 
 

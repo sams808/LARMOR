@@ -8,7 +8,11 @@ from __future__ import annotations
 _MODEL_PHRASE = {
     "gauss_lor": "Gauss/Lorentz lines",
     "czjzek": "a Czjzek distribution of quadrupolar parameters",
+    "czjzek_d": "a generalised (d-parameter) Czjzek distribution",
+    "czjzek_corr": "a Czjzek distribution with a correlated (δiso, C_Q) "
+                   "shift dependence",
     "ext_czjzek": "an extended (Gaussian-isotropic) Czjzek distribution",
+    "exchange2": "two-site Bloch–McConnell exchange lineshapes",
     "quad_ct": "second-order quadrupolar central-transition lineshapes",
     "quad_csa": "combined quadrupolar + CSA lineshapes",
     "quad_first": "first-order quadrupolar lineshapes with spinning sidebands",
@@ -22,9 +26,15 @@ _COLS = [
     ("isotropic_chemical_shift_ppm", "δiso (ppm)", "{:.2f}"),
     ("Cq_MHz", "C_Q (MHz)", "{:.2f}"),
     ("sigma_Cq_MHz", "σ(C_Q) (MHz)", "{:.2f}"),
+    ("czjzek_d", "d", "{:.2f}"),
+    ("shift_slope_ppm_per_MHz", "dδ/dC_Q (ppm/MHz)", "{:.2f}"),
     ("eta", "η", "{:.2f}"),
     ("shift_fwhm_ppm", "FWHM (ppm)", "{:.1f}"),
     ("line_fwhm_ppm", "FWHM (ppm)", "{:.1f}"),
+    ("split_ppm", "Δδ (ppm)", "{:.2f}"),
+    ("pop_a", "p_A", "{:.2f}"),
+    ("k_ex_hz", "k_ex (s⁻¹)", "{:.3g}"),
+    ("lorentz_fwhm_ppm", "Lorentz FWHM (ppm)", "{:.1f}"),
 ]
 
 

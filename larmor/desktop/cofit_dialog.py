@@ -225,6 +225,8 @@ class CofitDialog(QDialog):
         "eta_q": "ηq", "eta_cs": "ηcs", "zeta_ppm": "ζ (ppm)",
         "sigma_zeta_ppm": "σζ (ppm)", "gl": "G/L", "gauss_fwhm_ppm": "G (ppm)",
         "lorentz_fwhm_ppm": "L (ppm)", "shift_ppm": "shift (ppm)",
+        "czjzek_d": "d", "shift_slope_ppm_per_MHz": "dδ/dC_Q",
+        "split_ppm": "Δδ (ppm)", "pop_a": "p(A)", "k_ex_hz": "k_ex (s⁻¹)",
     }
 
     def _build_param_rows(self):

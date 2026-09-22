@@ -5,6 +5,8 @@ footer. This is the primary model editor, faithful to dmfit's 'Fit
 Parameters' window."""
 from __future__ import annotations
 
+import math
+
 from PySide6.QtCore import QEvent, Qt, Signal
 from PySide6.QtGui import QAction, QColor
 from PySide6.QtWidgets import (
@@ -116,9 +118,14 @@ PARAM_COLUMNS = [
     ("shift_ppm", "Shift\n(ppm)"),                 # external-spectrum offset
     ("shift_fwhm_ppm", "Width\n(ppm)"),
     ("gauss_fwhm_ppm", "Gauss w\n(ppm)"),          # true Voigt
-    ("lorentz_fwhm_ppm", "Lorentz w\n(ppm)"),
+    ("lorentz_fwhm_ppm", "Lorentz w\n(ppm)"),      # Voigt, two-site exchange
+    ("split_ppm", "Δδ A−B\n(ppm)"),                # two-site exchange
+    ("pop_a", "p(A)"),
+    ("k_ex_hz", "k_ex\n(s⁻¹)"),
     ("gl", "xG/(1-x)L"),
     ("sigma_Cq_MHz", "σ(Cq)\n(MHz)"),
+    ("czjzek_d", "d\n(Czjzek)"),                   # general-d Czjzek
+    ("shift_slope_ppm_per_MHz", "dδ/dC_Q\n(ppm/MHz)"),   # correlated Czjzek
     ("Cq_MHz", "Cq\n(MHz)"),
     ("Cq_fwhm_MHz", "ΔCq FWHM\n(MHz)"),
     ("eta", "η"),
@@ -252,6 +259,21 @@ class _Cell(QWidget):
                 f"Cq = {cq:.4g} MHz  (fitted)\n"
                 f"νQ = 3·Cq / [2I(2I−1)] = {nuq:.4g} MHz   (I = {self.spin:g})\n"
                 f"(dmfit reports νQ = Cq/2 for I = 3/2)")
+        elif name == "k_ex_hz":
+            # two-site exchange: the equal-population coalescence rate
+            # k_c = √2·π·Δν places the fitted k_ex in its regime at a glance
+            split = (self.site_params.get("split_ppm") or {}).get("value", 0.0)
+            dnu = abs(float(split or 0.0)) * float(self.ctx["larmor_MHz"] or 0.0)
+            k_c = math.sqrt(2.0) * math.pi * dnu
+            self.derived.setText(f"k_c {k_c:.3g}")
+            self.derived.setToolTip(
+                f"equal-population coalescence rate √2·π·Δν = {k_c:.4g} s⁻¹ "
+                f"(Δν = Δδ·ν₀ = {dnu:.4g} Hz)\n"
+                "k_ex ≪ k_c: slow exchange — two lines, each broadened by its "
+                "own exchange rate (k_AB = p_B·k_ex, k_BA = p_A·k_ex)\n"
+                "k_ex ≫ k_c: fast exchange — one line at pos with residual "
+                "width 4π·p_A·p_B·Δν²/k_ex\n"
+                "(for unequal populations coalescence comes slightly earlier)")
         else:
             self.derived.clear()
 
@@ -492,7 +514,8 @@ class LinesTable(QWidget):
         hh.setSectionResizeMode(0, QHeaderView.ResizeToContents)
         hh.setSectionResizeMode(1, QHeaderView.ResizeToContents)
         hh.setStretchLastSection(True)
-        for _dk in ("sigma_Cq_MHz", "Cq_MHz"):     # room for the Cq/νQ read-out
+        # room for the Cq/νQ (and k_c) read-outs beside the value
+        for _dk in ("sigma_Cq_MHz", "Cq_MHz", "k_ex_hz"):
             if _dk in self._used_keys:
                 t.setColumnWidth(2 + self._used_keys.index(_dk), 200)
         t.blockSignals(False)

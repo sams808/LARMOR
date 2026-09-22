@@ -2922,8 +2922,8 @@ class MainWindow(QMainWindow):
             if k in params:
                 params[k]["value"] = val
         # 2) built-in quadrupolar starting points (only if not remembered)
-        if name in ("czjzek", "ext_czjzek", "quad_ct", "quad_first",
-                    "quad_csa", "csa_czjzek"):
+        if name in ("czjzek", "czjzek_d", "czjzek_corr", "ext_czjzek",
+                    "quad_ct", "quad_first", "quad_csa", "csa_czjzek"):
             for k, val in (self._NUCLEUS_START.get(nucleus) or {}).items():
                 if k in params and not (remembered and k in remembered):
                     params[k]["value"] = val
@@ -3427,7 +3427,8 @@ class MainWindow(QMainWindow):
         self._busy = True
         QApplication.setOverrideCursor(QCursor(Qt.WaitCursor))
         sites = (self.recipe.get("sites") if self.recipe else None) or []
-        needs_kernel = any(s.get("model") in ("czjzek", "ext_czjzek", "amorphous")
+        needs_kernel = any(s.get("model") in ("czjzek", "czjzek_d", "czjzek_corr",
+                                              "ext_czjzek", "amorphous")
                            for s in sites)
         self.statusBar().showMessage(
             "building the lineshape kernel (first Czjzek/Amorphous fit is slow, "
@@ -4333,7 +4334,9 @@ class MainWindow(QMainWindow):
         "shift_fwhm_ppm": "dCS", "line_fwhm_ppm": "line", "Cq_MHz": "Cq",
         "eta": "η", "eta_q": "ηq", "eps": "eps", "zeta_ppm": "ζ",
         "eta_cs": "ηcs", "gl": "G/L", "gauss_fwhm_ppm": "G",
-        "lorentz_fwhm_ppm": "L",
+        "lorentz_fwhm_ppm": "L", "czjzek_d": "d",
+        "shift_slope_ppm_per_MHz": "dδ/dC_Q", "split_ppm": "Δδ",
+        "pop_a": "p(A)", "k_ex_hz": "k_ex",
     }
 
     def _cofit_tieable(self) -> list:
@@ -4745,7 +4748,8 @@ class MainWindow(QMainWindow):
         from larmor.desktop.czjzek_dist_dialog import CzjzekDistDialog
 
         if not (self.recipe and any(
-                s.get("model") in ("czjzek", "ext_czjzek")
+                s.get("model") in ("czjzek", "czjzek_d", "czjzek_corr",
+                                   "ext_czjzek")
                 for s in self.recipe.get("sites", []))):
             self.statusBar().showMessage("no Czjzek sites in the current fit")
             return

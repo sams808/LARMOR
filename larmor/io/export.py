@@ -135,7 +135,7 @@ def _czjzek_amp_scales(recipe, exp_ppm) -> dict:
     above). exp_ppm is unused now (kept for signature stability)."""
     return {i: _DMFIT_CZJZEK_AMP_FACTOR
             for i, s in enumerate(recipe.sites)
-            if s.model in ("czjzek", "ext_czjzek")}
+            if s.model in ("czjzek", "czjzek_d", "ext_czjzek")}
 
 
 def _line_xml(site, i: int, freq_MHz: float, amp_scale: float = 1.0) -> str:
@@ -143,11 +143,12 @@ def _line_xml(site, i: int, freq_MHz: float, amp_scale: float = 1.0) -> str:
     pos = p.get("isotropic_chemical_shift_ppm", 0.0)
     amp = p.get("amplitude", 1.0) * amp_scale
     name = site.label or f"line{i}"
-    if site.model == "czjzek":
+    if site.model in ("czjzek", "czjzek_d"):
         sigma = p.get("sigma_Cq_MHz", 1.0)
         scz_khz = sigma * SCZ_FROM_SIGMA * 1000.0
         cq_khz = 2.0 * scz_khz
         dcs = p.get("shift_fwhm_ppm", 10.0)
+        d = float(p.get("czjzek_d", 5.0))        # dmfit's <d>; 5 for czjzek
         return (
             "\t\t<line>\n"
             "\t\t\t<ModelName>CzSimple</ModelName>\n"
@@ -162,7 +163,7 @@ def _line_xml(site, i: int, freq_MHz: float, amp_scale: float = 1.0) -> str:
             "\t\t\t</GaussLor>\n"
             "\t\t\t<QUAD>\n"
             f'\t\t\t\t<CQ Unit="KHz">{cq_khz:.6f}</CQ>\n'
-            "\t\t\t\t<d>5</d>\n"
+            f"\t\t\t\t<d>{d:g}</d>\n"
             f'\t\t\t\t<sCZ_CQ Unit="KHz">{scz_khz:.6f}</sCZ_CQ>\n'
             f'\t\t\t\t<CQ_max Unit="KHz">{cq_khz:.6f}</CQ_max>\n'
             "\t\t\t</QUAD>\n"

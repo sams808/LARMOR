@@ -23,7 +23,8 @@ class CzjzekDistDialog(QDialog):
         v = QVBoxLayout(self)
 
         sites = [(i, s) for i, s in enumerate(recipe.get("sites", []))
-                 if s.get("model") in ("czjzek", "ext_czjzek")
+                 if s.get("model") in ("czjzek", "czjzek_d", "czjzek_corr",
+                                       "ext_czjzek")
                  and "sigma_Cq_MHz" in s.get("params", {})]
         v.addWidget(QLabel(
             "The Czjzek width σ stands for a whole distribution of quadrupolar "
@@ -47,17 +48,20 @@ class CzjzekDistDialog(QDialog):
         cq = suggested_cq_axis(smax, 400)
         for i, s in sites:
             sigma = float(s["params"]["sigma_Cq_MHz"]["value"])
-            p = marginal_cq(sigma, cq)
+            # czjzek_d carries Czjzek's dimensionality; every other model is d = 5
+            d = float((s["params"].get("czjzek_d") or {}).get("value", 5.0))
+            p = marginal_cq(sigma, cq, d)
             name = s.get("label") or f"site {i}"
             plot.plot(cq, p, pen=pg.mkPen(site_color(i), width=1.8), name=name)
-            # mark the mode of the marginal where it actually is (≈ 3.7σ)
+            # mark the mode of the marginal where it actually is (≈ 3.7σ at d = 5)
             mode = float(cq[int(np.argmax(p))])
             plot.addItem(pg.InfiniteLine(
                 pos=mode, angle=90,
                 pen=pg.mkPen(site_color(i), width=1, style=Qt.DotLine)))
             lines.append(f"<b style='color:{site_color(i)}'>{name}</b>: "
                          f"σ={sigma:.3g} MHz · mode C_Q≈{mode:.3g} · "
-                         f"√⟨P_Q²⟩={rms_pq(sigma):.3g} MHz")
+                         f"√⟨P_Q²⟩={rms_pq(sigma, d):.3g} MHz"
+                         + (f" · d = {d:g}" if d != 5.0 else ""))
 
         summary = QLabel("<br>".join(lines) if lines
                          else "no Czjzek sites in the current fit")

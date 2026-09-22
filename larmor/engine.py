@@ -375,8 +375,15 @@ def kernel_window(x_ppm, larmor_MHz: float) -> tuple[float, float]:
     return float(need), 0.5 * (lo + hi)
 
 
+#: the models that render on the Czjzek kernel at the czjzek axis/resolution
+#: rules: czjzek and the two kernel models that must equal it exactly at
+#: d = 5 / slope = 0 (one interpolation, not two). ext_czjzek and amorphous
+#: staying out is historical, not a design rule.
+_KERNEL_AXIS_MODELS = ("czjzek", "czjzek_d", "czjzek_corr")
+
+
 def needs_kernel(recipe: Recipe) -> bool:
-    return any(s.model == "czjzek" for s in recipe.sites)
+    return any(s.model in _KERNEL_AXIS_MODELS for s in recipe.sites)
 
 
 #: models safe to simulate on a grid RESTRICTED to the fit window (+ margin)
@@ -399,7 +406,8 @@ def needs_kernel(recipe: Recipe) -> bool:
 #: arbitrary user expression -- unknowable in general).
 _GRID_RESTRICTABLE = frozenset({
     "gauss_lor", "gl_norm", "jmultiplet", "sidebands", "voigt",   # pointwise
-    "czjzek", "ext_czjzek", "amorphous",                          # own kernel grid
+    "exchange2",                                                   # pointwise (closed-form Bloch-McConnell)
+    "czjzek", "czjzek_d", "czjzek_corr", "ext_czjzek", "amorphous",  # own kernel grid
     "spectrum",                                                    # interpolates a reference trace pointwise
 })
 

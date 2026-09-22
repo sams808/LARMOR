@@ -1,8 +1,14 @@
-"""Quadrupolar models: Czjzek distribution and discrete second-order CT sites.
+"""Quadrupolar models: Czjzek distributions and discrete second-order CT sites.
 
-Both share the same physics engine (mrsimulator BlochDecayCTSpectrum):
+All share the same physics engine (mrsimulator BlochDecayCTSpectrum):
   - czjzek reweights a precomputed (Cq, eta) kernel -- fast in fits
-  - quad_ct simulates one site on demand with an LRU cache -- exact in Cq/eta
+  - czjzek_d: the same kernel with Czjzek's dimensionality d as a parameter
+    (d = 5 == czjzek == Le Caer & Brand's Gaussian Isotropic Model; dmfit
+    CzSimple's <d>)
+  - czjzek_corr: d = 5 weights, each C_Q group translated by a linear
+    (delta_iso, C_Q) correlation about the mean C_Q (slope 0 == czjzek)
+  - ext_czjzek / amorphous: other reweightings of the same kernel
+  - quad_ct etc. simulate one site on demand with an LRU cache -- exact in Cq/eta
 """
 from __future__ import annotations
 
@@ -238,6 +244,141 @@ register(Model(
         ParamDef("amplitude", "amp", 1.0, "", "peak height", min=0.0),
     ),
     render=_render_ext_czjzek,
+))
+
+
+# --------------------------------------------------------------------------
+# Czjzek, general d: Czjzek's dimensionality as a parameter (dmfit CzSimple <d>)
+#
+# Le Caer & Brand's Gaussian Isotropic Model (five i.i.d. Gaussian components
+# of the traceless symmetric EFG tensor) IS the d = 5 Czjzek distribution that
+# mrsimulator's CzjzekDistribution implements, so a separate "GIM" model would
+# be byte-identical to `czjzek`; their extended GIM is `ext_czjzek`. What
+# mrsimulator does not offer is Czjzek's exponent d - 1 as a free parameter,
+# which dmfit exposes as CzSimple's <d> box. This model adds it on the shared
+# kernel through czjzek_dist.czjzek_weights, which reproduces
+# CzjzekKernel.weights at d = 5 -- so czjzek_d at d = 5 renders exactly as
+# czjzek on the same cached kernel. The parameter is named czjzek_d (not d):
+# the `function` model already owns a parameter literally called d, and
+# table columns, labels and multi-field sharing are keyed by parameter name.
+
+def _render_czjzek_d(v: dict, ctx: SimContext) -> np.ndarray:
+    from larmor import czjzek_dist
+
+    sigma = float(v.get("sigma_Cq_MHz", 2.0))
+    kernel = _kernel_for(ctx, CZJZEK_KERNEL_HEADROOM * sigma)
+    w = czjzek_dist.czjzek_weights(sigma, float(v.get("czjzek_d", 5.0)),
+                                   kernel.cq_grid_MHz, kernel.eta_grid)
+    y = w @ kernel.K
+    y = _broaden_shift(kernel.x_ppm, y, v["isotropic_chemical_shift_ppm"],
+                       _czjzek_fwhm(v))
+    return _finish(kernel, y, v, ctx)
+
+
+register(Model(
+    name="czjzek_d",
+    label="Czjzek, general d  (GIM at d = 5)",
+    description="Czjzek distribution with Czjzek's dimensionality d as a "
+                "parameter (dmfit CzSimple <d>). d = 5 is the fully isotropic "
+                "Gaussian Isotropic Model == the plain czjzek model; d < 5 is "
+                "an empirical, more constrained family.",
+    needs_quadrupolar=True,
+    params=(
+        ParamDef("isotropic_chemical_shift_ppm", "pos", 0.0, "ppm",
+                 "isotropic chemical shift"),
+        ParamDef("sigma_Cq_MHz", "sigma", 2.0, "MHz",
+                 "Czjzek width parameter (mrsimulator sigma; sigma_Cz = "
+                 "dmfit sCZ_CQ = 2 sigma)",
+                 min=0.05, max=40.0),
+        ParamDef("czjzek_d", "d", 5.0, "",
+                 "Czjzek dimensionality d (5 = GIM/standard Czjzek; set 3-4 "
+                 "before freeing it)", min=1.0, max=5.0, vary=False),
+        ParamDef("shift_fwhm_ppm", "dCS", 10.0, "ppm",
+                 "isotropic-shift distribution FWHM (dmfit dCS)", min=0.1),
+        ParamDef("line_fwhm_ppm", "line", 0.0, "ppm",
+                 "round point/line broadening (dmfit wid)", min=0.0),
+        ParamDef("amplitude", "amp", 1.0, "", "peak height", min=0.0),
+    ),
+    render=_render_czjzek_d,
+))
+
+
+# --------------------------------------------------------------------------
+# Czjzek + correlated isotropic shift: delta_iso = pos + slope (C_Q - <C_Q>)
+#
+# Real glasses correlate the isotropic shift with the quadrupolar coupling
+# (17O, 23Na, 27Al MQMAS: Vermillion 1998, Clark 2004, Vasconcelos 2013). The
+# kernel rows are eta-major, so one eta-summed subspectrum per C_Q group is
+# formed (80 rows on the 25 MHz step, not 880), each translated by the
+# correlated shift and summed; the residual dCS and line broadening follow.
+
+def _shift_sum(x: np.ndarray, Y: np.ndarray, shifts: np.ndarray,
+               weights: np.ndarray | None = None, tol: float = 1e-6
+               ) -> np.ndarray:
+    """Sum the rows of ``Y`` (each sampled on the ascending axis ``x``) after
+    translating row q by ``shifts[q]`` along x -- linear interpolation, zero
+    outside the axis, the primitive _broaden_shift uses. When ``weights`` is
+    given, rows below ``tol`` times the largest weight are skipped (they
+    carry no visible intensity)."""
+    x = np.asarray(x, float)
+    Y = np.asarray(Y, float)
+    shifts = np.asarray(shifts, float)
+    keep = np.ones(Y.shape[0], dtype=bool)
+    if weights is not None:
+        weights = np.asarray(weights, float)
+        keep = weights >= tol * (weights.max() if weights.size else 0.0)
+    out = np.zeros(x.shape[0])
+    for q in np.flatnonzero(keep):
+        out += np.interp(x - shifts[q], x, Y[q], left=0.0, right=0.0)
+    return out
+
+
+def _render_czjzek_corr(v: dict, ctx: SimContext) -> np.ndarray:
+    sigma = float(v.get("sigma_Cq_MHz", 2.0))
+    kernel = _kernel_for(ctx, CZJZEK_KERNEL_HEADROOM * sigma)
+    n_eta, n_cq = kernel.eta_grid.size, kernel.cq_grid_MHz.size
+    # kernel rows follow np.meshgrid(cq, eta, indexing='xy').ravel(): eta-major
+    W = kernel.weights(sigma).reshape(n_eta, n_cq)
+    # one eta-summed subspectrum per C_Q: the shift correlates with C_Q only
+    Y = np.einsum("eq,eqx->qx", W, kernel.K.reshape(n_eta, n_cq, -1))
+    wq = W.sum(axis=0)
+    cq_mean = float(wq @ kernel.cq_grid_MHz)
+    pos = float(v["isotropic_chemical_shift_ppm"])
+    slope = float(v.get("shift_slope_ppm_per_MHz", 0.0))
+    # pivot at <C_Q>: pos stays the ensemble-MEAN shift for any slope and the
+    # centre of gravity is slope-invariant (sum_q wq (C_Q - <C_Q>) = 0), so
+    # pos and slope are decorrelated in the fit
+    shifts = pos + slope * (kernel.cq_grid_MHz - cq_mean)
+    y = _shift_sum(kernel.x_ppm, Y, shifts, weights=wq)
+    y = _broaden_shift(kernel.x_ppm, y, 0.0, _czjzek_fwhm(v))
+    return _finish(kernel, y, v, ctx)
+
+
+register(Model(
+    name="czjzek_corr",
+    label="Czjzek + δiso–C_Q correlation",
+    description="Czjzek (d = 5) distribution whose isotropic shift depends "
+                "linearly on C_Q about the ensemble mean: δiso = pos + "
+                "slope·(C_Q − ⟨C_Q⟩), plus a residual Gaussian shift "
+                "distribution dCS. slope = 0 is the plain Czjzek model.",
+    needs_quadrupolar=True,
+    params=(
+        ParamDef("isotropic_chemical_shift_ppm", "pos", 0.0, "ppm",
+                 "ensemble-mean isotropic chemical shift"),
+        ParamDef("sigma_Cq_MHz", "sigma", 2.0, "MHz",
+                 "Czjzek width parameter (mrsimulator sigma; sigma_Cz = "
+                 "dmfit sCZ_CQ = 2 sigma)",
+                 min=0.05, max=40.0),
+        ParamDef("shift_slope_ppm_per_MHz", "slope", 0.0, "ppm/MHz",
+                 "dδiso/dC_Q about the mean C_Q (0 = plain Czjzek)",
+                 min=-50.0, max=50.0),
+        ParamDef("shift_fwhm_ppm", "dCS", 5.0, "ppm",
+                 "residual shift-distribution FWHM at fixed C_Q", min=0.1),
+        ParamDef("line_fwhm_ppm", "line", 0.0, "ppm",
+                 "round point/line broadening (dmfit wid)", min=0.0),
+        ParamDef("amplitude", "amp", 1.0, "", "peak height", min=0.0),
+    ),
+    render=_render_czjzek_corr,
 ))
 
 

@@ -35,10 +35,13 @@ follows directly from the Czjzek analysis (§ Czjzek).
 | Quad 1st order (satellites) | quadrupolar | physical | satellite manifold | pos, C_Q, η, fwhm |
 | Quad CT + CSA | quadrupolar | physical | site with both interactions | pos, C_Q, η_Q, ζ, η_CS |
 | **Czjzek** | disordered quad | physical | **glasses / amorphous quad sites** | pos, σ, dCS, line |
+| Czjzek, general d | disordered quad | physical at d = 5, empirical below | dmfit-style d fits; the GIM ≡ Czjzek at d = 5 | pos, σ, d, dCS, line |
+| Czjzek + δiso–C_Q correlation | disordered quad | physical | glasses whose shift tracks C_Q | pos, σ, dδ/dC_Q, dCS, line |
 | ext. Czjzek | disordered quad | physical | partially ordered / defective sites | pos, C_Q, η, ε, dCS |
 | **Amorphous** | disordered quad | physical | **BO₃ in ¹¹B; well-defined C_Q with modest disorder** | pos, C_Q, η, ΔC_Q, Δη, dCS, lb |
 | CSA powder (MAS/static) | shielding | physical | spin-½ chemical-shift anisotropy | pos, ζ, η, fwhm |
 | CSA distribution (disordered) | shielding | physical | amorphous spin-½ (distributed ζ) | pos, ζ, σ_ζ, η |
+| Two-site exchange | dynamic | physical | chemical exchange between two isotropic sites (VT series) | pos, Δδ, p_A, k_ex, L-fwhm |
 | Function fit | utility | empirical | arbitrary y = f(x; a,b,c,d) | a, b, c, d |
 | Spectrum (background) | utility | data | subtract a measured phase/impurity | amplitude, shift |
 
@@ -279,8 +282,9 @@ itself is exactly $2\sigma_{Cz} = 4\sigma$. (Their worked ²⁷Al slag glass:
 *single* Czjzek line.)
 
 The general Czjzek replaces the exponent 4 by **d − 1**, where **d = 5** is the
-fully-isotropic case; a smaller d describes a more constrained (partially ordered)
-distribution.
+fully-isotropic case; LARMOR exposes d as a separate model, **`czjzek_d`** (see
+*Czjzek, general d* below), so the flagship `czjzek` stays the four-parameter
+d = 5 line. A Czjzek line whose isotropic shift tracks C_Q is **`czjzek_corr`**.
 
 **Assumptions (and therefore conditions of validity)** — the four points of
 d'Espinose de Lacaillerie et al. 2008:
@@ -401,6 +405,111 @@ Czjzek. **Limitations:** more parameters than Czjzek; ε and the dominant tensor
 trade off unless the data are good. If ε is large the fit is just Czjzek — prefer
 the simpler model then.
 
+### Czjzek, general d — `czjzek_d`  (the Gaussian Isotropic Model)
+
+**What it is — and what it is not.** Le Caër & Brand (1998) named the statistical
+model behind Czjzek's distribution the **Gaussian Isotropic Model** (GIM): the five
+independent components of the traceless symmetric EFG tensor are i.i.d. Gaussians,
+and the resulting (ν_Q, η) density is Czjzek's law with **d = 5**. That is exactly
+what mrsimulator's `CzjzekDistribution` computes and what LARMOR's **`czjzek`**
+fits — so **the GIM is `czjzek`**, and the *extended* GIM of the same paper (a
+dominant tensor plus a Gaussian perturbation, mrsimulator's
+`ExtCzjzekDistribution`: $S_T = S(0) + \rho\,S_C$ with
+$\rho = \|S(0)\|\,\varepsilon/\sqrt{30}$) is **`ext_czjzek`**. A separate "GIM"
+line would render identically to `czjzek`.
+
+What neither mrsimulator nor `czjzek` offers is Czjzek's **dimensionality d** as a
+parameter — dmfit CzSimple's `<d>` box. `czjzek_d` adds it on the same cached
+kernel, written in LARMOR's stored σ ($\sigma_{Cz} = 2\sigma$):
+
+$$p_d(\nu_Q,\eta) \propto \nu_Q^{\,d-1}\,\eta\left(1-\frac{\eta^2}{9}\right)\exp\!\left[-\frac{\nu_Q^2\,(1+\eta^2/3)}{2\sigma_{Cz}^2}\right], \qquad 1 \leq d \leq 5$$
+
+Because $P_Q^2 = \nu_Q^2\,(1+\eta^2/3)$ enters only through the exponential, $P_Q$
+is chi-distributed with d degrees of freedom and scale $\sigma_{Cz}$ for every d:
+
+$$\sqrt{\langle P_Q^2\rangle} = \sqrt{d}\,\sigma_{Cz} = 2\sqrt{d}\,\sigma, \qquad \mathrm{mode}(P_Q) = \sigma_{Cz}\sqrt{d-1}$$
+
+so d = 5 gives the 2√5·σ of the plain Czjzek model, and the d = 5 weights are
+mrsimulator's own to floating-point precision (a test pins them): **`czjzek_d` at
+d = 5 ≡ `czjzek`**.
+
+**What d < 5 means.** A smaller d moves weight toward $\nu_Q \to 0$: the pattern
+narrows and its second-order shift shrinks. Le Caër & Brand showed that no Gaussian
+tensor ensemble yields d ≠ 5, so d < 5 is **phenomenological** — a bookkeeping
+device (familiar from dmfit fits) for a distribution more constrained than the
+fully random one, not a structural statement. Report it as such.
+
+**How it's used.** The parameters of `czjzek` plus **d** (`czjzek_d`, default 5,
+**pinned**), so a fresh line behaves as Czjzek. To test whether d = 5 is justified,
+set d to 3–4 first and then release it: 5.0 is the upper bound, and an optimiser
+started on a bound has nowhere to go. **d and σ are strongly correlated** (both
+stretch the pattern) — check *Parameter correlations* and the χ² map before quoting
+a fitted d. The P(C_Q) dialog, the batch table and the σ-cell tooltip use the exact
+d for √⟨P_Q²⟩ and the marginal.
+
+**dmfit interop.** CzSimple's `<d>` round-trips: a file with `<d>` ≠ 5 imports as
+`czjzek_d` (d pinned), d = 5 or no `<d>` stays `czjzek`; export writes the site's
+d. 1D only in this release (the 2D MQMAS engine uses the d = 5 kernel).
+
+**Literature.** Czjzek et al., *Phys. Rev. B* **23**, 2513 (1981) — the
+d-parameter family; **G. Le Caër & R. A. Brand, *J. Phys.: Condens. Matter* **10**,
+10715 (1998)** — the Gaussian Isotropic Model and its extension; d'Espinose de
+Lacaillerie et al. 2008 (d = 5 in NMR); Le Caër, Bureau & Massiot 2010 (the
+extended model in NMR).
+
+### Czjzek + correlated shift — `czjzek_corr`
+
+**The problem it solves.** In a real glass the isotropic shift and the quadrupolar
+coupling of a site are **not independent**: both follow the same local geometry
+(bond angles, coordination distortion, modifier proximity), so δ_iso drifts with
+C_Q across the ensemble. ¹⁷O and ²⁷Al MQMAS studies resolve this as tilted
+(δ_iso, C_Q) ridges (Vermillion, Florian & Grandinetti 1998; Clark et al. 2004),
+and MD/GIPAW modelling of glasses yields joint (δ_iso, C_Q, η) distributions with
+the same correlation (Vasconcelos et al. 2013; Charpentier 2011). A plain Czjzek
+line, whose dCS is one Gaussian independent of C_Q, cannot reproduce the
+resulting 1D asymmetry.
+
+**The model.** The d = 5 Czjzek density in (C_Q, η) is kept and the isotropic
+shift becomes conditional on C_Q — linear about the ensemble mean, with a residual
+Gaussian spread:
+
+$$p(\delta, C_Q, \eta) = p_{Cz}(C_Q,\eta;\sigma)\;\frac{1}{\sqrt{2\pi}\,w}\exp\!\left[-\frac{\left(\delta-\bar{\delta}-s\,(C_Q-\langle C_Q\rangle)\right)^2}{2w^2}\right], \qquad w = \frac{\mathrm{dCS}}{2\sqrt{2\ln 2}}$$
+
+Rendering: the kernel's (C_Q, η) basis is summed over η into one subspectrum per
+C_Q, each is translated by $s\,(C_Q-\langle C_Q\rangle)$, the sum is placed at
+$\bar{\delta}$ and convolved with dCS (and the line broadening).
+
+**Parameters.** `pos` = $\bar{\delta}$, the **ensemble-mean** isotropic shift;
+`sigma` as Czjzek; **`slope`** (`shift_slope_ppm_per_MHz`) =
+$s = d\delta_{iso}/dC_Q$ in ppm/MHz; `dCS` = the residual shift spread *at fixed
+C_Q*; `line`; `amp`. Pivoting at ⟨C_Q⟩ (the weight-mean C_Q of the distribution)
+has three consequences: pos keeps its meaning for any slope, the **centre of
+gravity is exactly slope-invariant** ($\sum_q w_q\,(C_Q-\langle C_Q\rangle) = 0$),
+and pos and slope are decorrelated in the fit. To quote the correlation as an
+intercept–slope line $\delta_{iso} = a + s\,C_Q$, use
+$a = \bar{\delta} - s\,\langle C_Q\rangle$. In the bivariate-normal reading,
+$s = \rho\,\sigma_\delta/\sigma_C$.
+
+**Sign and shape.** In IUPAC ppm a **positive** slope places the high-C_Q sites at
+*higher* ppm — which partly cancels their (negative) second-order shift, so a
+small positive slope first **narrows** the observed pattern before broadening it; a
+negative slope always broadens. `slope = 0` is the plain `czjzek` line to
+floating-point precision (same kernel, same weights).
+
+**Identifiability.** slope, dCS and σ all shape the low-ppm tail; the fit resolves
+them only when the pattern is well digitised and the tail is clean. Fit with slope
+pinned at 0 first, release it, and compare χ²; multi-field data (the slope is
+field-independent, the second-order shift is not) settle it best. Bounds are
+±50 ppm/MHz; a slope pinned at a bound is a runaway, not a result. 1D only; dmfit
+has no equivalent line (export writes a commented Gaus/Lor envelope).
+
+**Literature.** K. E. Vermillion, P. Florian, P. J. Grandinetti, *J. Chem. Phys.*
+**108**, 7274 (1998); T. M. Clark, P. J. Grandinetti, P. Florian, J. F. Stebbins,
+*Phys. Rev. B* **70**, 064202 (2004); T. Charpentier, *Solid State Nucl. Magn.
+Reson.* **40**, 1 (2011); F. Vasconcelos et al., *J. Phys.: Condens. Matter*
+**25**, 255402 (2013); Neuville, Cormier & Massiot, *Geochim. Cosmochim. Acta*
+**68**, 5071 (2004).
+
 ### Amorphous — `amorphous`  ★ the BO₃ model
 
 **What it is.** A second-order quadrupolar **central-transition** lineshape carrying
@@ -506,6 +615,66 @@ quadrupolar Czjzek); report the mean and width of ζ, not a single value.
 
 ---
 
+## 5 · Dynamic lineshapes
+
+### Two-site exchange — `exchange2`
+
+**What it is.** Two isotropic sites A and B whose nuclei jump between the two
+environments at a rate comparable to their frequency separation. The classic
+treatment (Gutowsky & Holm 1956; McConnell's modified Bloch equations 1958) gives
+the steady-state absorption in closed form. With
+$\beta_X = \pi\,\Delta\nu_{1/2} + 2\pi i\,(\nu-\nu_X)$ (one intrinsic Lorentzian
+width $\Delta\nu_{1/2} = 1/(\pi T_2)$ for both sites) and detailed balance
+$k_{AB} = p_B\,k_{ex}$, $k_{BA} = p_A\,k_{ex}$, $k_{ex} = k_{AB} + k_{BA} = 1/\tau$:
+
+$$I(\nu) \propto \mathrm{Re}\,\frac{p_A\,\beta_B + p_B\,\beta_A + k_{ex}}{\beta_A\,\beta_B + k_{ex}\,(p_A\,\beta_A + p_B\,\beta_B)}$$
+
+This is the sum of the two steady-state magnetisations of the 2×2 McConnell system
+written without cancelling terms, so it is exact and well behaved from
+$k_{ex} = 0$ to $k_{ex} \to \infty$.
+
+**Limits (all verified numerically in the test suite).**
+
+- $k_{ex} \to 0$: $p_A/\beta_A + p_B/\beta_B$ — two Lorentzians of width
+  $\Delta\nu_{1/2}$ with areas $p_A : p_B$;
+- $k_{ex} \to \infty$: $1/(p_A\beta_A + p_B\beta_B)$ — one Lorentzian of the same
+  width at the population-weighted mean frequency;
+- equal populations **coalesce at $k_{ex} = \sqrt{2}\,\pi\,\Delta\nu$** (Δν the A–B
+  separation in Hz; two maxima persist at 4.3 Δν, one remains at 4.6 Δν) — the fit
+  table shows this $k_c$ beside the k_ex cell;
+- fast exchange: residual width $\Delta\nu_{1/2} + 4\pi\,p_A p_B\,\Delta\nu^2/k_{ex}$;
+- the **area is independent of $k_{ex}$** — exchange redistributes intensity, it
+  does not lose it.
+
+**Parameters.** `pos` = the **population-weighted mean shift**
+$p_A\,\delta_A + p_B\,\delta_B$ (the lineshape centroid for every k, and the single
+line's position in fast exchange); `Δδ` (`split_ppm`) = $\delta_A - \delta_B \geq 0$
+— A is the higher-ppm site, which removes the A↔B relabelling ambiguity; `p(A)`
+(`pop_a`), with $p_B = 1 - p_A$; `k_ex` (`k_ex_hz`, s⁻¹; `2kHz` may be typed in the
+cell); `lfwhm` (`lorentz_fwhm_ppm`), the shared intrinsic width; `amp`, the **peak
+height** (LARMOR convention — *Quantify* integrates the rendered line, so the
+k-independent area is what enters the populations).
+
+**How it's used.** Slow-exchange spectra fix Δδ and p_A almost by inspection; fit
+those first (small k_ex), then release k_ex as the temperature rises. In a
+variable-temperature series use **Sequential fit** to carry the parameters from
+spectrum to spectrum and **Arrhenius / VFT** on the fitted k_ex(T) for the
+activation energy. Because k_ex spans decades on a linear scale, start it in the
+right regime (the $k_c$ read-out tells which) or let *Auto fit*'s multi-start
+explore it.
+
+**Limitations.** Two sites with one shared Lorentzian T₂ and no Gaussian term;
+isotropic (spin-½ or fully MAS-collapsed) lines only — no anisotropic or
+quadrupolar exchange, no multi-site or unequal-T₂ generalisation. dmfit has no
+equivalent line: export writes a commented Gaus/Lor envelope (width placeholder).
+
+**Literature.** H. S. Gutowsky & C. H. Holm, *J. Chem. Phys.* **25**, 1228 (1956);
+H. M. McConnell, *J. Chem. Phys.* **28**, 430 (1958); M. T. Rogers & J. C.
+Woodbrey, *J. Phys. Chem.* **66**, 540 (1962); A. D. Bain, *Prog. Nucl. Magn.
+Reson. Spectrosc.* **43**, 63 (2003).
+
+---
+
 ## Conventions
 
 **Quadrupolar coupling.** C_Q = eQV_zz/h (MHz); η = (V_xx−V_yy)/V_zz ∈ [0,1]. The
@@ -520,7 +689,15 @@ CQ = 4σ; the mode of |C_Q| ≈ 3.7σ (1.87 σ_Cz); √⟨P_Q²⟩ = √d·σ_Cz
 (2√5·σ at d = 5). The 1D kernel grid reaches 10σ (only 4.5·10⁻⁵ of the mass lies
 beyond it; 21 % lies beyond 5σ). Dimensionality d = 5 for a fully isotropic
 (standard Czjzek) distribution; mrsimulator's `CzjzekDistribution` implements this
-d = 5 case, which is also dmfit's default (d = 5).
+d = 5 case, which is also dmfit's default (d = 5). `czjzek_d` exposes d as a pinned
+parameter, 1 ≤ d ≤ 5 (dmfit CzSimple `<d>`); `czjzek_corr` adds the slope
+dδ_iso/dC_Q in ppm/MHz about the weight-mean ⟨C_Q⟩, with `pos` the ensemble-mean
+shift. Parameter names are unique across models (`czjzek_d`, not `d`, which the
+function model owns).
+
+**Exchange.** `k_ex` = k_AB + k_BA = 1/τ in s⁻¹ (detailed balance k_AB = p_B·k_ex);
+`pos` is the population-weighted mean shift; Δδ = δ_A − δ_B ≥ 0; equal populations
+coalesce at k_ex = √2·π·Δν.
 
 **Shielding (Haeberlen).** δ_iso = (δ_xx+δ_yy+δ_zz)/3; anisotropy ζ = δ_zz − δ_iso;
 asymmetry η_CS = (δ_yy − δ_xx)/ζ, with |δ_zz−δ_iso| ≥ |δ_xx−δ_iso| ≥ |δ_yy−δ_iso|.
@@ -545,8 +722,18 @@ documented in the MQMAS manual (**? ▸ User manuals ▸ MQMAS**).
 - **Czjzek** — G. Czjzek et al., *Phys. Rev. B* **23**, 2513 (1981);
   d'Espinose de Lacaillerie, Fretigny & Massiot, *J. Magn. Reson.* **192**, 244
   (2008).
-- **Extended Czjzek** — Le Caër & Brand, *J. Phys.: Condens. Matter* **10**, 10715
-  (1998); Le Caër, Bureau & Massiot, *ibid.* **22**, 065402 (2010).
+- **Gaussian Isotropic Model / extended Czjzek** — Le Caër & Brand, *J. Phys.:
+  Condens. Matter* **10**, 10715 (1998); Le Caër, Bureau & Massiot, *ibid.* **22**,
+  065402 (2010).
+- **Correlated (δ_iso, C_Q) distributions in glasses** — Vermillion, Florian &
+  Grandinetti, *J. Chem. Phys.* **108**, 7274 (1998); Clark, Grandinetti, Florian &
+  Stebbins, *Phys. Rev. B* **70**, 064202 (2004); Charpentier, *Solid State Nucl.
+  Magn. Reson.* **40**, 1 (2011); Vasconcelos et al., *J. Phys.: Condens. Matter*
+  **25**, 255402 (2013).
+- **Two-site exchange** — Gutowsky & Holm, *J. Chem. Phys.* **25**, 1228 (1956);
+  McConnell, *J. Chem. Phys.* **28**, 430 (1958); Rogers & Woodbrey, *J. Phys.
+  Chem.* **66**, 540 (1962); Bain, *Prog. Nucl. Magn. Reson. Spectrosc.* **43**, 63
+  (2003).
 - **Voigt / pseudo-Voigt** — Ida, Ando & Toraya, *J. Appl. Cryst.* **33**, 1311
   (2000).
 - **Spinning sidebands** — Herzfeld & Berger, *J. Chem. Phys.* **73**, 6021 (1980).

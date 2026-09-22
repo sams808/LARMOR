@@ -365,6 +365,9 @@ raises with an explanation of the windowing rule
 |---|---|---|---|
 | `czjzek` | mrsimulator basis + Czjzek PDF reweight | validated (Fig. 2) | glassy / amorphous quadrupolar sites |
 | `ext_czjzek` | mrsimulator ExtCzjzekDistribution | delegated | partially ordered / defective sites |
+| `czjzek_d` | `czjzek_dist.czjzek_weights` on the shared basis | validated: d = 5 weights ≡ mrsimulator to $10^{-6}$; $\sqrt{\langle P_Q^2\rangle} = \sqrt{d}\,\sigma_{Cz}$ | dmfit-style general-d Czjzek (GIM at d = 5) |
+| `czjzek_corr` | kernel reweight + per-$C_Q$ shift | validated: slope 0 ≡ `czjzek`; centre of gravity slope-invariant; Var(−s) > Var(+s) | glasses with a δ_iso–$C_Q$ correlation |
+| `exchange2` | closed-form Bloch–McConnell | verified: k→0 / k→∞ limits, coalescence at $\sqrt{2}\,\pi\,\Delta\nu$, k-independent area | two-site chemical exchange |
 | `quad_ct` | mrsimulator CT-only single site | validated (Fig. 1) | crystalline CT 2nd-order patterns |
 | `quad_first` | mrsimulator full manifold | delegated | first-order / satellite patterns |
 | `quad_csa` | mrsimulator quad + shielding | delegated | combined quadrupolar + CSA |

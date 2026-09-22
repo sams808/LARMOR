@@ -24,9 +24,13 @@ from larmor.engine import make_context, simulate_site
 from larmor.fit import ConstraintError, _EXPR_REF
 from larmor.recipe import Recipe
 
-#: parameter names it makes physical sense to share across fields
+#: parameter names it makes physical sense to share across fields (all
+#: field-independent for one sample at one temperature -- including the
+#: exchange rate and populations of a two-site exchange line)
 DEFAULT_SHARE = ("isotropic_chemical_shift_ppm", "sigma_Cq_MHz", "Cq_MHz",
-                 "eta", "eta_q", "eps", "zeta_ppm", "eta_cs", "shift_fwhm_ppm")
+                 "eta", "eta_q", "eps", "zeta_ppm", "eta_cs", "shift_fwhm_ppm",
+                 "czjzek_d", "shift_slope_ppm_per_MHz", "split_ppm", "pop_a",
+                 "k_ex_hz")
 
 
 @dataclass

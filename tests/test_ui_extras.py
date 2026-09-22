@@ -944,7 +944,7 @@ def test_mixed_model_recipe_gets_one_cell_per_own_parameter(qapp):
 
     from larmor.desktop.table import LinesTable
     names = ["gauss_lor", "voigt", "jmultiplet", "czjzek", "quad_csa",
-             "amorphous", "spectrum"]
+             "amorphous", "spectrum", "czjzek_d", "czjzek_corr", "exchange2"]
     sites = [_one_site_recipe(n)["sites"][0] for n in names]
     rec = {"nucleus": "27Al", "larmor_frequency_MHz": 130.32,
            "spin_rate_Hz": 20000.0, "sites": sites}

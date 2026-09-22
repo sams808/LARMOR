@@ -229,6 +229,26 @@ tables above (`fit._ANALYTIC_MODELS`/`_SIMULATED_MODELS`,
 `constraints_util._PEAK_FWHM_MODELS`/`_NOT_PEAK_FWHM_MODELS`), so the silent
 omissions in items 2–4 and 6 of the list above are no longer possible.
 
+7. **Model-name tuples NOT covered by the partition tests** — each is a
+   hand-maintained allowlist that degrades silently when a new model is
+   left out: `app.py` `_seed_nucleus_defaults` (per-nucleus σ/dCS seeds),
+   `_sim_busy_on` (kernel-build wait message), `show_czjzek_dist` and the
+   `czjzek_dist_dialog.py` site filter (P(C_Q) dialog), `_MODELS_2D` (2D
+   fit refusal list); `engine._KERNEL_AXIS_MODELS` (`needs_kernel`);
+   `methods.py` `_MODEL_PHRASE` / `_COLS` / the Czjzek-sentence gate;
+   `batch._site_columns`; `multifit.DEFAULT_SHARE`; `io/fxmla.py` +
+   `io/export.py` (dmfit mapping); `panels.PARAM_LABELS`; cofit `_SHORT` and
+   `app._COFIT_LABEL`; `help/spectra-1d.md` "Which lineshape?" table;
+   `docs/validation.md` §6. Grep for an existing model name (`"ext_czjzek"`)
+   before declaring a new model finished.
+
+**Parameter names must be unique across models.** `table.PARAM_COLUMNS`,
+`panels.PARAM_LABELS`, `multifit.DEFAULT_SHARE` and the cofit tie bar are
+keyed by parameter NAME across all models, so two models using the same name
+for different quantities share a column, a label and a tie. The `function`
+model owns `a`, `b`, `c`, `d` — which is why the general-d Czjzek parameter is
+`czjzek_d` (lmfit key `d` is fine: keys are prefixed per site).
+
 ---
 
 ## 7 · Limits enforced in code
@@ -247,6 +267,11 @@ Worth knowing before concluding "the model cannot fit this".
   400 MHz ladder top; `tests/test_models_v2.py` pins the product for every
   model carrying a `sigma_Cq_MHz`) — at the bound the at-bounds diagnosis
   fires instead of the lineshape saturating into a plain Gaussian.
+  `czjzek_d`/`czjzek_corr`: σ ≤ 40 MHz likewise; `czjzek_d` ∈ [1, 5]
+  (pinned by default); `shift_slope_ppm_per_MHz` ±50 ppm/MHz; `exchange2`
+  `k_ex_hz` ∈ [0, 1e8] s⁻¹, `pop_a` ∈ [0.01, 0.99], `split_ppm` ≥ 0.
+  `czjzek_d`, `czjzek_corr` and `exchange2` have no 2D (MQMAS)
+  implementation — `app._MODELS_2D` refuses them with the supported list.
 - **Interop**: `io/fxmla.py` converts only three dmfit line models (CzSimple,
   Gaus/Lor, Amorphous) and skips the rest with a warning.
   `refranges.py` covers exactly 8 nuclei and gives a status hint, never a guess,

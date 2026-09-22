@@ -1,4 +1,6 @@
-"""Analytic lineshapes: Gauss/Lorentz (pseudo-Voigt), as in dmfit's Gaus/Lor."""
+"""Analytic lineshapes: Gauss/Lorentz (pseudo-Voigt) as in dmfit's Gaus/Lor,
+the true Voigt, J-multiplets, empirical sidebands, and the two-site
+chemical-exchange lineshape (Gutowsky-Holm / McConnell, closed form)."""
 from __future__ import annotations
 
 import numpy as np
@@ -191,4 +193,80 @@ register(Model(
         ParamDef("amplitude", "amp", 1.0, "", "peak height", min=0.0),
     ),
     render=_render_voigt,
+))
+
+
+def two_site_exchange(nu_hz: np.ndarray, nu_a_hz: float, nu_b_hz: float,
+                      p_a: float, k_ex: float, fwhm_hz: float) -> np.ndarray:
+    """Steady-state Bloch-McConnell absorption for two sites A <-> B in
+    chemical exchange (Gutowsky & Holm 1956; McConnell 1958), unnormalised.
+
+    Populations p_A and p_B = 1 - p_A, one intrinsic Lorentzian FWHM
+    ``fwhm_hz`` for both sites (1/(pi T2)) and the exchange rate
+    k_ex = k_AB + k_BA = 1/tau (s^-1) under detailed balance
+    (k_AB = p_B k_ex, k_BA = p_A k_ex). Solving the 2x2 steady-state system
+    and adding the two magnetisations gives the cancellation-free form
+
+        M(nu) = [p_A beta_B + p_B beta_A + k_ex]
+                / [beta_A beta_B + k_ex (p_A beta_A + p_B beta_B)]
+        beta_X = pi w + 2 pi i (nu - nu_X)
+
+    and the absorption is Re M >= 0. Limits: k_ex -> 0 gives
+    p_A/beta_A + p_B/beta_B (two Lorentzians, areas p_A : p_B); k_ex -> inf
+    gives 1/(p_A beta_A + p_B beta_B), one Lorentzian of FWHM w at the
+    population-weighted mean frequency. Equal populations coalesce at
+    k_ex = sqrt(2) pi |nu_A - nu_B|; the fast-exchange residual FWHM is
+    w + 4 pi p_A p_B (nu_A - nu_B)^2 / k_ex. The area does not depend on k_ex.
+    """
+    nu = np.asarray(nu_hz, float)
+    p_a = float(p_a)
+    p_b = 1.0 - p_a
+    w = max(float(fwhm_hz), 1e-9)
+    k = max(float(k_ex), 0.0)
+    beta_a = np.pi * w + 2j * np.pi * (nu - float(nu_a_hz))
+    beta_b = np.pi * w + 2j * np.pi * (nu - float(nu_b_hz))
+    num = p_a * beta_b + p_b * beta_a + k
+    den = beta_a * beta_b + k * (p_a * beta_a + p_b * beta_b)
+    return np.real(num / den)
+
+
+def _render_exchange2(v: dict, ctx: SimContext) -> np.ndarray:
+    lar = ctx.larmor_MHz or 1.0                 # ppm -> Hz (jmultiplet precedent)
+    pos = float(v["isotropic_chemical_shift_ppm"])
+    split = float(v.get("split_ppm", 5.0))
+    pa = float(np.clip(v.get("pop_a", 0.5), 0.0, 1.0))
+    # pos is the population-weighted mean: p_A d_A + p_B d_B = pos, and
+    # d_A - d_B = split with A the higher-ppm site
+    d_a = pos + (1.0 - pa) * split
+    d_b = pos - pa * split
+    y = two_site_exchange(ctx.x_ppm * lar, d_a * lar, d_b * lar, pa,
+                          float(v.get("k_ex_hz", 100.0)),
+                          float(v.get("lorentz_fwhm_ppm", 1.0)) * lar)
+    peak = float(y.max())
+    return v["amplitude"] * y / peak if peak > 0 else y
+
+
+register(Model(
+    name="exchange2",
+    label="Two-site exchange  (Bloch–McConnell)",
+    description="Two isotropic sites A/B in chemical exchange (Gutowsky–Holm "
+                "1956 / McConnell 1958): populations p_A, 1−p_A, separation "
+                "Δδ = δ_A − δ_B, exchange rate k_ex = k_AB + k_BA (s⁻¹) and one "
+                "intrinsic (T2) Lorentzian width. pos is the population-weighted "
+                "mean shift. k→0: two lines; k→∞: one line at pos.",
+    params=(
+        ParamDef("isotropic_chemical_shift_ppm", "pos", 0.0, "ppm",
+                 "population-weighted mean shift (the fast-exchange position)"),
+        ParamDef("split_ppm", "dd", 5.0, "ppm",
+                 "δ_A − δ_B (A is the higher-ppm site)", min=0.0),
+        ParamDef("pop_a", "pa", 0.5, "", "population of A (p_B = 1 − p_A)",
+                 min=0.01, max=0.99),
+        ParamDef("k_ex_hz", "kex", 100.0, "Hz",
+                 "exchange rate k_ex = k_AB + k_BA = 1/τ (s⁻¹)",
+                 min=0.0, max=1e8),
+        ParamDef("lorentz_fwhm_ppm", "lfwhm", 1.0, "ppm",
+                 "intrinsic Lorentzian FWHM of each site (1/πT2)", min=0.01),
+        ParamDef("amplitude", "amp", 1.0, "", "peak height", min=0.0),
+    ),
+    render=_render_exchange2,
 ))
