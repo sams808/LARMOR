@@ -661,6 +661,9 @@ class MainWindow(QMainWindow):
                   lambda: self.open_plotting_studio({"kind": "2d", "path": ""}))
 
         m_help = mb.addMenu("&Help")
+        self.actPalette = self._add(m_help, "&Command palette…  (find any menu entry)",
+                                    self.open_command_palette, "Ctrl+Shift+P")
+        m_help.addSeparator()
         m_man = m_help.addMenu("User &manuals")
         for name, title in (
                 ("getting-started", "Getting started"),
@@ -1079,6 +1082,13 @@ class MainWindow(QMainWindow):
         from larmor.desktop.help_dialog import show_help
 
         show_help(self, name, title)
+
+    def open_command_palette(self):
+        """Help ▸ Command palette (Ctrl+Shift+P): fuzzy-search every menu and
+        toolbar command and run the chosen one exactly as from its menu."""
+        from larmor.desktop.palette_dialog import show_palette
+
+        show_palette(self)
 
     def _about(self):
         from PySide6.QtWidgets import QDialog, QTextBrowser

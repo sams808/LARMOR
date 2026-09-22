@@ -91,6 +91,13 @@ remembered between sessions and re-colours everything — widgets, plot, curves,
 site markers — while keeping text, buttons and markers readable (every preset is
 contrast-checked). Pick whichever is easiest on your eyes.
 
+**Finding a command.** **? ▸ Command palette…** (Ctrl + Shift + P) lists every
+menu and toolbar entry — menu path, label and shortcut — and filters as you type.
+Fragments and ASCII spellings work (`czj`, `theme dark`, `F5`, `chi2` for χ²); a
+check mark shows the current state of toggles; greyed entries are not available
+yet (usually: open a spectrum first). Enter runs the highlighted entry; with
+nothing typed the list is a complete map of the menus.
+
 Each experiment has its own manual with worked steps and the science behind it:
 
 | If you have… | Read |
