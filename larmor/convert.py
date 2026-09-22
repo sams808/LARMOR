@@ -82,3 +82,48 @@ def distance_from_dipolar(g1_MHz_T: float, g2_MHz_T: float, d_Hz: float
     g1, g2 = _gamma_rad(g1_MHz_T), _gamma_rad(g2_MHz_T)
     r3 = MU0_4PI * abs(g1 * g2) * HBAR / (2.0 * np.pi * abs(d_Hz))
     return (r3 ** (1.0 / 3.0)) / 1.0e-10
+
+
+# ---------------------------------------------------------------- CSA conventions
+def csa_principal_from_haeberlen(diso_ppm: float, zeta_ppm: float,
+                                 eta: float) -> tuple[float, float, float]:
+    """Shift principal components (δ11 ≥ δ22 ≥ δ33) from LARMOR's Haeberlen
+    parameters, where ``zeta_ppm`` is the SHIELDING anisotropy the csa_mas
+    model stores (shift anisotropy δzz − δiso = −ζ)."""
+    z, e = float(zeta_ppm), float(eta)
+    comps = [diso_ppm + z * (1.0 + e) / 2.0, diso_ppm + z * (1.0 - e) / 2.0,
+             diso_ppm - z]
+    d11, d22, d33 = sorted(comps, reverse=True)
+    return float(d11), float(d22), float(d33)
+
+
+def csa_haeberlen_from_principal(d11: float, d22: float, d33: float
+                                 ) -> tuple[float, float, float]:
+    """(δiso, ζ_shielding, η) from three principal shift components, with the
+    Haeberlen ordering |δzz−δiso| ≥ |δxx−δiso| ≥ |δyy−δiso| and
+    η = (δyy − δxx)/(δzz − δiso) ∈ [0, 1]."""
+    diso = (d11 + d22 + d33) / 3.0
+    zz, xx, yy = sorted((d11, d22, d33), key=lambda d: abs(d - diso),
+                        reverse=True)
+    daniso = zz - diso
+    eta = (yy - xx) / daniso if daniso else 0.0
+    return float(diso), float(-daniso), float(min(max(eta, 0.0), 1.0))
+
+
+def csa_span_skew(d11: float, d22: float, d33: float) -> tuple[float, float]:
+    """Herzfeld–Berger span Ω = δ11 − δ33 and skew κ = 3(δ22 − δiso)/Ω."""
+    d11, d22, d33 = sorted((d11, d22, d33), reverse=True)
+    span = d11 - d33
+    diso = (d11 + d22 + d33) / 3.0
+    return float(span), float(3.0 * (d22 - diso) / span if span else 0.0)
+
+
+def csa_principal_from_span_skew(diso_ppm: float, span_ppm: float,
+                                 skew: float) -> tuple[float, float, float]:
+    """Inverse of csa_span_skew (κ clipped to [−1, 1], Ω ≥ 0)."""
+    span = abs(float(span_ppm))
+    skew = min(max(float(skew), -1.0), 1.0)
+    d22 = diso_ppm + skew * span / 3.0
+    rest = 3.0 * diso_ppm - d22
+    return float((rest + span) / 2.0), float(d22), float((rest - span) / 2.0)
+

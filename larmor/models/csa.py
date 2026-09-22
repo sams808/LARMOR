@@ -7,11 +7,27 @@ import numpy as np
 from larmor.models.base import Model, ParamDef, SimContext, register
 
 
+def _n_ssb_for(zeta_ppm: float, ctx: SimContext, floor: int = 8,
+               ceiling: int = 256) -> int:
+    """Sidebands mrsimulator must carry so none is truncated: sized from the
+    static span |zeta| nu0 / nu_rot (Herzfeld-Berger), rounded up to a power
+    of two (the simulator's efficient sizes). A fixed 32 silently clipped the
+    manifold of a slowly spun, strongly anisotropic site."""
+    from larmor.herzfeld_berger import n_sidebands_needed
+
+    need = n_sidebands_needed(zeta_ppm, ctx.larmor_MHz, ctx.spin_rate_Hz)
+    if need <= 0:
+        return floor
+    n = 1 << int(np.ceil(np.log2(max(2 * need, floor))))
+    return int(min(max(n, floor), ceiling))
+
+
 def _render_csa(v: dict, ctx: SimContext) -> np.ndarray:
     from larmor.models._singlesite import render_single_site
 
     return render_single_site(v, ctx, zeta_key="zeta_ppm", eta_cs_key="eta",
-                              ct_only=False, n_ssb=32)
+                              ct_only=False,
+                              n_ssb=_n_ssb_for(v["zeta_ppm"], ctx))
 
 
 def _render_csa_czjzek(v: dict, ctx: SimContext) -> np.ndarray:
@@ -65,8 +81,10 @@ register(Model(
     name="csa_mas",
     label="CSA powder (MAS/static)",
     description="Shielding-anisotropy powder pattern with physical spinning "
-                "sidebands (spin rate 0 = static). Replaces manual 'ss band' "
-                "lines.",
+                "sidebands whose intensities follow Herzfeld & Berger (1980) "
+                "from ζ and η (spin rate 0 = static). Replaces manual 'ss "
+                "band' lines; Tools > Herzfeld–Berger sideband analysis reads "
+                "ζ, η off the measured manifold to seed it.",
     params=(
         ParamDef("isotropic_chemical_shift_ppm", "pos", 0.0, "ppm",
                  "isotropic chemical shift"),

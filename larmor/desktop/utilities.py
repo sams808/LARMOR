@@ -127,7 +127,7 @@ class ConvertDialog(QDialog):
     def __init__(self, parent, sfo_MHz: float = 100.0):
         super().__init__(parent)
         self.setWindowTitle("Conversion tools")
-        self.resize(460, 520)
+        self.resize(640, 720)
         v = QVBoxLayout(self)
 
         # --- chemical shift ---
@@ -190,9 +190,44 @@ class ConvertDialog(QDialog):
         for w in (self.n1, self.n2):
             w.currentTextChanged.connect(self._dip_from_r)
         v.addWidget(g3)
+
+        # --- chemical-shift tensor conventions (Haeberlen / principal / HB) ---
+        g4 = QGroupBox("Chemical-shift tensor conventions"); f4 = QGridLayout(g4)
+        def spin(dec, lo, hi, val=0.0):
+            w = QDoubleSpinBox(); w.setDecimals(dec); w.setRange(lo, hi)
+            w.setValue(val); w.setKeyboardTracking(False); return w
+        f4.addWidget(QLabel("Haeberlen  (as csa_mas)"), 0, 0)
+        f4.addWidget(QLabel("δiso"), 0, 1)
+        self.cs_iso = spin(2, -1e5, 1e5); f4.addWidget(self.cs_iso, 0, 2)
+        f4.addWidget(QLabel("ζ (shielding)"), 0, 3)
+        self.cs_zeta = spin(2, -1e5, 1e5, 50.0); f4.addWidget(self.cs_zeta, 0, 4)
+        f4.addWidget(QLabel("η"), 0, 5)
+        self.cs_eta = spin(3, 0.0, 1.0, 0.3); f4.addWidget(self.cs_eta, 0, 6)
+        f4.addWidget(QLabel("Principal"), 1, 0)
+        f4.addWidget(QLabel("δ11"), 1, 1)
+        self.cs_d11 = spin(2, -1e5, 1e5); f4.addWidget(self.cs_d11, 1, 2)
+        f4.addWidget(QLabel("δ22"), 1, 3)
+        self.cs_d22 = spin(2, -1e5, 1e5); f4.addWidget(self.cs_d22, 1, 4)
+        f4.addWidget(QLabel("δ33"), 1, 5)
+        self.cs_d33 = spin(2, -1e5, 1e5); f4.addWidget(self.cs_d33, 1, 6)
+        f4.addWidget(QLabel("Herzfeld–Berger"), 2, 0)
+        f4.addWidget(QLabel("Ω (span)"), 2, 1)
+        self.cs_span = spin(2, 0.0, 1e5); f4.addWidget(self.cs_span, 2, 2)
+        f4.addWidget(QLabel("κ (skew)"), 2, 3)
+        self.cs_skew = spin(3, -1.0, 1.0); f4.addWidget(self.cs_skew, 2, 4)
+        self.cs_note = QLabel(""); self.cs_note.setWordWrap(True)
+        f4.addWidget(self.cs_note, 3, 0, 1, 7)
+        self._cs_guard = False
+        for w in (self.cs_iso, self.cs_zeta, self.cs_eta):
+            w.valueChanged.connect(self._csa_from_haeberlen)
+        for w in (self.cs_d11, self.cs_d22, self.cs_d33):
+            w.valueChanged.connect(self._csa_from_principal)
+        for w in (self.cs_span, self.cs_skew):
+            w.valueChanged.connect(self._csa_from_span_skew)
+        v.addWidget(g4)
         v.addStretch(1)
 
-        self._quad(); self._dip_from_r()
+        self._quad(); self._dip_from_r(); self._csa_from_haeberlen()
 
     def _set(self, spin, val):
         spin.blockSignals(True); spin.setValue(val); spin.blockSignals(False)
@@ -227,3 +262,50 @@ class ConvertDialog(QDialog):
         if r != float("inf"):
             self.dist.setValue(r)
         self._d_guard = False
+
+    # ---- CSA conventions: whichever row is edited drives the other two ----
+    def _csa_show(self, diso, zeta, eta, d11, d22, d33, span, skew):
+        for w, val in ((self.cs_iso, diso), (self.cs_zeta, zeta),
+                       (self.cs_eta, eta), (self.cs_d11, d11),
+                       (self.cs_d22, d22), (self.cs_d33, d33),
+                       (self.cs_span, span), (self.cs_skew, skew)):
+            self._set(w, val)
+        self.cs_note.setText(
+            f"shift anisotropy δaniso = δzz − δiso = <b>{-zeta:.2f}</b> ppm "
+            f"(= −ζ)  ·  reduced anisotropy δ = {-zeta:.2f}, "
+            f"Δδ = {-1.5 * zeta:.2f} ppm")
+
+    def _csa_from_haeberlen(self, *_):
+        if self._cs_guard:
+            return
+        self._cs_guard = True
+        diso, zeta, eta = (self.cs_iso.value(), self.cs_zeta.value(),
+                           self.cs_eta.value())
+        d11, d22, d33 = C.csa_principal_from_haeberlen(diso, zeta, eta)
+        span, skew = C.csa_span_skew(d11, d22, d33)
+        self._csa_show(diso, zeta, eta, d11, d22, d33, span, skew)
+        self._cs_guard = False
+
+    def _csa_from_principal(self, *_):
+        if self._cs_guard:
+            return
+        self._cs_guard = True
+        d11, d22, d33 = sorted((self.cs_d11.value(), self.cs_d22.value(),
+                                self.cs_d33.value()), reverse=True)
+        diso, zeta, eta = C.csa_haeberlen_from_principal(d11, d22, d33)
+        span, skew = C.csa_span_skew(d11, d22, d33)
+        self._csa_show(diso, zeta, eta, d11, d22, d33, span, skew)
+        self._cs_guard = False
+
+    def _csa_from_span_skew(self, *_):
+        if self._cs_guard:
+            return
+        self._cs_guard = True
+        diso = self.cs_iso.value()
+        d11, d22, d33 = C.csa_principal_from_span_skew(
+            diso, self.cs_span.value(), self.cs_skew.value())
+        _, zeta, eta = C.csa_haeberlen_from_principal(d11, d22, d33)
+        span, skew = C.csa_span_skew(d11, d22, d33)
+        self._csa_show(diso, zeta, eta, d11, d22, d33, span, skew)
+        self._cs_guard = False
+

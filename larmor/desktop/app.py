@@ -611,6 +611,8 @@ class MainWindow(QMainWindow):
         self._add(m_tools, "QCPMG (echo train → spectrum)…", self.open_qcpmg)
         self._add(m_tools, "Stitch frequency-stepped (&VOCS) spectra…",
                   self.open_vocs)
+        self._add(m_tools, "&Herzfeld–Berger sideband analysis (ζ, η)…  (CSA from "
+                           "sideband intensities)", self.open_herzfeld_berger)
         self._add(m_tools, "&Read static pattern (C_Q, η)…  (three markers, "
                            "no fit)", self.open_staticct)
         self._add(m_tools, "QCPMG: infinite-field δiso (2 fields)…",
@@ -4819,6 +4821,54 @@ class MainWindow(QMainWindow):
             f"added quad_ct from the reading: C_Q {cq_MHz:.2f} MHz, "
             f"η {eta:.2f}, δiso {diso_ppm:.1f} ppm — refine with Fit if "
             "the lineshape supports it")
+
+    def open_herzfeld_berger(self):
+        """Tools > Herzfeld-Berger sideband analysis: (zeta, eta) from the
+        integrated intensities of a MAS sideband manifold -- a measurement
+        that works where a full csa_mas lineshape fit is not yet trusted."""
+        from larmor.desktop.herzfeld_berger_dialog import HerzfeldBergerDialog
+        from larmor.nuclei import all_isotopes
+
+        if not self.exp_ppm.size:
+            self.statusBar().showMessage("load a spectrum first")
+            return
+        nucleus = (self.recipe or {}).get("nucleus", "")
+        lar = float((self.recipe or {}).get("larmor_frequency_MHz", 0.0) or 0.0)
+        nur = float((self.recipe or {}).get("spin_rate_Hz", 0.0) or 0.0)
+        if lar <= 0 or nur <= 0:
+            QMessageBox.warning(
+                self, "Herzfeld–Berger sideband analysis",
+                "Needs a MAS spin rate and a Larmor frequency — a static "
+                "spectrum has no sidebands to analyse. Set them in the "
+                "experiment parameters (double-click the header).")
+            return
+        iso = next((i for i in all_isotopes() if i.symbol == nucleus), None)
+        dlg = HerzfeldBergerDialog(self, self.exp_ppm, self.exp_amp, nucleus,
+                                   lar, nur, iso.spin if iso else 0.5)
+        dlg.seed_site.connect(self._hb_seed)
+        dlg.exec()
+
+    def _hb_seed(self, zeta_ppm: float, eta: float, diso_ppm: float,
+                 amplitude: float):
+        """Turn a Herzfeld-Berger reading into a csa_mas starting site."""
+        if self.recipe is None:
+            return
+        self.snapshot()
+        m = model_registry.get("csa_mas")
+        params = {p.name: {"value": p.default, "stderr": None, "vary": p.vary,
+                           "min": p.min, "max": p.max, "expr": None}
+                  for p in m.params}
+        params["isotropic_chemical_shift_ppm"]["value"] = float(diso_ppm)
+        params["zeta_ppm"]["value"] = float(zeta_ppm)
+        params["eta"]["value"] = float(eta)
+        params["amplitude"]["value"] = float(amplitude)
+        n = len(self.recipe["sites"])
+        self.recipe["sites"].append({"model": "csa_mas", "label": f"HB-{n}",
+                                     "params": params})
+        self.on_structure_changed()
+        self.statusBar().showMessage(
+            f"added csa_mas from the sideband reading: ζ {zeta_ppm:.1f} ppm, "
+            f"η {eta:.2f}, δiso {diso_ppm:.2f} ppm — refine with Fit")
 
     def open_vocs(self):
         """Tools > Stitch frequency-stepped (VOCS): sub-spectra acquired at

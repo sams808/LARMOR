@@ -470,6 +470,28 @@ Selective Averaging* (1976). Sideband analysis: Herzfeld & Berger, *J. Chem. Phy
 **Limitations:** spin-½ only; needs the sideband manifold (moderate spin rate) to
 constrain ζ and η_CS.
 
+**Sideband intensities and the Herzfeld–Berger reading.** Under MAS the
+intensity of the N-th sideband is the powder average of the squared Fourier
+coefficient of the crystallite's periodic phase,
+
+$$I_N = \left\langle \left| rac{1}{	au_r} \int_0^{	au_r} e^{\,i\Phi(t)}\, e^{-i N \omega_r t}\, dt ight|^2 ightangle_{eta,\gamma}, \qquad \Phi(t) = 2\pi \int_0^{t} 
+u_{m CSA}(t')\,dt'$$
+
+which is exactly the result Herzfeld and Berger tabulated as a function of
+(μ, ρ). The model above generates these intensities through mrsimulator; the
+number of sidebands simulated is now sized from |ζ|ν₀/ν_rot so a slowly spun,
+strongly anisotropic site is never truncated. **Tools ▸ Herzfeld–Berger
+sideband analysis** performs the classical inverse: it integrates the
+centreband and ±N sidebands of the measured spectrum, normalises them, fits
+(ζ, η) to the exact pattern (the sign of ζ follows from the +N/−N asymmetry),
+reports the tensor in the Haeberlen, principal-component and span/skew (Ω, κ)
+conventions, and seeds a `csa_mas` site from the reading. It is a
+measurement, so it works where the individual sidebands are too broad or too
+overlapped for the full lineshape fit to be trusted; the second moment of the
+sideband pattern equals the static second moment (ζν₀)²(1+η²/3)/5, which is
+the check the implementation is held to. **Tools ▸ Conversion tools** converts
+between the three tensor conventions.
+
 ### CSA distribution (disordered) — `csa_czjzek`
 
 **What it is.** The **CSA analogue of the Czjzek**: the shielding powder pattern
