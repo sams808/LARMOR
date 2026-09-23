@@ -18,15 +18,15 @@ an open successor to dmfit. The physics comes from mrsimulator, the
 optimisation from lmfit; LARMOR adds ingestion, the interactive UI, batch and
 series workflows, uncertainties, and reproducible figures.
 
-**Size.** 112 Python modules, ~33k lines under `larmor/`: 58 modules / ~13.8k
-lines of Qt-free core, 41 modules / ~18.5k lines of desktop, plus
-`larmor/xfact/` (13 modules, an easter egg). Tests: 67 files, ~712 collected.
+**Size.** 140 Python modules, ~43k lines under `larmor/`: 67 modules / ~17.9k
+lines of Qt-free core, 60 modules / ~23.9k lines of desktop, plus
+`larmor/xfact/` (13 modules, an easter egg). Tests: 89 files, ~1000 collected
+(counts as of 0.13.0).
 
 **The split.** Everything outside `larmor/desktop/` and `larmor/xfact/` is
-Qt-free — verified by importing all 71 core modules and finding no PySide6 in
-`sys.modules`. Nothing enforces this; it is convention, and there is no test
-asserting it. The dependency direction is clean: no core module imports from
-`larmor.desktop`.
+Qt-free — `tests/test_core_qt_free.py` imports every core module and fails if
+PySide6 or pyqtgraph appears in `sys.modules`. The dependency direction is
+clean: no core module imports from `larmor.desktop`.
 
 **The biggest files**, where most trouble lives: `desktop/batchfit_dialog.py`
 (1,765), `desktop/plotting_studio.py` (1,449), `desktop/qcpmg_dialog.py`
@@ -59,15 +59,18 @@ lives in eleven `desktop/mw_*.py` mixin modules of 207–920 lines each plus
 
 ```
 larmor desktop                     # the app
-pytest -q                          # the suite: ~663 passed, 15 skipped, ~2.5 min
+pytest -q                          # the suite: ~1000 tests, ~15 min with the real data
 pytest tests/test_qcpmg.py -q      # one file
-python -m pyflakes larmor tests    # the de-facto linter
+python -m pyflakes larmor tests    # the linter; must print nothing
 ```
 
 There is **no linter config** (no ruff/flake8/black/pre-commit) and **no CI**.
-pyflakes currently reports ~55 cosmetic findings (mostly unused imports); some
-are deliberate re-exports in `larmor/__init__.py`, so "fix all pyflakes" would
-break the public surface.
+pyflakes must report nothing: `tests/test_pyflakes_gate.py` runs it over both
+trees and fails on the first finding (the sixty cosmetic findings were curated
+once in 0.12.x, and two of them were real). Deliberate re-exports are declared
+through `__all__`, side-effect imports go through `importlib.import_module`.
+A test that runs longer than 10 minutes dumps every thread's stack
+(`faulthandler_timeout` in `pyproject.toml`).
 
 **Environment**: Python 3.11.15, mrsimulator 1.0.0, lmfit 1.3.4, numpy 2.4.6,
 scipy 1.17.1, PySide6 6.11.1, pyqtgraph 0.14.0. `pyproject.toml` pins

@@ -19,6 +19,14 @@ import pytest
 #: root of the real-data tree; every dataset path is relative to this
 DATA_ROOT = Path(os.environ.get("LARMOR_TEST_DATA", r"C:\Users\samso"))
 
+# No background kernel pre-build in test windows: every MainWindow that
+# received a quadrupolar spectrum used to start a KernelWarmWorker thread
+# that outlived the fixture's window, and a QThread destroyed while running
+# aborts the interpreter -- runs that printed all their dots and died, or
+# hung, right after the tests that load 11B/27Al data. The one test of the
+# warm-up itself deletes this variable and stubs the worker.
+os.environ.setdefault("LARMOR_NO_KERNEL_WARM", "1")
+
 
 def _data(rel: str) -> Path:
     return DATA_ROOT / rel

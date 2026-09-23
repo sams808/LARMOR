@@ -281,6 +281,22 @@ class MainWindow(_MenusMixin, _ChromeMixin, _FilesMixin, _SessionMixin,
 
     def closeEvent(self, ev):
         self._flush_session()
+        # Join the worker threads before the window (their Python owner) goes
+        # away: a QThread destroyed while running aborts the whole process
+        # ("QThread: Destroyed while thread is still running") -- seen as test
+        # runs that printed every dot and died before the summary, or hung,
+        # right after a fixture window that had started a kernel pre-build.
+        for name in ("_warm_worker", "_sim_worker", "_fit_worker", "_fit2d_worker"):
+            w = getattr(self, name, None)
+            if w is None or not hasattr(w, "isRunning"):
+                continue
+            try:
+                if w.isRunning():
+                    if hasattr(w, "request_stop"):
+                        w.request_stop("stop")
+                    w.wait(30_000)
+            except RuntimeError:            # already deleted on the C++ side
+                pass
         try:
             from larmor.parallel import shutdown_shared_pool
             shutdown_shared_pool()
