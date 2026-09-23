@@ -443,6 +443,10 @@ figure without hand-assembling panels:
    from batch CSV…** to pivot one parameter (e.g. `amplitude`) out of a
    `batch_table*.csv` automatically, one row per sample — each bar normalizes
    to 100% on its own, so raw amplitudes work without pre-converting to %.
+   From a batch whose model carried family tags (§6), pick `family_pct` for
+   a bar stacked by family (Σ BO3 / Σ BO4 per glass) instead of by line;
+   `ratio` also appears in that picker but is not a stackable quantity —
+   N4 per glass belongs in a *Composition trend* or the Series plot.
 4. **Auto update / Preview.** Auto update is **off by default** — a batch
    grid with many panels (each a full reconstruction + population-%
    integral) can be slow to redo on every tweak. **Preview** renders on
