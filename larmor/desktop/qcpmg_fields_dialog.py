@@ -16,7 +16,8 @@ from PySide6.QtWidgets import (
 )
 
 from larmor.qcpmg_fields import (
-    FieldPoint, centre_of_gravity, infinite_field_diso,
+    ERR_FLOOR_PPM, FieldPoint, centre_of_gravity, field_plausibility_warning,
+    fmt_result_lines, infinite_field_diso,
 )
 
 
@@ -237,7 +238,7 @@ class QcpmgFieldsDialog(QDialog):
         fw_ppm = qcpmg.fwhm_hz(d["ppm"], d["amp"], 1.0, (hi, lo))
         if np.isfinite(cg):
             self.table.setItem(r, 1, QTableWidgetItem(f"{cg:.2f}"))
-            self.table.setItem(r, 2, QTableWidgetItem(f"{max(sigma, 0.1):.1f}"))
+            self.table.setItem(r, 2, QTableWidgetItem(f"{max(sigma, ERR_FLOOR_PPM):.1f}"))
         self.table.setItem(r, 3, QTableWidgetItem(f"{fw_ppm:.2f}"))
         if self._cg_line is not None and np.isfinite(cg):
             self._cg_line.setValue(cg)
@@ -364,7 +365,13 @@ class QcpmgFieldsDialog(QDialog):
         self.table.insertRow(r)
         self.table.setItem(r, 0, QTableWidgetItem(f"{larmor:g}" if larmor else ""))
         self.table.setItem(r, 1, QTableWidgetItem(""))
-        self.table.setItem(r, 2, QTableWidgetItem("5"))
+        # the +- cell starts EMPTY: a missing sigma is "no uncertainty known"
+        # and the fitter then says so, rather than a default 5 ppm silently
+        # setting the weights and the reported +-
+        err_item = QTableWidgetItem("")
+        err_item.setToolTip("δcg uncertainty (ppm); leave empty when unknown "
+                            "-- the fit is then unweighted and says so")
+        self.table.setItem(r, 2, err_item)
         self.table.setItem(r, 3, QTableWidgetItem(""))          # FWHM (ppm)
         chk = QCheckBox(); chk.setChecked(True)
         w = QWidget(); lay = QHBoxLayout(w); lay.setContentsMargins(0, 0, 0, 0)
@@ -404,7 +411,9 @@ class QcpmgFieldsDialog(QDialog):
             try:
                 err = float(self.table.item(r, 2).text())
             except (AttributeError, ValueError):
-                err = 5.0
+                err = 0.0                     # missing: no uncertainty known
+            if not (np.isfinite(err) and err > 0.0):
+                err = 0.0                     # negative / NaN: not a sigma
             w = self.table.cellWidget(r, 4)
             sel = w.findChild(QCheckBox).isChecked() if w else True
             pts.append(FieldPoint(nu, dcg, err, sel))
@@ -466,11 +475,25 @@ class QcpmgFieldsDialog(QDialog):
                        pen=pg.mkPen("#c0392b", width=1.6, style=Qt.DashLine))
         self.plot.plot([0.0], [res.delta_iso_ppm], pen=None, symbol="star",
                        symbolBrush="#c0392b", symbolSize=14)
-        self.result.setText(
-            f"δiso = <b>{res.delta_iso_ppm:.1f} ± {res.delta_iso_err_ppm:.1f} "
-            f"ppm</b>  (intercept, 1/ν₀²→0)   ·   "
-            f"C_Q = {res.cq_MHz:.2f} ± {res.cq_err_MHz:.2f} MHz   ·   "
-            f"P_Q = {res.pq_MHz:.2f} MHz   (η = {res.eta:g} assumed)")
+        self.result.setText(self._result_html(res, pts))
+
+    def _result_html(self, res, pts) -> str:
+        """The headline: the same wording as the report (a bound is a bound,
+        a NaN is '--'), plus the notes and the field-plausibility check."""
+        lines = fmt_result_lines(res)
+        head = (f"<b>{lines[0].replace('delta_iso', 'δiso')}</b>  "
+                f"(intercept, 1/ν₀²→0)   ·   "
+                + "   ·   ".join(ln.replace("eta", "η") for ln in lines[1:3]))
+        extra = []
+        if res.note:
+            extra.append(f"<span style='color:#c0392b'>{res.note}</span>")
+        if res.warning:
+            extra.append(f"<span style='color:#c0392b'>⚠ {res.warning}</span>")
+        for p in pts:
+            msg = field_plausibility_warning(p.larmor_MHz, self._nucleus)
+            if msg:
+                extra.append(f"<span style='color:#c0392b'>⚠ {msg}</span>")
+        return "<br>".join([head] + extra)
 
 
 #: the one shared instance — fields sent from several QCPMG processing

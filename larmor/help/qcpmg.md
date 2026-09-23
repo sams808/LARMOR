@@ -287,7 +287,12 @@ $$\delta_\text{cg} = \delta_\text{iso} - \frac{10^6}{40}\,\frac{C_Q^2(3+\eta^2)}
 
 so a plot of δcg (ppm) vs $1/\nu_0^2$ is a straight line: the **intercept is
 δiso**, and the **slope gives $C_Q$** (with an assumed η, conventionally 0.7 —
-two centres of gravity cannot determine η).
+two centres of gravity cannot determine η). The slope must be **negative**:
+the second-order shift lowers δcg more at the lower field. A slope that is
+positive, or negative but within 2σ of zero, cannot come from Eq. (1) — the
+two δcg are then not the same observable (different processing mode, window
+or referencing) — and the tool reports only a 2σ **upper bound** on $C_Q$
+instead of a value, together with the slope and its σ.
 
 **Tools ▸ QCPMG: infinite-field δiso** opens the extrapolation. Enter each
 field's Larmor frequency and its δcg (type it, or **grab it from the open

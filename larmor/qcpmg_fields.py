@@ -61,31 +61,71 @@ def dcg_at_field(delta_iso_ppm: float, cq_MHz: float, larmor_MHz: float,
     return delta_iso_ppm - A * cq_MHz ** 2 / larmor_MHz ** 2
 
 
+#: smallest dcg uncertainty the fit will weight with (ppm). A jitter sigma of
+#: 1e-14 ppm (a window that is the whole axis) would otherwise give a weight
+#: of 1e28 and cancel the normal-equation denominator to exactly 0.0. Both
+#: dialogs and the fitter apply this SAME floor, so a displayed "0.1" is the
+#: value that was used.
+ERR_FLOOR_PPM = 0.1
+
+#: lever-arm ratio (x.max - x.min) / x.max in 1/nu0^2 below which two fields
+#: cannot be extrapolated (5 % in 1/nu0^2 = Larmor frequencies within ~2.5 %)
+MIN_LEVER_ARM = 0.05
+#: below this the extrapolation is valid but poorly conditioned (a warning)
+SHORT_LEVER_ARM = 0.20
+
+
 @dataclass
 class FieldPoint:
     larmor_MHz: float                 # observe (Larmor) frequency of the nucleus
     dcg_ppm: float                    # measured CT centre of gravity
-    dcg_err_ppm: float = 0.0
-    ct_selective: bool | None = None  # provenance only (see module docstring)
+    dcg_err_ppm: float = 0.0          # 0 / NaN / negative = no uncertainty known
+    ct_selective: bool | None = None  # operator's declaration; provenance only
     label: str = ""
+
+    @property
+    def has_err(self) -> bool:
+        """True when dcg_err_ppm is a usable (finite, positive) uncertainty."""
+        e = float(self.dcg_err_ppm)
+        return bool(np.isfinite(e) and e > 0.0)
 
 
 @dataclass
 class InfiniteFieldResult:
     delta_iso_ppm: float
-    delta_iso_err_ppm: float
-    cq_MHz: float
-    cq_err_MHz: float
+    delta_iso_err_ppm: float          # NaN when nothing could be propagated
+    cq_MHz: float                     # 0.0 when the slope is not significantly < 0
+    cq_err_MHz: float                 # 0.0 in that case (see cq_upper_2sigma_MHz)
     pq_MHz: float
     eta: float
     spin: float
     slope: float                      # ppm·MHz² (δcg vs 1/ν0²)
     intercept: float                  # == delta_iso_ppm
     points: list[FieldPoint] = field(default_factory=list)
+    slope_err: float = float("nan")   # σ_b (ppm·MHz²)
+    #: 2-σ upper bound on C_Q when the slope is not significantly negative
+    cq_upper_2sigma_MHz: float = 0.0
+    #: non-empty when C_Q could not be quoted as a value (positive or
+    #: non-significant slope) or when the uncertainties were not propagated
+    note: str = ""
+    #: non-fatal quality warnings (short lever arm, poorly constrained)
+    warning: str = ""
+    lever_arm: float = 0.0            # (x.max - x.min) / x.max in 1/ν0²
+    weighted: bool = True             # False: equal weights (a sigma was missing)
 
     def line(self, inv_nu2: np.ndarray) -> np.ndarray:
         """δcg on the fit line for given 1/ν0² values (for plotting)."""
         return self.intercept + self.slope * np.asarray(inv_nu2, float)
+
+    @property
+    def cq_is_bound(self) -> bool:
+        """True when C_Q is reported as an upper bound, not a value."""
+        return self.cq_upper_2sigma_MHz > 0.0 and self.cq_MHz == 0.0
+
+
+def _quad_A(spin: float, eta: float) -> float:
+    """A in slope = −A·C_Q² (ppm·MHz² per MHz²)."""
+    return (1.0e6 / 40.0) * (3.0 + eta ** 2) * _spin_factor(spin)
 
 
 def infinite_field_diso(points: list[FieldPoint], spin: float,
@@ -93,36 +133,163 @@ def infinite_field_diso(points: list[FieldPoint], spin: float,
     """Fit δcg = δiso + slope·(1/ν0²) across fields and return δiso, C_Q, P_Q.
 
     Needs ≥ 2 fields. With exactly 2 the line is exact (errors from the δcg
-    uncertainties are propagated); with > 2 a weighted least-squares line is fit.
+    uncertainties are propagated); with > 2 a weighted least-squares line is
+    fit.
+
+    Uncertainty policy. A point whose ``dcg_err_ppm`` is 0, negative or NaN
+    has NO known uncertainty. The fit is then UNWEIGHTED (equal weights, said
+    so in ``note``): with two points nothing can be propagated and the ± are
+    NaN; with three or more the ± come from the scatter about the line
+    (ordinary least squares scaled by χ²/(n−2)). Nothing is ever invented
+    for a missing σ. Valid σ are floored at ``ERR_FLOOR_PPM``.
+
+    C_Q policy. The slope is converted through C_Q² = −b/A BEFORE the square
+    root, with σ(C_Q²) = σ_b/A. When C_Q² ≥ 2σ the value is quoted as usual;
+    when the slope is within ±2σ of zero C_Q is reported as a 2-σ upper
+    bound (``cq_upper_2sigma_MHz``) with ``cq_MHz = cq_err_MHz = 0.0`` and a
+    ``note``; when the slope is significantly POSITIVE Eq. (1) cannot have
+    produced it and the note says the two δcg are not comparable.
     """
     if len(points) < 2:
         raise ValueError("need the centre of gravity at at least two fields")
-    x = np.array([1.0 / p.larmor_MHz ** 2 for p in points])   # 1/ν0²  (MHz⁻²)
-    y = np.array([p.dcg_ppm for p in points])
-    err = np.array([p.dcg_err_ppm or 1.0 for p in points])
-    w = 1.0 / err ** 2
+    if any(not (float(p.larmor_MHz) > 0.0) for p in points):
+        raise ValueError(
+            "Larmor frequency must be > 0 MHz (the observe frequency of THIS "
+            "nucleus, not the 1H frequency)")
+    n = len(points)
+    x = np.array([1.0 / float(p.larmor_MHz) ** 2 for p in points])  # 1/ν0² (MHz⁻²)
+    y = np.array([float(p.dcg_ppm) for p in points])
+    err = np.array([float(p.dcg_err_ppm) for p in points])
+    valid = np.isfinite(err) & (err > 0.0)
 
-    # weighted linear fit y = a + b x  (a = δiso, b = slope)
+    notes: list[str] = []
+    warnings: list[str] = []
+    weighted = bool(valid.all())
+    if weighted:
+        w = 1.0 / np.maximum(err, ERR_FLOOR_PPM) ** 2
+    else:
+        w = np.ones(n)
+        rows = ", ".join(str(i + 1) for i in np.where(~valid)[0])
+        notes.append("uncertainties not propagated: equal weights (row "
+                     f"{rows} has no/invalid sigma)")
+
+    xr = float((x.max() - x.min()) / x.max())
+    if xr < MIN_LEVER_ARM:
+        raise ValueError(
+            "fields differ by less than 5 % in 1/nu0^2 (Larmor frequencies "
+            f"within ~2.5 %; lever arm {xr:.4f}) -- cannot extrapolate to "
+            "infinite field")
+
+    # weighted linear fit y = a + b x  (a = δiso, b = slope); the denominator
+    # as a sum over pairs is free of the sw*sxx - sx*sx cancellation
     sw = w.sum()
     sx = (w * x).sum(); sy = (w * y).sum()
     sxx = (w * x * x).sum(); sxy = (w * x * y).sum()
-    denom = sw * sxx - sx * sx
-    if denom == 0:
-        raise ValueError("the two fields are too close to extrapolate")
+    denom = 0.0
+    for i in range(n):
+        for j in range(i + 1, n):
+            denom += w[i] * w[j] * (x[i] - x[j]) ** 2
+    if not denom > 1e-12 * sw * sxx:
+        raise ValueError(
+            f"the fields are too close in 1/nu0^2 to extrapolate (lever arm {xr:.4f})")
     b = (sw * sxy - sx * sy) / denom
     a = (sy - b * sx) / sw
-    # parameter variances from the weighted fit
-    var_a = sxx / denom
-    var_b = sw / denom
+    resid = y - a - b * x
+    chi2 = float((w * resid ** 2).sum())
+    dof = n - 2
+    # parameter variances of the weighted fit (unit-variance weights)
+    var_a = max(sxx / denom, 0.0)
+    var_b = max(sw / denom, 0.0)
+    if weighted:
+        sig_a, sig_b = float(np.sqrt(var_a)), float(np.sqrt(var_b))
+    elif dof > 0:
+        s2 = chi2 / dof                       # OLS residual variance
+        sig_a, sig_b = float(np.sqrt(var_a * s2)), float(np.sqrt(var_b * s2))
+        notes.append("no input errors given: +- from scatter about the line")
+    else:
+        sig_a = sig_b = float("nan")          # exact line, nothing to estimate
 
-    cq = cq_from_slope(b, spin, eta)
-    # dC_Q/db = C_Q / (2b) → σ_Cq = |C_Q/(2b)|·σ_b
-    cq_err = abs(cq / (2.0 * b)) * np.sqrt(var_b) if b else 0.0
-    pq = cq * np.sqrt(1.0 + eta ** 2 / 3.0)
+    A = _quad_A(spin, eta)
+    cq2 = -b / A
+    sig_cq2 = sig_b / A if np.isfinite(sig_b) else float("nan")
+    cq = cq_err = cq_upper = 0.0
+    if np.isfinite(sig_cq2) and cq2 < 2.0 * sig_cq2:
+        cq_upper = float(np.sqrt(max(cq2 + 2.0 * sig_cq2, 0.0)))
+        if cq2 > -2.0 * sig_cq2:
+            notes.append(
+                f"slope not significantly negative: C_Q <= {cq_upper:.3f} MHz "
+                "(2-sigma upper bound) -- check that both dcg are the same "
+                "observable (mode, window, referencing)")
+        else:
+            notes.append(
+                "slope significantly POSITIVE: Eq. 1 cannot produce this; the "
+                "two dcg are not comparable (mode, window or referencing differ)")
+    elif cq2 <= 0.0:
+        # no σ to judge significance (two points, no uncertainties) and the
+        # slope is not negative: Eq. (1) cannot have produced it
+        notes.append(
+            "slope is positive or zero: Eq. 1 cannot produce this; the two "
+            "dcg are not comparable (mode, window or referencing differ)")
+    else:
+        cq = float(np.sqrt(cq2))
+        # dC_Q/d(C_Q²) = 1/(2 C_Q)  →  σ_Cq = σ(C_Q²)/(2 C_Q) = |C_Q/(2b)|·σ_b
+        cq_err = float(sig_cq2 / (2.0 * cq)) if np.isfinite(sig_cq2) else float("nan")
+    pq = cq * float(np.sqrt(1.0 + eta ** 2 / 3.0))
+
+    if xr < SHORT_LEVER_ARM:
+        warnings.append(
+            f"short lever arm ({xr:.2f} of 1/nu0^2): the intercept is an "
+            "extrapolation over more than 5x the spanned range")
+    if valid.any() and np.isfinite(sig_a) and sig_a > 10.0 * float(err[valid].max()):
+        warnings.append(
+            f"poorly constrained: sigma(delta_iso) = {sig_a:.1f} ppm is more "
+            "than 10x the largest dcg uncertainty")
+
     return InfiniteFieldResult(
-        delta_iso_ppm=a, delta_iso_err_ppm=float(np.sqrt(var_a)),
+        delta_iso_ppm=float(a), delta_iso_err_ppm=sig_a,
         cq_MHz=cq, cq_err_MHz=cq_err, pq_MHz=pq, eta=eta, spin=spin,
-        slope=b, intercept=a, points=list(points))
+        slope=float(b), intercept=float(a), points=list(points),
+        slope_err=sig_b, cq_upper_2sigma_MHz=cq_upper,
+        note="; ".join(notes), warning="; ".join(warnings),
+        lever_arm=xr, weighted=weighted)
+
+
+#: plausible static-field range for a solid-state NMR magnet (tesla): 4 T
+#: (~170 MHz 1H) to 36 T (the 1.5 GHz series-connected hybrid)
+B0_PLAUSIBLE_T = (4.0, 36.0)
+
+
+def implied_B0_T(nu_MHz: float, nucleus: str) -> float | None:
+    """Static field (T) that ``nu_MHz`` implies for ``nucleus``, or None for a
+    blank/unknown nucleus. Uses |γ| (mrsimulator's gyromagnetic_ratio is
+    SIGNED: 29Si is −8.4655 MHz/T)."""
+    if not nucleus or not (float(nu_MHz or 0.0) > 0.0):
+        return None
+    try:
+        from mrsimulator.spin_system.isotope import ISOTOPE_DATA
+        d = ISOTOPE_DATA.get(str(nucleus))
+    except Exception:                                         # noqa: BLE001
+        return None
+    if not d:
+        return None
+    gamma = abs(float(d.get("gyromagnetic_ratio", 0.0) or 0.0))
+    return float(nu_MHz) / gamma if gamma > 0 else None
+
+
+def field_plausibility_warning(nu_MHz: float, nucleus: str) -> str:
+    """'' when ``nu_MHz`` puts ``nucleus`` in a plausible magnet, else a
+    one-line warning naming the implied field -- the 1H frequency (800 /
+    1100 MHz) typed for 35Cl would imply 200+ T and a C_Q ~10x too large."""
+    b0 = implied_B0_T(nu_MHz, nucleus)
+    if b0 is None:
+        return ""
+    lo, hi = B0_PLAUSIBLE_T
+    if lo <= b0 <= hi:
+        return ""
+    hint = (" -- did you enter the 1H frequency?" if b0 > hi
+            else " -- is this the observe frequency in MHz (not GHz)?")
+    return (f"nu0 = {float(nu_MHz):g} MHz would put {nucleus} at {b0:.1f} T"
+            + hint)
 
 
 @dataclass
@@ -200,6 +367,31 @@ def fit_samples(rows, spin: float, eta: float = DEFAULT_ETA
     return out
 
 
+def _pm(value: float, digits: int) -> str:
+    """'+- 1.23' or '+- --' for a NaN (nothing could be propagated)."""
+    return f"+- {value:.{digits}f}" if np.isfinite(value) else "+- --"
+
+
+def fmt_result_lines(res: InfiniteFieldResult) -> list[str]:
+    """The fitted-number lines of one sample, shared by the report and the
+    dialogs so the two can never disagree on how a bound is worded."""
+    out = [f"delta_iso = {res.delta_iso_ppm:.2f} {_pm(res.delta_iso_err_ppm, 2)} ppm"]
+    if res.cq_is_bound or (res.cq_MHz == 0.0 and res.note):
+        up = res.cq_upper_2sigma_MHz
+        bound = f"<= {up:.3f} MHz (2-sigma upper bound)" if up > 0 else "not determined"
+        out.append(f"C_Q {bound}   (eta = {res.eta:g} assumed)")
+        pq_up = up * float(np.sqrt(1.0 + res.eta ** 2 / 3.0))
+        out.append(f"P_Q {'<= ' + format(pq_up, '.3f') + ' MHz (2-sigma upper bound)' if up > 0 else 'not determined'}")
+    else:
+        out.append(f"C_Q = {res.cq_MHz:.3f} {_pm(res.cq_err_MHz, 3)} MHz   "
+                   f"(eta = {res.eta:g} assumed)")
+        out.append(f"P_Q = {res.pq_MHz:.3f} MHz")
+    out.append(f"slope = {res.slope:.6g} {_pm(res.slope_err, 0)} ppm.MHz^2"
+               if np.isfinite(res.slope_err) else
+               f"slope = {res.slope:.6g} +- -- ppm.MHz^2")
+    return out
+
+
 def report_text(results: dict, spin: float, eta: float, nucleus: str = "",
                 widths: dict | None = None) -> str:
     """A plain-text report of an infinite-field extrapolation, for the lab
@@ -223,14 +415,18 @@ def report_text(results: dict, spin: float, eta: float, nucleus: str = "",
         lines.append("    nu0 (MHz)      dcg (ppm)   +- err   CT-selective")
         for p in res.points:
             sel = "" if p.ct_selective is None else ("yes" if p.ct_selective else "no")
+            err = f"{p.dcg_err_ppm:7.2f}" if p.has_err else f"{'n/a':>7s}"
             lines.append(f"    {p.larmor_MHz:10.4f}  {p.dcg_ppm:11.2f}  "
-                         f"{p.dcg_err_ppm:7.2f}   {sel}")
-        lines.append(f"    delta_iso      = {res.delta_iso_ppm:8.2f} "
-                     f"+- {res.delta_iso_err_ppm:.2f} ppm")
-        lines.append(f"    C_Q            = {res.cq_MHz:8.3f} "
-                     f"+- {res.cq_err_MHz:.3f} MHz   (eta = {res.eta:g} assumed)")
-        lines.append(f"    P_Q            = {res.pq_MHz:8.3f} MHz")
-        lines.append(f"    slope          = {res.slope:.6g} ppm.MHz^2")
+                         f"{err}   {sel}")
+        for ln in fmt_result_lines(res):
+            key, _, rest = ln.partition(" ")
+            lines.append(f"    {key:14s} {rest}")
+        if res.note:
+            for part in res.note.split("; "):
+                lines.append(f"    note           : {part}")
+        if res.warning:
+            for part in res.warning.split("; "):
+                lines.append(f"    ! {part}")
         w = (widths or {}).get(sample)
         if w is not None and getattr(w, "ok", False):
             lines.append(f"    W_q            = {w.wq_lo_ppm:8.1f} ppm (low field)"
@@ -246,9 +442,14 @@ def report_text(results: dict, spin: float, eta: float, nucleus: str = "",
         lines.append("-" * 66)
         lines.append("sample                         diso (ppm)      C_Q (MHz)")
         for sample, res in ok:
+            if res.cq_is_bound or (res.cq_MHz == 0.0 and res.note):
+                cq = (f"<= {res.cq_upper_2sigma_MHz:.3f} (2-sigma)"
+                      if res.cq_upper_2sigma_MHz > 0 else "not determined")
+            else:
+                cq = f"{res.cq_MHz:6.3f} {_pm(res.cq_err_MHz, 3)}"
             lines.append(f"{(sample or '(unnamed)')[:28]:28s}  "
-                         f"{res.delta_iso_ppm:7.2f} +- {res.delta_iso_err_ppm:5.2f}  "
-                         f"{res.cq_MHz:6.3f} +- {res.cq_err_MHz:.3f}")
+                         f"{res.delta_iso_ppm:7.2f} {_pm(res.delta_iso_err_ppm, 2):<9s} "
+                         f"{cq}")
         lines.append("")
     for sample, why in bad:
         lines.append(f"NOT FITTED  {sample or '(unnamed)'}: {why}")
@@ -256,5 +457,8 @@ def report_text(results: dict, spin: float, eta: float, nucleus: str = "",
         lines.append("")
     lines.append("delta_iso is the intercept at 1/nu0^2 -> 0; C_Q follows from the")
     lines.append("slope with the assumed eta, so its accuracy is limited by that")
-    lines.append("assumption. Quote P_Q when eta is unknown.")
+    lines.append("assumption. Quote P_Q when eta is unknown. A slope that is not")
+    lines.append("significantly negative gives only an upper bound on C_Q; a")
+    lines.append("significantly positive slope means the dcg values are not the")
+    lines.append("same observable (mode, window or referencing differ).")
     return "\n".join(lines)

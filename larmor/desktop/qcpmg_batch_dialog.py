@@ -228,9 +228,22 @@ class QcpmgBatchFieldsDialog(QDialog):
                 errors.append(f"{Path(p).name}: {exc}")
         self._refresh_headers()
         self._set_dirty()
+        self._show_field_warnings()
         if errors:
             QMessageBox.warning(self, "Some files were not loaded",
                                 "\n".join(errors))
+
+    def _show_field_warnings(self):
+        """Non-fatal: a Larmor frequency that puts the nucleus outside any
+        real magnet (the 1H frequency typed for 35Cl gives 200+ T)."""
+        from larmor.qcpmg_fields import field_plausibility_warning
+        seen = []
+        for d in self.cells.values():
+            msg = field_plausibility_warning(d["larmor"], self._nucleus)
+            if msg and msg not in seen:
+                seen.append(msg)
+        if seen:
+            self.msg.setText("⚠ " + "  ·  ".join(seen))
 
     def _load_cell(self, row: int, col: int, path: str):
         from larmor import qcpmg
@@ -273,7 +286,8 @@ class QcpmgBatchFieldsDialog(QDialog):
         lo, hi = d["window"]
         cg, sigma = qcpmg.centre_of_gravity(d["ppm"], d["amp"], (hi, lo))
         fw_ppm = qcpmg.fwhm_hz(d["ppm"], d["amp"], 1.0, (hi, lo))
-        d["cg"], d["sigma"], d["fwhm"] = cg, max(sigma, 0.1), fw_ppm
+        from larmor.qcpmg_fields import ERR_FLOOR_PPM
+        d["cg"], d["sigma"], d["fwhm"] = cg, max(sigma, ERR_FLOOR_PPM), fw_ppm
         it = self.table.item(row, col)
         if it is not None:
             txt = Path(d["path"]).name
