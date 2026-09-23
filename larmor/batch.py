@@ -58,14 +58,16 @@ def _fit_entry(path: str, rec: dict, ppm, amp, warns=()) -> FitEntry:
 
 
 def _larproj_workspaces(path: str) -> list[dict] | None:
-    """The saved workspaces of a LARMOR project bundle (app.py's
-    save_project/open_project -- ppm/amp/recipe embedded directly, no
-    separate data load needed), or None if `path` isn't one -- callers fall
-    back to the normal single-fit load_any path for anything else."""
-    import json
-
+    """The saved workspaces of a LARMOR project bundle (larmor.project --
+    1D entries carry ppm/amp/recipe embedded directly, no separate data load
+    needed), or None if `path` isn't one -- callers fall back to the normal
+    single-fit load_any path for anything else. The bundle is read through
+    project.load_bundle so schema migrations apply uniformly; v2 entries carry
+    a ``kind``, and only 1d entries have ``exp_ppm``, which load_entries's
+    existing ``not ppm`` guard uses to skip 2d / figure / batch entries."""
     try:
-        d = json.loads(Path(path).read_text(encoding="utf-8"))
+        from larmor.project import load_bundle
+        d, _notes = load_bundle(path)
     except Exception:
         return None
     if not isinstance(d, dict) or "workspaces" not in d:

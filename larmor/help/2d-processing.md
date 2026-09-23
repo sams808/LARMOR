@@ -62,6 +62,11 @@ reconstructs the dispersive part by a **Hilbert transform** (Kramers–Kronig),
 which is exact for *re*-phasing already-absorptive data and good enough
 interactively.
 
+Every applied phase is recorded on the map (with the shear, calibrate and 2D
+operations below) and replayed on the freshly loaded data when a project that
+contains the map is reopened. **Reset** undoes the phases applied since the last
+shear / transpose / reverse / symmetrize; a calibration survives it.
+
 ---
 
 ## 4 · Measure & calibrate
@@ -69,7 +74,9 @@ interactively.
 - **Measure** — drop two markers → Δ in **ppm and Hz** on each axis, shown in the
   cursor label.
 - **Calibrate** — click a peak → enter its known F2 and F1 ppm → the axes shift
-  rigidly to reference the map. As always, the raw data is not modified.
+  rigidly to reference the map. As always, the raw data is not modified; the
+  shift is recorded and replayed with the map's other operations when a
+  project is reopened.
 
 ---
 
@@ -84,6 +91,11 @@ interactively.
 | **Diagonal → fit** | extract the diagonal trace to a workbench |
 | **Projection → fit / CSV** | send or save an F1/F2 projection |
 | **Apply shear** | shear an unsheared MQMAS dataset (see the MQMAS manual) |
+
+Transpose, Reverse, Symmetrize and Apply shear are recorded on the map and
+replayed when a project containing it is reopened; Flip is a view setting and
+is saved as such. A project stores the map **by reference** (its source path)
+plus this record, never the processed arrays.
 
 ---
 

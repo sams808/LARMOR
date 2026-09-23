@@ -71,11 +71,17 @@ before opening it. **File ▸ Open sample** points it at a folder.
 ## 3 · Workspaces
 
 The **Workspaces** dock lists everything you have open. Each entry carries an
-icon for its kind (bare spectrum, spectrum-with-fit, 2D map). Click to switch,
-**Close** to free it, **Save** to write its recipe. Opening a 2D, or pulling a
-trace off a map, spawns a **new** workspace so your existing fit is never
-disturbed; **Back to 2D map** (Ctrl + 2) returns to the parent map. Snapshots are
-lightweight (arrays + a recipe reference), and closing a workspace frees it.
+icon for its kind: bare spectrum (∿), spectrum-with-fit (⤳), 2D map (▦), and
+the session rows a project keeps alongside them — a figure kept from the
+Plotting studio (◫) and a batch-fit session (☷). Click to switch to a
+document, **Close** to free it, **Save** to write its recipe; a figure or batch
+row opens in its dialog on **Enter**, double-click or **Save**, and is updated
+when that dialog closes. Opening a 2D, or pulling a trace off a map, spawns a
+**new** workspace so your existing fit is never disturbed; **Back to 2D map**
+(Ctrl + 2) returns to the parent map. Snapshots are lightweight (arrays + a
+recipe reference), and closing a workspace frees it. **File ▸ Save project…**
+(Ctrl + Shift + P) keeps the whole dock as one `.larproj.json` file; a project
+opens from **File ▸ Open project…** or plain **File ▸ Open…**.
 
 ## 4 · Processing, fitting, tools
 

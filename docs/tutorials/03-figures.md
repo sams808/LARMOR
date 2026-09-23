@@ -22,7 +22,10 @@ and its fit if there is one). The **Template** dropdown offers named starting
 points — a stacked series, a deconvolution grid, a composition trend, and so
 on — each pre-filling the layout so you only add your traces. Edit, click
 **Preview**, then **Export…** (png + svg + pdf at 600 dpi, ready for the
-journal). **Save spec…** and **Load spec…** round-trip the JSON.
+journal). **Save spec…** and **Load spec…** round-trip the JSON. A figure
+changed in the studio also stays in the **Workspaces** dock when the studio
+closes (Enter or double-click reopens it) and is saved with **File > Save
+project…**; a studio previewed and closed untouched leaves nothing behind.
 
 ## 2. Anatomy of a 1D spec
 

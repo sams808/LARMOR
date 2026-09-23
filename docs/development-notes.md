@@ -38,7 +38,7 @@ lines — by far the largest and the main window's monolith),
 | Group | Modules |
 |---|---|
 | Ingestion | `io/bruker.py` (1r/2rr/fid/ser, EXPNO or pdata, self-identifies 1D/2D and raw/processed), `io/varian.py`, `io/fxmla.py` (dmfit), `io/spectra.py` (CSV with a metadata header), `io/scan.py`, `io/export.py`; `loader.py` is the single entry point (`load_any`, `apply_processing`), `fourier.py` handles States/TPPI/echo-antiecho |
-| Model | `recipe.py` — `Param` / `SiteModel` / `Recipe`, the diffable JSON format; data referenced by path + SHA-256, never inlined |
+| Model | `recipe.py` — `Param` / `SiteModel` / `Recipe`, the diffable JSON format; data referenced by path + SHA-256, never inlined. `project.py` — the `.larproj.json` bundle: schema version, the v1 → v2 migration (through `recipe.run_migrations`), the per-kind entry builders (1D embedded; 2D maps and batch spectra by reference), path relocation |
 | Processing | `processing.py` (the replayable op pipeline), `baseline.py`, `qcpmg.py`, `qcpmg_fields.py` |
 | Simulation | `models/` (the registry), `engine.py` (Czjzek kernel + `simulate`), `twod.py` (MQMAS), `estimate.py` (starting values measured from data) |
 | Fitting | `fit.py`, `batchfit.py`, `seqfit.py`, `multifit.py`, `autofit.py`, `parallel.py` |
@@ -193,6 +193,9 @@ comments in the source explain them; this is the index.
 | **`keyboardTracking(False)` on every spinbox** in the QCPMG dialog | `qcpmg_dialog.py:161` | Typing "293" acts on "29" and clamps the echo top; one point of top moved T₂ by up to 7400 % |
 | **`PARAM_COLUMNS` must keep its automatic fallback column** | `table.py:102` | Without it a model's parameters become fitted-but-invisible, as Amorphous ΔC_Q was |
 | **`load_any` returns `(ppm, amp, recipe, meta, warnings)`** | `app.py:2331`, `app.py:2889` | It was once unpacked as `(recipe, ppm, amp, …)`; every overlay format except raw Bruker silently failed. The same slip survived in `add_background_spectrum` until it was found in use: the recipe dict landed in `amp`, `np.asarray(..., float)` raised a `TypeError` out of the Qt slot, and no background/reference spectrum could ever be added. Grep every `_load_any(` call site when this shape changes |
+| **Never embed 2D arrays in a project bundle** — a 2D entry is a source path (+ project-relative path) plus the view's op log | `project.py` (`entry_2d`, `view2d_persisted`), `twod_view.py` (`_ops`) | A 2rr is 10⁵–10⁶ points, four quadrants when hypercomplex; the bundle would dwarf the data it references, and the recorded ops replay exactly (`twod.replay_ops` dispatches to the same functions the view calls live) |
+| **Every `Contour2DView` method that replaces `_orig` / `_committed` must append to `_ops`**; the phase-Reset rule lives in one place (`_ops_after_reset`: drop phases after the last rebasing op, keep shifts) | `twod_view.py` | `replay_ops` raises on an unknown op, but an operation that never logs itself reopens as a map that silently differs from what was saved. `_shift_axes` relabels `_orig` and `_committed` without rebasing, so a phase before a calibrate is still undone by Reset while the shift survives |
+| **v2 2D / figure / batch bundle entries carry no `exp_ppm`** | `batch.py` (`load_entries`), `project.py` | The batch report's bundle reader skips them through its existing `not ppm` guard; giving them arrays would turn them into phantom fits. `load_bundle` refuses a JSON object without a `workspaces` list so a recipe file never migrates into an empty project |
 
 ---
 
@@ -308,11 +311,13 @@ Ordered by how likely they are to mislead someone.
    exercises an import → export round trip, and the file the export constant
    was calibrated on is not in the repo and no longer on the machine.
 5. ~~Version fields are write-only~~ **fixed in 0.11.2**:
-   `recipe._MIGRATIONS` runs on load with a note per hop, and
-   `open_project` warns when a bundle is newer than
-   `PROJECT_BUNDLE_VERSION`. The migrations dict is empty until the first
-   schema change — the point was to have the hook before files from
-   other machines meet it.
+   `recipe._MIGRATIONS` runs on load with a note per hop. The migrations
+   dict is no longer empty: the project bundle's v1 → v2 hop
+   (`project._MIGRATIONS`, `kind` defaults on every entry) is the first
+   real migration, and both tables run through `recipe.run_migrations`;
+   the recipe schema itself is still v1. A bundle newer than
+   `project.PROJECT_BUNDLE_VERSION` opens with a note in the "Project
+   opened" box rather than a refusal.
 6. **`AMORPH_CQ_MAX` is duplicated as a literal** in `io/fxmla.py:385`;
    raising the model's bound would leave imported dmfit Amorphous lines
    truncated at 6 MHz.
@@ -368,6 +373,13 @@ Ordered by how likely they are to mislead someone.
     (`x_fit` + `ppm`). `MainWindow._residual_noise_ratio` is now a two-line
     delegate to `fithealth.residual_noise_ratio`, to remove when `app.py` is
     split.
+16. **`MainWindow._data2d` (what `run_fit_2d` fits) is the as-loaded map**
+    and does not follow the view's phase / shear / calibrate; the 2D page's
+    footer Compute is a no-op (`_simulate_now` returns early for the 2D
+    view) and only `_fit2d_done` draws a 2D model. This is also why a
+    reopened project restores a 2D map's fit parameters but not its model
+    overlay — the MQMAS kernel build takes seconds and is memory-cached
+    only, so the notes box says to run Fit.
 
 Genuinely open work is in `docs/roadmap.md`. The largest structural items:
 `app.py` is a 4.7k-line monolith, and there is no CI — so every "suite green"
