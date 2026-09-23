@@ -44,7 +44,7 @@ lives in eleven `desktop/mw_*.py` mixin modules of 207–920 lines each plus
 | Processing | `processing.py` (the replayable op pipeline), `baseline.py`, `qcpmg.py`, `qcpmg_fields.py`, `sidebands.py` (autocorrelation νrot / sideband-manifold detector; mirrors qcpmg's period finder), `phasedrag.py` (drag-to-phase gesture arithmetic + pivot re-expression, Qt-free) |
 | Simulation | `models/` (the registry), `engine.py` (Czjzek kernel + `simulate`), `twod.py` (MQMAS), `estimate.py` (starting values measured from data) |
 | Fitting | `fit.py`, `batchfit.py`, `seqfit.py`, `multifit.py`, `autofit.py`, `parallel.py` |
-| Interpretation | `quantify.py`, `sanity.py`, `identifiability.py`, `diagnostics.py`, `fithealth.py` (one verdict from the previous four, rendered by the desktop strip), `chi2map.py`, `czjzek_dist.py`, `convert.py`, `nuclei.py`, `refranges.py` |
+| Interpretation | `quantify.py`, `sanity.py`, `identifiability.py`, `diagnostics.py`, `fithealth.py` (one verdict from the previous four, rendered by the desktop strip), `chi2map.py`, `czjzek_dist.py`, `convert.py`, `nuclei.py`, `refranges.py`, `dft.py` (magres → sites, the `[calculation]` header, equivalent-atom grouping, the `_SEED_KEYS` partition), `shiftcal.py` (σ → δ calibration line with covariance) |
 | Output | `figures.py` (spec-driven renderers), `methods.py` (auto-written Methods text), `series_grid.py` |
 | Desktop shell | `desktop/app.py` is the `MainWindow` facade (construction, the two Qt event overrides, `main()`); every other method is defined on one mixin in `desktop/mw_*.py` — `mw_menus`, `mw_chrome`, `mw_files`, `mw_session`, `mw_overlays`, `mw_editing`, `mw_sidebands`, `mw_fitting`, `mw_processing`, `mw_cofit`, `mw_tools` — and the QThreads are in `desktop/workers.py`. The layout and its rules are in §11 |
 
@@ -215,6 +215,7 @@ comments in the source explain them; this is the index.
 | **`hilbert` must precede `ift` before any window** on a real-only spectrum | `desktop/panels.py` `_emit` (forced and locked in re-apodize mode) | The IFT of a real spectrum is two-sided (hermitian); a one-sided EM window damps the mirrored half, loses ~half the signal and distorts the line — the whole-echo trap in a new guise |
 | **`FidDialog` puts `ft` BEFORE the `phase` step** | `fid_dialog.py` `_chain` | `fourier.ft1d` appends `ft` at the END when none is given; with the phase op ahead of it every non-zero p0 / p1 made the preview fail on time-domain data |
 | **A reopened `.json` recipe seeds `_proc_base` from `load_any(path, replay=False)`** | `desktop/mw_files.py` `_load_source_body` | The exp arrays arrive ALREADY replayed; seeding the live pipeline's base from them compounds the recorded chain on the first panel touch (p0 40 became 80) |
+| **The magres import routes tensor components by ROLE through `dft._SEED_KEYS`**, never by the shared parameter name `eta` | `dft.py` `to_site_dict` | The quadrupolar η landed in `csa_mas`'s shielding `eta` and a spin-1/2 nucleus got C_Q = 3 MHz; guarded by `tests/test_dft_simpson.py::test_to_site_dict_routes_shielding_and_quadrupolar_eta_by_model` and the fifth partition test |
 
 ---
 
@@ -249,7 +250,11 @@ tables above (`fit._ANALYTIC_MODELS`/`_SIMULATED_MODELS`,
 `engine._GRID_RESTRICTABLE`/`_GRID_FULL_REQUIRED`,
 `estimate._WIDTH_KEY`/`_NO_WIDTH_SEED`,
 `constraints_util._PEAK_FWHM_MODELS`/`_NOT_PEAK_FWHM_MODELS`), so the silent
-omissions in items 2–4 and 6 of the list above are no longer possible.
+omissions in items 2–4 and 6 of the list above are no longer possible. A
+fifth partition, `dft._SEED_KEYS` / `dft._NOT_SEEDABLE`, decides what the
+DFT tensor import seeds — a new model must declare which of its parameters
+take the shielding ζ / η_CS and C_Q / η_Q (or that a computed tensor cannot
+seed it) before Tools ▸ Import DFT tensors offers it.
 
 7. **Model-name tuples NOT covered by the partition tests** — each is a
    hand-maintained allowlist that degrades silently when a new model is
@@ -502,7 +507,7 @@ moved verbatim from the pre-split `app.py`; nothing user-visible changed, and
 | `desktop/mw_fitting.py` (552) | simulation debounce, 1D / 2D fit runs and completions, `_health_*`, quantify, CSV / LaTeX / Methods, publication bundle, auto fit |
 | `desktop/mw_processing.py` (737) | `apply_processing`, FID / channel display refresh, drag-to-phase, calibrate / measure / reset, baseline tools, zones, experiment parameters, WURST, subtract |
 | `desktop/mw_cofit.py` (471) | the co-fit page and its state machine |
-| `desktop/mw_tools.py` (624) | dialog launchers of the Tools / Analysis menus and the small recipe edits they hand back |
+| `desktop/mw_tools.py` (624) | dialog launchers of the Tools / Analysis menus and the small recipe edits they hand back (`_magres_add_sites` applies a DFT import: sites, note, `provenance['dft_import']`); the two-tab magres dialog itself is `desktop/magres_dialog.py` |
 
 **Where a new `MainWindow` method goes.** In the mixin that owns the state it
 reads or writes (the module docstrings list the owned attributes); a slot that

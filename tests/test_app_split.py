@@ -342,6 +342,7 @@ GOLDEN_MENU = (
     (('&Help', 'User &manuals'), 'Relaxation (T1/T2)', '', False, False),
     (('&Help', 'User &manuals'), 'QCPMG', '', False, False),
     (('&Help', 'User &manuals'), 'Multi-dataset & co-fitting', '', False, False),
+    (('&Help', 'User &manuals'), 'DFT tensors — import & shift calibration', '', False, False),
     (('&Help',), '&Tutorials', '', False, True),
     (('&Help', '&Tutorials'), '1 · A first fit — ²⁷Al Czjzek', '', False, False),
     (('&Help', '&Tutorials'), '2 · Constraints — fix, bound, link', '', False, False),

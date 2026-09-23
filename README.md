@@ -101,12 +101,14 @@ plots, deconvolution grids from a batch fit, species distributions, relaxation
 series) from a JSON spec that can be saved and re-rendered identically. Journal
 style presets, PNG/SVG/PDF output.
 
-**Other.** DFT tensor import from CASTEP/Quantum ESPRESSO `.magres` files, a
-command palette (Ctrl+Shift+P) that reaches any menu entry by fuzzy search, an
-optional bridge to SIMPSON for exact recoupling simulations, and a `larmor` CLI
-(`info`, `import`, `fit`, `batchfit`, `seqfit`, `multifit`, `satrec`, `redor`,
-`magres`) for scripted use — the whole thing is an ordinary Python package
-underneath.
+**Other.** DFT tensor import from CASTEP/Quantum ESPRESSO `.magres` files
+(spin-aware seeding, symmetry-equivalent atoms merged per crystallographic
+site, a multi-reference shielding-to-shift calibration line with covariance),
+a command palette (Ctrl+Shift+P) that reaches any menu entry by fuzzy search,
+an optional bridge to SIMPSON for exact recoupling simulations, and a `larmor`
+CLI (`info`, `import`, `fit`, `batchfit`, `seqfit`, `multifit`, `satrec`,
+`redor`, `magres`, `shiftcal`) for scripted use — the whole thing is an
+ordinary Python package underneath.
 
 ## How it compares to dmfit
 
