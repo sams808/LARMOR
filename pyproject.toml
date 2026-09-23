@@ -36,3 +36,7 @@ larmor = ["static/*", "help/*", "xfact/packs/*/assets/offline/*"]
 
 [tool.pytest.ini_options]
 markers = ["slow: long-running tests (full kernel build + fit)"]
+# a test that runs longer than this dumps every thread's stack to stderr
+# (the test keeps running): twice in 2026-09 a fit-health test stalled for
+# over an hour under heavy parallel load and left no trace of where
+faulthandler_timeout = 600
