@@ -1315,7 +1315,6 @@ class BatchFitDialog(QDialog):
     def _save_table(self):
         if self._result is None:
             return
-        import csv
         from larmor import batchfit
 
         from larmor.desktop.paths import suggest_save_dir
@@ -1326,19 +1325,10 @@ class BatchFitDialog(QDialog):
             "CSV (*.csv)")
         if not path:
             return
-        rows = batchfit.shared_table(self._result)
-        with open(path, "w", newline="", encoding="utf-8") as f:
-            w = csv.writer(f)
-            # model + source_path: so the Plotting studio's batch-grid figure
-            # can find each row's spectrum/fit straight from this CSV, even
-            # without "Save individual fits…" too
-            w.writerow(["scope", "site", "label", "param", "value", "stderr",
-                        "model", "source_path"])
-            for r in rows:
-                w.writerow([r["scope"], r["site"], r["label"], r["param"],
-                            f"{r['value']:.6g}",
-                            "" if r["stderr"] is None else f"{r['stderr']:.4g}",
-                            r.get("model", ""), r.get("source_path", "")])
+        # batchfit.SHARED_HEADER: model + source_path so the Plotting studio's
+        # batch-grid figure can find each row's spectrum/fit straight from
+        # this CSV, even without "Save individual fits…" too
+        batchfit.write_shared_csv(self._result, path)
         msg = f"saved {path}"
         if self.chkAutoRecipes.isChecked():
             n = self._save_all_recipes_to(Path(path).parent)
@@ -1663,31 +1653,13 @@ class BatchFitDialog(QDialog):
     def _write_err_csv(self, path):
         if not path or self._result is None:
             return
-        import csv
         from larmor import batchfit
 
         method = self.errCombo.currentData()
-
-        def num(v, fmt=".6g"):
-            if v is None or (isinstance(v, float) and not np.isfinite(v)):
-                return ""
-            return format(v, fmt)
-
-        rows = batchfit.error_table(self._result, method=method)
-        with open(path, "w", newline="", encoding="utf-8") as f:
-            w = csv.writer(f)
-            # model + source_path: so the Plotting studio's batch-grid figure
-            # can find each row's spectrum/fit straight from this CSV, even
-            # without "Save individual fits…" too
-            w.writerow(["scope", "site", "label", "param", "value", "stderr",
-                        "error_method", "sigma_pct", "ci68_lo", "ci68_hi",
-                        "model", "source_path"])
-            for r in rows:
-                w.writerow([r["scope"], r["site"], r["label"], r["param"],
-                            num(r["value"]), num(r["stderr"]), r["error_method"],
-                            num(r["sigma_pct"], ".3g"),
-                            num(r["ci68_lo"]), num(r["ci68_hi"]),
-                            r.get("model", ""), r.get("source_path", "")])
+        # batchfit.ERROR_HEADER: model + source_path so the Plotting studio's
+        # batch-grid figure can find each row's spectrum/fit straight from
+        # this CSV, even without "Save individual fits…" too
+        batchfit.write_error_csv(self._result, path, method)
         msg = f"exported {Path(path).name} · {method} errors"
         if self.chkAutoRecipes.isChecked():
             n = self._save_all_recipes_to(Path(path).parent)

@@ -580,3 +580,45 @@ def test_pivot_by_spectrum_blanks_excluded_sites_and_orders_columns_by_site():
     assert cells[(0, amp_b)]["value"] == \
         res.recipes[0].sites[1].params["amplitude"].value
     assert batchfit.pivot_by_spectrum(rows, 0) == ([], {})
+
+
+def test_write_shared_and_error_csv_match_the_dialog_headers(tmp_path):
+    """The long-table CSV writers (moved here from the batch dialog so the CLI
+    and io/bundle share them): golden headers, one row per table row, the
+    dialog's .6g / .4g formatting, blanks for None, excluded sites absent."""
+    import csv
+
+    entries = _entries()
+    entries[1][0].sites[1].params["amplitude"] = Param(
+        0.0, vary=False, min=0.0, max=0.0)
+    res = batchfit.batch_fit(entries)
+
+    assert batchfit.SHARED_HEADER == ["scope", "site", "label", "param", "value",
+                                      "stderr", "model", "source_path"]
+    assert batchfit.ERROR_HEADER == ["scope", "site", "label", "param", "value",
+                                     "stderr", "error_method", "sigma_pct",
+                                     "ci68_lo", "ci68_hi", "model", "source_path"]
+
+    p = tmp_path / "batch_table.csv"
+    assert batchfit.write_shared_csv(res, p) == str(p)
+    with open(p, newline="", encoding="utf-8") as f:
+        rows = list(csv.reader(f))
+    table = batchfit.shared_table(res)
+    assert rows[0] == batchfit.SHARED_HEADER
+    assert len(rows) - 1 == len(table)
+    for got, want in zip(rows[1:], table):
+        assert got[0] == want["scope"] and got[1] == want["site"]
+        assert got[4] == f"{want['value']:.6g}"
+        assert got[5] == ("" if want["stderr"] is None else f"{want['stderr']:.4g}")
+        assert got[6] == want["model"]
+    assert not any(r[0] == "g1" and r[1] == "s1" for r in rows[1:])
+
+    batchfit.batch_error_analysis(res, _data_for(entries), method="covariance")
+    pe = tmp_path / "batch_fit_covariance.csv"
+    batchfit.write_error_csv(res, pe, "covariance")
+    with open(pe, newline="", encoding="utf-8") as f:
+        erows = list(csv.reader(f))
+    assert erows[0] == batchfit.ERROR_HEADER and len(erows[0]) == 12
+    assert len(erows) - 1 == len(batchfit.error_table(res, method="covariance"))
+    assert all(r[6] == "covariance" for r in erows[1:])
+    assert not any(r[0] == "g1" and r[1] == "s1" for r in erows[1:])

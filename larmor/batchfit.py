@@ -17,6 +17,10 @@ shared tie and are allowed to drift by a small ±fraction around the shared valu
 independently per spectrum (a "relaxation" — e.g. let δ_iso wander ±5 % while
 widths stay locked).
 
+Also home to the long-table CSV writers (``write_shared_csv`` /
+``write_error_csv`` over ``SHARED_HEADER`` / ``ERROR_HEADER``) used by the
+batch dialog, the CLI and :mod:`larmor.io.bundle`.
+
 1D only. Qt-free and testable.
 """
 from __future__ import annotations
@@ -523,6 +527,60 @@ def shared_table(result: BatchFitResult) -> list[dict]:
                                  "index": k})
         rows.extend(_population_rows(rec, result.labels[k], None, index=k))
     return rows
+
+
+# ---------------------------------------------------------------- CSV writers
+# The long-table CSV files the dialog's Save table… / Export CSV…, the CLI's
+# batch_table.csv / seq_table.csv and io/bundle all write -- one header list
+# and one writer per table, so a column added here reaches every export.
+SHARED_HEADER = ["scope", "site", "label", "param", "value", "stderr",
+                 "model", "source_path"]
+ERROR_HEADER = ["scope", "site", "label", "param", "value", "stderr",
+                "error_method", "sigma_pct", "ci68_lo", "ci68_hi",
+                "model", "source_path"]
+
+
+def write_shared_csv(result: BatchFitResult, path) -> str:
+    """``shared_table(result)`` as CSV with SHARED_HEADER (value ``.6g``,
+    stderr ``.4g`` or blank). model + source_path let the Plotting studio's
+    batch-grid figure find each row's spectrum/fit straight from this CSV,
+    even without "Save individual fits…" too. Returns the path written."""
+    import csv
+
+    rows = shared_table(result)
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(SHARED_HEADER)
+        for r in rows:
+            w.writerow([r["scope"], r["site"], r["label"], r["param"],
+                        f"{r['value']:.6g}",
+                        "" if r["stderr"] is None else f"{r['stderr']:.4g}",
+                        r.get("model", ""), r.get("source_path", "")])
+    return str(path)
+
+
+def write_error_csv(result: BatchFitResult, path, method: str | None = None) -> str:
+    """``error_table(result, method)`` as CSV with ERROR_HEADER (None / NaN
+    cells blank; sigma_pct ``.3g``, the rest ``.6g``). Returns the path
+    written."""
+    import csv
+
+    def num(v, fmt=".6g"):
+        if v is None or (isinstance(v, float) and not np.isfinite(v)):
+            return ""
+        return format(v, fmt)
+
+    rows = error_table(result, method=method)
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(ERROR_HEADER)
+        for r in rows:
+            w.writerow([r["scope"], r["site"], r["label"], r["param"],
+                        num(r["value"]), num(r["stderr"]), r["error_method"],
+                        num(r["sigma_pct"], ".3g"),
+                        num(r["ci68_lo"]), num(r["ci68_hi"]),
+                        r.get("model", ""), r.get("source_path", "")])
+    return str(path)
 
 
 def pivot_by_spectrum(rows: list[dict], n_spectra: int

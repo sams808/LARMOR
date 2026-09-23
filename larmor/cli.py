@@ -325,21 +325,30 @@ def _series_entries(spectra, model_path, window_arg):
     return entries, None
 
 
-def _write_recipes_and_table(recipes, outdir, table_rows, tag):
+def _write_recipes_and_table(recipes, outdir, table_rows, tag) -> list[str]:
+    """Write ``<slug>_<tag>.recipe.json`` per recipe and ``<tag>_table.csv``
+    (batchfit.SHARED_HEADER: the same 8 columns the batch dialog's Save
+    table… writes, so the Plotting studio's CSV loader finds model and
+    source_path). Returns the recipe stems, in order."""
     import csv
+    from larmor import batchfit
     outdir = Path(outdir or "."); outdir.mkdir(parents=True, exist_ok=True)
+    stems = []
     for rec in recipes:
         slug = "".join(c if c.isalnum() or c in "-_" else "_"
                        for c in (rec.sample or "fit"))[:60] or "fit"
+        stems.append(f"{slug}_{tag}")
         rec.save(outdir / f"{slug}_{tag}.recipe.json")
     with open(outdir / f"{tag}_table.csv", "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
-        w.writerow(["scope", "site", "label", "param", "value", "stderr"])
+        w.writerow(batchfit.SHARED_HEADER)
         for r in table_rows:
             w.writerow([r["scope"], r["site"], r["label"], r["param"],
                         f"{r['value']:.6g}",
-                        "" if r["stderr"] is None else f"{r['stderr']:.4g}"])
+                        "" if r["stderr"] is None else f"{r['stderr']:.4g}",
+                        r.get("model", ""), r.get("source_path", "")])
     print(f"wrote {len(recipes)} recipe(s) + {tag}_table.csv to {outdir}")
+    return stems
 
 
 def cmd_batchfit(args: argparse.Namespace) -> int:
