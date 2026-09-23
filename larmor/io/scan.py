@@ -409,11 +409,13 @@ def disambiguate(labels: list[str], paths: list[str]) -> list[str]:
     for lab, idx in groups.items():
         if len(idx) < 2:
             continue
-        folders = {where[i][0] for i in idx}
+        folders = sorted({where[i][0] for i in idx})
         if len(folders) > 1:
+            tags = {f: (name_parts(f).date or f) for f in folders}
+            if len(set(tags.values())) < len(folders):   # same day twice
+                tags = {f: f for f in folders}
             for i in idx:
-                folder = where[i][0]
-                tag = name_parts(folder).date or folder
+                tag = tags[where[i][0]]
                 if tag:
                     labels[i] = f"{lab} ({tag})"
     # still equal (same folder, or folders without a tag) -> the EXPNO

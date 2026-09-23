@@ -5,6 +5,7 @@
     larmor fit recipe.json [-o out.json] [--plot out.png]
     larmor batchfit SPECTRA... --model m.recipe.json [-o out] [--curves]
     larmor seqfit SPECTRA... --model m.recipe.json [-o out] [--curves]
+    larmor inventory MONTH [--csv out.csv] [--nucleus 31P] [--picks]
 """
 from __future__ import annotations
 
@@ -90,6 +91,38 @@ def cmd_srcheck(args: argparse.Namespace) -> int:
                                             session=str(root)), encoding="utf-8")
         log = R.append_log(rows, root, ada_ppm=args.ada, tol_ppm=args.tol, action="export")
         print(f"wrote {args.csv} and {txt}; old/new values appended to {log}")
+    return 0
+
+
+def cmd_inventory(args: argparse.Namespace) -> int:
+    """Session inventory of one month folder (see larmor.inventory): the
+    sample x nucleus grid of production picks, the demoted / flagged rows,
+    a CSV; ``--picks`` prints the picks' paths only, one per line, so
+    ``larmor batchfit $(larmor inventory MONTH --picks --nucleus 31P)`` composes."""
+    from larmor import inventory as I
+
+    inv = I.build(args.path, ns_frac=args.ns_frac, sr_audit=not args.no_sr)
+    if not inv.rows:
+        print(f"no EXPNO found under {inv.root} -- give the month folder that holds "
+              "the sample folders", file=sys.stderr)
+        return 1
+    if args.picks:
+        for r in inv.picks(args.nucleus):
+            print(r.openable or r.path)
+        return 0
+    print(f"session {inv.root}: {len(inv.rows)} EXPNOs in {inv.n_folders()} sample "
+          f"folder(s), {len(inv.samples())} sample(s), nuclei "
+          f"{' '.join(inv.nuclei())}, {len(inv.picks())} production pick(s), "
+          f"{inv.n_flags()} flagged EXPNO(s)")
+    print(I.grid_text(inv))
+    print(I.text_report(inv, all_rows=args.all))
+    counts = inv.counts()
+    print("summary: " + ", ".join(f"{k} {n}" for k, n in sorted(counts.items())))
+    if args.csv:
+        I.to_csv(inv, args.csv)
+        txt = Path(args.csv).with_suffix("").as_posix() + "_picks.txt"
+        Path(txt).write_text(I.picks_text(inv, args.nucleus), encoding="utf-8")
+        print(f"wrote {args.csv} and {txt}")
     return 0
 
 
@@ -441,6 +474,26 @@ def main(argv: list[str] | None = None) -> int:
     p_sc.add_argument("--all", action="store_true", help="list every EXPNO, not "
                       "only the flagged ones")
     p_sc.set_defaults(func=cmd_srcheck)
+
+    p_inv = sub.add_parser("inventory", help="session inventory: every EXPNO of a "
+                           "month folder as a sample x nucleus grid with the production "
+                           "pick per block, roles (setup/short/failed/arrayed) and "
+                           "title-vs-folder flags")
+    p_inv.add_argument("path", help="month/session folder (or any EXPNO inside it)")
+    p_inv.add_argument("--csv", help="write the inventory table here (and a "
+                       "*_picks.txt list of the production picks)")
+    p_inv.add_argument("--nucleus", help="restrict --picks / the picks list to one "
+                       "nucleus, e.g. 31P")
+    p_inv.add_argument("--picks", action="store_true",
+                       help="print only the picks' openable paths, one per line")
+    p_inv.add_argument("--ns-frac", dest="ns_frac", type=float, default=0.25,
+                       help="a spectrum whose NS is below this fraction of the "
+                            "block's maximum is a short shot (default 0.25)")
+    p_inv.add_argument("--no-sr", dest="no_sr", action="store_true",
+                       help="skip the referencing-audit column (faster)")
+    p_inv.add_argument("--all", action="store_true",
+                       help="list every EXPNO, not only the demoted / flagged ones")
+    p_inv.set_defaults(func=cmd_inventory)
 
     p_imp = sub.add_parser("import", help="convert a dmfit .fxmla to a LARMOR recipe")
     p_imp.add_argument("path")
