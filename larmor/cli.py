@@ -295,6 +295,7 @@ def _series_entries(spectra, model_path, window_arg):
     spectrum that carries sites."""
     import copy
     import numpy as np
+    from larmor.io import scan
     from larmor.loader import load_any
     from larmor.recipe import Recipe
 
@@ -314,13 +315,17 @@ def _series_entries(spectra, model_path, window_arg):
         return None, "no model — pass --model recipe.json (or a spectrum with a fit)"
     if window_arg:
         win = tuple(window_arg)
+    # the same sample names (and the same collision rule) as the desktop
+    # dialogs, so CSV scopes and recipe slugs match between the two routes
+    labels = scan.disambiguate([scan.sample_label(p, rec) for _, _, rec, p in loaded],
+                               [str(p) for _, _, _, p in loaded])
     entries = []
-    for ppm, amp, rec, p in loaded:
+    for (ppm, amp, rec, p), label in zip(loaded, labels):
         r = Recipe.from_dict({
             "nucleus": rec.get("nucleus", ""),
             "larmor_frequency_MHz": rec.get("larmor_frequency_MHz", 0.0),
             "spin_rate_Hz": rec.get("spin_rate_Hz", 0.0),
-            "sample": rec.get("sample") or Path(p).stem,
+            "sample": label,
             # load_any fills both for Bruker / csv / fxmla sources; the saved
             # recipes and the publication bundle then reopen with their data
             "source_path": rec.get("source_path") or str(p),

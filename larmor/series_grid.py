@@ -220,7 +220,11 @@ def find_recipes_near_csv(csv_path: str | Path) -> list[str]:
     CSV's own folder plus, when the CSV carries source_path hints, each
     hinted spectrum's folder too (the CSV and the fits needn't live in the
     same place). Returns what it could match, in the CSV's own row order;
-    scopes without a matching file are simply absent."""
+    scopes without a matching file are simply absent. A scope is matched to
+    a file whose stem IS the scope (or starts with ``<scope>_``), else to the
+    recipe whose ``sample`` is the scope, and only then by substring: short
+    folder-derived scopes such as ``Ab`` and ``AbNa`` would otherwise
+    mis-pair."""
     folder = Path(csv_path).parent
     scopes: list[str] = []
     with open(csv_path, newline="", encoding="utf-8") as f:
@@ -244,19 +248,31 @@ def find_recipes_near_csv(csv_path: str | Path) -> list[str]:
     matched: list[str] = []
     by_sample: dict[str, Path] | None = None    # built lazily, only if needed
     for scope in scopes:
-        hit = next((c for c in candidates if scope in c.stem), None)
+        # 1. the file is named by the scope ("Ab.recipe.json", "Ab_batch…")
+        hit = next((c for c in candidates
+                    if _stem(c) == scope or _stem(c).startswith(scope + "_")), None)
         if hit is None:
+            # 2. the recipe says it is this sample
             if by_sample is None:
                 by_sample = {}
                 for c in candidates:
                     try:
-                        by_sample[Recipe.load(c).sample] = c
+                        by_sample.setdefault(Recipe.load(c).sample, c)
                     except Exception:
                         continue
             hit = by_sample.get(scope)
+        if hit is None:
+            # 3. last resort: the scope somewhere in the file name
+            hit = next((c for c in candidates if scope in c.stem), None)
         if hit is not None and str(hit) not in matched:
             matched.append(str(hit))
     return matched
+
+
+def _stem(p: Path) -> str:
+    """``x_batch.recipe.json`` -> ``x_batch`` (both suffixes off)."""
+    s = p.stem
+    return s[:-7] if s.lower().endswith(".recipe") else s
 
 
 def resolve_paths(source) -> tuple[list[str], list[str]]:

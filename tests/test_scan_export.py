@@ -30,6 +30,12 @@ def test_scan_sample_identifies_experiments():
         assert e.openable is None or e.openable.endswith(
             ("1r", "2rr", "fid", "ser"))
         assert e.kind and e.ndim in (1, 2)
+    # the acquisition facts the session inventory reads come off the same
+    # text parse of acqus (NS, DATE, the D array) and the pdata listing
+    assert all(e.ns > 0 and e.date > 0 for e in exps)
+    assert any(e.d1_s > 0 for e in exps)
+    assert all(e.n_procs >= 1 for e in exps)
+    assert all(e.date_iso.startswith("20") for e in exps)
 
 
 def test_classify_pulse_programs():

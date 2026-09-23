@@ -23,6 +23,7 @@ from larmor.desktop import theme
 from larmor.desktop.panels import PARAM_LABELS
 from larmor.desktop.plot import site_color
 from larmor.desktop.batchfit_dialog import _slug, _proc_number, _saved_tol, _save_tol
+from larmor.io.scan import disambiguate, sample_label
 import datetime as _dt
 
 
@@ -230,10 +231,13 @@ class SeqFitDialog(QDialog):
                 "nucleus": rec.get("nucleus", ""),
                 "larmor": float(rec.get("larmor_frequency_MHz", 0.0) or 0.0),
                 "spin": float(rec.get("spin_rate_Hz", 0.0) or 0.0),
-                "sample": rec.get("sample") or Path(p).stem, "path": p,
+                "sample": sample_label(p, rec), "path": p,
                 "proc": _proc_number(p)})
             if self._model_sites is None and rec.get("sites"):
                 self._model_sites = rec["sites"]
+        for d, lab in zip(data, disambiguate([d["sample"] for d in data],
+                                             [d["path"] for d in data])):
+            d["sample"] = lab
         return data
 
     def _seed_recipe(self, d) -> dict:
