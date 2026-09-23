@@ -39,7 +39,7 @@ lines — by far the largest and the main window's monolith),
 |---|---|
 | Ingestion | `io/bruker.py` (1r/2rr/fid/ser, EXPNO or pdata, self-identifies 1D/2D and raw/processed), `io/varian.py`, `io/fxmla.py` (dmfit), `io/spectra.py` (CSV with a metadata header), `io/scan.py`, `io/export.py`; `loader.py` is the single entry point (`load_any`, `apply_processing`), `fourier.py` handles States/TPPI/echo-antiecho |
 | Model | `recipe.py` — `Param` / `SiteModel` / `Recipe`, the diffable JSON format; data referenced by path + SHA-256, never inlined. `project.py` — the `.larproj.json` bundle: schema version, the v1 → v2 migration (through `recipe.run_migrations`), the per-kind entry builders (1D embedded; 2D maps and batch spectra by reference), path relocation |
-| Processing | `processing.py` (the replayable op pipeline), `baseline.py`, `qcpmg.py`, `qcpmg_fields.py` |
+| Processing | `processing.py` (the replayable op pipeline), `baseline.py`, `qcpmg.py`, `qcpmg_fields.py`, `sidebands.py` (autocorrelation νrot / sideband-manifold detector; mirrors qcpmg's period finder) |
 | Simulation | `models/` (the registry), `engine.py` (Czjzek kernel + `simulate`), `twod.py` (MQMAS), `estimate.py` (starting values measured from data) |
 | Fitting | `fit.py`, `batchfit.py`, `seqfit.py`, `multifit.py`, `autofit.py`, `parallel.py` |
 | Interpretation | `quantify.py`, `sanity.py`, `identifiability.py`, `diagnostics.py`, `fithealth.py` (one verdict from the previous four, rendered by the desktop strip), `chi2map.py`, `czjzek_dist.py`, `convert.py`, `nuclei.py`, `refranges.py` |

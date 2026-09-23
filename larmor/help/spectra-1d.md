@@ -222,6 +222,57 @@ menu:
   is degenerate with the rest of the model), and the copy is a snapshot —
   re-processing the workbench afterwards does not update it.
 
+### Spinning sidebands — detected for you
+
+LARMOR looks for the **repeat of the spectrum at ±ν_rot** whenever a 1D
+spectrum lands on the workbench (open, workspace switch, re-processing, a
+processed FID, background subtraction, and after the Experiment or Calibrate
+dialogs). The spectrum is correlated with a shifted copy of itself; the lag at
+which it repeats is the sideband spacing $\Delta\delta = \nu_\mathrm{rot} / \nu_0$
+(in ppm), searched within ±2 % of the recorded rate — a rate that is slightly
+off is re-measured from the data. The spacing is then checked against the
+peaks: the tallest band is the centreband and the orders +1 **and** −1 must
+both sit on a resolved peak, the one cheap test that tells a manifold from two
+unrelated lines or a two-horn static pattern. When it holds, a small **banner**
+appears over the plot ("Spinning sidebands: ν_rot 20 000 Hz (124.6 ppm at
+160.46 MHz) · 2 orders each side · confidence 0.90") together with dotted
+**guide lines** labelled *centre*, *+1*, *−1*, … on the very peaks it claims,
+so the claim can be checked before anything is clicked. Two one-click actions,
+each a single undo step:
+
+- **Add linked manifold** (or **Return**) — one centreband line (an existing
+  line sitting on it is reused) plus one line per detected order whose position
+  is the constraint `A+124.6` / `A-124.6`, whose width and shape are tied to the
+  centreband (`A`), and whose **amplitude stays free**: sideband intensities
+  follow the shielding or quadrupolar tensor (Herzfeld & Berger), not a fixed
+  ratio, so they are seeded from the measured teeth and left to the fit. The
+  paddles of linked lines are not draggable — drag the centreband and the
+  manifold follows. The button's drop-down offers the same manifold **as one
+  `sidebands` model line** instead (geometric ratio *r* and *n_ssb*, both
+  seeded from the teeth).
+- **Add shifted copy** — one *spectrum* component per detected side, shifted by
+  ±Δδ with the shift held and scaled to the first sideband: the copy carries the
+  whole pattern, higher orders included (the "Add a copy of this spectrum…"
+  route, without the dialog).
+
+LARMOR stays silent on a confirmed-static dataset (ν_rot = 0), when nothing
+repeats within ±2 % of a certain recorded rate (so a J-multiplet or two sites
+split by about ν_rot are never mistaken for sidebands in the automatic offer),
+when the model already carries a manifold (a `sidebands`, CSA-MAS, Czjzek-CSA
+or first-order quadrupolar site, linked positions, or a shifted copy), and for
+a trace dismissed with **✕** / **Esc** until the data or the rate changes. A
+rate recorded as *uncertain* (the red MAS pill) is a question the data can
+answer: the search then also scans 1–80 kHz, and accepting an offer **writes
+the measured ν_rot** into the recipe and clears the warning. A certain rate is
+never written — when the measured and recorded rates disagree by more than
+0.5 % the banner shows **⚠ acquisition says …** and the experiment strip is
+the place to fix it — except for the `sidebands` model line, which has no
+spacing of its own and needs the rate to sit on the teeth.
+**Decomposition ▸ Detect spinning sidebands** (Ctrl+Shift+D) runs the same
+search on demand, scanning when the recorded rate yields nothing, and reports
+the reason in the status bar when it finds no repeat. **View ▸ Offer
+spinning-sideband detection on load** turns the automatic offer off.
+
 ---
 
 ## 4 · Measure & export
@@ -253,6 +304,11 @@ menu:
   *Analyst* **140**, 250 (2015).
 - M. Newville *et al.*, **lmfit**: non-linear least-squares minimization for
   Python, doi:10.5281/zenodo.11813 (2014). *(the optimiser + uncertainties)*
+- J. Herzfeld, A. E. Berger, "Sideband intensities in NMR spectra of samples
+  spinning at the magic angle", *J. Chem. Phys.* **73**, 6021 (1980).
+  *(sideband intensities)*
+- M. M. Maricq, J. S. Waugh, "NMR in rotating solids", *J. Chem. Phys.* **70**,
+  3300 (1979). *(spinning sidebands)*
 - R. R. Ernst, G. Bodenhausen, A. Wokaun, *Principles of NMR in One and Two
   Dimensions*, Oxford (1987). *(general reference)*
 

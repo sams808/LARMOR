@@ -141,7 +141,11 @@ sideband-intensity analysis of MAS.
 **Use it for** a quick empirical description of a sideband pattern when you don't
 need to invert it to a full CSA/quadrupolar tensor. For a *physical* sideband
 manifold from a shielding tensor, use **CSA powder** instead, which generates the
-sidebands from ζ and η.
+sidebands from ζ and η. **Decomposition ▸ Detect spinning sidebands** (or the
+automatic offer that appears when a loaded spectrum repeats at ±ν_rot) can seed
+this model from the measured manifold — `n_ssb` from the highest matched order,
+`r` from the measured height ratios — through the banner's *as one `sidebands`
+model line* entry.
 
 **Limitations.** The geometric ratio is a convenience, not a tensor — it doesn't
 encode ζ/η. Use it for bookkeeping, not for extracting anisotropy.
