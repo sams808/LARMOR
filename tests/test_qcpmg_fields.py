@@ -1041,3 +1041,49 @@ def test_figure_export_writes_a_json_record_with_the_windows(tmp_path):
     # render still ignores the extra key
     fig = figures.render(spec)
     assert len(fig.axes) == 1
+
+
+# ---------------------------------------------------------------- fix 16
+def test_pq_has_an_eta_independent_uncertainty_and_cq_its_eta_range():
+    from larmor.qcpmg_fields import report_text
+
+    pts = [FieldPoint(NU_LO, -113.1, 1.5), FieldPoint(NU_HI, -92.1, 1.1)]
+    ref = infinite_field_diso(pts, 1.5, 0.7)
+    assert ref.pq_MHz == pytest.approx(3.3061, abs=1e-3)
+    assert ref.pq_err_MHz == pytest.approx(0.146, abs=2e-3)
+    assert ref.pq_err_MHz == pytest.approx(ref.pq_MHz * ref.cq_err_MHz / ref.cq_MHz)
+    assert ref.pq_err_MHz == pytest.approx(ref.pq_MHz * ref.slope_err / (2 * abs(ref.slope)))
+    for eta in (0.0, 0.5, 1.0):
+        r = infinite_field_diso(pts, 1.5, eta)
+        assert r.pq_MHz == pytest.approx(ref.pq_MHz, abs=1e-9)          # eta-invariant
+        assert r.pq_err_MHz == pytest.approx(ref.pq_err_MHz, abs=1e-9)
+        assert r.cq_MHz == pytest.approx(ref.cq_MHz * np.sqrt((3 + 0.49) / (3 + eta ** 2)), rel=1e-9)
+    lo, hi = sorted(ref.cq_eta_range)
+    assert lo == pytest.approx(2.863, abs=1e-3) and hi == pytest.approx(3.306, abs=1e-3)
+    assert lo < ref.cq_MHz < hi
+    txt = report_text({"s": ref}, 1.5, 0.7, "35Cl")
+    pq_line = [ln for ln in txt.splitlines() if ln.strip().startswith("P_Q")][0]
+    cq_line = [ln for ln in txt.splitlines() if ln.strip().startswith("C_Q")][0]
+    assert "+-" in pq_line and "eta-independent" in pq_line
+    assert txt.index(pq_line) < txt.index(cq_line)                     # P_Q first
+    assert "2.863-3.306 over eta 0-1" in cq_line
+    summary = txt.split("Summary", 1)[1]
+    assert "P_Q (MHz)" in summary.splitlines()[2]
+    assert "3.306 +- 0.146" in summary
+
+
+def test_dialog_label_quotes_pq_with_its_error(qapp):
+    from PySide6.QtWidgets import QTableWidgetItem
+
+    from larmor.desktop.qcpmg_fields_dialog import QcpmgFieldsDialog
+
+    dlg = QcpmgFieldsDialog(None, "35Cl", None)
+    for r, (nu, dcg, err) in enumerate(((NU_LO, -113.1, 1.5), (NU_HI, -92.1, 1.1))):
+        dlg.table.setItem(r, 0, QTableWidgetItem(f"{nu}"))
+        dlg.table.setItem(r, 1, QTableWidgetItem(f"{dcg}"))
+        dlg.table.setItem(r, 2, QTableWidgetItem(f"{err}"))
+    dlg._compute()
+    t = dlg.result.text()
+    assert "P_Q = 3.306 +- 0.146 MHz (η-independent)" in t
+    assert "C_Q = 3.065 +- 0.136 MHz" in t and "2.863-3.306 over η 0-1" in t
+    dlg.close()

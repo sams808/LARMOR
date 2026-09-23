@@ -239,6 +239,11 @@ class InfiniteFieldResult:
     slope: float                      # ppm·MHz² (δcg vs 1/ν0²)
     intercept: float                  # == delta_iso_ppm
     points: list[FieldPoint] = field(default_factory=list)
+    #: σ(P_Q) = σ(C_Q)·sqrt(1+η²/3) = P_Q·σ_b/(2|b|): the η-FREE uncertainty
+    pq_err_MHz: float = 0.0
+    #: C_Q at η = 0 and η = 1 for the same slope (+7.9 % / -6.6 % about η 0.7):
+    #: the systematic the assumed η adds, kept OUT of the +-
+    cq_eta_range: tuple = (0.0, 0.0)
     slope_err: float = float("nan")   # σ_b (ppm·MHz²)
     #: 2-σ upper bound on C_Q when the slope is not significantly negative
     cq_upper_2sigma_MHz: float = 0.0
@@ -406,7 +411,10 @@ def infinite_field_diso(points: list[FieldPoint], spin: float,
         cq = float(np.sqrt(cq2))
         # dC_Q/d(C_Q²) = 1/(2 C_Q)  →  σ_Cq = σ(C_Q²)/(2 C_Q) = |C_Q/(2b)|·σ_b
         cq_err = float(sig_cq2 / (2.0 * cq)) if np.isfinite(sig_cq2) else float("nan")
-    pq = cq * float(np.sqrt(1.0 + eta ** 2 / 3.0))
+    eta_factor = float(np.sqrt(1.0 + eta ** 2 / 3.0))
+    pq = cq * eta_factor
+    pq_err = cq_err * eta_factor if np.isfinite(cq_err) else float("nan")
+    cq_eta_range = (cq_from_slope(float(b), spin, 0.0), cq_from_slope(float(b), spin, 1.0))
 
     if xr < SHORT_LEVER_ARM:
         warnings.append(
@@ -434,6 +442,7 @@ def infinite_field_diso(points: list[FieldPoint], spin: float,
         delta_iso_ppm=float(a), delta_iso_err_ppm=sig_a,
         cq_MHz=cq, cq_err_MHz=cq_err, pq_MHz=pq, eta=eta, spin=spin,
         slope=float(b), intercept=float(a), points=list(points),
+        pq_err_MHz=pq_err, cq_eta_range=cq_eta_range,
         slope_err=sig_b, cq_upper_2sigma_MHz=cq_upper,
         note="; ".join(notes), warning="; ".join(warnings),
         lever_arm=xr, weighted=weighted,
@@ -832,14 +841,19 @@ def fmt_result_lines(res: InfiniteFieldResult) -> list[str]:
     if res.cq_is_bound or (res.cq_MHz == 0.0 and res.note):
         up = res.cq_upper_2sigma_MHz
         bound = f"<= {up:.3f} MHz (2-sigma upper bound)" if up > 0 else "not determined"
-        out.append(f"C_Q {bound}   (eta = {res.eta:g} assumed)")
         pq_up = up * float(np.sqrt(1.0 + res.eta ** 2 / 3.0))
-        out.append(f"P_Q {'<= ' + format(pq_up, '.3f') + ' MHz (2-sigma upper bound)' if up > 0 else 'not determined'}")
+        out.append(f"P_Q {'<= ' + format(pq_up, '.3f') + ' MHz (2-sigma upper bound, eta-independent)' if up > 0 else 'not determined'}")
+        out.append(f"C_Q {bound}   (eta = {res.eta:g} assumed)")
     else:
+        eta_factor = float(np.sqrt(1.0 + res.eta ** 2 / 3.0))
+        pq_scaled = (res.cq_err_scaled_MHz * eta_factor
+                     if np.isfinite(res.cq_err_scaled_MHz) else float("nan"))
+        out.append(f"P_Q = {res.pq_MHz:.3f} "
+                   f"{_pm_scaled(res.pq_err_MHz, pq_scaled, 3, 'MHz')} (eta-independent)")
+        lo, hi = sorted(res.cq_eta_range)
         out.append(f"C_Q = {res.cq_MHz:.3f} "
                    f"{_pm_scaled(res.cq_err_MHz, res.cq_err_scaled_MHz, 3, 'MHz')}   "
-                   f"(eta = {res.eta:g} assumed)")
-        out.append(f"P_Q = {res.pq_MHz:.3f} MHz")
+                   f"(eta = {res.eta:g} assumed; {lo:.3f}-{hi:.3f} over eta 0-1)")
     out.append(f"slope = {res.slope:.6g} {_pm(res.slope_err, 0)} ppm.MHz^2"
                if np.isfinite(res.slope_err) else
                f"slope = {res.slope:.6g} +- -- ppm.MHz^2")
@@ -947,16 +961,20 @@ def report_text(results: dict, spin: float, eta: float, nucleus: str = "",
     if ok:
         lines.append("Summary")
         lines.append("-" * 66)
-        lines.append("sample                         diso (ppm)      C_Q (MHz)")
+        lines.append("sample                         diso (ppm)        "
+                     "P_Q (MHz)          C_Q (MHz)")
         for sample, res in ok:
             if res.cq_is_bound or (res.cq_MHz == 0.0 and res.note):
-                cq = (f"<= {res.cq_upper_2sigma_MHz:.3f} (2-sigma)"
-                      if res.cq_upper_2sigma_MHz > 0 else "not determined")
+                up = res.cq_upper_2sigma_MHz
+                pq = (f"<= {up * float(np.sqrt(1.0 + res.eta ** 2 / 3.0)):.3f} (2-sigma)"
+                      if up > 0 else "not determined")
+                cq = f"<= {up:.3f} (2-sigma)" if up > 0 else "not determined"
             else:
+                pq = f"{res.pq_MHz:6.3f} {_pm(res.pq_err_MHz, 3)}"
                 cq = f"{res.cq_MHz:6.3f} {_pm(res.cq_err_MHz, 3)}"
             lines.append(f"{(sample or '(unnamed)')[:28]:28s}  "
                          f"{res.delta_iso_ppm:7.2f} {_pm(res.delta_iso_err_ppm, 2):<9s} "
-                         f"{cq}")
+                         f"{pq:18s} {cq}")
         lines.append("")
     for sample, why in bad:
         lines.append(f"NOT FITTED  {sample or '(unnamed)'}: {why}")
@@ -964,9 +982,10 @@ def report_text(results: dict, spin: float, eta: float, nucleus: str = "",
         lines.append("")
     lines.append("CT-selective is the operator's declaration, recorded for")
     lines.append("provenance; it does not enter the fit.")
-    lines.append("delta_iso is the intercept at 1/nu0^2 -> 0; C_Q follows from the")
-    lines.append("slope with the assumed eta, so its accuracy is limited by that")
-    lines.append("assumption. Quote P_Q when eta is unknown. A slope that is not")
+    lines.append("delta_iso is the intercept at 1/nu0^2 -> 0. P_Q = C_Q sqrt(1+eta^2/3)")
+    lines.append("follows from the slope WITHOUT eta (C_Q^2 (3+eta^2) = 3 P_Q^2), so quote")
+    lines.append("P_Q +- when eta is unknown; C_Q needs the assumed eta and its range over")
+    lines.append("eta = 0-1 is a systematic kept out of the +-. A slope that is not")
     lines.append("significantly negative gives only an upper bound on C_Q; a")
     lines.append("significantly positive slope means the dcg values are not the")
     lines.append("same observable (mode, window or referencing differ).")

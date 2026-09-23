@@ -712,6 +712,7 @@ class QcpmgFieldsDialog(QDialog):
         head = (f"<b>{lines[0].replace('delta_iso', 'δiso')}</b>  "
                 f"(intercept, 1/ν₀²→0)   ·   "
                 + "   ·   ".join(ln.replace("eta", "η") for ln in lines[1:3]))
+        # lines[1] is P_Q +- (eta-independent), lines[2] is C_Q with its range
         extra = []
         chi_line = [ln for ln in lines if ln.startswith("chi2/dof")]
         if chi_line:

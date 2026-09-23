@@ -561,8 +561,11 @@ chemical-shift anisotropy."*
    $\delta_\text{iso}$ is the chemical shift and $C_Q/P_Q$ the quadrupolar
    product.
 4. **Two-field QCPMG** — state the assumed η and that all fields are in the
-   large-$C_Q$ (CT-only) limit; the reported ± errors already reflect the
-   two-field, unknown-η uncertainty.
+   large-$C_Q$ (CT-only) limit. The ± on $\delta_\text{iso}$, $P_Q$ and $C_Q$
+   propagate the δcg uncertainties only; at the assumed η = 0.7 the η
+   assumption adds a separate systematic of +7.9 % (η = 0) / −6.6 % (η = 1)
+   on $C_Q$ and nothing on $P_Q$ — quote $P_Q$ ± or give $C_Q$ as its range
+   over η; do not fold the range into the ±.
 5. **CSA** — extract CSA with `csa_mas`, never `sidebands`; confirm the ζ
    sign convention.
 6. **dmfit interop** — LARMOR's own fits and reported numbers are independent

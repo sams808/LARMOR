@@ -319,9 +319,12 @@ instead of a value, together with the slope and its σ.
 **Tools ▸ QCPMG: infinite-field δiso** opens the extrapolation. Enter each
 field's Larmor frequency and its δcg (type it, or **grab it from the open
 spectrum's visible range** — zoom to the CT band first), set η, and
-**Compute**. The *CT-selective (declared)* box starts **unknown** and is not
-read from the data: selectivity is the operator's judgement (ν_rf against
-ν_Q), recorded for provenance only — it does not enter the fit. It plots δcg vs $1/\nu_0^2$ with the
+**Compute**. It reports δiso ± σ, $P_Q$ ± σ (η-independent: $C_Q^2(3+\eta^2)
+= 3P_Q^2$, so the slope needs no η) and $C_Q$ ± σ at the assumed η together
+with its range over η = 0–1 (+7.9 % / −6.6 % about η = 0.7) — a systematic
+kept out of the ±. The *CT-selective (declared)* box starts **unknown** and
+is not read from the data: selectivity is the operator's judgement (ν_rf
+against ν_Q), recorded for provenance only — it does not enter the fit. It plots δcg vs $1/\nu_0^2$ with the
 fit line and reports δiso, $C_Q$, and $P_Q$ with propagated uncertainties.
 
 **Add from datasets…** expects the **sum-echo dataset** written by *Save as
@@ -429,8 +432,9 @@ result can never be exported.
 
 **Compute all** extrapolates every sample. Then:
 
-- **Export report…** writes a plain-text record: every input point, every
-  fitted δiso, C_Q and P_Q with uncertainties, the W_q/W_csd split over all
+- **Export report…** writes a plain-text record: every input point with its
+  window, mode and source, δiso ± σ, P_Q ± σ (η-independent) and C_Q ± σ at
+  the assumed η with its range over η = 0–1, the W_q/W_csd split over all
   the fields that carry a FWHM, and the assumptions (η, spin) spelled out. A sample that
   could not be fitted is listed as such rather than silently dropped.
 - **Export figures…** writes the **merged** figure — every sample on one
