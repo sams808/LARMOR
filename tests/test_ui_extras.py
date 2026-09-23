@@ -1369,3 +1369,104 @@ def test_batch_table_checkbox_hides_and_shows(qapp, tmp_path):
     assert dlg._hl == 0 and dlg.focusWidget() is not dlg.table
     dlg.chkTable.setChecked(True)
     assert not dlg.table.isHidden()
+
+
+# ---------------------------------------------------------------------------
+# N1: Publication bundle… in the batch dialog (larmor.io.bundle behind it).
+
+def _read_bundle_curves(path):
+    """A bundle _curves.csv as a structured array, its '# key=value' header
+    dropped first (genfromtxt would take the first '#' line as the header)."""
+    from pathlib import Path
+    rows = [ln for ln in Path(path).read_text(encoding="utf-8").splitlines()
+            if ln and not ln.startswith("#")]
+    return np.genfromtxt(rows, delimiter=",", names=True)
+
+
+def test_batch_dialog_publication_bundle_button_writes_the_folder(qapp, tmp_path, monkeypatch):
+    import csv
+    from PySide6.QtWidgets import QFileDialog, QMessageBox
+    from larmor.desktop import batchfit_dialog
+
+    dlg = _batch_dialog(tmp_path, 3)
+    assert not dlg.btnBundle.isEnabled()                 # like Save table… before a fit
+    _fit_batch(dlg)
+    assert dlg.btnBundle.isEnabled()
+
+    folder = tmp_path / "bundle"
+    folder.mkdir()
+    monkeypatch.setattr(QFileDialog, "getExistingDirectory",
+                        staticmethod(lambda *a, **k: str(folder)))
+    dlg._export_bundle()
+    names = {p.name for p in folder.iterdir()}
+    assert {"manifest.csv", "README.txt", "batch_table.csv"} <= names
+    assert len(list(folder.glob("*.recipe.json"))) == 3
+    assert len(list(folder.glob("*_curves.csv"))) == 3
+    assert not list(folder.glob("batch_fit_*.csv"))      # no error method computed
+    with open(folder / "manifest.csv", newline="", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    assert len(rows) == 3
+    for k, d in enumerate(dlg._data):
+        tab = _read_bundle_curves(folder / rows[k]["curves_file"])
+        assert np.array_equal(tab["experiment"], d["amp"])       # exactly as fitted
+        assert np.array_equal(tab["ppm"], d["ppm"])
+        assert "experiment_raw" not in tab.dtype.names            # no baseline applied
+        assert rows[k]["source_path"] == d["path"]
+        assert rows[k]["source_kind"] == "csv" and len(rows[k]["source_sha256"]) == 64
+    assert "manifest.csv" in dlg.status.text() and "3 spectra" in dlg.status.text()
+
+    # an existing bundle: the replace question answered No writes nothing
+    before = (folder / "manifest.csv").read_bytes()
+    stamp = (folder / "manifest.csv").stat().st_mtime_ns
+    monkeypatch.setattr(QMessageBox, "question",
+                        staticmethod(lambda *a, **k: QMessageBox.No))
+    dlg._export_bundle()
+    assert (folder / "manifest.csv").stat().st_mtime_ns == stamp
+    assert (folder / "manifest.csv").read_bytes() == before
+
+    # the button follows Save table… through an error worker
+    monkeypatch.setattr(batchfit_dialog._ErrorWorker, "start", lambda self: None)
+    dlg._start_err_worker("covariance")
+    assert not dlg.btnBundle.isEnabled() and not dlg.btnTable.isEnabled()
+    dlg._post_err_enable()
+    assert dlg.btnBundle.isEnabled() and dlg.btnTable.isEnabled()
+
+
+def test_batch_bundle_experiment_is_the_baselined_array(qapp, tmp_path, monkeypatch):
+    """A per-spectrum baseline: the bundle's 'experiment' is d['amp'] (what
+    the fit saw), 'experiment_raw' is d['amp0'], and only for that spectrum;
+    the manifest's processing column carries the recorded op."""
+    import csv
+    from PySide6.QtWidgets import QFileDialog
+    from larmor import batchfit
+    from larmor.desktop.batchfit_dialog import estimate_baseline
+
+    dlg = _batch_dialog(tmp_path, 2)
+    d0 = dlg._data[0]
+    d0["amp0"] = d0["amp0"] + 20.0                       # a raised baseline on spectrum 0
+    base = estimate_baseline(d0["ppm"], d0["amp0"], "Flat (edge median)")
+    d0["amp"] = d0["amp0"] - base
+    d0["baseline_ops"] = [{"op": "flat_baseline"}]
+    dlg._cells[0]["exp"].setData(d0["ppm"], d0["amp"])
+    res = batchfit.batch_fit(dlg._entries())
+    dlg._done(res)
+    assert res.recipes[0].processing == [{"op": "flat_baseline"}]
+    assert res.recipes[1].processing == []
+
+    folder = tmp_path / "b"
+    folder.mkdir()
+    monkeypatch.setattr(QFileDialog, "getExistingDirectory",
+                        staticmethod(lambda *a, **k: str(folder)))
+    dlg._export_bundle()
+    with open(folder / "manifest.csv", newline="", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    tab0 = _read_bundle_curves(folder / rows[0]["curves_file"])
+    assert list(tab0.dtype.names)[:3] == ["ppm", "experiment", "experiment_raw"]
+    assert np.array_equal(tab0["experiment"], d0["amp"])
+    assert np.array_equal(tab0["experiment_raw"], d0["amp0"])
+    assert not np.array_equal(tab0["experiment"], tab0["experiment_raw"])
+    tab1 = _read_bundle_curves(folder / rows[1]["curves_file"])
+    assert "experiment_raw" not in tab1.dtype.names
+    assert np.array_equal(tab1["experiment"], dlg._data[1]["amp"])
+    assert rows[0]["processing"].startswith('[{"op": "')
+    assert rows[1]["processing"] == "[]"

@@ -86,3 +86,56 @@ def test_seqfit_dialog_fit_current_and_auto(qapp, tmp_path):
            for d in dlg._recipes]
     assert pos[0] == pytest.approx(13.0, abs=0.4)
     assert pos[-1] == pytest.approx(17.0, abs=0.4)
+
+
+def test_seqfit_dialog_publication_bundle_after_manual_fits(qapp, tmp_path, monkeypatch):
+    """Publication bundle… works after a manual Fit current alone (unfitted
+    members get note 'not fitted'), recipes carry their source path, and a
+    second bundle after the auto sweep has every member fitted."""
+    import csv
+    from PySide6.QtWidgets import QFileDialog
+    from larmor.desktop.seqfit_dialog import SeqFitDialog, _SeqWorker
+    from larmor.recipe import Recipe
+
+    paths, model = _series(tmp_path)
+    dlg = SeqFitDialog(None, paths, model)
+    assert dlg.btnBundle.isEnabled()
+    assert [dlg._seed_recipe(d)["source_path"] for d in dlg._data] == paths
+    assert [d["source_path"] for d in dlg._recipes] == paths
+
+    dlg._fit_current()                                  # spectrum 0 only
+    folder = tmp_path / "b1"
+    folder.mkdir()
+    monkeypatch.setattr(QFileDialog, "getExistingDirectory",
+                        staticmethod(lambda *a, **k: str(folder)))
+    dlg._export_bundle()
+    names = {p.name for p in folder.iterdir()}
+    assert {"seq_table.csv", "manifest.csv", "README.txt"} <= names
+    assert len(list(folder.glob("*.recipe.json"))) == 3
+    assert len(list(folder.glob("*_curves.csv"))) == 3
+    with open(folder / "manifest.csv", newline="", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    assert len(rows) == 3
+    for k, r in enumerate(rows):
+        assert r["source_path"] == paths[k]
+        assert Recipe.load(folder / r["recipe_file"]).source_path == paths[k]
+        assert (folder / r["curves_file"]).is_file()
+    fitted = Recipe.from_dict(dlg._recipes[0])
+    assert fitted.fit_rmsd is not None
+    assert rows[0]["note"] == ""
+    assert float(rows[0]["rmsd"]) == pytest.approx(fitted.fit_rmsd, rel=1e-6)
+    assert [r["note"] for r in rows[1:]] == ["not fitted", "not fitted"]
+    assert "manifest.csv" in dlg.status.text() and "3 spectra" in dlg.status.text()
+
+    w = _SeqWorker(dlg._entries(), 2, "first", dlg._propagate(), 0, None)
+    w.done.connect(dlg._auto_done)
+    w.run()
+    folder2 = tmp_path / "b2"
+    folder2.mkdir()
+    monkeypatch.setattr(QFileDialog, "getExistingDirectory",
+                        staticmethod(lambda *a, **k: str(folder2)))
+    dlg._export_bundle()
+    with open(folder2 / "manifest.csv", newline="", encoding="utf-8") as f:
+        rows2 = list(csv.DictReader(f))
+    assert [r["note"] for r in rows2] == ["", "", ""]
+    assert all(float(r["rmsd"]) > 0 for r in rows2)

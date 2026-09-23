@@ -197,6 +197,15 @@ class SeqFitDialog(QDialog):
         bb = QDialogButtonBox(QDialogButtonBox.Close | QDialogButtonBox.Help)
         self.btnSave = bb.addButton("Save individual fits…", QDialogButtonBox.ActionRole)
         self.btnSave.clicked.connect(self._save_individual)
+        self.btnBundle = bb.addButton("Publication bundle…", QDialogButtonBox.ActionRole)
+        self.btnBundle.setToolTip(
+            "write everything about this series to one folder: seq_table.csv, one "
+            ".recipe.json and one _curves.csv per spectrum (ppm, experiment exactly as "
+            "fitted, model, residual, components), manifest.csv (source file + SHA-256, "
+            "EXPNO, NS, D1, SF/SR, processing, fit window, RMSD) and README.txt with the "
+            "Methods paragraph and software versions -- after Fit current steps or an "
+            "auto sweep")
+        self.btnBundle.clicked.connect(self._export_bundle)
         self.btnSeries = bb.addButton("Series plot…", QDialogButtonBox.ActionRole)
         self.btnSeries.clicked.connect(self._series_plot)
         bb.button(QDialogButtonBox.Close).clicked.connect(self.accept)
@@ -230,6 +239,9 @@ class SeqFitDialog(QDialog):
     def _seed_recipe(self, d) -> dict:
         return {"nucleus": d["nucleus"], "larmor_frequency_MHz": d["larmor"],
                 "spin_rate_Hz": d["spin"], "sample": d["sample"],
+                # so Save individual fits… and the publication bundle's
+                # recipe copies reopen with their data
+                "source_path": d["path"],
                 "fit_window_ppm": self._window,
                 "sites": copy.deepcopy(self._model_sites or [])}
 
@@ -476,6 +488,51 @@ class SeqFitDialog(QDialog):
             except Exception:
                 pass
         self.status.setText(f"saved {n} fit(s) to {folder}")
+
+    def _export_bundle(self):
+        """Publication bundle…: the live per-spectrum recipes (what Save
+        individual fits… saves -- manual Fit current steps or an auto sweep)
+        wrapped as a BatchFitResult the way _series_plot / cli.cmd_seqfit
+        do, then larmor.io.bundle.write_bundle with kind="seq". Members
+        never fitted get a manifest row with note 'not fitted'. The
+        manifest RMSD is recomputed with LARMOR's normalised definition,
+        not copied from the un-normalised live values."""
+        from larmor import batchfit
+        from larmor.io import bundle
+        from larmor.recipe import Recipe
+        from larmor.desktop.paths import suggest_save_dir
+
+        if not self._data:
+            self.status.setText("nothing to bundle — no spectra loaded")
+            return
+        recs = [Recipe.from_dict(d) for d in self._recipes]
+        res = batchfit.BatchFitResult(
+            recipes=recs, labels=[d["sample"] for d in self._data],
+            rmsd=list(self._live_rmsd), per_dataset=[], shared=(),
+            released=batchfit.all_but_amplitude(recs))
+        start = suggest_save_dir(self._data[0]["path"])
+        folder = QFileDialog.getExistingDirectory(
+            self, "Publication bundle — choose an output folder", start)
+        if not folder:
+            return
+        folder = Path(folder)
+        if (folder / "manifest.csv").exists():
+            ans = QMessageBox.question(
+                self, "Replace bundle?",
+                f"“{folder.name}” already holds a bundle (manifest.csv). "
+                "Replace its files?",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if ans != QMessageBox.Yes:
+                return
+        data = [(d["ppm"], d["amp"], self._window) for d in self._data]
+        try:
+            out = bundle.write_bundle(res, data, folder, kind="seq",
+                                      source_paths=[d["path"] for d in self._data])
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.warning(self, "Bundle failed", str(exc))
+            return
+        self.status.setText(out.summary + (
+            f" · {len(out.warnings)} warning(s), see README.txt" if out.warnings else ""))
 
     def _series_plot(self):
         from larmor.recipe import Recipe

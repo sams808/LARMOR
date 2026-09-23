@@ -382,6 +382,16 @@ class BatchFitDialog(QDialog):
                                  "grid, in long form")
         self.btnTable.setEnabled(False)
         self.btnTable.clicked.connect(self._save_table)
+        self.btnBundle = bb.addButton("Publication bundle…", QDialogButtonBox.ActionRole)
+        self.btnBundle.setToolTip(
+            "write everything about this batch to one folder: batch_table.csv "
+            "(+ the error table if computed), one .recipe.json and one _curves.csv "
+            "per spectrum (ppm, experiment exactly as fitted, model, residual, "
+            "components), manifest.csv (source file + SHA-256, EXPNO, NS, D1, SF/SR, "
+            "processing, fit window, RMSD) and README.txt with the Methods paragraph "
+            "and software versions")
+        self.btnBundle.setEnabled(False)
+        self.btnBundle.clicked.connect(self._export_bundle)
         self.btnSeries = bb.addButton("Series plot…", QDialogButtonBox.ActionRole)
         self.btnSeries.setToolTip("plot how each parameter evolves along the series")
         self.btnSeries.setEnabled(False)
@@ -1143,7 +1153,7 @@ class BatchFitDialog(QDialog):
         self.btnFit.setEnabled(False)
         self.btnCancel.setEnabled(True); self.btnStop.setEnabled(True)
         self.btnSave.setEnabled(False); self.btnTable.setEnabled(False)
-        self.btnSeries.setEnabled(False)
+        self.btnBundle.setEnabled(False); self.btnSeries.setEnabled(False)
         self.btnErr.setEnabled(False); self.btnErrCsv.setEnabled(False)
         self.prog.setRange(0, 0)                       # busy while fitting
         rtxt = (f" · releasing {', '.join(rel)} (±{self.frac.value():.0f}%)"
@@ -1183,7 +1193,7 @@ class BatchFitDialog(QDialog):
             return
         self._result = result
         self.btnSave.setEnabled(True); self.btnTable.setEnabled(True)
-        self.btnSeries.setEnabled(True)
+        self.btnBundle.setEnabled(True); self.btnSeries.setEnabled(True)
         self.btnErr.setEnabled(True); self.btnErrCsv.setEnabled(True)
         self._refresh_err_status()
         for k, pd in enumerate(result.per_dataset):
@@ -1334,6 +1344,48 @@ class BatchFitDialog(QDialog):
             n = self._save_all_recipes_to(Path(path).parent)
             msg += f" · {n} individual fit(s) saved alongside it"
         self.status.setText(msg)
+
+    def _export_bundle(self):
+        """Publication bundle…: everything about this batch into one folder
+        (larmor.io.bundle.write_bundle) -- the tables, one recipe copy and
+        one _curves.csv per spectrum with the experiment EXACTLY as fitted
+        (d["amp"], after any baseline; d["amp0"] as experiment_raw when a
+        baseline was applied), manifest.csv and README.txt. The error table
+        for the currently selected method is included only when it has
+        been computed; nothing is computed here."""
+        if self._result is None:
+            return
+        from larmor.io import bundle
+        from larmor.desktop.paths import suggest_save_dir
+
+        start = suggest_save_dir(self._src_paths[0] if self._src_paths else None)
+        folder = QFileDialog.getExistingDirectory(
+            self, "Publication bundle — choose an output folder", start)
+        if not folder:
+            return
+        folder = Path(folder)
+        if (folder / "manifest.csv").exists():
+            ans = QMessageBox.question(
+                self, "Replace bundle?",
+                f"“{folder.name}” already holds a bundle (manifest.csv). "
+                "Replace its files?",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if ans != QMessageBox.Yes:
+                return
+        data = [(d["ppm"], d["amp"], self._window) for d in self._data]
+        raw = [d["amp0"] if d.get("baseline_ops") else None for d in self._data]
+        m = self.errCombo.currentData()
+        method = m if m in (getattr(self._result, "error_detail", {}) or {}) else None
+        try:
+            res = bundle.write_bundle(
+                self._result, data, folder, kind="batch",
+                source_paths=[d["path"] for d in self._data], raw=raw,
+                error_method=method)
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.warning(self, "Bundle failed", str(exc))
+            return
+        self.status.setText(res.summary + (
+            f" · {len(res.warnings)} warning(s), see README.txt" if res.warnings else ""))
 
     def _save_template(self):
         import json
@@ -1584,7 +1636,7 @@ class BatchFitDialog(QDialog):
         self.btnFit.setEnabled(False)
         self.btnErr.setEnabled(False); self.btnErrCsv.setEnabled(False)
         self.btnSave.setEnabled(False); self.btnTable.setEnabled(False)
-        self.btnSeries.setEnabled(False)
+        self.btnBundle.setEnabled(False); self.btnSeries.setEnabled(False)
         self.btnStop.setEnabled(True); self.btnCancel.setEnabled(False)
         self.prog.setRange(0, len(data)); self.prog.setValue(0)
         name = self.errCombo.currentText().split(" (")[0]
@@ -1606,7 +1658,7 @@ class BatchFitDialog(QDialog):
         self._update_fit_enabled()
         self.btnErr.setEnabled(True); self.btnErrCsv.setEnabled(True)
         self.btnSave.setEnabled(True); self.btnTable.setEnabled(True)
-        self.btnSeries.setEnabled(True)
+        self.btnBundle.setEnabled(True); self.btnSeries.setEnabled(True)
 
     def _err_done(self, result):
         self._post_err_enable()
