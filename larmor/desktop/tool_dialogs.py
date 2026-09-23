@@ -1,16 +1,14 @@
-"""Tool dialogs: REDOR, DFT (.magres) import, Errors Analysis."""
+"""Tool dialogs: REDOR and Errors Analysis (the DFT .magres import lives in
+magres_dialog.py)."""
 from __future__ import annotations
-
-from pathlib import Path
 
 import numpy as np
 import pyqtgraph as pg
 from larmor.desktop import theme
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QApplication, QComboBox, QDialog, QDoubleSpinBox, QFileDialog,
-    QHBoxLayout, QLabel, QLineEdit, QPushButton, QTableWidget,
-    QTableWidgetItem, QVBoxLayout,
+    QApplication, QComboBox, QDialog, QFileDialog, QHBoxLayout, QLabel,
+    QLineEdit, QPushButton, QVBoxLayout,
 )
 
 
@@ -84,111 +82,6 @@ class RedorDialog(QDialog):
         tt = np.linspace(res.ntr_s.min(), res.ntr_s.max(), 200)
         self.plot.plot(tt, res.curve(tt), pen=pg.mkPen("#d62728", width=1.6))
         self.res.setText(res.summary + "   ·   " + " · ".join(res.notes))
-
-
-class MagresDialog(QDialog):
-    def __init__(self, parent):
-        super().__init__(parent)
-        self.setWindowTitle("Import DFT tensors (.magres)")
-        self.resize(720, 480)
-        self.result_sites: list[dict] = []
-        self._sites = []
-        v = QVBoxLayout(self)
-
-        top = QHBoxLayout()
-        self.lbl = QLabel("no file")
-        btn = QPushButton("Open .magres…")
-        btn.clicked.connect(self._pick)
-        top.addWidget(self.lbl, 1)
-        top.addWidget(btn)
-        v.addLayout(top)
-
-        opts = QHBoxLayout()
-        opts.addWidget(QLabel("isotope"))
-        self.iso = QComboBox()
-        opts.addWidget(self.iso)
-        opts.addWidget(QLabel("model"))
-        self.model = QComboBox()
-        from larmor import models as reg
-
-        self.model.addItems([m["name"] for m in reg.describe_all()
-                             if m["name"] in ("quad_ct", "quad_csa", "czjzek")])
-        opts.addWidget(self.model)
-        opts.addWidget(QLabel("σ_ref (ppm)"))
-        self.ref = QDoubleSpinBox(); self.ref.setRange(-1e4, 1e4)
-        self.ref.setToolTip("reference shielding to convert to chemical shift")
-        opts.addWidget(self.ref)
-        opts.addStretch(1)
-        v.addLayout(opts)
-
-        self.table = QTableWidget(0, 4)
-        self.table.setHorizontalHeaderLabels(
-            ["site", "isotope", "Cq (MHz) / η", "σ_iso (ppm)"])
-        self.table.horizontalHeader().setStretchLastSection(True)
-        v.addWidget(self.table, 1)
-
-        row = QHBoxLayout()
-        self.note = QLabel("")
-        self.note.setStyleSheet(f"color: {theme.active().text_dim};")
-        row.addWidget(self.note, 1)
-        add = QPushButton("Add these sites to the fit")
-        add.setDefault(True)
-        add.clicked.connect(self._accept)
-        row.addWidget(add)
-        v.addLayout(row)
-        self.iso.currentTextChanged.connect(self._refresh)
-
-    def _pick(self):
-        p, _ = QFileDialog.getOpenFileName(self, "CASTEP/QE .magres",
-                                           "", "magres (*.magres);;All (*)")
-        if not p:
-            return
-        from larmor import dft
-
-        try:
-            self._sites = dft.read_magres(p)
-            warnings = dft.assign_isotopes(self._sites)
-        except Exception as exc:
-            self.note.setText(f"failed: {exc}")
-            return
-        self.lbl.setText(Path(p).name)
-        isos = sorted({s.isotope for s in self._sites if s.isotope})
-        self.iso.clear()
-        self.iso.addItems(isos)
-        self.note.setText(" · ".join(warnings) if warnings else
-                          f"{len(self._sites)} sites, {len(isos)} isotopes")
-        self._refresh()
-
-    def _refresh(self):
-        from larmor import dft
-
-        iso = self.iso.currentText()
-        sites = dft.sites_for_isotope(self._sites, iso) if iso else []
-        self.table.setRowCount(len(sites))
-        for r, s in enumerate(sites):
-            q = s.quadrupolar()
-            sh = s.shielding()
-            cells = [s.label, s.isotope,
-                     f"{q['Cq_MHz']:.3f} / {q['eta']:.2f}" if q else "—",
-                     f"{sh['iso_ppm']:.1f}" if sh else "—"]
-            for c, t in enumerate(cells):
-                it = QTableWidgetItem(t)
-                it.setFlags(Qt.ItemIsEnabled)
-                self.table.setItem(r, c, it)
-
-    def _accept(self):
-        from larmor import dft
-
-        iso = self.iso.currentText()
-        ref = self.ref.value() or None
-        sites = dft.sites_for_isotope(self._sites, iso) if iso else []
-        self.result_sites = []
-        for s in sites:
-            sd = s.to_site_dict(model=self.model.currentText(),
-                                reference_ppm=ref)
-            self.result_sites.append({k: v for k, v in sd.items()
-                                      if k != "notes"})
-        self.accept()
 
 
 class ErrorsDialog(QDialog):
