@@ -41,9 +41,12 @@ class _ProcessingMixin:
 
         self.snapshot(with_axis=True)         # an SR change re-references the axis
         old_sr = self.recipe.get("sr_hz", 0.0) or 0.0
-        dlg = ExperimentDialog(self, self.recipe)
+        dlg = ExperimentDialog(
+            self, self.recipe,
+            measure=lambda: self._run_sideband_detection(scan=True))
         if dlg.exec():
             self.recipe["mas_uncertain"] = False     # user confirmed the params
+            mas_msg = self._commit_mas_choice(dlg)
             # a changed SR re-references the ppm axis: delta = (nu - SF) / SF,
             # so a LARGER SR moves every peak to LOWER ppm (TopSpin's
             # direction; this used to add the shift instead)
@@ -64,13 +67,49 @@ class _ProcessingMixin:
                     self.request_simulation()
             self._update_exp_label()
             self._maybe_offer_sidebands()     # νrot / SR may have changed
+            from larmor.sidebands import format_hz
+            nu = float(self.recipe.get("spin_rate_Hz", 0.0) or 0.0)
             self.statusBar().showMessage(
-                "experiment updated — re-simulating (a new spin rate builds "
-                "a new kernel once)")
+                f"experiment updated — νrot {format_hz(nu)} Hz confirmed"
+                + (f"; {mas_msg}" if mas_msg else "")
+                + " — re-simulating (a new spin rate builds a new kernel once)")
             self.request_simulation()
             self._persist_session()
         else:
             self.undo_stack.pop()   # dialog cancelled: drop the snapshot
+
+    def _commit_mas_choice(self, dlg) -> str:
+        """After OK in the Experiment dialog: write the per-session MAS
+        confirmation store (larmor.masrate) from the dialog's Remember /
+        Forget state and update ``recipe.provenance["mas_rate"]``. Returns
+        the status fragment ('remembered for …', 'forgotten', or '').
+        A recipe without the block (CSV / fxmla / VOCS) writes nothing."""
+        block = (self.recipe.get("provenance") or {}).get("mas_rate")
+        if not block or not block.get("session"):
+            return ""
+        from larmor import masrate
+
+        key = (block["session"], block.get("rotor") or "",
+               block.get("nucleus") or "")
+        ev = masrate.MasEvidence.from_dict(block)
+        if getattr(dlg, "forget_requested", False):
+            masrate.forget(key, ev)
+            block["confirmed"] = None
+            block["confirmed_note"] = ""
+            block["source"] = masrate.resolve(ev).source
+            block["uncertain"] = False
+            return "forgotten"
+        remember = getattr(dlg, "remember_mas", None)
+        if remember is not None and remember.isChecked():
+            rate = float(self.recipe.get("spin_rate_Hz", 0.0) or 0.0)
+            masrate.remember(key, ev, rate, note="Experiment parameters")
+            import datetime as _dt
+            block.update(source="confirmed", uncertain=False,
+                         confirmed=_dt.datetime.now().isoformat(timespec="seconds"),
+                         confirmed_note="Experiment parameters")
+            return "remembered for " + masrate.describe_key(key)
+        block["uncertain"] = False
+        return ""
 
     # ------------------------------------------------------------- baseline
     def _baseline_mode(self, on: bool):
