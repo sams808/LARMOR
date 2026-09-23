@@ -401,6 +401,70 @@ def test_batch_dialog_per_spectrum_twopoint_baseline(qapp, tmp_path):
     assert np.allclose(d0["amp"], y0)
 
 
+def test_batch_entries_carry_source_identity_and_open_acquisition_table(qapp, tmp_path):
+    """N4: the per-spectrum recipes of a batch carry the loaded record's
+    source_kind / source_sha256 / acquisition (the Final2 defect), the
+    auto-saved individual fits keep them, and 'Acquisition table…' opens the
+    Experimental-section window over the loaded spectra."""
+    import json
+
+    from larmor import batchfit
+    from larmor.desktop.acquisition_dialog import AcquisitionTableDialog
+    from larmor.desktop.batchfit_dialog import BatchFitDialog
+    from larmor.recipe import Recipe
+    from larmor import engine
+
+    model = {"nucleus": "11B", "larmor_frequency_MHz": 160.0,
+             "sites": [{"model": "gauss_lor", "label": "A", "params": {
+                 "isotropic_chemical_shift_ppm": {"value": 14.0},
+                 "shift_fwhm_ppm": {"value": 5.0},
+                 "amplitude": {"value": 80.0, "min": 0},
+                 "gl": {"value": 1.0, "vary": False}}}]}
+    x = np.linspace(-30, 40, 300)
+    paths = []
+    for k in range(2):
+        rec = Recipe.from_dict({**model, "sample": f"g{k}"})
+        _, y, _ = engine.simulate(rec, exp_ppm=x)
+        p = tmp_path / f"g{k}.csv"
+        p.write_text("# nucleus = 11B\n# larmor_MHz = 160\n" +
+                     "\n".join(f"{xi:.4f} {yi:.4f}" for xi, yi in zip(x, y)))
+        paths.append(p)
+    dlg = BatchFitDialog(None, [str(p) for p in paths], model)
+    assert len(dlg._data) == 2
+    # the loader's identity arrives through _load
+    assert dlg._data[0]["src"]["source_kind"] == "csv"
+    assert len(dlg._data[0]["src"]["source_sha256"]) == 64
+    # an injected block rides into the entries
+    dlg._data[1]["src"] = {"source_kind": "csv", "source_sha256": "ab" * 32,
+                           "acquisition": {"ns": 8, "d1_s": 2.0,
+                                           "expno_path": dlg._data[1]["path"]}}
+    entries = dlg._entries()
+    assert entries[1][0].source_sha256 == "ab" * 32 and entries[1][0].acquisition["ns"] == 8
+    assert entries[1][0].source_path == dlg._data[1]["path"]
+    assert entries[0][0].source_kind == "csv" and len(entries[0][0].source_sha256) == 64
+    dlg._result = batchfit.batch_fit(entries)
+    from PySide6.QtWidgets import QFileDialog
+    csv_path = tmp_path / "batch_table.csv"
+    orig = QFileDialog.getSaveFileName
+    QFileDialog.getSaveFileName = staticmethod(lambda *a, **k: (str(csv_path), ""))
+    try:
+        dlg._save_table()
+    finally:
+        QFileDialog.getSaveFileName = orig
+    saved = {json.loads(p.read_text(encoding="utf-8"))["sample"]:
+             json.loads(p.read_text(encoding="utf-8")) for p in tmp_path.glob("*.recipe.json")}
+    assert saved["g1"]["source_sha256"] == "ab" * 32 and saved["g1"]["acquisition"]["ns"] == 8
+    assert saved["g0"]["source_kind"] == "csv" and len(saved["g0"]["source_sha256"]) == 64
+    assert saved["g0"]["software"]["larmor"]
+    # the button opens the window (CSV sources: no block, an empty table)
+    assert dlg.btnAcq.isEnabled()
+    dlg.btnAcq.click()
+    kids = dlg.findChildren(AcquisitionTableDialog)
+    assert len(kids) == 1 and kids[0].table.rowCount() == 0
+    kids[0].close()
+    dlg.close()
+
+
 def test_batch_dialog_exclude_component_and_auto_save_recipes(qapp, tmp_path):
     """Right-click 'Exclude component' locks a site's amplitude to zero for
     ONE spectrum only; the exclusion is carried into _entries(), survives

@@ -149,7 +149,10 @@ class _ChromeMixin:
         btnTex.clicked.connect(self.copy_latex)
         head.addWidget(btnTex)
         btnMeth = QPushButton("Copy methods")
-        btnMeth.setToolTip("copy a paper-ready methods sentence describing the fit")
+        btnMeth.setToolTip("copy a paper-ready Experimental paragraph — spectrometer and "
+                           "field, probe, MAS rate, pulse and flip angle, recycle delay, "
+                           "scans, referencing, processing, the fit and the software "
+                           "versions (a CSV/dmfit source gets the fit sentence only)")
         btnMeth.clicked.connect(self.copy_methods)
         head.addWidget(btnMeth)
         btnBundle = QPushButton("Publication bundle…")
@@ -227,9 +230,16 @@ class _ChromeMixin:
             f"{self.recipe.get('nucleus', '?')} · "
             f"{self.recipe.get('larmor_frequency_MHz', 0):.3f} MHz · {mas}{sr_txt}")
         origin = self._mas_origin_sentence()
-        self.exp_label.setToolTip(
-            (f"{mas} — {origin} · " if origin else "")
-            + "double-click to edit the experiment parameters")
+        tip = ((f"{mas} — {origin} · " if origin else "")
+               + "double-click to edit the experiment parameters")
+        acq = self.recipe.get("acquisition") or {}
+        if acq:
+            from larmor import acquisition
+
+            tip += "\n" + "\n".join(acquisition.summary_lines(
+                acq, self.recipe.get("software"), self.recipe.get("spin_rate_Hz"),
+                self.recipe.get("mas_uncertain")))
+        self.exp_label.setToolTip(tip)
         self._update_mas_label()
         self._apply_axis_unit()          # SFO may have changed with the dataset
 

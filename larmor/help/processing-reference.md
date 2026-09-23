@@ -169,6 +169,21 @@ SI, `ft` with the spectrum's own referencing offset, then the spectrum's own
 `autophase` — on every recipe with `processing_from_raw` and the EXPNO as
 source, replayed from the instrument fid on reopen.
 
+A saved recipe also records where its numbers came from: `source_sha256`, the
+SHA-256 of the exact data file the fit saw (`pdata/<procno>/1r`, or the `fid`
+behind a *File ▸ Open FID* fit); `acquisition`, the flat block read from acqus,
+`pdata/<procno>/procs`, the title, `uxnmr.info` and the booking sidecar (with
+the procno the fit was made on, so a pdata/2 fit reopens pdata/2); and
+`software`, the software that produced the fit (LARMOR version and git commit
+when run from a checkout, mrsimulator, lmfit, numpy, scipy, nmrglue, Python,
+the fitting time). Reopening a recipe re-hashes the data file and re-reads the
+SR, and reports in the status bar — never a dialog — when the data file
+differs from the fitted one (*source data changed*: TopSpin rewrote the 1r),
+when the axis was re-referenced since the fit (*SR a → b Hz*), and when a
+recorded read-out change (e.g. the 0.13.0 Czjzek read-outs, for recipes with a
+Czjzek-family site) lies between the fitting version and the current one. A
+recipe without a hash (written before this record existed) stays silent.
+
 ---
 
 ## References

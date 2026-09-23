@@ -143,6 +143,13 @@ pass, so you never hand-copy numbers.
      with their bound and the linked ones with their expression — the
      paragraph a referee asks for.
    - **`figures/*.png`** — the individual overlays.
+   - **`acquisition.csv`** / **`acquisition.tex`** (the *acquisition table
+     (Table S1)* checkbox, on by default) — the acquisition parameters of every
+     fit's spectrum from its recipe's acquisition block, one row per EXPNO, with
+     a `# varies` row / bold cells for every column that differs across the
+     series; `report.md` gains an **`## Acquisition`** section with the
+     Experimental paragraph (varying parameters as ranges) and the table.
+     Nothing is written for CSV / dmfit sources, which carry no block.
 
 The columns are model-aware (Czjzek sites report σ and the field-independent
 `√⟨P_Q²⟩`; discrete/Amorphous sites report C_Q and η) and populations come from
@@ -335,6 +342,13 @@ manual, §2, describes the rule and the flags.
    alongside the table too, so the Plotting studio's batch-grid finds the
    real saved fits automatically (bounds, `vary`, baseline processing
    included) instead of only having the CSV's bare values to work from.
+   Every saved individual fit carries the source kind, the SHA-256 of its
+   data file and the acquisition block of its spectrum. **Acquisition
+   table…** needs no fit: it opens the same window as **Tools ▸ Experimental
+   section…** over the loaded spectra — Table S1 with every parameter that
+   varies across the series highlighted, the Experimental paragraph with
+   those parameters as ranges, **Copy paragraph** / **Copy LaTeX table** /
+   **Save CSV + LaTeX…**.
    **Publication bundle…** writes everything about the batch to one folder
    of your choice: `batch_table.csv` (plus the error table for the selected
    error-calculation method when it has been computed), one `.recipe.json`
@@ -475,7 +489,10 @@ and you get a **one-spectrum-at-a-time** workbench:
    reverts; **Stop** keeps what's done.
 4. **Save.** **Save individual fits…** (auto `sample_nucleus_seq_YYYYMMDD_HHMM` or
    a name per fit) and **Series plot…** (parameter/population evolution, with
-   export) — as in the batch tool. **Publication bundle…** is the batch tool's
+   export) — as in the batch tool; every saved recipe carries its source
+   path, the SHA-256 of its data file and its acquisition block, and
+   **Acquisition table…** opens the Experimental-section window over the
+   series (no fit needed). **Publication bundle…** is the batch tool's
    bundle (§6, step 6) for the series — `seq_table.csv` instead of
    `batch_table.csv`, otherwise the same files — and works after manual **Fit
    current** steps as well as after an auto sweep (a member never fitted gets a

@@ -611,9 +611,16 @@ class _FittingMixin:
         if not self.recipe or not self.recipe.get("sites"):
             self.statusBar().showMessage("no fit to describe")
             return
-        from larmor import methods
-        QApplication.clipboard().setText(methods.methods_sentence(self.recipe))
-        self.statusBar().showMessage("methods sentence copied to clipboard")
+        from larmor import acquisition, methods
+        # the full Experimental paragraph (acquisition + processing + fit +
+        # software) when the source carries an acquisition record; the fit
+        # sentence with the software versions otherwise
+        block = acquisition.block_for_recipe(self.recipe)
+        QApplication.clipboard().setText(methods.methods_paragraph(self.recipe, block=block))
+        self.statusBar().showMessage(
+            "Experimental paragraph copied to clipboard — check every [bracket] before pasting"
+            if block else
+            "methods sentence + software copied — no acquisition record for this source")
 
     def export_publication_bundle(self):
         """One click: figure (png/pdf/svg) + LaTeX table + CSV + methods sentence
@@ -632,8 +639,9 @@ class _FittingMixin:
 
         if self._last_quant is None:
             self.run_quantify(show=False)
-        (folder / "methods.txt").write_text(
-            methods.methods_sentence(self.recipe), encoding="utf-8")
+        # the same Experimental paragraph as the Report dock's Copy methods
+        paragraph = methods.methods_paragraph(self.recipe)
+        (folder / "methods.txt").write_text(paragraph, encoding="utf-8")
         (folder / "table.tex").write_text(
             methods.latex_table(self.recipe, self._last_quant,
                                 caption=(self.recipe.get("sample") or "")),
@@ -663,7 +671,7 @@ class _FittingMixin:
         # report.md tying it together
         rows = (self._last_quant or {}).get("rows", [])
         md = [f"# {self.recipe.get('sample') or 'Fit'} — {self.recipe.get('nucleus','')}",
-              "", methods.methods_sentence(self.recipe), ""]
+              "", paragraph, ""]
         h = self._health
         if h is not None and h.fitted and h.summary():
             md += ["Fit health: " + h.summary(), ""]

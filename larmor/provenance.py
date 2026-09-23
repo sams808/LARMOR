@@ -70,16 +70,24 @@ _HEX40 = re.compile(r"^[0-9a-f]{40}$")
 
 
 # ------------------------------------------------------------ carry-over
-def carry_source(rec: dict) -> dict:
+def carry_source(rec: dict, *, raw_expno=None) -> dict:
     """``{source_kind, source_sha256, acquisition}`` of a loaded recipe dict
     (defaults for missing or empty values), ready to spread into the
-    per-spectrum recipe a batch / sequential / CLI builder assembles."""
+    per-spectrum recipe a batch / sequential / CLI builder assembles. With
+    ``raw_expno`` (a batch reprocessed from its fids) the hash is that of
+    ``<EXPNO>/fid`` and the block's ``data_file`` says so."""
     rec = rec or {}
     out = {}
     for k in SOURCE_KEYS:
         v = rec.get(k)
         out[k] = v if v else (dict(_DEFAULTS[k]) if isinstance(_DEFAULTS[k], dict)
                               else _DEFAULTS[k])
+    if raw_expno:
+        fid = Path(str(raw_expno)) / "fid"
+        if fid.is_file():
+            out["source_sha256"] = source_sha256(fid)
+            if out["acquisition"]:
+                out["acquisition"] = {**out["acquisition"], "data_file": "fid"}
     return out
 
 

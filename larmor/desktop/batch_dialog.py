@@ -87,7 +87,11 @@ class BatchReportDialog(QDialog):
         self.cTex = QCheckBox("LaTeX"); self.cTex.setChecked(True)
         self.cMd = QCheckBox("Markdown report"); self.cMd.setChecked(True)
         self.cPlots = QCheckBox("per-fit plots"); self.cPlots.setChecked(True)
-        for c in (self.cCsv, self.cTex, self.cMd, self.cPlots):
+        self.cAcq = QCheckBox("acquisition table (Table S1)"); self.cAcq.setChecked(True)
+        self.cAcq.setToolTip("acquisition.csv / .tex and an '## Acquisition' section: the "
+                             "acquisition parameters of every fit's spectrum, with the "
+                             "ones that vary across the series flagged")
+        for c in (self.cCsv, self.cTex, self.cMd, self.cPlots, self.cAcq):
             fmt.addWidget(c)
         fmt.addStretch(1)
         v.addLayout(fmt)
@@ -177,7 +181,8 @@ class BatchReportDialog(QDialog):
                 self._paths, self.out.text().strip(),
                 error_method=self.method.currentData(), n_mc=self.mc_n.value(),
                 make_plots=self.cPlots.isChecked(), formats=tuple(formats),
-                progress=prog, should_stop=lambda: self._stop)
+                progress=prog, should_stop=lambda: self._stop,
+                acquisition_table=self.cAcq.isChecked())
         except Exception as exc:  # noqa: BLE001
             self.status.setText(f"failed: {exc}")
             self.btnGen.setEnabled(True); self.btnStop.setEnabled(False)

@@ -208,6 +208,13 @@ command line: `larmor srcheck <session folder> --csv audit.csv`.
    full relaxation. No fit can repair a non-quantitative acquisition; see
    **Fitting glasses for publication** §6 for the exact conditions.
 
+The Report dock's **Copy methods** gives the full Experimental paragraph —
+spectrometer and field, probe, MAS rate, pulse and flip angle, recycle delay,
+scans, referencing, TopSpin and LARMOR processing, the fit and the software
+versions — built from acqus / procs / title (a CSV or dmfit source gets the fit
+sentence alone); *Process ▸ Experiment parameters…* shows, read-only, what was
+read from those files.
+
 ### Reading the fit-health strip
 
 Under the spectrum, a one-line strip states whether the last fit's numbers can
@@ -379,6 +386,13 @@ spinning-sideband detection on load** turns the automatic offer off.
   edit — nothing to switch on. The status bar reports the count
   (`marked: 1 fixed · 2 at a bound`).
 - **File ▸ Save spectrum as** — a reopenable CSV with a metadata header.
+- **Provenance.** A saved recipe carries `acquisition` (the block read from
+  acqus / procs / title, with the procno), `software` (the versions that
+  produced the fit, stamped at every Fit) and `source_sha256` (the hash of the
+  exact data file). On reopen the status bar says *source data changed* when
+  the file no longer hashes the same (TopSpin reprocessed it — refit before
+  publishing) and *re-referenced since the fit* when the SR moved (the ppm
+  axis is no longer the fitted one); a recipe without a hash stays silent.
 
 ---
 

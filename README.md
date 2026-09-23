@@ -11,8 +11,10 @@ fitting from [lmfit](https://lmfit.github.io/lmfit-py/); LARMOR adds the interac
 fitting UI, file readers, batch workflows and figure export on top. Spectra are read
 directly from instrument folders (Bruker, Varian/Agilent, legacy dmfit files); the
 acquired files are never modified. A fit is saved as a JSON "recipe" that references
-the data by path and hash, so it can be re-run, diffed, and shared — typically right
-next to the spectrum it fits.
+the data by path and hash, together with the acquisition parameters read from the
+instrument files and the software versions that produced the fit, so it can be
+re-run, diffed, and shared — typically right next to the spectrum it fits — and the
+Experimental paragraph and Table S1 of a paper come out of the same file as the fit.
 
 ![11B and 27Al fits of the bundled pCABS2-4 glass dataset](examples/pCABS2-4_fits.png)
 

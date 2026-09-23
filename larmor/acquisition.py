@@ -657,11 +657,11 @@ def sentences(block: dict, *, spin_rate_Hz=None, mas_uncertain=None,
     nu = b.get("sf_MHz") or b.get("sfo1_MHz")
     field_bits = []
     if b.get("b0_T"):
-        field_bits.append(f"B₀ = {float(b['b0_T']):.1f} T")
+        field_bits.append(f"B₀ = {_val(b['b0_T'], lambda v: f'{float(v):.1f}', 'T')}")
     if b.get("magnet_1h_MHz"):
-        field_bits.append(f"{float(b['magnet_1h_MHz']):.2f} MHz for 1H")
+        field_bits.append(f"{_val(b['magnet_1h_MHz'], lambda v: f'{float(v):.2f}', 'MHz')} for 1H")
     if nu:
-        field_bits.append(f"{float(nu):.2f} MHz for {nuc}")
+        field_bits.append(f"{_val(nu, lambda v: f'{float(v):.2f}', 'MHz')} for {nuc}")
     field_txt = f" ({'; '.join(field_bits)})" if field_bits else ""
     kind = "static" if static else "MAS"
     s = f"The {nuc} {kind} NMR {spectra} {were} acquired"
@@ -921,11 +921,17 @@ COLUMNS: tuple[tuple, ...] = (
 )
 
 
-def _same(a, b) -> bool:
+#: relative tolerances for 'the same value': B0 and the 1H frequency come
+#: from uxnmr.info (rounded to 0.01 MHz) or from BF1 / Xi, which differ in
+#: the 4th decimal for one magnet; every other number must agree to 1e-6
+_TOL = {"b0_T": 1e-4, "magnet_1h_MHz": 1e-4}
+
+
+def _same(a, b, key: str = "") -> bool:
     if isinstance(a, (int, float)) and isinstance(b, (int, float)) and \
             not isinstance(a, bool) and not isinstance(b, bool):
         fa, fb = float(a), float(b)
-        return fa == fb or abs(fa - fb) <= 1e-6 * max(abs(fa), abs(fb))
+        return fa == fb or abs(fa - fb) <= _TOL.get(key, 1e-6) * max(abs(fa), abs(fb))
     return a == b
 
 
@@ -983,7 +989,7 @@ def table(blocks, spin_rates: dict | None = None) -> AcqTable:
         if not present:
             continue
         first = vals[0]
-        if len(present) != len(vals) or any(not _same(v, first) for v in vals[1:]):
+        if len(present) != len(vals) or any(not _same(v, first, k) for v in vals[1:]):
             if len(rows) > 1:
                 varying.add(k)
         else:
@@ -1085,7 +1091,7 @@ def _merged_view(t: AcqTable) -> dict:
         if k in ALWAYS_VARIES and k not in ("mas_uncertain",):
             # per-spectrum keys: a shared value stays, a differing one is a
             # range too (SR / SF differ only when referencing differs)
-            if present and all(_same(v, present[0]) for v in present):
+            if present and all(_same(v, present[0], k) for v in present):
                 view[k] = present[0]
             elif present and k in ("sr_hz", "sf_MHz"):
                 view[k] = _Range(present)
