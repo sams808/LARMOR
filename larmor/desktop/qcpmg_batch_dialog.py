@@ -448,7 +448,14 @@ class QcpmgBatchFieldsDialog(QDialog):
             self._nucleus, widths))
         n_ok = sum(1 for r in self._results.values()
                    if isinstance(r, InfiniteFieldResult))
-        self.msg.setText(f"{n_ok} of {len(self._results)} samples extrapolated")
+        from larmor.qcpmg_fields import mixed_modes
+        mixed = [name for name, r in self._results.items()
+                 if isinstance(r, InfiniteFieldResult) and mixed_modes(r.points)]
+        text = f"{n_ok} of {len(self._results)} samples extrapolated"
+        if mixed:
+            text += ("   ⚠ NOT COMPARABLE: " + ", ".join(mixed)
+                     + " mix magnitude and absorption δcg")
+        self.msg.setText(text)
         for b in (self.btnReport, self.btnFig):
             b.setEnabled(n_ok > 0)
 

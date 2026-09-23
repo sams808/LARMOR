@@ -692,3 +692,59 @@ def test_from_current_goes_through_the_dataset_route(qapp):
     r3 = d2.add_dataset_spectrum(78.354, x, y2, window=(-200.0, 50.0))
     assert "nan" not in d2.table.item(r3, 1).text().lower()
     d.close(); d2.close(); parent.close()
+
+
+# ---------------------------------------------------------------- fix 10 / 11
+def test_report_prints_the_mode_and_a_declared_selectivity():
+    from larmor.qcpmg_fields import mixed_modes, report_text
+
+    pts = [FieldPoint(NU_LO, -112.76, 1.28, None, magnitude=True),
+           FieldPoint(NU_HI, -95.78, 0.51, True, magnitude=True)]
+    res = infinite_field_diso(pts, 1.5, 0.7)
+    txt = report_text({"s": res}, 1.5, 0.7, "35Cl")
+    assert "CT-selective (declared)" in txt
+    rows = [ln for ln in txt.splitlines() if ln.strip().startswith(("78.", "107."))]
+    assert rows[0].rstrip().endswith("?") and rows[1].rstrip().endswith("yes")
+    assert "magnitude" in rows[0]
+    assert "all points measured on magnitude (mc) spectra" in txt
+    assert "operator's declaration" in txt
+    assert not mixed_modes(pts)
+    # one magnitude + one absorption: not the same observable
+    pts[1].magnitude = False
+    assert mixed_modes(pts)
+    txt = report_text({"s": infinite_field_diso(pts, 1.5, 0.7)}, 1.5, 0.7)
+    assert "NOT COMPARABLE" in txt and "absorption" in txt
+    # unknown modes are neither mixed nor 'all magnitude'
+    pts[1].magnitude = None
+    txt = report_text({"s": infinite_field_diso(pts, 1.5, 0.7)}, 1.5, 0.7)
+    assert "NOT COMPARABLE" not in txt and "all points measured" not in txt
+    assert "  ?" in txt
+
+
+def test_ct_selective_box_starts_unknown(qapp):
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QCheckBox, QTableWidgetItem
+
+    from larmor.desktop.qcpmg_fields_dialog import QcpmgFieldsDialog
+    from larmor.qcpmg_fields import report_text
+
+    d = QcpmgFieldsDialog(None, "35Cl")
+    x = np.linspace(-300.0, 100.0, 2001)
+    r = d.add_dataset_spectrum(78.354, x, np.exp(-(((x + 105.0) / 25.0) ** 2)))
+    chk = d.table.cellWidget(r, 4).findChild(QCheckBox)
+    assert chk.isTristate() and chk.checkState() == Qt.PartiallyChecked
+    d.table.setItem(1, 0, QTableWidgetItem("107.811"))
+    d.table.setItem(1, 1, QTableWidgetItem("-92.1"))
+    d.table.cellWidget(1, 4).findChild(QCheckBox).setCheckState(Qt.Checked)
+    d.table.setItem(0, 0, QTableWidgetItem("58.7"))
+    d.table.setItem(0, 1, QTableWidgetItem("-130.0"))
+    d.table.cellWidget(0, 4).findChild(QCheckBox).setCheckState(Qt.Unchecked)
+    pts = d._points()
+    by_nu = {round(p.larmor_MHz, 1): p.ct_selective for p in pts}
+    assert by_nu[78.4] is None and by_nu[107.8] is True and by_nu[58.7] is False
+    txt = report_text(d._result_map(), 1.5, 0.7, "35Cl")
+    rows = {ln.split()[0]: ln.split()[-1] for ln in txt.splitlines()
+            if ln.strip().startswith(("58.", "78.", "107."))}
+    assert rows["58.7000"] == "no" and rows["78.3540"] == "?" and rows["107.8110"] == "yes"
+    assert "(declared)" in d.table.horizontalHeaderItem(4).text()
+    d.close()

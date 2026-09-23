@@ -318,8 +318,10 @@ instead of a value, together with the slope and its σ.
 
 **Tools ▸ QCPMG: infinite-field δiso** opens the extrapolation. Enter each
 field's Larmor frequency and its δcg (type it, or **grab it from the open
-spectrum's visible range** — zoom to the CT band first), tick whether that field
-was CT-selective, set η, and **Compute**. It plots δcg vs $1/\nu_0^2$ with the
+spectrum's visible range** — zoom to the CT band first), set η, and
+**Compute**. The *CT-selective (declared)* box starts **unknown** and is not
+read from the data: selectivity is the operator's judgement (ν_rf against
+ν_Q), recorded for provenance only — it does not enter the fit. It plots δcg vs $1/\nu_0^2$ with the
 fit line and reports δiso, $C_Q$, and $P_Q$ with propagated uncertainties.
 
 **Add from datasets…** expects the **sum-echo dataset** written by *Save as

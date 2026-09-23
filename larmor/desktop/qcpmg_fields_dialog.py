@@ -95,7 +95,7 @@ class QcpmgFieldsDialog(QDialog):
         self.table = QTableWidget(0, 5)
         self.table.setHorizontalHeaderLabels(
             ["Larmor ν₀ (MHz)", "δcg (ppm)", "± err (ppm)",
-             "FWHM (ppm)", "CT-selective"])
+             "FWHM (ppm)", "CT-selective (declared)"])
         self.table.horizontalHeader().setStretchLastSection(True)
         # a QTableWidget's own minimum is ~1.5 rows, so at the default dialog
         # size the plot's fixed minimum squeezed the table nearly out of view
@@ -309,6 +309,13 @@ class QcpmgFieldsDialog(QDialog):
             self.wresult.setText(
                 f"<span style='color:#c0392b'>⚠ row {r + 1}: {seed.note}</span>")
         self._ds[ds_id]["tip"] = tip
+        pp = str((meta or {}).get("pulse_program", "") or "")
+        if pp:
+            w = self.table.cellWidget(r, 4)
+            chk = w.findChild(QCheckBox) if w is not None else None
+            if chk is not None:
+                chk.setToolTip(f"pulse program: {pp} -- selectivity is still "
+                               "your declaration (nu_rf vs nu_Q)")
         self._apply_ds_values(r, ds_id)
         self._warn_mixed_modes()
         self.table.selectRow(r)
@@ -541,7 +548,14 @@ class QcpmgFieldsDialog(QDialog):
                             "-- the fit is then unweighted and says so")
         self.table.setItem(r, 2, err_item)
         self.table.setItem(r, 3, QTableWidgetItem(""))          # FWHM (ppm)
-        chk = QCheckBox(); chk.setChecked(True)
+        # tri-state, starting UNKNOWN: selectivity is the operator's judgement
+        # (nu_rf vs nu_Q), not a property of the data or the pulse program,
+        # so a prefilled 'yes' would be fabricated provenance
+        chk = QCheckBox(); chk.setTristate(True)
+        chk.setCheckState(Qt.PartiallyChecked)
+        chk.setToolTip("was this field acquired with a CT-selective pulse? "
+                       "declared by you, recorded for provenance, not used by "
+                       "the fit -- click through unknown / yes / no")
         w = QWidget(); lay = QHBoxLayout(w); lay.setContentsMargins(0, 0, 0, 0)
         lay.setAlignment(Qt.AlignCenter); lay.addWidget(chk)
         self.table.setCellWidget(r, 4, w)
@@ -589,7 +603,11 @@ class QcpmgFieldsDialog(QDialog):
             if not (np.isfinite(err) and err > 0.0):
                 err = 0.0                     # negative / NaN: not a sigma
             w = self.table.cellWidget(r, 4)
-            sel = w.findChild(QCheckBox).isChecked() if w else True
+            sel = None
+            if w is not None:
+                state = w.findChild(QCheckBox).checkState()
+                sel = (None if state == Qt.PartiallyChecked
+                       else state == Qt.Checked)
             ds = self._ds.get(self._row_ds_id(r))
             if ds is not None and ds.get("meas") is not None:
                 pts.append(FieldPoint.from_measurement(

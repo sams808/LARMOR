@@ -275,3 +275,46 @@ def test_batch_sigma_above_8ppm_is_flagged_in_cell_and_report(qapp, tmp_path):
     d._compute()
     assert "! window sensitive" in d.report.toPlainText()
     d.close()
+
+
+# ---------------------------------------------------------------- fix 10
+def test_batch_grid_knows_the_processing_mode(qapp, tmp_path):
+    """All ten real datasets are magnitude spectra but the batch grid had no
+    idea: the mode is read from the header (spectrum_mode, or the legacy
+    ', magnitude)' sample suffix), shown as '(mc)' in the cell and printed
+    in the report; a magnitude/absorption mix is NOT COMPARABLE."""
+    from larmor.desktop.qcpmg_batch_dialog import QcpmgBatchFieldsDialog
+
+    def write(name, nu, centre, **hdr):
+        x = np.linspace(centre - 400, centre + 400, 3000)
+        y = np.exp(-((x - centre) / 40.0) ** 2)
+        meta = {"nucleus": "35Cl", "larmor_MHz": nu}
+        meta.update(hdr)
+        p = tmp_path / name
+        spectra.write_csv(p, x, y, meta)
+        return str(p)
+
+    d = QcpmgBatchFieldsDialog(None, "35Cl")
+    d.nSamples.setValue(2)
+    d._drop_files(0, 1, [write("m1.csv", 78.354, -120.0,
+                               spectrum_mode="magnitude(mc)"),
+                         write("m2.csv", 107.811, -100.0,
+                               sample="x · QCPMG sum echo (LB 51 Hz, magnitude)")])
+    assert d.cells[(0, 1)]["magnitude"] is True
+    assert d.cells[(0, 2)]["magnitude"] is True            # legacy header
+    assert "(mc)" in d.table.item(0, 1).text()
+    d._drop_files(1, 1, [write("a1.csv", 78.354, -120.0,
+                               spectrum_mode="magnitude(mc)"),
+                         write("a2.csv", 107.811, -100.0,
+                               spectrum_mode="absorption")])
+    assert d.cells[(1, 2)]["magnitude"] is False
+    assert "(mc)" not in d.table.item(1, 2).text()
+    d.table.item(0, 0).setText("both-mc")
+    d.table.item(1, 0).setText("mixed")
+    d._compute()
+    txt = d.report.toPlainText()
+    assert "magnitude" in txt and "all points measured on magnitude" in txt
+    assert "NOT COMPARABLE" in txt
+    assert "NOT COMPARABLE" in d.msg.text() and "mixed" in d.msg.text()
+    assert "both-mc" not in d.msg.text().split("NOT COMPARABLE")[1]
+    d.close()

@@ -20,8 +20,10 @@ even by a non-selective (hard) pulse — the satellites are too broad — so the
 measured centroid is the CT centroid at both fields regardless of pulse
 selectivity (Baasner et al. 2014). It is therefore valid to combine a
 non-selective field with a CT-selective field as long as both are in that limit
-and the centroid is taken over the CT band only. `per_field_selective` records
-the excitation for provenance; it does not change Eq. (1) in this limit.
+and the centroid is taken over the CT band only. ``FieldPoint.ct_selective``
+records the operator's DECLARATION of the excitation for provenance (True /
+False / None = not declared); it is not read from the data and does not
+change Eq. (1) in this limit.
 """
 from __future__ import annotations
 
@@ -538,6 +540,18 @@ def fmt_result_lines(res: InfiniteFieldResult) -> list[str]:
     return out
 
 
+def mode_label(magnitude) -> str:
+    """'magnitude' / 'absorption' / '?' for a point's processing mode."""
+    return "?" if magnitude is None else ("magnitude" if magnitude else "absorption")
+
+
+def mixed_modes(points) -> bool:
+    """True when the points whose mode is KNOWN mix magnitude and absorption
+    -- two different observables that must not share one line."""
+    known = {bool(p.magnitude) for p in points if p.magnitude is not None}
+    return len(known) > 1
+
+
 def report_text(results: dict, spin: float, eta: float, nucleus: str = "",
                 widths: dict | None = None) -> str:
     """A plain-text report of an infinite-field extrapolation, for the lab
@@ -558,16 +572,27 @@ def report_text(results: dict, spin: float, eta: float, nucleus: str = "",
 
     for sample, res in ok:
         lines.append(f"--- {sample or '(unnamed)'} " + "-" * max(0, 60 - len(sample)))
-        lines.append("    nu0 (MHz)      dcg (ppm)   +- err   CT-selective")
+        lines.append("    nu0 (MHz)      dcg (ppm)   +- err   mode        "
+                     "CT-selective (declared)")
         for p in res.points:
-            sel = "" if p.ct_selective is None else ("yes" if p.ct_selective else "no")
+            sel = "?" if p.ct_selective is None else ("yes" if p.ct_selective else "no")
             err = f"{p.dcg_err_ppm:7.2f}" if p.has_err else f"{'n/a':>7s}"
             lines.append(f"    {p.larmor_MHz:10.4f}  {p.dcg_ppm:11.2f}  "
-                         f"{err}   {sel}")
+                         f"{err}   {mode_label(p.magnitude):10s}  {sel}")
             for fl in p.flags:
                 lines.append(f"                 {fl}")
             if p.cg_sequence:
                 lines.append(f"                 {p.cg_sequence}")
+        if mixed_modes(res.points):
+            lines.append("    ! NOT COMPARABLE: mixed magnitude/absorption dcg -- "
+                         "reprocess both fields the same way")
+        elif res.points and all(p.magnitude for p in res.points):
+            lines.append("    all points measured on magnitude (mc) spectra -- dcg is the "
+                         "|spectrum| centroid, not the absorption one;")
+            lines.append("    rectified noise pulls it toward the window centre, growing "
+                         "with window width and 1/(S/N); compare with the")
+            lines.append("    phased spectrum on the same window before quoting P_Q to "
+                         "better than a few %")
         for ln in fmt_result_lines(res):
             key, _, rest = ln.partition(" ")
             lines.append(f"    {key:14s} {rest}")
@@ -605,6 +630,8 @@ def report_text(results: dict, spin: float, eta: float, nucleus: str = "",
         lines.append(f"NOT FITTED  {sample or '(unnamed)'}: {why}")
     if bad:
         lines.append("")
+    lines.append("CT-selective is the operator's declaration, recorded for")
+    lines.append("provenance; it does not enter the fit.")
     lines.append("delta_iso is the intercept at 1/nu0^2 -> 0; C_Q follows from the")
     lines.append("slope with the assumed eta, so its accuracy is limited by that")
     lines.append("assumption. Quote P_Q when eta is unknown. A slope that is not")
