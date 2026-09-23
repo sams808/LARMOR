@@ -1025,3 +1025,86 @@ def test_session_entries_never_reach_apply_doc(win, monkeypatch):
     w.close_workspace(0)                        # the figure row, while active is 1
     assert w.active_ws == 0 and w.workspaces[0]["kind"] == "1d"
     assert w.recipe["sample"] == "glassB"       # the document was not re-applied
+
+
+def test_batchfit_session_state_replays_reprocess_on_reopen(qapp, tmp_path, monkeypatch):
+    """A batch reprocessed from its fids reopens reprocessed: the session
+    state carries the template and each spectrum's chain + EXPNO, and
+    apply_session_state replays the chain BEFORE the baseline and the
+    stored result; a member whose fid is gone keeps its TopSpin spectrum
+    with a note."""
+    from conftest import fake_spectrum_params
+    from larmor import comparability, project
+    from larmor.desktop.batchfit_dialog import BatchFitDialog
+
+    paths = _csv_spectra(tmp_path, 2)
+    model = _model()
+    expnos = []
+    for k in range(2):
+        e = tmp_path / f"E{k}" / "24"
+        e.mkdir(parents=True)
+        (e / "acqus").write_text("##TITLE= stub\n##END=\n", encoding="utf-8")
+        expnos.append(str(e))
+    fakes = {f"batch0{k}": fake_spectrum_params(f"batch0{k}", lb=100 * k, has_fid=True,
+                                                expno=expnos[k]) for k in range(2)}
+    monkeypatch.setattr(comparability, "read_params",
+                        lambda p, procno=None: fakes.get(Path(str(p)).stem))
+    x = np.linspace(-20, 60, 500)
+    # a 0.7 pedestal so the flat (edge-median) baseline replayed below has
+    # something to remove
+    fake_amp = (3.0 * np.exp(-((x - 15.0) / 5.0) ** 2)
+                + 1.0 * np.exp(-((x - 2.0) / 3.0) ** 2) + 0.7)
+    monkeypatch.setattr(comparability, "reprocess",
+                        lambda params, ops: (x.copy(), fake_amp.copy(), ["replayed"]))
+    dlg = BatchFitDialog(None, paths, model)
+    assert "LB 0 / 100 Hz" in dlg.compBar.text()
+    template = {"wdw": 0, "lb_hz": 0.0, "gb": 0.0, "ssb": 0.0, "tdeff": 1024,
+                "si": 32768, "fcor": 1.0}
+    dlg._apply_reprocess(template, "own")
+    ops0 = dlg._data[0]["proc_ops"]
+    assert ops0 and dlg._data[0]["expno"] == expnos[0]
+    # a baseline over the reprocessed spectrum
+    d0 = dlg._data[0]
+    d0["amp"] = d0["amp0"] - 0.5
+    d0["baseline_ops"] = [{"op": "flat_baseline"}]
+
+    st = dlg.session_state()
+    wire = json.loads(json.dumps(project.json_safe(st)))
+    assert wire["reprocess"] == {"template": template, "phase": "own"}
+    assert wire["per_spectrum"][paths[0]]["proc_ops"] == ops0
+    assert wire["per_spectrum"][paths[0]]["expno"] == expnos[0]
+    assert wire["per_spectrum"][paths[0]]["baseline_ops"] == [{"op": "flat_baseline"}]
+
+    dlg2 = BatchFitDialog(None, paths, {"sites": wire["model_sites"],
+                                        "fit_window_ppm": wire["window"]})
+    notes = dlg2.apply_session_state(wire)
+    assert notes == []
+    assert dlg2._reprocess == wire["reprocess"]
+    assert np.allclose(dlg2._data[0]["amp0"], fake_amp)          # the chain replayed
+    assert dlg2._data[0]["proc_ops"] == ops0 and dlg2._data[0]["expno"] == expnos[0]
+    assert dlg2._data[0]["baseline_ops"] == [{"op": "flat_baseline"}]
+    assert np.allclose(dlg2._data[0]["amp"], fake_amp - 0.7, atol=1e-6)   # baseline on top
+    assert np.allclose(dlg2._cells[0]["exp"].yData, dlg2._data[0]["amp"])
+    assert "reprocessed from fid" in dlg2.compBar.text() and "2/2 spectra" in dlg2.compBar.text()
+    assert not dlg2.compBar.btnRevert.isHidden()
+    assert not dlg2._cells[1]["title"].text().endswith("⚠")       # LB no longer differs
+    rec = dlg2._entries()[0][0]
+    assert rec.processing_from_raw and rec.source_path == expnos[0]
+    assert rec.processing == ops0 + [{"op": "flat_baseline"}]
+    st2 = json.loads(json.dumps(project.json_safe(dlg2.session_state())))
+    assert st2["reprocess"] == wire["reprocess"]
+    assert st2["per_spectrum"] == wire["per_spectrum"]
+
+    # the fid is gone: the TopSpin spectrum is kept and the note says so
+    nofid = {k: fake_spectrum_params(k, lb=100 * i, has_fid=False)
+             for i, k in enumerate(("batch00", "batch01"))}
+    monkeypatch.setattr(comparability, "read_params",
+                        lambda p, procno=None: nofid.get(Path(str(p)).stem))
+    dlg3 = BatchFitDialog(None, paths, {"sites": wire["model_sites"],
+                                        "fit_window_ppm": wire["window"]})
+    notes = dlg3.apply_session_state(wire)
+    assert len(notes) == 2 and all("could not reprocess" in n for n in notes)
+    assert np.allclose(dlg3._data[1]["amp"], dlg3._data[1]["amp_src"])
+    assert dlg3._data[1]["proc_ops"] == [] and dlg3._data[1]["expno"] == ""
+    assert "could not reprocess" in dlg3.status.text()
+    assert dlg3._cells[1]["title"].text().endswith("⚠")           # still flagged
