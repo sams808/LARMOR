@@ -759,6 +759,8 @@ class MainWindow(QMainWindow):
                   self.open_vocs)
         self._add(m_tools, "&Herzfeld–Berger sideband analysis (ζ, η)…  (CSA from "
                            "sideband intensities)", self.open_herzfeld_berger)
+        self._add(m_tools, "Referencing a&udit…  (SR of a session against its "
+                           "¹H adamantane reference)", self.open_referencing_audit)
         self._add(m_tools, "&Read static pattern (C_Q, η)…  (three markers, "
                            "no fit)", self.open_staticct)
         self._add(m_tools, "QCPMG: infinite-field δiso (2 fields)…",
@@ -1820,11 +1822,14 @@ class MainWindow(QMainWindow):
         dlg = ExperimentDialog(self, self.recipe)
         if dlg.exec():
             self.recipe["mas_uncertain"] = False     # user confirmed the params
-            # a changed SR re-references the ppm axis by ΔSR / SFO1
+            # a changed SR re-references the ppm axis: delta = (nu - SF) / SF,
+            # so a LARGER SR moves every peak to LOWER ppm (TopSpin's
+            # direction; this used to add the shift instead)
             new_sr = self.recipe.get("sr_hz", 0.0) or 0.0
             larmor = self.recipe.get("larmor_frequency_MHz", 0.0) or 0.0
             if larmor and abs(new_sr - old_sr) > 1e-9 and self.exp_ppm.size:
-                d_ppm = (new_sr - old_sr) / larmor
+                from larmor.referencing import axis_shift_ppm
+                d_ppm = axis_shift_ppm(old_sr, new_sr, larmor)
                 self.exp_ppm = self.exp_ppm + d_ppm
                 if self._proc_base is not None:
                     self._proc_base = (self._proc_base[0] + d_ppm,
@@ -6095,6 +6100,69 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             f"added csa_mas from the sideband reading: ζ {zeta_ppm:.1f} ppm, "
             f"η {eta:.2f}, δiso {diso_ppm:.2f} ppm — refine with Fit")
+
+    def open_referencing_audit(self):
+        """Tools > Referencing audit: compare every SR of a session with the
+        value its 1H adamantane reference gives by indirect (Xi) referencing;
+        export a TopSpin sr list, log old and new values, or re-reference the
+        open spectrum. Non-modal, so the workbench stays usable."""
+        from larmor.desktop.referencing_dialog import ReferencingAuditDialog
+        from larmor.referencing import session_root
+
+        start = ""
+        if self.source_path and Path(self.source_path).exists():
+            start = str(session_root(self.source_path))
+        else:
+            start = str(QSettings("LARMOR", "app").value("lastDir", "") or "")
+        dlg = getattr(self, "_ref_audit", None)
+        if dlg is None:
+            dlg = ReferencingAuditDialog(self, start, self.source_path)
+            dlg.apply_requested.connect(self._apply_sr_correction)
+            self._ref_audit = dlg
+        else:
+            dlg.current_source = self.source_path
+            if start and not dlg.folder.text():
+                dlg.folder.setText(start)
+        dlg.show()
+        dlg.raise_()
+
+    def _apply_sr_correction(self, expno_path: str, new_sr: float, old_sr: float,
+                             note: str = ""):
+        """Re-reference the OPEN spectrum to a corrected SR (from the audit):
+        the axis moves by -(new - old) / SF, the recipe records the new SR and
+        the provenance keeps the old one; the data folder is untouched."""
+        from larmor.referencing import axis_shift_ppm
+
+        if self.recipe is None or not self.exp_ppm.size or not self.source_path:
+            self.statusBar().showMessage("open the spectrum to re-reference first")
+            return
+        src, target = Path(self.source_path), Path(expno_path)
+        if src != target and target not in src.parents:
+            self.statusBar().showMessage(
+                f"the audit row is {target.name}, the open spectrum is {src.name} "
+                "— open that spectrum first")
+            return
+        larmor = float(self.recipe.get("larmor_frequency_MHz", 0.0) or 0.0)
+        if larmor <= 0:
+            return
+        self.snapshot(with_axis=True)
+        d_ppm = axis_shift_ppm(old_sr, new_sr, larmor)
+        self.exp_ppm = self.exp_ppm + d_ppm
+        if self._proc_base is not None:
+            self._proc_base = (self._proc_base[0] + d_ppm, self._proc_base[1])
+        self.recipe["sr_hz"] = float(new_sr)
+        prov = self.recipe.setdefault("provenance", {}) or {}
+        prov["referencing"] = {"old_sr_hz": float(old_sr), "new_sr_hz": float(new_sr),
+                               "axis_shift_ppm": float(d_ppm), "note": note}
+        self.recipe["provenance"] = prov
+        self.view.set_experiment(self.exp_ppm, self.exp_amp)
+        self._update_exp_label()
+        self.request_simulation()
+        self.statusBar().showMessage(
+            f"re-referenced: SR {old_sr:.2f} → {new_sr:.2f} Hz, axis moved "
+            f"{d_ppm:+.3f} ppm — {note}" if note else
+            f"re-referenced: SR {old_sr:.2f} → {new_sr:.2f} Hz, axis moved {d_ppm:+.3f} ppm",
+            12000)
 
     def open_vocs(self):
         """Tools > Stitch frequency-stepped (VOCS): sub-spectra acquired at

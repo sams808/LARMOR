@@ -51,6 +51,46 @@ def cmd_info(args: argparse.Namespace) -> int:
     return 1
 
 
+def cmd_srcheck(args: argparse.Namespace) -> int:
+    """Referencing audit of one session folder (see larmor.referencing)."""
+    from larmor import referencing as R
+
+    root = R.session_root(args.path)
+    acqs = R.scan_session(root)
+    if not acqs:
+        print(f"no EXPNO found under {root} -- give the month folder that holds "
+              "the sample folders", file=sys.stderr)
+        return 1
+    rows = R.audit(acqs, tol_ppm=args.tol, ada_ppm=args.ada)
+    refs = R.find_references(acqs)
+    print(f"session {root}: {len(acqs)} acquisitions, {len(refs)} referenced 1H "
+          "spectrum(s)")
+    for r in refs:
+        chk = R.check_reference(r, args.ada)
+        print(f"  1H reference {r.label}  SF {r.sf_MHz:.6f} MHz  SR {r.sr_hz:.2f} Hz"
+              f"  -- {chk.status}")
+    for r in rows:
+        if r.acq.is_1h:
+            continue
+        if not args.all and not r.flagged and r.verdict not in ("no reference",):
+            continue
+        d = f"{r.delta_ppm:+.3f} ppm" if r.delta_ppm is not None else "-"
+        exp = f"{r.expected_sr_hz:.2f}" if r.expected_sr_hz is not None else "-"
+        stored = f"{r.acq.sr_hz:.2f}" if r.acq.sr_hz is not None else "-"
+        print(f"  {r.acq.label:<28} {r.acq.nucleus:<6} SR {stored:>10} expected {exp:>10}"
+              f"  {d:>12}  {r.verdict}" + (f"  ({r.note})" if r.note else ""))
+    counts = R.summary(rows)
+    print("summary: " + ", ".join(f"{k} {n}" for k, n in sorted(counts.items())))
+    if args.csv:
+        R.to_csv(rows, args.csv)
+        txt = Path(args.csv).with_suffix("").as_posix() + "_topspin.txt"
+        Path(txt).write_text(R.topspin_list(rows, only_flagged=not args.all,
+                                            session=str(root)), encoding="utf-8")
+        log = R.append_log(rows, root, ada_ppm=args.ada, tol_ppm=args.tol, action="export")
+        print(f"wrote {args.csv} and {txt}; old/new values appended to {log}")
+    return 0
+
+
 def cmd_import(args: argparse.Namespace) -> int:
     from larmor.io import fxmla
 
@@ -347,6 +387,19 @@ def main(argv: list[str] | None = None) -> int:
     p_info = sub.add_parser("info", help="identify and summarize a data source")
     p_info.add_argument("path")
     p_info.set_defaults(func=cmd_info)
+
+    p_sc = sub.add_parser("srcheck", help="referencing audit: every SR of a session "
+                          "folder against its 1H adamantane reference (indirect Xi)")
+    p_sc.add_argument("path", help="month/session folder (or any EXPNO inside it)")
+    p_sc.add_argument("--tol", type=float, default=0.05,
+                      help="flag |stored - expected| above this (ppm, default 0.05)")
+    p_sc.add_argument("--ada", type=float, default=1.82,
+                      help="adamantane 1H shift the reference was set to (ppm)")
+    p_sc.add_argument("--csv", help="write the audit table (and a *_topspin.txt list) "
+                      "here and append old/new values to the log")
+    p_sc.add_argument("--all", action="store_true", help="list every EXPNO, not "
+                      "only the flagged ones")
+    p_sc.set_defaults(func=cmd_srcheck)
 
     p_imp = sub.add_parser("import", help="convert a dmfit .fxmla to a LARMOR recipe")
     p_imp.add_argument("path")

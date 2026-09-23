@@ -85,6 +85,12 @@ returns to the FID for re-apodization without reloading, and real / imaginary /
 magnitude display channels for phasing. Processing steps are stored in the recipe
 and replayed whenever the data is reloaded.
 
+**Referencing audit.** One session folder at a time, every stored SR is compared
+with the value indirect referencing from the session's ¹H adamantane spectrum
+gives (IUPAC Ξ ratios, the `xiref` rule); forgotten or stale references are
+listed as TopSpin-ready `sr` values, and old and new values go to a permanent
+log so the correction stays reversible (`larmor srcheck`).
+
 **Relaxation and dipolar experiments.** T1/T2 extraction from arrayed experiments
 (saturation/inversion recovery, CPMG, T1ρ), including per-site decomposition;
 REDOR curves to dipolar couplings and distances; QCPMG echo trains to spikelet or

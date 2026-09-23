@@ -152,6 +152,24 @@ resulting SR. Double-click the **experiment strip** to edit nucleus / field /
 νrot / SR, or copy the SR from another spectrum. All referencing is a rigid ppm
 shift of the axis; the raw data is untouched.
 
+**Referencing audit (Tools ▸ Referencing audit…).** Checks a whole session at
+once. Point it at one month folder of the data tree (`…/DATA/2026-05`): it lists
+the ¹H spectra that carry a reference (adamantane at 1.82 ppm by default;
+the tallest line of each is checked against that value), then compares every
+other acquisition's stored SR with the value indirect referencing gives,
+SF_X = SF_¹H · Ξ_X / Ξ_¹H (IUPAC unified scale, the same rule as TopSpin's
+`xiref`). Verdicts: **ok**, **off** (a stale SR carried over from another day),
+**unreferenced** (SR = 0, `xiref` was never applied), **no reference** (no
+referenced ¹H on that magnet in the session). References are never borrowed
+from another month. The window exports a CSV plus a TopSpin-ready list of `sr`
+values per EXPNO, appends every old and new value to a permanent log
+(`%LOCALAPPDATA%\LARMOR\referencing_log.jsonl`, never truncated) so a
+correction typed at the spectrometer can be reversed later, and can
+re-reference the spectrum open in the workbench (the recipe keeps the old SR
+in its provenance). It is meant to be run once on a new dataset; a repeat
+run says when the session was audited before. The same check runs from the
+command line: `larmor srcheck <session folder> --csv audit.csv`.
+
 > **Processing history.** *Process ▸ Processing steps* lists every applied op;
 > remove any one and LARMOR re-applies the reduced pipeline. Removing `ift` alone
 > breaks a re-apodize chain (`hilbert, ift, em, ft`) — remove the window step
