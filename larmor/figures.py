@@ -197,6 +197,8 @@ def load_trace(t: dict) -> tuple[np.ndarray, np.ndarray, dict]:
         d = t["data"]
         if d.get("yerr") is not None:
             meta["yerr"] = np.asarray(d["yerr"], float)
+        if d.get("xerr") is not None:            # x error bars (a numeric series axis)
+            meta["xerr"] = np.asarray(d["xerr"], float)
         return np.asarray(d["x"], float), np.asarray(d["y"], float), meta
 
     if "recipe" in t:
@@ -367,10 +369,14 @@ def render_1d(spec: dict) -> Figure:
                            va="bottom", fontsize=plt.rcParams["font.size"],
                            color=line.get_color())
             ye = meta.get("yerr")
-            if (ye is not None and np.isfinite(ye).any()
-                    and t.get("err_visible", True)):
+            xe = meta.get("xerr")                    # never normalised, scaled or offset
+            has_ye = ye is not None and np.isfinite(ye).any()
+            has_xe = xe is not None and np.isfinite(xe).any()
+            if (has_ye or has_xe) and t.get("err_visible", True):
                 ew = float(t.get("err_width", 1.2))
-                ax.errorbar(x, y, yerr=np.abs(np.nan_to_num(ye)) * abs(scale),
+                ax.errorbar(x, y, yerr=(np.abs(np.nan_to_num(ye)) * abs(scale)
+                                        if has_ye else None),
+                            xerr=np.abs(np.nan_to_num(xe)) if has_xe else None,
                             fmt="none",
                             ecolor=t.get("err_color") or line.get_color(),
                             capsize=t.get("err_capsize", t.get("capsize", 3.5)),

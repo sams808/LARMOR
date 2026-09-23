@@ -39,6 +39,41 @@ def test_render_1d_inline():
     assert ax.lines[1].get_ydata().max() == pytest.approx(1.7, abs=1e-6)
 
 
+def test_render_1d_draws_xerr_from_an_inline_data_trace():
+    """A series plotted against a numeric column (composition) carries x
+    error bars: data.xerr rides through load_trace into one ErrorbarContainer
+    with has_xerr; a yerr-only spec keeps has_xerr False; xerr is never
+    rescaled by norm."""
+    import matplotlib.pyplot as plt
+    from matplotlib.container import ErrorbarContainer
+
+    def _cont(spec):
+        fig = figures.render(spec)
+        conts = [c for c in fig.axes[0].containers if isinstance(c, ErrorbarContainer)]
+        assert len(conts) == 1
+        return fig, conts[0]
+
+    base = {"kind": "1d", "x_is_ppm": False, "hide_yaxis": False}
+    fig, c = _cont({**base, "traces": [{"data": {"x": [1, 2, 3], "y": [1, 2, 1],
+                                                 "xerr": [.1, .1, .1], "yerr": [.2, .2, .2]}}]})
+    assert c.has_xerr and c.has_yerr
+    plt.close(fig)
+    fig, c = _cont({**base, "traces": [{"data": {"x": [1, 2, 3], "y": [1, 2, 1],
+                                                 "xerr": [.1, .1, .1]}}]})
+    assert c.has_xerr and not c.has_yerr
+    plt.close(fig)
+    fig, c = _cont({**base, "traces": [{"data": {"x": [1, 2, 3], "y": [10, 12, 9],
+                                                 "yerr": [0.5, 0.8, 0.4]}, "label": "s0"}]})
+    assert c.has_yerr and not c.has_xerr        # the yerr-only spec of test_plotting_studio
+    plt.close(fig)
+    fig, c = _cont({**base, "norm": "max",
+                    "traces": [{"data": {"x": [1, 2, 3], "y": [10, 20, 10],
+                                         "xerr": [.1, .1, .1], "yerr": [2, 2, 2]}}]})
+    segs = c.lines[2][0].get_segments()          # the x bars: x ± 0.1, unscaled
+    assert segs[0][1][0] - segs[0][0][0] == pytest.approx(0.2)
+    plt.close(fig)
+
+
 def test_render_1d_from_the_shipped_example_recipe(monkeypatch):
     root = Path(__file__).resolve().parents[1]
     recipe_path = root / "examples" / "pCABS2-4_27Al.recipe.json"
