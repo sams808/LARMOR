@@ -30,7 +30,12 @@ from PySide6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
 )
 
+from larmor import comparability
 from larmor.desktop import theme
+from larmor.desktop.comparability_dialog import (
+    ComparabilityBar, ComparabilityDialog, ReprocessDialog, _CHECK_CSS_COLOR,
+    apply_reprocess, revert_reprocess,
+)
 from larmor.desktop.panels import PARAM_LABELS
 from larmor.desktop.plot import site_color
 
@@ -39,7 +44,10 @@ PER_TAB = 9        # 3×3 grid per tab
 #: a cell's idle sample-name label; _apply_highlight restores it after a spotlight
 _TITLE_CSS = "font-size:10px; font-weight:600;"
 #: the flagged-RMSD red -- the same literal as the mixed-nuclei banner and the
-#: cell label (a warning must read as one on every theme, so not a theme role)
+#: cell label (a warning must read as one on every theme, so not a theme role).
+#: Two levels, the fit-health strip's: red = bad (RMSD outlier, mixed nuclei),
+#: amber (comparability_dialog._CHECK_CSS_COLOR) = check (a spectrum acquired
+#: or processed differently from the series majority)
 _FLAG_CSS_COLOR = "#c0392b"
 
 
@@ -192,6 +200,7 @@ class BatchFitDialog(QDialog):
         self._excluded: dict[int, set[int]] = {}   # cell index -> excluded site indices
         self._hl: int | None = None          # spotlighted spectrum (table row <-> grid cell)
         self._flag_reasons: dict[int, str] = {}   # k -> "RMSD … is an outlier; low S/N"
+        self._reprocess: dict | None = None  # {"template", "phase"} once reprocessed from fid
         self._data = self._load(paths)
 
         v = QVBoxLayout(self)
@@ -216,6 +225,17 @@ class BatchFitDialog(QDialog):
         self.warnBanner.setVisible(False)
         v.addWidget(self.warnBanner)
         self._update_nuclei_warning()
+
+        # the comparability line: were these spectra acquired and processed
+        # alike? (acqus / procs / auditp against the series majority; hidden
+        # for CSV/fxmla-only series). Details… opens the table, Reprocess all
+        # from fid… rebuilds every member with one common pipeline.
+        self.compBar = ComparabilityBar()
+        self.compBar.details_requested.connect(self._show_comparability)
+        self.compBar.reprocess_requested.connect(self._reprocess_all)
+        self.compBar.revert_requested.connect(self._use_topspin_processing)
+        self.compBar.set_comparison(self._comparison, self._n_with_fid())
+        v.addWidget(self.compBar)
 
         # ---- the grid of spectra, the results table under it ----
         split = QSplitter(Qt.Vertical)
@@ -439,15 +459,40 @@ class BatchFitDialog(QDialog):
             ppm = np.asarray(ppm, float); amp = np.asarray(amp, float)
             data.append({
                 "ppm": ppm, "amp": amp, "amp0": amp.copy(),
+                # the TopSpin arrays, kept for "Use TopSpin processing" after a
+                # reprocess from fid
+                "ppm_src": ppm.copy(), "amp_src": amp.copy(),
                 "nucleus": rec.get("nucleus", ""),
                 "larmor": float(rec.get("larmor_frequency_MHz", 0.0) or 0.0),
                 "spin": float(rec.get("spin_rate_Hz", 0.0) or 0.0),
                 "sample": sample_label(p, rec), "path": p,
                 "proc": _proc_number(p), "snr": _snr(amp),
+                # acqus / procs / auditp (None for CSV / fxmla), the reprocess
+                # chain and its EXPNO once "Reprocess all from fid…" ran
+                "params": comparability.read_params(p),
+                "proc_ops": [], "expno": "",
                 "baseline_ops": []})   # per-spectrum manual baseline (2-point…)
             if self._model_sites is None and rec.get("sites"):
                 self._model_sites = rec["sites"]
+        self._comparison = comparability.compare(
+            [d["params"] for d in data], [d["sample"] for d in data])
         return data
+
+    def _recompare(self):
+        """The series compared as it stands now: a member rebuilt from its
+        fid reads with the common template's shape keys (and no abs), so
+        only members still carrying their TopSpin processing stay flagged."""
+        params = []
+        for d in self._data:
+            p = d.get("params")
+            if p is not None and d.get("proc_ops") and self._reprocess:
+                p = comparability.as_reprocessed(p, self._reprocess["template"])
+            params.append(p)
+        return comparability.compare(params, [d["sample"] for d in self._data])
+
+    def _n_with_fid(self) -> int:
+        return sum(1 for d in self._data
+                   if d.get("params") is not None and d["params"].has_fid)
 
     def _build_grid(self):
         n = len(self._data)
@@ -483,10 +528,34 @@ class BatchFitDialog(QDialog):
                 grid.addWidget(cell, j // 3, j % 3)
                 self._cells.append({"plot": plot, "exp": exp, "model": model,
                                     "rmsd": rmsd, "comp": [], "title": title,
+                                    "title_css": _TITLE_CSS,
                                     "bl_picking": False, "bl_markers": [],
                                     "bl_line": None})
                 self._attach_cell_menu(k)
             self.tabs.addTab(page, f"{start + 1}–{min(start + PER_TAB, n)}")
+        self._refresh_cell_marks()
+
+    def _refresh_cell_marks(self):
+        """The comparability marker on the cells: a deviating spectrum's
+        title ends with ⚠ in amber and its tooltip says what differs from
+        the series majority -- the RMSD flag's discoverability path, in the
+        'check' colour. Re-run after a reprocess / revert."""
+        for k, cell in enumerate(self._cells):
+            sig = self._comparison.signature(k)
+            ink = (_FLAG_CSS_COLOR if self._comparison.level_of(k) == "bad"
+                   else _CHECK_CSS_COLOR)
+            cell["title_css"] = _TITLE_CSS + (f" color:{ink};" if sig else "")
+            title = cell.get("title")
+            if title is not None and k < len(self._data):
+                d = self._data[k]
+                tip = (f"{d['sample']}"
+                       + (f" · proc {d['proc']}" if d.get("proc") else "")
+                       + f" · {d.get('nucleus', '')}")
+                if sig:
+                    tip += "\n" + "\n".join(self._comparison.details(k))
+                title.setToolTip(tip)
+            self._update_exclude_title(k)
+        self._apply_highlight()
 
     def _fill_release_params(self):
         while self._rellay.count():
@@ -576,6 +645,11 @@ class BatchFitDialog(QDialog):
 
     # ------------------------------------------------------------------ baseline
     def _fit_baseline(self):
+        """Estimate and subtract a baseline from every spectrum's amp0. amp0
+        is the TopSpin spectrum until "Reprocess all from fid…" replaces it
+        (apply_reprocess resets amp0), so after a reprocess the baseline is
+        estimated on -- and Reset restores -- the reprocessed spectrum, not
+        the 1r; "Use TopSpin processing" on the comparability bar does that."""
         kinds = ["Polynomial", "Iterative (Yon 2020)", "Flat (edge median)"]
         dlg = QDialog(self); dlg.setWindowTitle("Fit baseline")
         lay = QVBoxLayout(dlg)
@@ -615,6 +689,8 @@ class BatchFitDialog(QDialog):
         self.status.setText(msg)
 
     def _reset_baseline(self):
+        """Baseline off: back to amp0 (the reprocessed spectrum after a
+        reprocess from fid, else the TopSpin spectrum)."""
         self._baseline_kind = "None"
         for k in range(len(self._data)):
             self._end_bg_pick(k)        # abandon any in-progress manual pick
@@ -625,6 +701,74 @@ class BatchFitDialog(QDialog):
                 self._cells[k]["exp"].setData(d["ppm"], d["amp"])
         self.lblBaseline.setText("none")
         self.status.setText("baseline removed — using raw spectra")
+
+    # ------------------------------------------------------------------ comparability
+    def _show_comparability(self):
+        ComparabilityDialog(self, self._comparison).exec()
+
+    def _reprocess_all(self):
+        dlg = ReprocessDialog(self, self._comparison, self._n_with_fid())
+        if dlg.exec() == QDialog.Accepted:
+            self._apply_reprocess(dlg.template(), dlg.phase())
+
+    def _clear_result(self):
+        """The fit describes spectra that no longer exist (reprocessed or
+        reverted): drop it and disable what depends on it, exactly as _run
+        does until _done."""
+        self._result = None
+        self._flag_reasons.clear()
+        t = theme.active()
+        for cell in self._cells:
+            cell["model"].setData([], [])
+            for it in cell["comp"]:
+                cell["plot"].removeItem(it)
+            cell["comp"] = []
+            cell["rmsd"].setText("")
+            cell["rmsd"].setStyleSheet(f"font-size:9px; color:{t.text_dim};")
+            cell["rmsd"].setToolTip("")
+        for b in (self.btnSave, self.btnTable, self.btnBundle, self.btnSeries,
+                  self.btnErr, self.btnErrCsv):
+            b.setEnabled(False)
+        self._refresh_err_status()
+
+    def _apply_reprocess(self, template: dict, phase: str = "own"):
+        """Rebuild every member with a fid through comparability.reprocess
+        (loader.apply_processing: the path a saved recipe replays), record
+        the chain per spectrum, drop the stale fit and baselines, and turn
+        the comparability line into the applied pipeline. The testable core
+        of "Reprocess all from fid…"."""
+        n, notes = apply_reprocess(self._data, self._cells, template, phase,
+                                   self.status.setText)
+        self._reprocess = {"template": dict(template), "phase": phase}
+        self._baseline_kind = "None"
+        self.lblBaseline.setText("none")
+        self._clear_result()
+        self._comparison = self._recompare()
+        self._refresh_cell_marks()
+        self.compBar.set_reprocessed(template, n, len(self._data), phase)
+        self._fill_table(None)
+        self._apply_scale()
+        ph = {"own": "each keeps its own phase", "auto": "autophased",
+              "none": "unphased"}.get(phase, phase)
+        msg = (f"reprocessed {n} spectra from fid with one common pipeline ({ph}) "
+               "— Fit again; Fit baseline… still applies")
+        if notes:
+            msg += "  ⚠ " + "; ".join(notes)
+        self.status.setText(msg)
+
+    def _use_topspin_processing(self):
+        """Back to the 1r arrays (ppm_src / amp_src) and the original flags."""
+        revert_reprocess(self._data, self._cells)
+        self._reprocess = None
+        self._comparison = self._recompare()
+        self._baseline_kind = "None"
+        self.lblBaseline.setText("none")
+        self._clear_result()
+        self._refresh_cell_marks()
+        self.compBar.set_comparison(self._comparison, self._n_with_fid())
+        self._fill_table(None)
+        self._apply_scale()
+        self.status.setText("spectra as TopSpin processed them (1r) — Fit again")
 
     # ------------------------------------------------------------------ manual
     # per-spectrum 2-point linear baseline (right-click a cell's plot)
@@ -842,6 +986,8 @@ class BatchFitDialog(QDialog):
             labels = [self._model_sites[i].get("label") or f"s{i}"
                      for i in excluded if i < len(self._model_sites)]
             text += "  (excluded: " + ", ".join(labels) + ")"
+        if self._comparison.signature(k):        # acquired/processed differently
+            text += " ⚠"
         self._cells[k]["title"].setText(text)
 
     # ------------------------------------------------------------------ view opts
@@ -938,7 +1084,11 @@ class BatchFitDialog(QDialog):
         t.blockSignals(True)
         t.setSortingEnabled(False)           # filling while sorting is on scrambles rows
         has_proc = any(d.get("proc") for d in self._data)
-        fixed = ["#", "sample"] + (["proc"] if has_proc else []) + ["S/N", "RMSD"]
+        # the comparability column exists only when there are Bruker
+        # parameters to compare, so CSV series keep their headers
+        has_params = self._comparison.level != "none"
+        fixed = (["#", "sample"] + (["proc"] if has_proc else [])
+                 + (["comparability"] if has_params else []) + ["S/N", "RMSD"])
         if result is None:
             cols, cells = [], {}
         else:
@@ -963,6 +1113,8 @@ class BatchFitDialog(QDialog):
             items.append(QTableWidgetItem(str(d.get("sample", ""))))
             if has_proc:
                 items.append(QTableWidgetItem(str(d.get("proc", ""))))
+            if has_params:
+                items.append(self._comparability_item(k, d))
             snr = d.get("snr")
             snr = float(snr) if _finite(snr) else float("nan")
             it = _NumItem(f"{snr:.0f}" if np.isfinite(snr) else "")
@@ -1022,6 +1174,24 @@ class BatchFitDialog(QDialog):
                 t.selectRow(r)
         t.blockSignals(False)
         self._apply_highlight()
+
+    def _comparability_item(self, k: int, d: dict) -> QTableWidgetItem:
+        """'reprocessed' / the deviation signature in amber (red for bad) /
+        '✓' -- a plain item, so sorting groups the three kinds together."""
+        if d.get("proc_ops"):
+            it = QTableWidgetItem("reprocessed")
+            if self._reprocess:
+                it.setToolTip(comparability.describe_template(
+                    self._reprocess["template"], self._reprocess.get("phase", "own")))
+            return it
+        sig = self._comparison.signature(k)
+        if not sig:
+            return QTableWidgetItem("✓")
+        it = QTableWidgetItem(sig)
+        it.setForeground(QColor(_FLAG_CSS_COLOR if self._comparison.level_of(k) == "bad"
+                                else _CHECK_CSS_COLOR))
+        it.setToolTip("\n".join(self._comparison.details(k)))
+        return it
 
     def _row_k(self, row: int):
         """Spectrum index of a table row, read from Qt.UserRole on its "#" item
@@ -1089,9 +1259,12 @@ class BatchFitDialog(QDialog):
                     pg.mkPen(t.accent, width=2) if sel else None)
             title = cell.get("title")
             if title is not None:
-                title.setStyleSheet(_TITLE_CSS + (
-                    f" background:{t.accent}; color:{t.accent_text}; "
-                    "padding:0 3px; border-radius:2px;" if sel else ""))
+                # idle: the cell's own css (amber when it deviates from the
+                # series majority); the accent spotlight still wins while selected
+                title.setStyleSheet(
+                    _TITLE_CSS + f" background:{t.accent}; color:{t.accent_text}; "
+                    "padding:0 3px; border-radius:2px;" if sel
+                    else cell.get("title_css", _TITLE_CSS))
 
     def _selection_status(self):
         """Status line for the spotlight -- the discoverability path for the
@@ -1107,6 +1280,9 @@ class BatchFitDialog(QDialog):
             parts.append(f"RMSD {self._result.rmsd[k]:.4f}")
         if k in self._flag_reasons:
             parts.append("⚠ " + self._flag_reasons[k])
+        sig = self._comparison.signature(k)
+        if sig:                                   # differs from the series majority
+            parts.append("⚠ " + sig)
         if _finite(d.get("snr")):
             parts.append(f"S/N {float(d['snr']):.0f}")
         self.status.setText(" · ".join(parts)
@@ -1134,13 +1310,26 @@ class BatchFitDialog(QDialog):
             rec = Recipe.from_dict({
                 "nucleus": d["nucleus"], "larmor_frequency_MHz": d["larmor"],
                 "spin_rate_Hz": d["spin"], "sample": d["sample"],
-                # whatever baseline correction is active -- the global "Fit
-                # baseline…" tool (see BASELINE_OPS) or a per-spectrum manual
-                # 2-point pick -- recorded so the exported fit reproduces the
-                # EXACT corrected spectrum against the raw source later (the
-                # Plotting studio's batch-grid replays this for "experiment")
-                "processing": list(d.get("baseline_ops") or []),
-                "source_path": d.get("path", ""),
+                # the reprocess-from-fid chain (if any) then whatever baseline
+                # correction is active -- the global "Fit baseline…" tool (see
+                # BASELINE_OPS) or a per-spectrum manual 2-point pick --
+                # recorded so the exported fit reproduces the EXACT spectrum
+                # fitted here from the raw source later (the Plotting studio's
+                # batch-grid and a reopened recipe replay this for "experiment")
+                "processing": (list(d.get("proc_ops") or [])
+                               + list(d.get("baseline_ops") or [])),
+                "processing_from_raw": bool(d.get("proc_ops")),
+                # a chain that starts in the time domain must point at the
+                # EXPNO: loader.apply_processing checks bruker.is_expno(source)
+                # before proc.from_bruker_fid, so the 1r path would make every
+                # saved recipe of a reprocessed batch fail to replay
+                "source_path": (d.get("expno") or d.get("path", "")),
+                # a member NOT reprocessed that differs from the series
+                # majority carries the fact into its saved fit
+                "notes": ([comparability.caveat_note(self._comparison, k)]
+                          if (not d.get("proc_ops")
+                              and comparability.caveat_note(self._comparison, k))
+                          else []),
                 "sites": copy.deepcopy(self._model_sites)})
             # "Exclude component" (right-click a cell): lock that site's
             # amplitude at exactly zero for THIS spectrum only -- batchfit.
@@ -1470,9 +1659,14 @@ class BatchFitDialog(QDialog):
         for k, d in enumerate(self._data):
             per[d["path"]] = {
                 "baseline_ops": [dict(o) for o in (d.get("baseline_ops") or [])],
+                # the reprocess-from-fid chain and its EXPNO, replayed BEFORE
+                # the baseline and the stored result on reopen
+                "proc_ops": [dict(o) for o in (d.get("proc_ops") or [])],
+                "expno": d.get("expno", ""),
                 "excluded": sorted(self._excluded.get(k, ()))}
         return {**self._template_dict(),
                 "paths": list(self._src_paths),
+                "reprocess": copy.deepcopy(self._reprocess),
                 "model_sites": copy.deepcopy(self._model_sites),
                 "window": list(self._window) if self._window else None,
                 "recipe_tag": self._recipe_tag,
@@ -1507,6 +1701,28 @@ class BatchFitDialog(QDialog):
         order = None
         for k, d in enumerate(self._data):
             ps = per.get(d["path"]) or {}
+            pops = [dict(o) for o in (ps.get("proc_ops") or [])]
+            if pops:
+                # the reprocess-from-fid chain first: amp0 becomes the
+                # reprocessed spectrum, the baseline replay below starts from it
+                p = d.get("params")
+                if p is not None and p.has_fid:
+                    try:
+                        ppm, amp, _n = comparability.reprocess(p, pops)
+                    except Exception as exc:  # noqa: BLE001
+                        notes.append(f"could not reprocess {d['sample']} from its "
+                                     f"fid ({exc}) — TopSpin spectrum kept")
+                    else:
+                        d["ppm"], d["amp"], d["amp0"] = ppm, amp, amp.copy()
+                        d["proc_ops"], d["expno"] = pops, p.expno
+                        d["snr"] = _snr(amp)
+                        if k < len(self._cells):
+                            self._cells[k]["exp"].setData(ppm, amp)
+                            self._cells[k]["plot"].setXRange(float(ppm.min()),
+                                                             float(ppm.max()))
+                else:
+                    notes.append(f"could not reprocess {d['sample']} from its fid "
+                                 "— TopSpin spectrum kept")
             ops = [dict(o) for o in (ps.get("baseline_ops") or [])]
             if ops:
                 from larmor import processing as proc
@@ -1525,6 +1741,15 @@ class BatchFitDialog(QDialog):
                 self._toggle_exclude(k, i, True)
             if excluded:
                 self._rebuild_cell_menu(k)   # checkable entries follow the state
+        if state.get("reprocess"):
+            self._reprocess = copy.deepcopy(state["reprocess"])
+            self._comparison = self._recompare()
+            self._refresh_cell_marks()
+            self.compBar.set_reprocessed(
+                self._reprocess.get("template") or {},
+                sum(1 for d in self._data if d.get("proc_ops")), len(self._data),
+                self._reprocess.get("phase", "own"))
+            self._fill_table(None)
         kind = self._baseline_kind
         if kind in (None, "", "None"):
             self.lblBaseline.setText("none")

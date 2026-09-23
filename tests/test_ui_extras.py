@@ -1472,3 +1472,232 @@ def test_batch_bundle_experiment_is_the_baselined_array(qapp, tmp_path, monkeypa
     assert np.array_equal(tab1["experiment"], dlg._data[1]["amp"])
     assert rows[0]["processing"].startswith('[{"op": "')
     assert rows[1]["processing"] == "[]"
+
+
+# ---------------------------------------------------------------- comparability (N8)
+# Were the spectra of a batch acquired and processed alike? The bar under
+# the banner, the amber ⚠ on deviating cells, the 'comparability' table
+# column, the caveat note on saved fits, and Reprocess all from fid… /
+# Use TopSpin processing. comparability.read_params is stubbed (CSV
+# fixtures have no acqus); the real five-glass series pins the end to end.
+
+def _stub_params(monkeypatch, fakes: dict):
+    """comparability.read_params -> the SpectrumParams keyed by file stem."""
+    from pathlib import Path
+    from larmor import comparability
+
+    monkeypatch.setattr(comparability, "read_params",
+                        lambda p, procno=None: fakes.get(Path(str(p)).stem))
+
+
+def _expno_stub(tmp_path, name):
+    """A folder bruker.is_expno accepts (acqus present), for source_path."""
+    e = tmp_path / name / "24"
+    e.mkdir(parents=True)
+    (e / "acqus").write_text("##TITLE= stub\n##END=\n", encoding="utf-8")
+    return str(e)
+
+
+def test_batch_dialog_comparability_hidden_for_csv_series(qapp, tmp_path):
+    from larmor.desktop.batchfit_dialog import BatchFitDialog
+
+    dlg = _batch_dialog(tmp_path, 2)
+    assert dlg.compBar.isHidden()
+    assert dlg._comparison.level == "none" and dlg._n_with_fid() == 0
+    assert _headers(dlg.table) == ["#", "sample", "S/N", "RMSD"]
+    for (rec, *_), d in zip(dlg._entries(), dlg._data):
+        assert rec.processing_from_raw is False and rec.notes == []
+        assert rec.source_path == d["path"] and rec.processing == []
+    assert not dlg._cells[0]["title"].text().endswith("⚠")
+    empty = BatchFitDialog(None, [], {"sites": []})       # builds, bar hidden
+    assert empty.compBar.isHidden() and empty._comparison.level == "none"
+
+
+def test_batch_dialog_comparability_bar_marks_deviants(qapp, tmp_path, monkeypatch):
+    from conftest import fake_spectrum_params
+    from larmor.desktop.comparability_dialog import ComparabilityDialog, _CHECK_CSS_COLOR
+
+    _stub_params(monkeypatch, {"batch00": fake_spectrum_params("batch00", lb=0),
+                               "batch01": fake_spectrum_params("batch01", lb=100)})
+    dlg = _batch_dialog(tmp_path, 2)
+    assert not dlg.compBar.isHidden()
+    assert "LB 0 / 100 Hz" in dlg.compBar.text() and "processed differently" in dlg.compBar.text()
+    assert dlg.compBar.btnReprocess.isHidden()            # nobody has a fid
+    assert not dlg.compBar.btnDetails.isHidden()
+    h = _headers(dlg.table)
+    assert h == ["#", "sample", "comparability", "S/N", "RMSD"]
+    col = h.index("comparability")
+    it = dlg.table.item(dlg._row_of(1), col)
+    assert it.text() == "LB 100 Hz"
+    assert it.foreground().color().name().lower() == _CHECK_CSS_COLOR.lower()
+    assert "series majority 0 Hz" in it.toolTip()
+    assert dlg.table.item(dlg._row_of(0), col).text() == "✓"
+    t1, t0 = dlg._cells[1]["title"], dlg._cells[0]["title"]
+    assert t1.text().endswith("⚠") and "series majority 0 Hz" in t1.toolTip()
+    assert not t0.text().endswith("⚠") and "majority" not in t0.toolTip()
+    # the amber marker survives a spotlight on and off; the accent wins while selected
+    dlg._highlight_cell(1)
+    assert "LB 100 Hz" in dlg.status.text() and "⚠" in dlg.status.text()
+    dlg._highlight_cell(None)
+    assert _CHECK_CSS_COLOR in t1.styleSheet() and _CHECK_CSS_COLOR not in t0.styleSheet()
+    ents = dlg._entries()
+    assert ents[0][0].notes == []
+    assert len(ents[1][0].notes) == 1
+    assert "LB 100 Hz" in ents[1][0].notes[0] and "majority 0 Hz" in ents[1][0].notes[0]
+    assert ents[1][0].processing_from_raw is False
+    seen = []
+    monkeypatch.setattr(ComparabilityDialog, "exec", lambda self: seen.append(self._cmp) or 0)
+    dlg._show_comparability()
+    assert len(seen) == 1 and seen[0].report("LB").deviants == [1]
+    # a fit still runs and flags nothing else
+    res = _fit_batch(dlg)
+    assert len(res.recipes) == 2
+    assert _headers(dlg.table)[:5] == ["#", "sample", "comparability", "S/N", "RMSD"]
+
+
+def test_batch_apply_reprocess_records_chain_invalidates_and_reverts(
+        qapp, tmp_path, monkeypatch):
+    from conftest import fake_spectrum_params
+    from larmor import comparability
+    from larmor.io import bruker
+    from larmor.processing import chain_start_domain
+
+    e0, e1 = _expno_stub(tmp_path, "E0"), _expno_stub(tmp_path, "E1")
+    fakes = {"batch00": fake_spectrum_params("batch00", lb=0, has_fid=True, expno=e0),
+             "batch01": fake_spectrum_params("batch01", lb=100, has_fid=True, expno=e1)}
+    _stub_params(monkeypatch, fakes)
+    x = np.linspace(-20, 60, 600)
+    fake_amp = 2.0 * np.exp(-((x - 15.0) / 4.0) ** 2)
+    calls = []
+
+    def fake_reprocess(params, ops):
+        calls.append((params.sample, [dict(o) for o in ops]))
+        return x.copy(), fake_amp.copy(), ["replayed 4 processing step(s) from the recipe"]
+
+    monkeypatch.setattr(comparability, "reprocess", fake_reprocess)
+    dlg = _batch_dialog(tmp_path, 2)
+    paths = [d["path"] for d in dlg._data]
+    _fit_batch(dlg)
+    assert dlg.btnSave.isEnabled() and dlg.btnBundle.isEnabled()
+    template = {"wdw": 0, "lb_hz": 0.0, "gb": 0.0, "ssb": 0.0, "tdeff": 1024,
+                "si": 32768, "fcor": 1.0}
+    dlg._apply_reprocess(template, "own")
+    assert [c[0] for c in calls] == ["batch00", "batch01"]
+    for k, d in enumerate(dlg._data):
+        ops = comparability.ops_for(fakes[f"batch0{k}"], template, "own")
+        assert d["proc_ops"] == ops and calls[k][1] == ops
+        assert [o["op"] for o in ops] == ["tdeff", "zf", "ft", "phase"]
+        assert "offset_ppm" in ops[2] and ops[3]["p0"] == 160.0
+        assert d["expno"] == (e0, e1)[k] and d["baseline_ops"] == []
+        assert np.allclose(d["amp0"], fake_amp) and np.allclose(d["amp"], fake_amp)
+        assert np.allclose(dlg._cells[k]["exp"].yData, fake_amp)
+        assert not dlg._cells[k]["title"].text().endswith("⚠")   # LB was the only difference
+    assert "reprocessed from fid" in dlg.compBar.text() and "TDeff 1024" in dlg.compBar.text()
+    assert not dlg.compBar.btnRevert.isHidden() and dlg.compBar.btnReprocess.isHidden()
+    assert dlg._result is None and dlg._flag_reasons == {}
+    for b in (dlg.btnSave, dlg.btnTable, dlg.btnBundle, dlg.btnSeries, dlg.btnErr, dlg.btnErrCsv):
+        assert not b.isEnabled()
+    assert dlg._cells[0]["model"].xData is None or len(dlg._cells[0]["model"].xData) == 0
+    col = _headers(dlg.table).index("comparability")
+    assert {dlg.table.item(r, col).text() for r in range(2)} == {"reprocessed"}
+    assert dlg.lblBaseline.text() == "none"
+    assert "reprocessed 2 spectra" in dlg.status.text() and "Fit again" in dlg.status.text()
+    rec = dlg._entries()[1][0]
+    ops1 = dlg._data[1]["proc_ops"]
+    assert rec.processing[:len(ops1)] == ops1 and rec.processing_from_raw
+    assert rec.source_path == e1 and bruker.is_expno(rec.source_path)
+    assert chain_start_domain(rec.processing) == "time" and rec.notes == []
+    st = dlg.session_state()
+    assert st["reprocess"] == {"template": template, "phase": "own"}
+    assert st["per_spectrum"][paths[1]]["proc_ops"] == ops1
+    assert st["per_spectrum"][paths[1]]["expno"] == e1
+    # a baseline after the reprocess is estimated on the reprocessed amp0 and
+    # recorded AFTER the chain
+    dlg._data[0]["amp"] = dlg._data[0]["amp0"] - 0.1
+    dlg._data[0]["baseline_ops"] = [{"op": "flat_baseline"}]
+    rec0 = dlg._entries()[0][0]
+    assert rec0.processing[-1] == {"op": "flat_baseline"} and rec0.processing[0]["op"] == "tdeff"
+    # Use TopSpin processing: the 1r arrays and the original flags come back
+    dlg._use_topspin_processing()
+    for k, d in enumerate(dlg._data):
+        assert np.allclose(d["amp"], d["amp_src"]) and np.allclose(d["amp0"], d["amp_src"])
+        assert d["proc_ops"] == [] and d["expno"] == "" and d["baseline_ops"] == []
+    rec = dlg._entries()[1][0]
+    assert not rec.processing_from_raw and rec.source_path == paths[1]
+    assert rec.notes and "LB 100 Hz" in rec.notes[0]
+    assert "LB 0 / 100 Hz" in dlg.compBar.text() and dlg.compBar.btnRevert.isHidden()
+    assert dlg._cells[1]["title"].text().endswith("⚠") and dlg._reprocess is None
+    assert dlg.session_state()["reprocess"] is None
+    assert dlg.table.item(dlg._row_of(1), col).text() == "LB 100 Hz"
+
+    # a member without a fid keeps its TopSpin spectrum and STAYS flagged
+    sub = tmp_path / "partial"
+    sub.mkdir()
+    e2 = _expno_stub(tmp_path, "E2")
+    _stub_params(monkeypatch, {
+        "batch00": fake_spectrum_params("batch00", lb=0, has_fid=True, expno=e0),
+        "batch01": fake_spectrum_params("batch01", lb=0, has_fid=True, expno=e2),
+        "batch02": fake_spectrum_params("batch02", lb=100, has_fid=False)})
+    dlg = _batch_dialog(sub, 3)
+    assert "2 of 3 have a fid" in dlg.compBar.btnReprocess.text()
+    dlg._apply_reprocess({**template, "wdw": 1}, "auto")
+    assert "no fid" in dlg.status.text() and "2/3 spectra" in dlg.compBar.text()
+    assert dlg._data[2]["proc_ops"] == [] and dlg._data[2]["expno"] == ""
+    assert dlg._data[0]["proc_ops"][-1] == {"op": "autophase"}
+    assert dlg._comparison.signature(2) == "LB 100 Hz" and dlg._comparison.signature(0) == ""
+    assert dlg._cells[2]["title"].text().endswith("⚠")
+    col = _headers(dlg.table).index("comparability")
+    assert dlg.table.item(dlg._row_of(2), col).text() == "LB 100 Hz"
+    assert dlg.table.item(dlg._row_of(0), col).text() == "reprocessed"
+    ents = dlg._entries()
+    assert ents[0][0].processing_from_raw and not ents[2][0].processing_from_raw
+    assert ents[2][0].notes and "LB 100 Hz" in ents[2][0].notes[0]
+
+
+def test_batch_dialog_real_11b_series_banner_and_reprocess(qapp):
+    """The five-glass 11B series end to end (no stubs): the bar names the
+    LB 0/100 Hz split and the D1 spread, exactly Base0Ca and Base1Ca carry
+    the amber marker, and Reprocess all from fid… with no window rebuilds
+    every member through the real fid with its own TopSpin phase, each
+    peak landing within 0.5 ppm of its 1r."""
+    from conftest import LAW_CA_11B, require
+    from larmor.desktop.batchfit_dialog import BatchFitDialog
+
+    require(LAW_CA_11B[0])
+    paths = [str(e / "pdata" / "1" / "1r") for e in LAW_CA_11B]
+    model = {"nucleus": "11B", "larmor_frequency_MHz": 192.43, "spin_rate_Hz": 35714.0,
+             "sites": [{"model": "gauss_lor", "label": "BO4", "params": {
+                 "isotropic_chemical_shift_ppm": {"value": 0.0, "min": -10, "max": 10},
+                 "shift_fwhm_ppm": {"value": 4.0, "min": 0.1},
+                 "amplitude": {"value": 80.0, "min": 0},
+                 "gl": {"value": 1.0, "vary": False}}}]}
+    dlg = BatchFitDialog(None, paths, model)
+    assert len(dlg._data) == 5 and dlg._n_with_fid() == 5
+    assert not dlg.compBar.isHidden()
+    txt = dlg.compBar.text()
+    assert "LB 0 / 100 Hz (EM)" in txt and "D1 varies 12.5–36 s" in txt
+    assert {k for k in range(5) if dlg._comparison.signature(k)} == {0, 1}
+    assert "5 of 5 have a fid" in dlg.compBar.btnReprocess.text()
+    assert not dlg.compBar.btnReprocess.isHidden()
+    col = _headers(dlg.table).index("comparability")
+    assert dlg.table.item(dlg._row_of(0), col).text() == "LB 0 Hz"
+    assert dlg.table.item(dlg._row_of(2), col).text() == "✓"
+    peaks_1r = [float(d["ppm"][np.argmax(d["amp"])]) for d in dlg._data]
+    template = {"wdw": 0, "lb_hz": 0.0, "gb": 0.0, "ssb": 0.0, "tdeff": 1024,
+                "si": 32768, "fcor": 1.0}
+    dlg._apply_reprocess(template, "own")
+    for k, d in enumerate(dlg._data):
+        ops = d["proc_ops"]
+        assert not any(o["op"] == "em" for o in ops)
+        assert ops[0] == {"op": "tdeff", "points": 512} and {"op": "zf", "si": 32768} in ops
+        ph = next(o for o in ops if o["op"] == "phase")
+        assert ph["p0"] == pytest.approx(-d["params"].proc["PHC0"]) and ph["pivot_frac"] == 1.0
+        assert d["expno"].endswith("24") and d["ppm"].size == 32768
+        assert abs(float(d["ppm"][np.argmax(d["amp"])]) - peaks_1r[k]) < 0.5
+        assert not dlg._cells[k]["title"].text().endswith("⚠")
+    assert "LB" not in dlg.compBar.text() and "reprocessed from fid" in dlg.compBar.text()
+    assert not dlg._comparison.report("LB").differs        # identical by construction
+    assert dlg._comparison.report("D1").varies             # Details still lists D1
+    for rec, *_ in dlg._entries():
+        assert rec.processing_from_raw and rec.source_path.endswith("24") and rec.notes == []
+    assert {dlg.table.item(r, col).text() for r in range(5)} == {"reprocessed"}

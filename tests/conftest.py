@@ -272,3 +272,32 @@ def _gauss_broaden(x, y, fwhm_ppm: float):
     k = np.arange(-int(5 * s), int(5 * s) + 1)
     g = np.exp(-0.5 * (k / s) ** 2)
     return np.convolve(y, g / g.sum(), "same")
+
+def fake_spectrum_params(sample: str, **over):
+    """An in-memory larmor.comparability.SpectrumParams (the 11B series'
+    acqus/procs values) for tests that stub comparability.read_params. Any
+    acqus / procs key can be overridden by name (lb=100 -> proc LB), plus
+    ``path`` / ``expno`` / ``has_fid`` / ``commands``."""
+    from larmor.comparability import SpectrumParams
+
+    acq = {"NUC1": "11B", "PULPROG": "zg", "NS": 256, "TD": 7988, "RG": 194.07,
+           "SW_h": 100000.0, "SFO1": 192.430693, "BF1": 192.430693, "O1": 0.0,
+           "DATE": 1768800000.0, "PROBHD": "16_Solenoid (PMAS16)", "D1": 12.5,
+           "P1": 0.425, "PLW1": 100.0, "PLW1_unit": "W"}
+    proc = {"WDW": 1, "LB": 0.0, "GB": 0.0, "SSB": 0.0, "TDeff": 1024, "SI": 32768,
+            "FCOR": 1.0, "PH_mod": 1, "PHC0": -160.0, "PHC1": 29.9084, "ABSG": 0,
+            "BC_mod": 0, "FT_mod": 6, "PKNL": True, "SF": 192.431528,
+            "OFFSET": 100.0, "SW_p": 100000.0}
+    meta = {k: over.pop(k) for k in ("path", "expno", "has_fid", "commands", "title")
+            if k in over}
+    for k, v in over.items():                 # case-insensitive: lb -> LB, tdeff -> TDeff
+        hits = [(d, kk) for d in (acq, proc) for kk in d if kk.lower() == k.lower()]
+        if hits:
+            hits[0][0][hits[0][1]] = v
+        else:
+            proc[k] = v
+    return SpectrumParams(
+        path=meta.get("path", f"/fake/{sample}/24/pdata/1/1r"),
+        expno=meta.get("expno", f"/fake/{sample}/24"), procno=1, sample=sample,
+        acq=acq, proc=proc, commands=meta.get("commands", ["efp LB = 0 SI = 32K"]),
+        title=meta.get("title", sample), has_fid=bool(meta.get("has_fid", False)))

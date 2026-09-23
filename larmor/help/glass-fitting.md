@@ -47,7 +47,10 @@ each peak's FWHM — the rest is a Gaussian shift distribution (§8.3). So:
 
 Related processing rule from the same section: apodize glass spectra with a
 **Gaussian window (Process ▸ GM)**, not exponential/EM — Lorentzian
-broadening measurably degrades deconvolution accuracy.
+broadening measurably degrades deconvolution accuracy. For a series, the
+batch fit's comparability line (*Multi-dataset*, §6) reports members apodised
+differently, and **Reprocess all from fid…** applies one Gaussian window to
+all of them at once.
 
 ## 3 · Restricted ranges — never fixed values
 

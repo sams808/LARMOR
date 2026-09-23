@@ -19,7 +19,11 @@ from PySide6.QtWidgets import (
     QScrollArea, QSpinBox, QVBoxLayout, QWidget,
 )
 
+from larmor import comparability
 from larmor.desktop import theme
+from larmor.desktop.comparability_dialog import (
+    ComparabilityBar, ComparabilityDialog, _CHECK_CSS_COLOR,
+)
 from larmor.desktop.panels import PARAM_LABELS
 from larmor.desktop.plot import site_color
 from larmor.desktop.batchfit_dialog import _slug, _proc_number, _saved_tol, _save_tol
@@ -81,6 +85,15 @@ class SeqFitDialog(QDialog):
         self.lblNav = QLabel(""); self.lblNav.setStyleSheet("font-weight:600;")
         nav.addWidget(self.btnPrev); nav.addWidget(self.lblNav, 1); nav.addWidget(self.btnNext)
         lv.addLayout(nav)
+
+        # were these spectra acquired and processed alike? (Details only: a
+        # sequential fit gives every member its own model, so nothing is
+        # reprocessed here; the batch dialog is where that fix lives)
+        self.compBar = ComparabilityBar(allow_reprocess=False)
+        self.compBar.details_requested.connect(
+            lambda: ComparabilityDialog(self, self._comparison).exec())
+        self.compBar.set_comparison(self._comparison, 0)
+        lv.addWidget(self.compBar)
 
         self.chkSeedMove = QCheckBox("seed from the spectrum I came from when I move")
         self.chkSeedMove.setChecked(True)
@@ -231,9 +244,13 @@ class SeqFitDialog(QDialog):
                 "larmor": float(rec.get("larmor_frequency_MHz", 0.0) or 0.0),
                 "spin": float(rec.get("spin_rate_Hz", 0.0) or 0.0),
                 "sample": rec.get("sample") or Path(p).stem, "path": p,
-                "proc": _proc_number(p)})
+                "proc": _proc_number(p),
+                # acqus / procs / auditp (None for CSV / fxmla)
+                "params": comparability.read_params(p)})
             if self._model_sites is None and rec.get("sites"):
                 self._model_sites = rec["sites"]
+        self._comparison = comparability.compare(
+            [d["params"] for d in data], [d["sample"] for d in data])
         return data
 
     def _seed_recipe(self, d) -> dict:
@@ -285,7 +302,15 @@ class SeqFitDialog(QDialog):
         self.lblNav.setText(f"spectrum {self._cur + 1} / {len(self._data)}  ·  "
                             f"{d['sample']}"
                             + (f"  (proc {d['proc']})" if d["proc"] else ""))
-        self.plotTitle.setText(d["sample"])
+        sig = self._comparison.signature(self._cur)
+        if sig:                       # acquired / processed unlike the series majority
+            self.plotTitle.setText(d["sample"] + " ⚠")
+            self.plotTitle.setStyleSheet(f"font-weight:600; color:{_CHECK_CSS_COLOR};")
+            self.plotTitle.setToolTip("\n".join(self._comparison.details(self._cur)))
+        else:
+            self.plotTitle.setText(d["sample"])
+            self.plotTitle.setStyleSheet("font-weight:600;")
+            self.plotTitle.setToolTip("")
         self.table.rebuild(self._recipes[self._cur], set())
         self.btnPrev.setEnabled(self._cur > 0)
         self.btnNext.setEnabled(self._cur < len(self._data) - 1)

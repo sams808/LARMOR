@@ -14,7 +14,12 @@ The **Datasets** dock overlays spectra behind the active one for visual
 comparison — a composition series (e.g. LAW3Cl0→4Ca), before/after processing,
 or a reference. **＋ Add spectrum to compare…** draws each overlay in its own
 colour with per-overlay **visible / colour / remove** controls and a global
-**stack offset**. Promote an overlay to **active** (it becomes the fit target)
+**stack offset**. **Compare acquisition…** (beside the add button, live once
+an overlay with a Bruker source exists) opens the comparability table of §6
+over the active spectrum and every overlay — `acqus` and `procs` side by
+side — and an overlay acquired or processed unlike the others carries a ⚠
+marker with the differing parameter under its name. Promote an overlay to
+**active** (it becomes the fit target)
 and the previous active demotes back to an overlay. The active spectrum is always
 the single object the 1D fitter works on, so overlays never disturb a fit.
 
@@ -153,6 +158,53 @@ populations change. **Ctrl/Shift-click** the spectra in the Explorer and press
 **Batch fit selected…** (or *Tools ▸ Batch fit spectra*). Tutorial 4
 (Help ▸ Tutorials) runs this on a five-glass composition series and on a
 synthetic series from the command line.
+
+**Comparable before shared.** A shared model assumes the series was
+*measured and processed alike*, and TopSpin never says otherwise. When the
+dialog opens it reads every Bruker member's `acqus`, `pdata/N/procs` and
+TopSpin's own command trail (`auditp.txt`) and compares the series against
+its **majority** — the most frequent value; an exact tie takes the first
+spectrum's value and says so; a parameter where every member differs reports
+once as *varies min–max* without singling anyone out. Compared and flagged:
+the window and its LB / GB / SSB, TDeff, SI, FCOR, the phase mode and the
+`abs` baseline order (ABSG, BC_mod), the referencing (SF, in ppm against the
+Referencing audit's tolerance) and, on the acquisition side, the pulse
+program, SW, TD, D1 (5 %), P1, PLW1 and the probe. NS, RG, the date, the
+PHC0 / PHC1 values and the audit command line are reported but never flagged —
+they are legitimately per spectrum (NS and RG are still named in the verdict
+when they differ). Mixed nuclei or fields are *bad* (red): no shared model can
+describe them. The verdict is one line under the panels — dim when the series
+is alike, amber when it is not (`⚠ processed differently: LB 0 / 100 Hz (EM) ·
+acquired differently: D1 varies 12.5–36 s`); each deviating panel's name ends
+with an amber ⚠ whose tooltip says what differs from the majority, the results
+table gains a sortable **comparability** column (✓, the difference, or
+*reprocessed*) and the spotlight status line repeats the reason. **Details…**
+opens the full parameter × spectrum table (majority bold, deviants amber,
+every processing cell tooltipped with that spectrum's TopSpin command line,
+*only differences* on by default) with **Copy as text** and **Save CSV…**; the
+same table comes from `larmor compare <spectra…> [--all] [--csv out.csv]`, and
+`larmor batchfit` / `larmor seqfit` print one `warning:` line for a differing
+series. Apodisation is not a detail for a shared-width model: an EM of 100 Hz
+adds 0.5 ppm of Lorentzian width at 192 MHz, so a member apodised differently
+is fitted with the wrong width by construction. **Reprocess all from fid…**
+removes that: every member with a raw fid is rebuilt with one common chain —
+TDeff (in TopSpin's real points), the window (none, EM, GM or QSINE with LB /
+GB), zero-fill to SI, an FT referenced by each spectrum's *own* SF, then each
+spectrum's own TopSpin phase (PHC0 / PHC1) or **Autophase** — pre-filled from
+the series majority or from one chosen spectrum, and editable. The chain is
+recorded on every saved fit as its `processing` with `processing_from_raw` and
+the EXPNO as source, so **Save individual fits…**, the batch table's automatic
+recipes, the Plotting studio and a reopened project replay it from the
+instrument fid (the instrument folders are never written to). Members without
+a fid keep their TopSpin spectrum and stay flagged; a previous fit is cleared
+(**Fit** again) and baselines reset — **Fit baseline…** still applies
+afterwards, and it is the tool for what TopSpin's `abs` did, which is reported
+but not replayed. **Use TopSpin processing** reverts to the 1r files.
+Acquisition differences (D1, NS, pulse) cannot be reprocessed away; a member
+that still differs from the majority carries the fact as a note in its recipe.
+The glass protocol (*Glass fitting*, §2) asks for a Gaussian window (GM) rather
+than EM — the reprocess form is the place to apply it to the whole series at
+once.
 
 1. **One model, applied.** The batch uses a single model for all spectra — your
    current fit, or a recipe you load in the dialog. The recipe is treated as the
@@ -418,6 +470,10 @@ and you get a **one-spectrum-at-a-time** workbench:
    current** steps as well as after an auto sweep (a member never fitted gets a
    manifest row marked *not fitted*); the saved recipes carry their source
    path. `larmor seqfit … --curves` writes the same from the command line.
+   The comparability line of §6 (with **Details…**, without the reprocess —
+   every member gets its own model here) sits under **◀ Prev / Next ▶**, and
+   the current spectrum's title carries the amber ⚠ when it was acquired or
+   processed unlike the rest of the series.
 
 Use §6 when the sites are genuinely the *same* everywhere and only populations
 change; use §8 when the sites themselves **evolve** along the series.
