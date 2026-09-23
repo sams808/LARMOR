@@ -7,6 +7,10 @@
 - json  : the LARMOR recipe (via Recipe.save) — the reproducible unit.
 - fxmla : a dmfit-compatible file, so a fit made in LARMOR opens in dmfit
           (the σ = sCZ_CQ/2 convention is inverted on the way out).
+- curves: the publication-bundle CSV (``export_curves_csv``, not in FORMATS):
+          the experiment exactly as fitted on its own ppm axis, model,
+          residual and one column per component, with a ``# key=value``
+          header that reopens in LARMOR as a spectrum.
 """
 from __future__ import annotations
 
@@ -20,23 +24,104 @@ SCZ_FROM_SIGMA = 2.0            # dmfit sCZ_CQ = 2 × mrsimulator σ (Phase 0)
 
 
 # --------------------------------------------------------------------------
+def curve_table(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray, *,
+                on_experiment_axis: bool = False, site_prefix: bool = False,
+                ) -> tuple[list[str], list[np.ndarray]]:
+    """The curves of a fit as ``(labels, columns)``: ppm, experiment, model,
+    residual (= experiment - model), then one column per site.
+
+    ``on_experiment_axis=False`` (export_text's layout): the MODEL axis
+    (``engine.simulate``'s, a Czjzek kernel axis covering the data) with the
+    experiment interpolated onto it. ``True``: the EXPERIMENTAL axis sorted
+    ascending (``argsort(kind="stable")``), the experiment never interpolated
+    or otherwise altered, and the model/components brought onto it with the
+    same ``np.interp`` call ``fit.fit`` uses for its RMSD -- so a file of
+    these columns reproduces ``Recipe.fit_rmsd``. ``site_prefix`` names the
+    components ``s<i>_<label>`` (pandas-friendly, joins onto the batch table's
+    ``site`` column) instead of the bare label."""
+    from larmor import engine
+
+    exp_ppm = np.asarray(exp_ppm, float)
+    exp_amp = np.asarray(exp_amp, float)
+    x_model, total, per_site = engine.simulate(recipe, exp_ppm=exp_ppm)
+    names = [s.label or f"site{i}" for i, s in enumerate(recipe.sites)]
+    if site_prefix:
+        names = [f"s{i}_{n}" for i, n in enumerate(names)]
+    if on_experiment_axis:
+        order = np.argsort(exp_ppm, kind="stable")
+        x = exp_ppm[order]
+        experiment = exp_amp[order]
+        model = np.interp(x, x_model, total)
+        comps = [np.interp(x, x_model, np.asarray(y, float)) for y in per_site]
+    else:
+        x = x_model
+        experiment = np.interp(x, exp_ppm, exp_amp)
+        model = total
+        comps = list(per_site)
+    residual = experiment - model
+    return (["ppm", "experiment", "model", "residual", *names],
+            [x, experiment, model, residual, *comps])
+
+
 def export_text(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
                 path: str | Path) -> str:
     """Whitespace columns: ppm, experiment, model, per-component curves."""
-    from larmor import engine
-
-    x, total, per_site = engine.simulate(recipe, exp_ppm=exp_ppm)
-    exp_on_x = np.interp(x, exp_ppm, exp_amp)
-    residual = exp_on_x - total
-    cols = [x, exp_on_x, total, residual, *per_site]
-    labels = ["ppm", "experiment", "model", "residual"] + \
-        [s.label or f"site{i}" for i, s in enumerate(recipe.sites)]
+    labels, cols = curve_table(recipe, exp_ppm, exp_amp)
     lines = ["# " + "\t".join(labels)]
     for row in zip(*cols):
         lines.append("\t".join(f"{v:.6g}" for v in row))
     text = "\n".join(lines) + "\n"
     Path(path).write_text(text, encoding="utf-8")
     return text
+
+
+def export_curves_csv(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
+                      path: str | Path, *, raw: np.ndarray | None = None,
+                      header: dict | None = None) -> dict:
+    """The publication-bundle curves file: ``ppm, experiment,
+    [experiment_raw,] model, residual, s0_<label>, s1_<label> …`` on the
+    experimental axis (ascending). ``ppm``, ``experiment`` and
+    ``experiment_raw`` are written with ``repr`` so they round-trip
+    bit-exactly (the experiment is the array the fit saw, never re-derived);
+    model, residual and components with ``.9g``. ``raw`` (the pre-baseline
+    trace, same axis) adds the ``experiment_raw`` column. Header lines follow
+    ``spectra.read_csv``'s ``# key=value`` convention -- sample, nucleus,
+    larmor_MHz, spin_rate_Hz from the recipe plus every entry of ``header``
+    (source_path, fit_window_ppm, processing, excluded…) -- so File ▸ Open
+    reopens the file as the fitted spectrum. Returns the arrays written
+    (``ppm``, ``experiment``, ``experiment_raw``, ``model``, ``residual``,
+    ``components``, ``columns``) so a caller can compute its RMSD from
+    exactly what is on disk."""
+    import csv
+
+    labels, cols = curve_table(recipe, exp_ppm, exp_amp,
+                               on_experiment_axis=True, site_prefix=True)
+    x, experiment, model, residual = cols[:4]
+    comps = cols[4:]
+    raw_col = None
+    if raw is not None:
+        order = np.argsort(np.asarray(exp_ppm, float), kind="stable")
+        raw_col = np.asarray(raw, float)[order]
+    meta = {"sample": recipe.sample or "", "nucleus": recipe.nucleus or "",
+            "larmor_MHz": recipe.larmor_frequency_MHz,
+            "spin_rate_Hz": recipe.spin_rate_Hz}
+    meta.update(header or {})
+    exact = [x, experiment] + ([raw_col] if raw_col is not None else [])
+    approx = [model, residual, *comps]
+    columns = (labels[:2] + (["experiment_raw"] if raw_col is not None else [])
+               + labels[2:])
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        f.write("# LARMOR curves\n")
+        for k, v in meta.items():
+            f.write(f"# {k}={v}\n")
+        w = csv.writer(f, lineterminator="\n")
+        w.writerow(columns)
+        for i in range(x.size):
+            w.writerow([repr(float(c[i])) for c in exact]
+                       + [format(float(c[i]), ".9g") for c in approx])
+    return {"columns": columns, "ppm": x, "experiment": experiment,
+            "experiment_raw": raw_col, "model": model, "residual": residual,
+            "components": comps}
 
 
 def export_csv_params(recipe: Recipe, path: str | Path) -> str:

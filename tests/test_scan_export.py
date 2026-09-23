@@ -1,4 +1,6 @@
 """Sample scanner (auto-identify) and multi-format fit export."""
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -135,3 +137,95 @@ def test_export_fxmla_writes_unknown_models_as_gausslor(tmp_path):
 def test_formats_registry():
     assert set(export.FORMATS) >= {"text (.txt)", "parameters (.csv)",
                                    "LARMOR recipe (.json)", "dmfit (.fxmla)"}
+
+
+def _export_text_reference(recipe, exp_ppm, exp_amp):
+    """export_text's body before curve_table was factored out of it -- the
+    golden for the byte-identity check, portable across mrsimulator builds."""
+    from larmor import engine
+    x, total, per_site = engine.simulate(recipe, exp_ppm=exp_ppm)
+    exp_on_x = np.interp(x, exp_ppm, exp_amp)
+    cols = [x, exp_on_x, total, exp_on_x - total, *per_site]
+    labels = ["ppm", "experiment", "model", "residual"] + \
+        [s.label or f"site{i}" for i, s in enumerate(recipe.sites)]
+    lines = ["# " + "\t".join(labels)]
+    for row in zip(*cols):
+        lines.append("\t".join(f"{v:.6g}" for v in row))
+    return "\n".join(lines) + "\n"
+
+
+def test_curve_table_experiment_axis_is_exact_and_export_text_is_unchanged(tmp_path):
+    r = _recipe()
+    ppm_asc = np.linspace(-50, 150, 800)
+    amp_asc = np.exp(-((ppm_asc - 60) / 12) ** 2) * 900
+    ppm, amp = ppm_asc[::-1].copy(), amp_asc[::-1].copy()        # DESCENDING input
+
+    labels, cols = export.curve_table(r, ppm, amp, on_experiment_axis=True,
+                                      site_prefix=True)
+    assert labels == ["ppm", "experiment", "model", "residual", "s0_AlO4", "s1_imp"]
+    x, experiment, model, residual = cols[:4]
+    assert np.all(np.diff(x) > 0)
+    order = np.argsort(ppm, kind="stable")
+    assert np.array_equal(x, ppm[order]) and np.array_equal(experiment, amp[order])
+    assert np.allclose(residual, experiment - model)
+    assert np.allclose(model, cols[4] + cols[5], atol=1e-9 * model.max())
+    assert x.size == ppm.size                       # never the model's kernel axis
+
+    # export_text (model axis, .6g) is byte-identical to its former body
+    txt = export.export_text(r, ppm_asc, amp_asc, tmp_path / "o.txt")
+    assert txt == _export_text_reference(r, ppm_asc, amp_asc)
+    head = txt.splitlines()[0]
+    assert "AlO4" in head and "imp" in head
+
+
+def _read_curves(path):
+    """A curves CSV as a structured array: the '# key=value' lines dropped
+    first, because genfromtxt(names=True) would otherwise take the first
+    commented line ('# LARMOR curves') as the header. pandas reads the
+    same file with comment="#"."""
+    rows = [ln for ln in Path(path).read_text(encoding="utf-8").splitlines()
+            if ln and not ln.startswith("#")]
+    return np.genfromtxt(rows, delimiter=",", names=True)
+
+
+def test_export_curves_csv_roundtrips_exactly_and_reopens_in_larmor(tmp_path):
+    from larmor.loader import load_any
+
+    r = _recipe()
+    ppm = np.linspace(-50, 150, 300)[::-1].copy()
+    amp = (np.exp(-((ppm - 60) / 12) ** 2) * 900
+           + np.random.default_rng(1).normal(0, 3.0, ppm.size))
+    p = tmp_path / "glass_curves.csv"
+    out = export.export_curves_csv(r, ppm, amp, p, header={"fit_window_ppm": "150.0,-50.0"})
+    lines = p.read_text(encoding="utf-8").splitlines()
+    assert lines[0] == "# LARMOR curves"
+    assert "# sample=glass" in lines and "# nucleus=27Al" in lines
+    assert "# larmor_MHz=195.483" in lines and "# fit_window_ppm=150.0,-50.0" in lines
+    hdr = next(ln for ln in lines if not ln.startswith("#"))
+    assert hdr == "ppm,experiment,model,residual,s0_AlO4,s1_imp"
+    assert out["columns"] == hdr.split(",")
+
+    tab = _read_curves(p)
+    order = np.argsort(ppm, kind="stable")
+    assert np.array_equal(tab["ppm"], ppm[order])              # repr round-trip
+    assert np.array_equal(tab["experiment"], amp[order])
+    assert np.allclose(tab["model"], out["model"], rtol=1e-8)
+    assert np.allclose(tab["model"], tab["s0_AlO4"] + tab["s1_imp"],
+                       atol=1e-6 * tab["model"].max())
+
+    # File > Open reopens the curves file as the fitted spectrum
+    ppm2, amp2, rec2, _meta, _w = load_any(p)
+    assert np.array_equal(ppm2, ppm[order]) and np.array_equal(amp2, amp[order])
+    assert rec2["nucleus"] == "27Al" and rec2["sample"] == "glass"
+    assert rec2["larmor_frequency_MHz"] == pytest.approx(195.483)
+
+    # a raw (pre-baseline) trace goes right after the experiment
+    raw = amp + 5.0
+    p2 = tmp_path / "glass_raw_curves.csv"
+    out2 = export.export_curves_csv(r, ppm, amp, p2, raw=raw)
+    hdr2 = next(ln for ln in p2.read_text(encoding="utf-8").splitlines()
+                if not ln.startswith("#"))
+    assert hdr2.split(",")[:3] == ["ppm", "experiment", "experiment_raw"]
+    tab2 = _read_curves(p2)
+    assert np.array_equal(tab2["experiment_raw"], raw[order])
+    assert np.array_equal(out2["experiment_raw"], raw[order])

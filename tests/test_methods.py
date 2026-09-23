@@ -58,3 +58,34 @@ def test_methods_sentence_states_the_czjzek_width_convention():
     plain = {"nucleus": "11B", "larmor_frequency_MHz": 160.0, "sites": [
         {"model": "gauss_lor", "label": "A", "params": {}}]}
     assert "P_Q" not in methods.methods_sentence(plain)
+
+
+def test_methods_sentence_names_the_profile_estimator_and_software_versions(monkeypatch):
+    """'profile' used to fall into the Monte-Carlo wording; the software
+    block never raises and names every field an export README records."""
+    import re
+    import subprocess
+    import time
+
+    import larmor
+
+    rec = _czjzek_recipe().to_dict()
+    prof = methods.methods_sentence(rec, "profile")
+    assert "χ² profile" in prof and "Monte-Carlo" not in prof
+    assert "covariance" in methods.methods_sentence(rec, "covariance")
+    assert "Monte-Carlo" in methods.methods_sentence(rec, "montecarlo")
+
+    t0 = time.perf_counter()
+    v = methods.software_versions()
+    assert time.perf_counter() - t0 < 3.0
+    assert set(v) == {"larmor", "mrsimulator", "lmfit", "numpy", "python", "git_commit"}
+    assert v["larmor"] == larmor.__version__
+    assert v["mrsimulator"] and v["lmfit"] and v["numpy"] and v["python"]
+    assert v["git_commit"] == "" or re.fullmatch(r"[0-9a-f]{12}", v["git_commit"])
+
+    def boom(*a, **k):
+        raise OSError("no git here")
+
+    monkeypatch.setattr(subprocess, "run", boom)
+    assert methods.software_versions()["git_commit"] == ""
+    assert methods._dist_version("no-such-distribution-xyz") == ""

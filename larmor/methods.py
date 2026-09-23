@@ -1,6 +1,10 @@
 """Copy-ready outputs: a LaTeX results table and a short methods sentence from a
 finished fit — the last mile from "a fit on screen" to "text in a manuscript".
 
+Also supplies the software block (``software_versions``) that exports record
+next to their numbers -- the series publication bundle's README today, recipe
+provenance later.
+
 Qt-free and testable; the desktop layer just puts the strings on the clipboard.
 """
 from __future__ import annotations
@@ -103,8 +107,9 @@ def methods_sentence(recipe: dict, error_method: str = "covariance") -> str:
     model_txt = models[0] if len(models) == 1 else \
         (" and ".join([", ".join(models[:-1]), models[-1]]) if len(models) > 1
          else "the fitted lineshapes")
-    err_txt = ("the least-squares covariance" if error_method == "covariance"
-               else "a Monte-Carlo (parametric bootstrap) analysis")
+    err_txt = {"covariance": "the least-squares covariance",
+               "profile": "one-parameter χ² profiles (1σ intervals)",
+               }.get(error_method, "a Monte-Carlo (parametric bootstrap) analysis")
     field_txt = f" (Larmor frequency {field:.1f} MHz)" if field else ""
     # a Czjzek width is quoted in four incompatible conventions across the
     # literature (σ / σ_Cz = sCZ_CQ = 2σ / dmfit's displayed CQ = 4σ /
@@ -130,3 +135,55 @@ def methods_sentence(recipe: dict, error_method: str = "covariance") -> str:
         f"populations (integrated over the fit window) are reported with "
         f"uncertainties from {err_txt}." + czjzek_txt
     )
+
+
+# ---------------------------------------------------------------- software
+def software_versions() -> dict:
+    """The software block an export records next to its numbers: LARMOR,
+    mrsimulator, lmfit and numpy versions (importlib.metadata, so nothing
+    heavy is imported for a string), the Python version and, when LARMOR
+    runs from a git checkout, the short commit. Never raises; a version that
+    cannot be determined is ``""``."""
+    import platform
+
+    import larmor
+
+    return {"larmor": larmor.__version__,
+            "mrsimulator": _dist_version("mrsimulator"),
+            "lmfit": _dist_version("lmfit"),
+            "numpy": _dist_version("numpy"),
+            "python": platform.python_version(),
+            "git_commit": _git_commit()}
+
+
+def _dist_version(name: str) -> str:
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        return version(name)
+    except PackageNotFoundError:
+        return ""
+
+
+def _git_commit() -> str:
+    """``git rev-parse --short=12 HEAD`` of the checkout larmor/ lives in --
+    only when a ``.git`` sits next to the package (a worktree's ``.git`` is a
+    file, hence ``exists`` rather than ``is_dir``); ``""`` for an installed
+    copy, a missing git, a timeout or any other failure."""
+    import subprocess
+    from pathlib import Path
+
+    import larmor
+
+    root = Path(larmor.__file__).resolve().parents[1]
+    if not (root / ".git").exists():
+        return ""
+    try:
+        kw = {}
+        if hasattr(subprocess, "CREATE_NO_WINDOW"):      # no console flash on Windows
+            kw["creationflags"] = subprocess.CREATE_NO_WINDOW
+        out = subprocess.run(["git", "-C", str(root), "rev-parse", "--short=12", "HEAD"],
+                             capture_output=True, text=True, timeout=2, **kw)
+        return out.stdout.strip() if out.returncode == 0 else ""
+    except Exception:
+        return ""

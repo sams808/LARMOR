@@ -269,3 +269,29 @@ def test_app_re_references_the_open_spectrum():
             QDialog.exec = orig
     finally:
         win.close()
+
+
+def test_read_acquisition_reads_ns_and_d1(tmp_path):
+    """NS and the recycle delay D[1] come off acqus (nmrglue returns the
+    '(0..N)' delay array as a list); an acqus without them reads 0 / 0.0
+    and every other field is unchanged."""
+    e = tmp_path / "sample" / "3102"
+    _jcamp(e / "acqus", NUC1="<31P>", BF1=BF1_P, SFO1=BF1_P, O1=0, DATE=1_700_000_000,
+           PROBHD="<probe>", PULPROG="<zg>", NS=14, D="(0..1)\n0.2 300")
+    _jcamp(e / "pdata" / "1" / "procs", SF=242.79194514, SI=1024, SR=0.0)
+    a = R.read_acquisition(e)
+    assert a is not None
+    assert a.ns == 14 and a.d1_s == 300.0
+    assert a.nucleus == "31P" and a.bf1_MHz == BF1_P and a.pulprog == "zg"
+
+    e2 = tmp_path / "sample" / "3103"
+    _jcamp(e2 / "acqus", NUC1="<31P>", BF1=BF1_P, SFO1=BF1_P, O1=0, DATE=1_700_000_000,
+           PROBHD="<probe>", PULPROG="<zg>")
+    b = R.read_acquisition(e2)
+    assert b is not None and b.ns == 0 and b.d1_s == 0.0
+    assert (b.nucleus, b.bf1_MHz, b.sfo1_MHz, b.o1_Hz, b.date, b.probe, b.pulprog) == \
+        (a.nucleus, a.bf1_MHz, a.sfo1_MHz, a.o1_Hz, a.date, a.probe, a.pulprog)
+    # defaulted fields: keyword construction without them still works
+    assert R.Acquisition(path="p", sample="s", expno=1, nucleus="1H", bf1_MHz=1.0,
+                         sfo1_MHz=1.0, o1_Hz=0.0, sf_MHz=None, sr_hz=None,
+                         date=0.0).ns == 0

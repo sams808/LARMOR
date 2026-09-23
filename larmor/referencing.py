@@ -107,6 +107,8 @@ class Acquisition:
     pulprog: str = ""
     title: str = ""
     procno: int = 1
+    ns: int = 0                     # acqus NS (0 if absent)
+    d1_s: float = 0.0               # acqus D[1], the recycle delay in s (0 if absent)
 
     @property
     def is_1h(self) -> bool:
@@ -158,6 +160,10 @@ def read_acquisition(expno_dir, procno: int = 1) -> Acquisition | None:
         sfo1 = float(acqus.get("SFO1", 0.0) or 0.0)
         o1 = float(acqus.get("O1", 0.0) or 0.0)
         date = float(acqus.get("DATE", 0) or 0)
+        ns = int(float(acqus.get("NS", 0) or 0))
+        # nmrglue's read_jcamp returns the "(0..63)" delay array as a list
+        d = acqus.get("D")
+        d1 = float(d[1]) if isinstance(d, (list, tuple)) and len(d) > 1 else 0.0
     except (TypeError, ValueError):
         return None
     sf = sr = None
@@ -184,7 +190,7 @@ def read_acquisition(expno_dir, procno: int = 1) -> Acquisition | None:
                        sfo1_MHz=sfo1, o1_Hz=o1, sf_MHz=sf, sr_hz=sr,
                        date=date, probe=_clean(acqus.get("PROBHD")),
                        pulprog=_clean(acqus.get("PULPROG")), title=title,
-                       procno=procno)
+                       procno=procno, ns=ns, d1_s=d1)
 
 
 def session_root(path) -> Path:
