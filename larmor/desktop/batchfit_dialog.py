@@ -39,6 +39,7 @@ from larmor.desktop.comparability_dialog import (
 from larmor.desktop.panels import PARAM_LABELS
 from larmor.desktop.plot import site_color
 from larmor.io.scan import disambiguate, sample_label
+from larmor.series_table import SeriesTable
 
 PER_TAB = 9        # 3×3 grid per tab
 
@@ -203,6 +204,9 @@ class BatchFitDialog(QDialog):
         self._flag_reasons: dict[int, str] = {}   # k -> "RMSD … is an outlier; low S/N"
         self._reprocess: dict | None = None  # {"template", "phase"} once reprocessed from fid
         self._data = self._load(paths)
+        # the series' identity (larmor.series_table): names, replicate groups,
+        # order and joined composition columns -- edited by "Series table…"
+        self._series = SeriesTable.from_spectra(self._data)
 
         v = QVBoxLayout(self)
 
@@ -419,6 +423,12 @@ class BatchFitDialog(QDialog):
         self.btnSeries.setToolTip("plot how each parameter evolves along the series")
         self.btnSeries.setEnabled(False)
         self.btnSeries.clicked.connect(self._series_plot)
+        self.btnSeriesTable = bb.addButton("Series table…", QDialogButtonBox.ActionRole)
+        self.btnSeriesTable.setToolTip(
+            "names, replicate groups and order of the series (the grid, the results "
+            "table, the CSV rows and the saved recipes follow) and composition "
+            "columns joined from a CSV for the Series plot's x axis")
+        self.btnSeriesTable.clicked.connect(self._edit_series)
         bb.button(QDialogButtonBox.Close).clicked.connect(self.accept)
         bb.helpRequested.connect(self._help)
 
@@ -467,6 +477,10 @@ class BatchFitDialog(QDialog):
                 "larmor": float(rec.get("larmor_frequency_MHz", 0.0) or 0.0),
                 "spin": float(rec.get("spin_rate_Hz", 0.0) or 0.0),
                 "sample": sample_label(p, rec), "path": p,
+                # where the name came from (io/scan through the loader): the
+                # sample folder and the title's first line, for the Series table
+                "folder": str((rec.get("provenance") or {}).get("sample_folder", "")),
+                "title": str((rec.get("provenance") or {}).get("title", "")),
                 "proc": _proc_number(p), "snr": _snr(amp),
                 # acqus / procs / auditp (None for CSV / fxmla), the reprocess
                 # chain and its EXPNO once "Reprocess all from fid…" ran
@@ -477,6 +491,7 @@ class BatchFitDialog(QDialog):
         # share a label: labels become table scopes and recipe file names
         for d, lab in zip(data, disambiguate([d["sample"] for d in data],
                                              [d["path"] for d in data])):
+            d["group"] = d["sample"]             # the base label: replicates share it
             d["sample"] = lab
             if self._model_sites is None and rec.get("sites"):
                 self._model_sites = rec["sites"]
@@ -1330,6 +1345,11 @@ class BatchFitDialog(QDialog):
                 # before proc.from_bruker_fid, so the 1r path would make every
                 # saved recipe of a reprocessed batch fail to replay
                 "source_path": (d.get("expno") or d.get("path", "")),
+                # where the display name came from (the Series table's folder /
+                # title columns) and the replicate group it belongs to
+                "provenance": {"sample_folder": d.get("folder", ""),
+                               "title": d.get("title", ""),
+                               "series_group": d.get("group", d["sample"])},
                 # a member NOT reprocessed that differs from the series
                 # majority carries the fact into its saved fit
                 "notes": ([comparability.caveat_note(self._comparison, k)]
@@ -1361,6 +1381,7 @@ class BatchFitDialog(QDialog):
         self.btnSave.setEnabled(False); self.btnTable.setEnabled(False)
         self.btnBundle.setEnabled(False); self.btnSeries.setEnabled(False)
         self.btnErr.setEnabled(False); self.btnErrCsv.setEnabled(False)
+        self.btnSeriesTable.setEnabled(False)          # _done / _err_done index cells by k
         self.prog.setRange(0, 0)                       # busy while fitting
         rtxt = (f" · releasing {', '.join(rel)} (±{self.frac.value():.0f}%)"
                 if rel else "")
@@ -1390,6 +1411,7 @@ class BatchFitDialog(QDialog):
         self.prog.setRange(0, 100); self.prog.setValue(100 if mode != "cancel" else 0)
         self.btnCancel.setEnabled(False); self.btnStop.setEnabled(False)
         self._update_fit_enabled()
+        self.btnSeriesTable.setEnabled(True)
         if mode == "cancel":                           # revert to the pre-fit view
             for k, cell in enumerate(self._cells):
                 px, py = self._pre[k] if k < len(getattr(self, "_pre", [])) else (None, None)
@@ -1452,6 +1474,7 @@ class BatchFitDialog(QDialog):
         self.prog.setRange(0, 100); self.prog.setValue(0)
         self.btnCancel.setEnabled(False); self.btnStop.setEnabled(False)
         self._update_fit_enabled()
+        self.btnSeriesTable.setEnabled(True)
         self.status.setText(f"batch fit failed: {msg}")
 
     # ------------------------------------------------------------------ save
@@ -1546,6 +1569,7 @@ class BatchFitDialog(QDialog):
         # this CSV, even without "Save individual fits…" too
         batchfit.write_shared_csv(self._result, path)
         msg = f"saved {path}"
+        msg += self._write_series_sidecar(path)
         if self.chkAutoRecipes.isChecked():
             n = self._save_all_recipes_to(Path(path).parent)
             msg += f" · {n} individual fit(s) saved alongside it"
@@ -1645,7 +1669,104 @@ class BatchFitDialog(QDialog):
         if self._result is None:
             return
         from larmor.desktop.series_plot import SeriesPlotDialog
-        SeriesPlotDialog(self, self._result).exec()
+        SeriesPlotDialog(self, self._result, series=self._series).exec()
+
+    # ------------------------------------------------------------------ series table
+    def _edit_series(self):
+        """Series table…: names, replicate groups, order and joined columns of
+        the series in one editor (larmor.desktop.series_table_dialog). OK
+        renames in place; when rows moved, the grid is rebuilt in the new
+        order with the fitted curves, exclusions, flags and spotlight following."""
+        if any(c.get("bl_picking") for c in self._cells):
+            self.status.setText("finish or cancel the 2-point baseline pick first "
+                                "(right-click that cell) — the series table rebuilds "
+                                "the grid")
+            return
+        from larmor.desktop.series_table_dialog import SeriesTableDialog
+
+        busy = ((self._worker is not None and self._worker.isRunning())
+                or (self._err_worker is not None and self._err_worker.isRunning()))
+        dlg = SeriesTableDialog(self, self._series, locked=busy)
+        if dlg.exec() != QDialog.Accepted:
+            return
+        self._apply_series(dlg.table(), dlg.perm())
+
+    def _apply_series(self, table: SeriesTable, perm: list):
+        """Adopt an edited series table. ``perm`` (new position -> current
+        index) reorders the spectra first (_reorder); then every display name
+        is written where labels live -- d["sample"], the fitted result's
+        labels and its recipes' sample -- so the cells, the Results table, the
+        CSV scopes, the auto-named recipes and the Series plot read the new
+        names without a refit."""
+        n = len(self._data)
+        perm = list(perm)
+        if perm != list(range(n)):
+            self._reorder(perm)
+        self._series = table
+        for k, (d, row) in enumerate(zip(self._data, table.rows)):
+            d["sample"] = row.display_name
+            d["group"] = row.group
+            if self._result is not None and k < len(self._result.labels):
+                self._result.labels[k] = row.display_name
+                self._result.recipes[k].sample = row.display_name
+        self._comparison = self._recompare()          # its per-spectrum labels
+        self._refresh_cell_marks()                    # titles, tooltips, exclusions
+        for k in range(len(self._cells)):
+            self._rebuild_cell_menu(k)                # the export title reads the name
+        self._fill_table(self._result)
+        self._selection_status()
+        if self._hl is None:
+            self.status.setText(self.status.text() + " · series table applied")
+
+    def _reorder(self, perm: list):
+        """Permute the spectra (``perm[new] = old``): _data / _src_paths and
+        every index-keyed structure (_excluded, _flag_reasons, _hl), rebuild
+        the grid, then re-pair a finished result by source_path
+        (batchfit.align_result) and repaint it through _done -- the sequence
+        apply_session_state already takes for a reopened session."""
+        from larmor import batchfit
+
+        self._data = [self._data[k] for k in perm]
+        loaded = [str(d["path"]) for d in self._data]
+        self._src_paths = loaded + [p for p in self._src_paths if p not in set(loaded)]
+        where = {old: new for new, old in enumerate(perm)}
+        self._excluded = {where[k]: v for k, v in self._excluded.items() if k in where}
+        self._flag_reasons = {where[k]: v for k, v in self._flag_reasons.items()
+                              if k in where}
+        self._hl = where.get(self._hl) if self._hl is not None else None
+        self._comparison = self._recompare()
+        self.tabs.clear()
+        self._cells = []
+        self._build_grid()
+        self._apply_scale()
+        if self._result is not None:
+            res, _dropped = batchfit.align_result(self._result,
+                                                  [d["path"] for d in self._data])
+            if len(res.per_dataset) != len(res.recipes):
+                res.per_dataset = batchfit.result_curves(res, [d["ppm"] for d in self._data])
+            self._done(res)
+        else:
+            self._fill_table(None)
+        for k in self._excluded:
+            self._rebuild_cell_menu(k)
+        if self._hl is not None and self.tabs.count():
+            self.tabs.setCurrentIndex(self._hl // PER_TAB)
+        self._apply_highlight()
+
+    def _write_series_sidecar(self, csv_path) -> str:
+        """``<stem>_series.csv`` beside a table export: position, name, group,
+        folder, title, source_path, every Series-table column and the RMSD --
+        the wide companion of the long CSV, which never gains rows (the
+        studio's rebuild iterates its scope rows). Returns the status note."""
+        from larmor import series_table
+
+        side = Path(csv_path).with_name(Path(csv_path).stem + "_series.csv")
+        extra = {"RMSD": list(self._result.rmsd)} if self._result is not None else None
+        try:
+            series_table.write_series_csv(self._series, side, extra=extra)
+        except OSError as exc:
+            return f" · series table not written ({exc})"
+        return f" · series table {side.name}"
 
     # ------------------------------------------------------------------ session
     # A project bundle (larmor.project) keeps a batch-fit session as a row of
@@ -1672,6 +1793,8 @@ class BatchFitDialog(QDialog):
                 "excluded": sorted(self._excluded.get(k, ()))}
         return {**self._template_dict(),
                 "paths": list(self._src_paths),
+                # the Series table: rows in paths order, each with its source_path
+                "series": self._series.to_dict(),
                 "reprocess": copy.deepcopy(self._reprocess),
                 "model_sites": copy.deepcopy(self._model_sites),
                 "window": list(self._window) if self._window else None,
@@ -1701,6 +1824,14 @@ class BatchFitDialog(QDialog):
         notes: list[str] = []
         self._recipe_tag = state.get("recipe_tag") or ""
         self._apply_template(state)
+        if state.get("series"):
+            # the Series table back BEFORE the result block: names, groups and
+            # columns pair by source_path, so _done paints the restored labels;
+            # a spectrum that did not reload simply loses its row
+            self._apply_series(
+                SeriesTable.from_dict(state["series"]).aligned_to(
+                    [d["path"] for d in self._data], fresh=self._series),
+                list(range(len(self._data))))
         self._baseline_kind = (state.get("baseline_kind")
                                or state.get("baseline") or "None")
         per = state.get("per_spectrum") or {}
@@ -1879,6 +2010,7 @@ class BatchFitDialog(QDialog):
         self.btnErr.setEnabled(False); self.btnErrCsv.setEnabled(False)
         self.btnSave.setEnabled(False); self.btnTable.setEnabled(False)
         self.btnBundle.setEnabled(False); self.btnSeries.setEnabled(False)
+        self.btnSeriesTable.setEnabled(False)
         self.btnStop.setEnabled(True); self.btnCancel.setEnabled(False)
         self.prog.setRange(0, len(data)); self.prog.setValue(0)
         name = self.errCombo.currentText().split(" (")[0]
@@ -1901,6 +2033,7 @@ class BatchFitDialog(QDialog):
         self.btnErr.setEnabled(True); self.btnErrCsv.setEnabled(True)
         self.btnSave.setEnabled(True); self.btnTable.setEnabled(True)
         self.btnBundle.setEnabled(True); self.btnSeries.setEnabled(True)
+        self.btnSeriesTable.setEnabled(True)
 
     def _err_done(self, result):
         self._post_err_enable()
@@ -1955,6 +2088,7 @@ class BatchFitDialog(QDialog):
         # this CSV, even without "Save individual fits…" too
         batchfit.write_error_csv(self._result, path, method)
         msg = f"exported {Path(path).name} · {method} errors"
+        msg += self._write_series_sidecar(path)
         if self.chkAutoRecipes.isChecked():
             n = self._save_all_recipes_to(Path(path).parent)
             msg += f" · {n} individual fit(s) saved alongside it"

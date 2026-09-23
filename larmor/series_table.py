@@ -547,24 +547,33 @@ class Match:
 
 def propose_mapping(table: SeriesTable, csv_rows: list, sample_header: str) -> list:
     """Pair series rows with CSV rows: exact on the display name, then exact
-    on the group, then normalised-key equality (name, then group). More than
-    one candidate at a stage -> ``ambiguous`` with the candidates listed and
-    no default -- the person decides."""
+    on the group, then normalised-key equality (name, then group), then the
+    CSV name read as a sample FOLDER (``04272026_P5-Bi8-12_SS_ALP`` -> key
+    ``P5-Bi8-12``, as a batch CSV written before the folder-derived names
+    carries; ``how`` = ``folder``). More than one candidate at a stage ->
+    ``ambiguous`` with the candidates listed and no default -- the person
+    decides."""
     names = [(r.get(sample_header) or "").strip() for r in csv_rows]
     exact: dict = {}
     normed: dict = {}
+    folder: dict = {}
     for i, nm in enumerate(names):
         exact.setdefault(nm, []).append(i)
         normed.setdefault(norm_key(nm), []).append(i)
+        parts = scan.name_parts(nm)
+        if parts.from_folder:
+            folder.setdefault(norm_key(parts.key), []).append(i)
     out = []
     for k, row in enumerate(table.rows):
         found = None
         for cand_name, how in ((row.display_name, "exact"), (row.group, "exact"),
-                               (row.display_name, "normalised"), (row.group, "normalised")):
+                               (row.display_name, "normalised"), (row.group, "normalised"),
+                               (row.group, "folder"), (row.display_name, "folder")):
             if not cand_name:
                 continue
             idx = (exact.get(cand_name) if how == "exact"
-                   else normed.get(norm_key(cand_name)))
+                   else normed.get(norm_key(cand_name)) if how == "normalised"
+                   else folder.get(norm_key(cand_name)))
             if not idx:
                 continue
             if len(idx) == 1:

@@ -285,6 +285,14 @@ def relocate_batch_state(state: dict, project_dir: str | Path
                 recs.append(r)
             res["recipes"] = recs
             st["result"] = res
+        ser = st.get("series")
+        if isinstance(ser, dict):
+            # the Series table's rows pair by source_path too (SeriesTable.aligned_to)
+            ser = dict(ser)
+            ser["rows"] = [{**r, "source_path": mapping.get(r.get("source_path", ""),
+                                                            r.get("source_path", ""))}
+                           for r in (ser.get("rows") or [])]
+            st["series"] = ser
     return st, missing
 
 

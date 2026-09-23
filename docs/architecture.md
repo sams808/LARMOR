@@ -78,6 +78,14 @@ verdict — a `Health` with a level and flags carrying fixed wording,
 click-through targets and the table cells they concern; the strip under the
 desktop workbench and the Report header both read it.
 
+`series_table.py` (Qt-free) holds a series' identity for the batch and
+sequential fits: the names `io/scan` derived, kept unique after a hand
+rename, with replicate groups, an explicit order, composition columns
+joined from a CSV (a wide table or another batch's long CSV pivoted per
+scope), replicate statistics and an OLS line, the wide `_series.csv`
+companion of the long CSV and the DUST-shaped export — consumed by the two
+fit dialogs and the Series evolution plot.
+
 Output is `figures.py` — `render()` on plain-dict specs for 1D/2D/series
 figures with journal presets and png/pdf/svg/tiff export — together with
 `methods.py` (LaTeX table and methods sentence) and `batch.py` (publication

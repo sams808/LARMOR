@@ -1126,6 +1126,160 @@ def _fit_batch(dlg):
     return dlg._result
 
 
+def test_batch_dialog_series_table_reorders_renames_and_realigns_the_result(qapp, tmp_path):
+    """Series table… OK with a permutation and a rename: the spectra, the
+    fitted result (paired by source_path), the exclusions, the flags, the
+    spotlight, the grid cells and the Results table all follow, without a
+    refit; the session state carries the table in paths order."""
+    dlg = _batch_dialog(tmp_path, 3)
+    paths = [d["path"] for d in dlg._data]
+    assert dlg.btnSeriesTable.isEnabled()
+    assert dlg._series.labels() == ["batch00", "batch01", "batch02"]
+    assert [d["group"] for d in dlg._data] == ["batch00", "batch01", "batch02"]
+    res = _fit_batch(dlg)
+    rmsd = list(res.rmsd)
+    dlg._toggle_exclude(2, 0, True)
+    dlg._highlight_cell(2)
+    tbl = dlg._series.permuted([2, 0, 1])
+    tbl.rename(0, "high")
+    dlg._apply_series(tbl, [2, 0, 1])
+    assert [d["path"] for d in dlg._data] == [paths[2], paths[0], paths[1]]
+    assert dlg._src_paths == [paths[2], paths[0], paths[1]]
+    assert [r.source_path for r in dlg._result.recipes] == [d["path"] for d in dlg._data]
+    assert dlg._result.rmsd == pytest.approx([rmsd[2], rmsd[0], rmsd[1]])
+    assert dlg._result.labels[0] == "high" == dlg._result.recipes[0].sample
+    assert dlg._result.labels[1:] == ["batch00", "batch01"]
+    assert dlg._data[0]["sample"] == "high" and dlg._series.labels()[0] == "high"
+    assert dlg._excluded == {0: {0}} and dlg._hl == 0
+    assert len(dlg._cells) == 3
+    assert np.allclose(dlg._cells[0]["exp"].yData, dlg._data[0]["amp"])
+    assert dlg._cells[0]["model"].xData is not None and len(dlg._cells[0]["model"].xData) > 0
+    assert dlg._cells[0]["rmsd"].text().endswith(f"{rmsd[2]:.4f}")
+    title = dlg._cells[0]["title"].text()
+    assert title.startswith("high") and "excluded" in title
+    assert dlg._cells[1]["title"].text() == "batch00"
+    assert dlg.table.item(dlg._row_of(0), 1).text() == "high"
+    assert dlg.table.item(dlg._row_of(0), 0).text() == "1"
+    assert "high" in dlg.status.text()
+    st = dlg.session_state()
+    assert st["series"]["rows"][0]["display_name"] == "high"
+    assert [r["source_path"] for r in st["series"]["rows"]] == st["paths"]
+    # a rename alone (identity perm) does not rebuild the grid
+    cells = dlg._cells
+    tbl2 = dlg._series.permuted([0, 1, 2])
+    tbl2.rename(1, "mid")
+    dlg._apply_series(tbl2, [0, 1, 2])
+    assert dlg._cells is cells and dlg._result.labels[1] == "mid"
+    assert dlg._cells[1]["title"].text() == "mid"
+    assert dlg.table.item(dlg._row_of(1), 1).text() == "mid"
+    # the table's rows feed the CSV scopes and the wide sidecar
+    out = tmp_path / "batch_table.csv"
+    from larmor import batchfit
+    batchfit.write_shared_csv(dlg._result, out)
+    scopes = {ln.split(",")[0] for ln in out.read_text(encoding="utf-8").splitlines()[1:]}
+    assert {"high", "mid", "batch01"} <= scopes
+    note = dlg._write_series_sidecar(str(out))
+    side = tmp_path / "batch_table_series.csv"
+    assert note == " · series table batch_table_series.csv" and side.exists()
+    lines = side.read_text(encoding="utf-8").splitlines()
+    assert lines[0].split(",") == ["position", "name", "group", "folder", "title",
+                                   "source_path", "RMSD"]
+    assert lines[1].split(",")[:3] == ["1", "high", "high"]
+    assert lines[1].split(",")[5] == paths[2]
+    assert float(lines[1].split(",")[6]) == pytest.approx(rmsd[2], rel=1e-5)
+
+
+def test_batch_dialog_series_defaults_carry_folder_title_and_group_from_the_loader(
+        qapp, tmp_path, monkeypatch):
+    """The loader (io/scan) names Bruker spectra by sample folder and keeps
+    the title / folder in the recipe's provenance; the Series table's folder,
+    title and group columns and _entries' provenance read them, and two
+    folders of one glass get the date tag but share a group."""
+    from pathlib import Path
+    import larmor.loader as loader
+    from larmor.desktop.batchfit_dialog import BatchFitDialog
+    from larmor.io.scan import name_parts
+
+    x = np.linspace(-20, 60, 300)
+    y = 100.0 * np.exp(-0.5 * ((x - 15.0) / 4.0) ** 2)
+
+    def fake_load(p):
+        folder = Path(str(p)).parts[-5]
+        rec = {"nucleus": "11B", "larmor_frequency_MHz": 160.0, "spin_rate_Hz": 0.0,
+               "sample": name_parts(folder).key,
+               "provenance": {"title": "11B with short tip angle", "sample_folder": folder}}
+        return x, y, rec, "", []
+    monkeypatch.setattr(loader, "load_any", fake_load)
+    folders = ["01192026_SR31649_Base0Ca_SS_ALP", "01202026_SR31648_Base3Ca_SS_ALP",
+               "04272026_P5-Bi8-12_SS_ALP", "05082026_P5-Bi8-12_SS_ALP"]
+    paths = [str(tmp_path / f / e / "pdata" / "1" / "1r")
+             for f, e in zip(folders, ("24", "24", "3114", "3102"))]
+    model = {"nucleus": "11B", "larmor_frequency_MHz": 160.0, "spin_rate_Hz": 0.0,
+             "sites": [{"model": "gauss_lor", "label": "A", "params": {
+                 "isotropic_chemical_shift_ppm": {"value": 15.0, "min": 0, "max": 30},
+                 "shift_fwhm_ppm": {"value": 6.0, "min": 0.1},
+                 "amplitude": {"value": 80.0, "min": 0},
+                 "gl": {"value": 1.0, "vary": False}}}]}
+    dlg = BatchFitDialog(None, paths, model)
+    labels = ["Base0Ca", "Base3Ca", "P5-Bi8-12 (04272026)", "P5-Bi8-12 (05082026)"]
+    assert [d["sample"] for d in dlg._data] == labels
+    assert [d["group"] for d in dlg._data] == ["Base0Ca", "Base3Ca", "P5-Bi8-12", "P5-Bi8-12"]
+    assert [d["title"] for d in dlg._data] == ["11B with short tip angle"] * 4
+    assert [d["folder"] for d in dlg._data] == folders
+    assert dlg._series.labels() == labels
+    assert dlg._series.groups() == {"Base0Ca": [0], "Base3Ca": [1], "P5-Bi8-12": [2, 3]}
+    assert dlg._series.rows[0].folder == folders[0]
+    assert dlg._series.rows[0].title == "11B with short tip angle"
+    assert [c["title"].text() for c in dlg._cells] == labels
+    rec = dlg._entries()[0][0]
+    assert rec.sample == "Base0Ca"
+    assert rec.provenance == {"sample_folder": folders[0], "title": "11B with short tip angle",
+                              "series_group": "Base0Ca"}
+    assert dlg._entries()[3][0].provenance["series_group"] == "P5-Bi8-12"
+    # CSV fixtures (the real loader again) keep their stem names, blank folder / title
+    monkeypatch.undo()
+    csv_dlg = _batch_dialog(tmp_path, 2)
+    assert [d["sample"] for d in csv_dlg._data] == ["batch00", "batch01"]
+    assert csv_dlg._data[0]["folder"] == "" and csv_dlg._data[0]["title"] == ""
+    assert csv_dlg._entries()[0][0].provenance["series_group"] == "batch00"
+
+
+def test_batch_dialog_series_table_button_is_locked_during_workers_and_picks(
+        qapp, tmp_path, monkeypatch):
+    from larmor.desktop import batchfit_dialog as mod
+    from larmor.desktop import series_table_dialog as sdlg
+
+    dlg = _batch_dialog(tmp_path, 2)
+    assert dlg.btnSeriesTable.isEnabled()
+    monkeypatch.setattr(mod._BatchWorker, "start", lambda self: None)
+    dlg._run()
+    assert not dlg.btnSeriesTable.isEnabled()
+    dlg._worker.run()                                   # synchronous -> _done
+    assert dlg._result is not None and dlg.btnSeriesTable.isEnabled()
+    dlg._run()
+    dlg._done(dlg._result, mode="cancel")               # the cancel path re-enables too
+    assert dlg.btnSeriesTable.isEnabled()
+    dlg._run()
+    dlg._failed("boom")
+    assert dlg.btnSeriesTable.isEnabled()
+    monkeypatch.setattr(mod._ErrorWorker, "start", lambda self: None)
+    dlg._start_err_worker("covariance")
+    assert not dlg.btnSeriesTable.isEnabled()
+    dlg._post_err_enable()
+    assert dlg.btnSeriesTable.isEnabled()
+    # a pending 2-point pick blocks the editor (the grid would be rebuilt)
+    opened = []
+    monkeypatch.setattr(sdlg.SeriesTableDialog, "exec",
+                        lambda self: opened.append(self) or 0)
+    dlg._cells[0]["bl_picking"] = True
+    dlg._edit_series()
+    assert not opened and "pick" in dlg.status.text()
+    dlg._cells[0]["bl_picking"] = False
+    dlg._edit_series()
+    assert len(opened) == 1 and opened[0].btnSort.isEnabled()   # not locked when idle
+    assert opened[0].table().labels() == ["batch00", "batch01"]
+
+
 class _Click:
     """Stub of pyqtgraph's MouseClickEvent with only button() / scenePos() /
     accept(), like the _RightClick stubs above: the not-picking branch of

@@ -28,6 +28,7 @@ from larmor.desktop.panels import PARAM_LABELS
 from larmor.desktop.plot import site_color
 from larmor.desktop.batchfit_dialog import _slug, _proc_number, _saved_tol, _save_tol
 from larmor.io.scan import disambiguate, sample_label
+from larmor.series_table import SeriesTable
 import datetime as _dt
 
 
@@ -72,6 +73,8 @@ class SeqFitDialog(QDialog):
         self._worker = None
         self._cur = 0
         self._data = self._load(paths)
+        # names / replicate groups / sweep order, edited by "Series table…"
+        self._series = SeriesTable.from_spectra(self._data)
         self._recipes = [self._seed_recipe(d) for d in self._data]
 
         root = QHBoxLayout(self)
@@ -222,6 +225,12 @@ class SeqFitDialog(QDialog):
         self.btnBundle.clicked.connect(self._export_bundle)
         self.btnSeries = bb.addButton("Series plot…", QDialogButtonBox.ActionRole)
         self.btnSeries.clicked.connect(self._series_plot)
+        self.btnSeriesTable = bb.addButton("Series table…", QDialogButtonBox.ActionRole)
+        self.btnSeriesTable.setToolTip(
+            "names, replicate groups and the sweep order of the series (Prev / Next, "
+            "the auto sweep and the saved fits follow) and composition columns "
+            "joined from a CSV for the Series plot's x axis")
+        self.btnSeriesTable.clicked.connect(self._edit_series)
         bb.button(QDialogButtonBox.Close).clicked.connect(self.accept)
         bb.helpRequested.connect(self._help)
         rv.addWidget(bb)
@@ -245,6 +254,9 @@ class SeqFitDialog(QDialog):
                 "larmor": float(rec.get("larmor_frequency_MHz", 0.0) or 0.0),
                 "spin": float(rec.get("spin_rate_Hz", 0.0) or 0.0),
                 "sample": sample_label(p, rec), "path": p,
+                # the sample folder and title line (io/scan through the loader)
+                "folder": str((rec.get("provenance") or {}).get("sample_folder", "")),
+                "title": str((rec.get("provenance") or {}).get("title", "")),
                 "proc": _proc_number(p),
                 # acqus / procs / auditp (None for CSV / fxmla)
                 "params": comparability.read_params(p)})
@@ -252,6 +264,7 @@ class SeqFitDialog(QDialog):
                 self._model_sites = rec["sites"]
         for d, lab in zip(data, disambiguate([d["sample"] for d in data],
                                              [d["path"] for d in data])):
+            d["group"] = d["sample"]             # the base label: replicates share it
             d["sample"] = lab
         self._comparison = comparability.compare(
             [d["params"] for d in data], [d["sample"] for d in data])
@@ -408,6 +421,7 @@ class SeqFitDialog(QDialog):
             self.status.setText("need a model and at least two spectra"); return
         self.btnAuto.setEnabled(False); self.btnFit.setEnabled(False)
         self.btnCancel.setEnabled(True); self.btnStop.setEnabled(True)
+        self.btnSeriesTable.setEnabled(False)          # _on_step indexes by k
         self.prog.setRange(0, 0)
         self._pre_recipes = copy.deepcopy(self._recipes)
         _save_tol(self.tol.value())
@@ -437,6 +451,7 @@ class SeqFitDialog(QDialog):
         self.prog.setRange(0, 100); self.prog.setValue(0 if mode == "cancel" else 100)
         self.btnAuto.setEnabled(True); self.btnFit.setEnabled(True)
         self.btnCancel.setEnabled(False); self.btnStop.setEnabled(False)
+        self.btnSeriesTable.setEnabled(True)
         if mode == "cancel":
             self._recipes = self._pre_recipes
             self.status.setText("sweep cancelled — reverted")
@@ -453,6 +468,7 @@ class SeqFitDialog(QDialog):
         self.prog.setRange(0, 100); self.prog.setValue(0)
         self.btnAuto.setEnabled(True); self.btnFit.setEnabled(True)
         self.btnCancel.setEnabled(False); self.btnStop.setEnabled(False)
+        self.btnSeriesTable.setEnabled(True)
         self.status.setText(f"sweep failed: {msg}")
 
     # ------------------------------------------------------------------ evolution plots
@@ -572,7 +588,57 @@ class SeqFitDialog(QDialog):
             recipes=recs, labels=[d["sample"] for d in self._data],
             rmsd=list(self._live_rmsd), per_dataset=[], history=[], passes=0,
             propagated=self._propagate())
-        SeriesPlotDialog(self, res).exec()
+        SeriesPlotDialog(self, res, series=self._series).exec()
+
+    # ------------------------------------------------------------------ series table
+    def _edit_series(self):
+        """Series table…: names, replicate groups and the sweep order in one
+        editor (larmor.desktop.series_table_dialog); OK renames in place and
+        re-sequences the spectra, their recipes and RMSDs."""
+        from larmor.desktop.series_table_dialog import SeriesTableDialog
+
+        busy = self._worker is not None and self._worker.isRunning()
+        dlg = SeriesTableDialog(self, self._series, locked=busy)
+        if dlg.exec() != QDialog.Accepted:
+            return
+        self._apply_series(dlg.table(), dlg.perm())
+
+    def _apply_series(self, table: SeriesTable, perm: list):
+        """Adopt an edited series table. ``perm`` (new position -> current
+        index) permutes _data, _recipes and _live_rmsd together, moves the
+        current spectrum with them and permutes a finished sweep's lists in
+        place (SeqFitResult pairs by index -- its recipes carry no source_path
+        of their own; ``history`` is per pass and order-free). Names go into
+        d["sample"] and each recipe's sample, which the nav label, the plot
+        title, the saved file names and the Series plot read."""
+        n = len(self._data)
+        perm = list(perm)
+        moved = perm != list(range(n))
+        if moved:
+            self._data = [self._data[k] for k in perm]
+            self._recipes = [self._recipes[k] for k in perm]
+            self._live_rmsd = [self._live_rmsd[k] for k in perm]
+            self._cur = perm.index(self._cur) if self._cur in perm else 0
+            if self._result is not None:
+                for name in ("recipes", "labels", "rmsd", "per_dataset"):
+                    seq = getattr(self._result, name, None)
+                    if isinstance(seq, list) and len(seq) == n:
+                        setattr(self._result, name, [seq[k] for k in perm])
+        self._series = table
+        for k, (d, row) in enumerate(zip(self._data, table.rows)):
+            d["sample"] = row.display_name
+            d["group"] = row.group
+            self._recipes[k]["sample"] = row.display_name
+            if self._result is not None and k < len(self._result.labels):
+                self._result.labels[k] = row.display_name
+                self._result.recipes[k].sample = row.display_name
+        self._comparison = comparability.compare(
+            [d["params"] for d in self._data], [d["sample"] for d in self._data])
+        self._show_current()
+        self._draw_rms()
+        self._draw_traj()
+        self.status.setText(f"series table applied — {n} spectra"
+                            + (" in a new order" if moved else ""))
 
     def _help(self):
         from larmor.desktop.help_dialog import show_help

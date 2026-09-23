@@ -161,6 +161,15 @@ def test_propose_mapping_exact_then_group_then_normalised_and_flags_ambiguity():
     # two normalised candidates and no exact one -> ambiguous, no default
     m4 = st.propose_mapping(t, [{"sample": "P5Bi8-12"}, {"sample": "p5 bi8 12"}], "sample")
     assert m4[0].how == "ambiguous" and m4[0].csv_row is None and m4[0].candidates == [0, 1]
+    # a batch CSV written before the folder-derived names: its scopes are raw
+    # sample folders -> read through io/scan's tokens (how = 'folder')
+    old = [{"scope": "04272026_P5-Bi8-12_SS_ALP"}, {"scope": "03232026_P5-Bi0_SS_ALP"},
+           {"scope": "shared"}]
+    m5 = st.propose_mapping(t, old, "scope")
+    assert [(x.how, x.csv_row) for x in m5[:2]] == [("folder", 0), ("folder", 1)]
+    assert m5[2].how == "none" and m5[3].how == "none"
+    m6 = st.propose_mapping(rep, old, "scope")           # the triple, through its group
+    assert [(x.how, x.csv_row) for x in m6] == [("folder", 0)] * 3
 
 
 def test_apply_join_writes_numbers_only_and_tags_labels(tmp_path):

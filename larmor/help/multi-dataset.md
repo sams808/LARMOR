@@ -223,7 +223,7 @@ manual, §2, describes the rule and the flags.
    except the amplitude**, which is always free per spectrum (and may fall to
    **zero** where a line is absent). This holds regardless of the recipe's own
    pin/vary flags. To let a parameter adapt across the series, tick it under
-   **Release per spectrum** (see step 4) — nothing else moves.
+   **Release per spectrum** (see step 5) — nothing else moves.
 2. **See them all — as spectra.** The spectra show in a **3×3 grid** with tabs
    (page through 10–15 at a time). Each cell is a real NMR plot: **sample name**
    top-left, ppm running **high→low**, and you can **drag to zoom** (right-click ▸
@@ -244,7 +244,48 @@ manual, §2, describes the rule and the flags.
    S/N) shows its RMSD in red with the reason as a tooltip. **Esc** clears
    the spotlight; untick **table** to hide it, or drag the divider to trade
    grid height for table height.
-3. **Baseline, per spectrum.** **Fit baseline…** estimates and subtracts a
+3. **Name and order the series.** Each panel is titled by its **sample** as
+   the loader derives it (*Getting started*, §2): the sample folder without
+   its date, rotor and operator tokens (`01192026_SR31649_Base0Ca_SS_ALP` →
+   `Base0Ca`), the title's `Sample …` line for an EXPNO-per-sample layout,
+   and the folder's date token when one glass was measured twice
+   (`P5-Bi8-12 (04272026)`). The TopSpin title line is not the name — the
+   five 2026-01 glasses all read `11B with short tip angle` — it stays in the
+   panel tooltip and in the `title` column. **Series table…** opens the one
+   editable table behind the series: `#` | `name` | `group` | `folder` |
+   `title` | one column per numeric metadata column. The Explorer hands
+   spectra over in tree order, which is alphabetical by folder and therefore
+   by rotor (`SR31648` sorts before `SR31649`: 0Ca, 3Ca, 1Ca, 2Ca, 4Ca); the
+   ▲ ▼ arrows and **Sort by…** (natural name order — `0Ca, 1Ca, …, 10Ca` — or
+   any numeric column) set the series order, and OK applies it everywhere at
+   once: the grid, the results table, the CSV rows, the saved-recipe names
+   and the Series plot. A fitted result follows its spectra (paired by
+   source path), so reordering never asks for a refit. Names are kept
+   **unique** — a typed collision gets ` (2)` — because a name is a CSV scope
+   and a recipe file stem; replicates are expressed through the **group**
+   column instead (two folders of one glass share the base name as their
+   group, which is what *average replicates* in the Series plot collapses).
+   **Join CSV…** brings composition columns in: a wide table with one row
+   per sample (an EPMA export — delimiter and BOM are detected, the sample
+   column is found by name), or another batch's long `batch_table*.csv`,
+   recognised by its `scope, site, param, value` header and pivoted to one
+   `<site> <parameter>` column per scope (a 31P batch joined to a 27Al
+   series, for instance). The proposed row mapping is shown first — exact
+   name or group, then a normalised key (`P5-Bi8-12` = `P5Bi8-12`), an amber
+   `(none)` where nothing matched, a blank choice with the candidates listed
+   where several rows match loosely — with a checklist of the numeric
+   columns (a `_sd` / `_err` / `_u` / ` ±` partner is paired as the column's
+   ± automatically; oxide columns are ticked by default) and a tag,
+   *analysed* / *nominal* / none, that prefixes the labels. Nothing is joined
+   on Cancel. **Add column…** types a column by hand; **Save table…** /
+   **Load table…** keep the whole table as `<name>.series.json` (rows pair by
+   source path, else by name, and the saved order is followed). **Save
+   table…** and **Export CSV…** (step 7) also write `<stem>_series.csv`
+   beside the long CSV — position, name, group, folder, title, source path,
+   every column and the RMSD — the wide table a notebook otherwise rebuilds
+   by hand. The batch session and the project bundle carry the table; the
+   Sequential fit (§8) shares the same dialog.
+4. **Baseline, per spectrum.** **Fit baseline…** estimates and subtracts a
    baseline from every spectrum *independently* before fitting — **Polynomial**
    (robust asymmetric, choose the order), **Iterative** (Yon 2020), or a flat
    edge-median level. **Reset** restores the raw spectra. For a spectrum that
@@ -275,7 +316,7 @@ manual, §2, describes the rule and the flags.
    fixed for that spectrum, even if "Release per spectrum" is ticked for
    them elsewhere — a line that isn't there has nothing to release, and
    letting it drift would only hand the fit useless free parameters.
-4. **One Fit button; choose what may move.** **Fit** refines **only the
+5. **One Fit button; choose what may move.** **Fit** refines **only the
    amplitudes** per spectrum — everything else is held at the recipe. Whichever
    parameters you tick under **Release per spectrum** are additionally fit,
    **independently per spectrum**, allowed to drift by **±X %** around their
@@ -285,7 +326,7 @@ manual, §2, describes the rule and the flags.
    residual stdev stops improving. Interrupt any time with **Cancel** (discard,
    revert) or **Stop** (keep the latest iteration) — the same two modes as the
    main fitter.
-5. **Error calculation.** After the fit, choose how the per-spectrum errors are
+6. **Error calculation.** After the fit, choose how the per-spectrum errors are
    estimated from the **Error calculation** menu, then **Compute errors**:
    * **Covariance** — the least-squares covariance stderr. The batch fit's own
      pass skips the (potentially costly) errorbar-rescue step for speed, so
@@ -316,7 +357,7 @@ manual, §2, describes the rule and the flags.
    flight on each core rather than cutting off instantly, the same "keeps
    the current work" behaviour as everywhere else in LARMOR that can be
    interrupted.
-6. **Save.** **Save individual fits…** writes one LARMOR `.recipe.json` per
+7. **Save.** **Save individual fits…** writes one LARMOR `.recipe.json` per
    spectrum, named **automatically**
    (`sample_nucleus_recipe_batch_YYYYMMDD_HHMM`) or with a **name you type for
    each**
@@ -359,14 +400,35 @@ manual, §2, describes the rule and the flags.
    **Series plot…** charts how any parameter (δ_iso, width, C_Q, η, or population %)
    evolves along the series. Its **Error bars** menu chooses which computed error
    to draw and export — *covariance*, *Monte-Carlo*, or *χ² profile* (whichever
-   you ran in step 5), or *none*. The **integrated population %** carries an
+   you ran in step 6), or *none*. The **integrated population %** carries an
    error too — first-order from the amplitude's error under the chosen method
    (the other sites' amplitude errors, which also shift the total, are
    neglected — the same approximation the Report table uses). Export the
    numbers (the ± column is labelled with the chosen method) or the figure, and
    **Send to Plotting studio** carries the points *and their error bars* into
    the studio, where the axes, limits,
-   ticks, legend and fonts are fully customisable. (For a fuller publication table
+   ticks, legend and fonts are fully customisable. The **x axis** menu
+   replaces the series order by any numeric column of the Series table
+   (step 3): points sit at the column's value, sorted by it, its ± becomes
+   x error bars and the column label the axis title — population against
+   analysed P2O5, or a 27Al shift against the 31P bonded-P fraction joined
+   from another batch. **Average replicates** (shown when a group has more
+   than one member, on by default then) collapses each group to its mean;
+   the bar is the sample standard deviation (ddof = 1) — a singleton keeps
+   its own fit error — and the exported CSV carries `n`, `x` and `x ±`.
+   **Fit line** adds an ordinary-least-squares line through three or more
+   points, labelled with the slope ± its error, Pearson r and n; it travels
+   with the figure export and into the studio. **Species bar…** opens the
+   Plotting studio on a 100 %-stacked bar of every site's integral
+   population, one bar per name (or per group), in the current x order.
+   **Export DUST CSV…** writes a composition file DUST imports directly:
+   `Sample`, the Series table's oxide columns under DUST's canonical names
+   (`P2O5_mol`, `Bi2O3 (mol%)` → `P2O5`, `Bi2O3`; non-oxide columns are
+   skipped and named), then `N4_measured` and `N4_measured_err` — the
+   selected sites' summed integral population as a fraction, with its
+   error. DUST's import dialog maps the two N4 columns to *Ignore*; join
+   them against DUST's Results CSV by `Sample` to compare measured and
+   predicted N4. (For a fuller publication table
    across independent fits, see the **Batch fit report** tool.)
 
 It builds on the same co-fit engine (§3), so the shared parameters carry full
@@ -429,6 +491,8 @@ figure without hand-assembling panels:
    from batch CSV…** to pivot one parameter (e.g. `amplitude`) out of a
    `batch_table*.csv` automatically, one row per sample — each bar normalizes
    to 100% on its own, so raw amplitudes work without pre-converting to %.
+   From the Series plot, **Species bar…** builds the same chart directly,
+   its categories following the Series table's names and order.
 4. **Auto update / Preview.** Auto update is **off by default** — a batch
    grid with many panels (each a full reconstruction + population-%
    integral) can be slow to redo on every tweak. **Preview** renders on
@@ -453,7 +517,8 @@ The batch tool (§6) assumes one *shared* model. Some series don't work that way
 the lineshape **evolves smoothly** from one end-member to the other (a
 composition or temperature series), and each spectrum deserves its own fit — just
 one that starts from where its neighbour ended. **Tools ▸ Sequential fit** does
-exactly that. Ctrl/Shift-select the series in the Explorer (in order), open it,
+exactly that. Ctrl/Shift-select the series in the Explorer in any order —
+**Series table…** sets the sweep order and the names (§6, step 3) — open it,
 and you get a **one-spectrum-at-a-time** workbench:
 
 1. **Precise, per-spectrum control.** The current spectrum shows with its model
@@ -476,7 +541,7 @@ and you get a **one-spectrum-at-a-time** workbench:
 4. **Save.** **Save individual fits…** (auto `sample_nucleus_seq_YYYYMMDD_HHMM` or
    a name per fit) and **Series plot…** (parameter/population evolution, with
    export) — as in the batch tool. **Publication bundle…** is the batch tool's
-   bundle (§6, step 6) for the series — `seq_table.csv` instead of
+   bundle (§6, step 7) for the series — `seq_table.csv` instead of
    `batch_table.csv`, otherwise the same files — and works after manual **Fit
    current** steps as well as after an auto sweep (a member never fitted gets a
    manifest row marked *not fitted*); the saved recipes carry their source

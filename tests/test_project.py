@@ -389,6 +389,38 @@ def test_relocate_batch_state_rewrites_moved_paths(tmp_path):
     assert state["paths"] == [old_a, old_b]          # input untouched
 
 
+def test_relocate_batch_state_rewrites_series_row_paths(tmp_path):
+    """The Series table's rows pair with spectra by source_path
+    (SeriesTable.aligned_to), so a moved project rewrites them with the same
+    mapping as per_spectrum and the recipes; the input dict is untouched."""
+    from larmor import project
+
+    new_dir = tmp_path / "moved"
+    (new_dir / "data").mkdir(parents=True)
+    a = new_dir / "data" / "a.csv"
+    a.write_text("x")
+    old_a, old_b = "D:/old/data/a.csv", "D:/old/data/b.csv"
+    rows = [{"source_path": old_a, "display_name": "a", "group": "a", "folder": "",
+             "title": "", "values": {"CaO": 1.0}},
+            {"source_path": old_b, "display_name": "b", "group": "a", "folder": "",
+             "title": "", "values": {"CaO": 2.0}}]
+    state = {"paths": [old_a, old_b], "paths_rel": ["data/a.csv", "data/b.csv"],
+             "per_spectrum": {old_a: {}, old_b: {}},
+             "series": {"version": 1, "rows": rows,
+                        "columns": [{"key": "CaO", "label": "CaO", "err_key": None,
+                                     "tag": "", "source": ""}]}}
+    st, missing = project.relocate_batch_state(state, new_dir)
+    assert missing == [old_b]
+    assert [r["source_path"] for r in st["series"]["rows"]] == [str(a), old_b]
+    assert st["series"]["rows"][1]["values"] == {"CaO": 2.0}
+    assert st["series"]["columns"] == state["series"]["columns"]
+    assert state["series"]["rows"][0]["source_path"] == old_a     # input untouched
+    # nothing moved: the series dict passes through as is
+    st2, _ = project.relocate_batch_state({"paths": [str(a)], "series": state["series"]},
+                                          new_dir)
+    assert st2["series"] is state["series"]
+
+
 def test_build_bundle_remaps_active_and_counts_drops(tmp_path):
     from larmor import project
 
@@ -827,6 +859,57 @@ def test_batchfit_dialog_session_state_roundtrip(qapp, tmp_path):
     st2 = dlg2.session_state()
     assert {k: v for k, v in json.loads(json.dumps(project.json_safe(st2))).items()
             if k != "result"} == {k: v for k, v in wire.items() if k != "result"}
+
+
+def test_batchfit_dialog_session_state_keeps_series_names_order_and_columns(qapp, tmp_path):
+    """A renamed, reordered series with a typed column survives the session
+    round trip: the rows ride in paths order with their source_path, come
+    back before the result is re-paired, and a spectrum that cannot be
+    reloaded loses only its own row."""
+    from larmor import batchfit, project
+    from larmor.desktop.batchfit_dialog import BatchFitDialog
+    from larmor.series_table import SeriesColumn
+
+    paths = _csv_spectra(tmp_path, 3)
+    model = _model()
+    dlg = BatchFitDialog(None, paths, model)
+    tbl = dlg._series.permuted([1, 0, 2])
+    tbl.rename(1, "glassZ")                               # spectrum 0, now second
+    tbl.add_column(SeriesColumn("CaO (mol%)", "CaO (mol%)"), {0: 1.0, 1: 0.0, 2: 2.0})
+    dlg._apply_series(tbl, [1, 0, 2])
+    assert [d["path"] for d in dlg._data] == [paths[1], paths[0], paths[2]]
+    assert [d["sample"] for d in dlg._data] == ["batch01", "glassZ", "batch02"]
+    res = batchfit.batch_fit(dlg._entries())
+    dlg._done(res)
+    assert res.labels == ["batch01", "glassZ", "batch02"]
+
+    st = dlg.session_state()
+    wire = json.loads(json.dumps(project.json_safe(st)))
+    assert wire["paths"] == [paths[1], paths[0], paths[2]]
+    assert [r["source_path"] for r in wire["series"]["rows"]] == wire["paths"]
+    assert wire["series"]["rows"][1]["display_name"] == "glassZ"
+    assert wire["series"]["columns"][0]["key"] == "CaO (mol%)"
+    dlg2 = BatchFitDialog(None, wire["paths"], {"sites": wire["model_sites"],
+                                                "fit_window_ppm": wire["window"]})
+    assert dlg2.apply_session_state(wire) == []
+    assert dlg2._series.labels() == ["batch01", "glassZ", "batch02"]
+    assert [d["sample"] for d in dlg2._data] == ["batch01", "glassZ", "batch02"]
+    assert [r.values["CaO (mol%)"] for r in dlg2._series.rows] == [1.0, 0.0, 2.0]
+    assert dlg2._result.labels == ["batch01", "glassZ", "batch02"]
+    assert [r.sample for r in dlg2._result.recipes] == dlg2._result.labels
+    assert dlg2._cells[1]["title"].text().startswith("glassZ")
+    assert dlg2.table.item(dlg2._row_of(1), 1).text() == "glassZ"
+    assert dlg2._result.rmsd == pytest.approx(res.rmsd)
+    assert dlg2.session_state()["series"] == wire["series"]
+
+    os.remove(paths[1])
+    dlg3 = BatchFitDialog(None, wire["paths"], {"sites": wire["model_sites"]})
+    notes = dlg3.apply_session_state(wire)
+    assert notes and "could not be reloaded" in notes[0]
+    assert dlg3._series.labels() == ["glassZ", "batch02"]
+    assert [r.values["CaO (mol%)"] for r in dlg3._series.rows] == [0.0, 2.0]
+    assert dlg3._result.labels == ["glassZ", "batch02"]
+    assert [d["sample"] for d in dlg3._data] == ["glassZ", "batch02"]
 
 
 def test_batchfit_dialog_session_aligns_results_when_a_spectrum_is_missing(qapp, tmp_path):

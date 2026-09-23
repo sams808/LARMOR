@@ -172,7 +172,17 @@ Report (quantify)** (F6).
    per spectrum* with one panel per spectrum, titled by sample (`Base0Ca` …
    `Base4Ca`) in that order. The current fit is pre-loaded as the model;
    **Model from recipe…** loads `base0Ca_11B.recipe.json` instead.
-3. Options worth knowing before the first run: `components` overlays each
+3. The panels read `Base0Ca` … `Base4Ca` from the sample folders (the title
+   line `11B with short tip angle` is the same on all five and stays in the
+   tooltip). Via the Explorer the five arrive in tree order, which is
+   alphabetical by folder and therefore by rotor: `Base0Ca`, `Base3Ca`
+   (rotor SR31648), `Base1Ca`, `Base2Ca`, `Base4Ca`. Open **Series table…**,
+   press **Sort by…**, choose `name (natural)` and OK: the grid, the results
+   table and every later export now run 0Ca → 4Ca. **Add column…** with the
+   label `CaO (mol%)` and type 0, 1, 2, 3, 4 into it — the Series plot in §5
+   can then use CaO as its x axis. (**Batch fit picks…** from the Session
+   inventory already hands the five over in sample order.)
+4. Options worth knowing before the first run: `components` overlays each
    site's curve on every panel; `shared scale` puts all panels on one axis
    scale; **Fit baseline…** estimates and subtracts a baseline from every
    spectrum (**Reset** restores the raw data); **Save setup…** /
@@ -181,7 +191,7 @@ Report (quantify)** (F6).
    differ (LB and D1, as §2 measured); **Details…** opens the parameter table
    and **Reprocess all from fid…** rebuilds all five from their fids with one
    window and TDeff before fitting.
-4. **Fit**. Every lineshape parameter is held at the model value and each
+5. **Fit**. Every lineshape parameter is held at the model value and each
    spectrum's amplitudes are fitted; the status line then reads
    `batch fit: 5 spectra, N shared parameters · mean RMSD …` and each panel
    shows its own RMSD (a panel whose RMSD stands out is flagged with ⚠ and a
@@ -230,7 +240,15 @@ runs anywhere.
 - **Series plot…** opens *Series evolution*: pick one or more lines and a
   parameter (BO₄ population against sample, for instance), choose the error
   bars from the computed estimators, and **Export figure…** or
-  **Export parameters (CSV)…**.
+  **Export parameters (CSV)…**. The **x axis** menu offers every numeric
+  column of the Series table — `CaO (mol%)` from §4 puts the five glasses
+  at 0 … 4 mol%, with x error bars when the column has a ± partner;
+  **fit line** draws the least-squares line with its slope ± error, r and
+  n; **average replicates** appears when two spectra share a group and
+  collapses them to a mean ± sample standard deviation. **Species bar…**
+  sends a 100 %-stacked population bar to the Plotting studio, and
+  **Export DUST CSV…** writes `Sample`, the oxide columns and
+  `N4_measured` / `N4_measured_err` for a join against DUST's Results CSV.
 
 Two more tools read what the batch wrote. **Plotting > Plotting studio…**
 has templates for a series — `Stacked series`, `Deconvolution grid`,

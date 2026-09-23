@@ -88,6 +88,56 @@ def test_seqfit_dialog_fit_current_and_auto(qapp, tmp_path):
     assert pos[-1] == pytest.approx(17.0, abs=0.4)
 
 
+def test_seqfit_series_table_reorder_drives_the_sweep_and_the_names(qapp, tmp_path):
+    """Series table… in the sequential fit: a permutation re-sequences the
+    spectra, their recipes, the live RMSDs and the current position; names
+    reach d['sample'], the recipes, the nav label and the sweep result; a
+    finished sweep's lists are permuted alongside."""
+    from larmor.desktop.seqfit_dialog import SeqFitDialog, _SeqWorker
+    from larmor.recipe import Recipe
+
+    paths, model = _series(tmp_path)
+    dlg = SeqFitDialog(None, paths, model)
+    assert dlg.btnSeriesTable.isEnabled()
+    assert dlg._series.labels() == ["s0", "s1", "s2"]
+    assert [d["group"] for d in dlg._data] == ["s0", "s1", "s2"]
+    assert dlg._data[0]["folder"] == "" and dlg._data[0]["title"] == ""
+    dlg._next()
+    assert dlg._cur == 1
+    tbl = dlg._series.permuted([2, 1, 0])
+    tbl.rename(0, "last")
+    dlg._apply_series(tbl, [2, 1, 0])
+    assert [d["path"] for d in dlg._data] == [paths[2], paths[1], paths[0]]
+    assert dlg._cur == 1                                   # s1 moved with the user
+    assert dlg._data[0]["sample"] == "last" == dlg._recipes[0]["sample"]
+    assert dlg._recipes[0]["source_path"] == paths[2]
+    assert dlg._entries()[0][0].sample == "last"
+    assert "spectrum 2 / 3" in dlg.lblNav.text() and "s1" in dlg.lblNav.text()
+    assert "new order" in dlg.status.text()
+    dlg._prev()
+    assert dlg._cur == 0 and dlg.plotTitle.text() == "last"
+    assert dlg._series.labels() == ["last", "s1", "s0"]
+
+    w = _SeqWorker(dlg._entries(), 2, "first", dlg._propagate(), 0, None)
+    w.done.connect(dlg._auto_done)
+    w.run()
+    assert dlg._result.labels == ["last", "s1", "s0"]
+    pos = [Recipe.from_dict(d).sites[0].params["isotropic_chemical_shift_ppm"].value
+           for d in dlg._recipes]
+    assert pos[0] == pytest.approx(17.0, abs=0.4)          # paths[2] leads the sweep now
+    assert pos[-1] == pytest.approx(13.0, abs=0.4)
+    rm = list(dlg._live_rmsd)
+    tbl2 = dlg._series.permuted([1, 0, 2])
+    dlg._apply_series(tbl2, [1, 0, 2])
+    assert dlg._result.labels == ["s1", "last", "s0"]
+    assert dlg._result.rmsd == pytest.approx([rm[1], rm[0], rm[2]])
+    assert dlg._live_rmsd == pytest.approx([rm[1], rm[0], rm[2]])
+    assert [r.sample for r in dlg._result.recipes] == dlg._result.labels
+    assert [d["sample"] for d in dlg._recipes] == dlg._result.labels
+    assert dlg._cur == 1 and "spectrum 2 / 3" in dlg.lblNav.text()
+    assert dlg.btnSeriesTable.isEnabled()
+
+
 def test_seqfit_dialog_publication_bundle_after_manual_fits(qapp, tmp_path, monkeypatch):
     """Publication bundle… works after a manual Fit current alone (unfitted
     members get note 'not fitted'), recipes carry their source path, and a
