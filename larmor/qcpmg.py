@@ -269,6 +269,112 @@ def cg_window(ppm: np.ndarray, y: np.ndarray, *, rel_floor: float = 0.05
     return float(max(x[lo_i], x[hi_i])), float(min(x[lo_i], x[hi_i]))
 
 
+#: a spectrum whose positive part repeats at a lag shorter than this many
+#: points is not a comb (adjacent-sample noise correlation)
+COMB_MIN_PERIOD_PTS = 4
+#: autocorrelation modulation depth (first minimum to the following maximum)
+#: that separates a spikelet comb from a smooth band with noise
+COMB_MIN_DEPTH = 0.2
+#: a comb needs at least this many spikelets inside the envelope's window
+COMB_MIN_SPIKELETS = 5
+
+
+def detect_comb(ppm: np.ndarray, y: np.ndarray) -> tuple[int, float, float]:
+    """(period_pts, period_ppm, depth) of a spikelet comb in a SPECTRUM, or
+    (0, 0.0, depth) when the trace is a smooth band.
+
+    The positive part of the trace is autocorrelated; a comb gives a deep
+    modulation -- the correlation falls to a minimum between spikelets and
+    rises again at one spikelet spacing (0.96 at 56 points = 6.8 ppm on a
+    real 35Cl QCPMG 1r). Noise on a smooth band rises immediately (lag 2-3)
+    with a depth of ~0.01, which is why the first MINIMUM is located before
+    the following maximum and a depth of at least ``COMB_MIN_DEPTH`` is
+    required.
+    """
+    ppm = np.asarray(ppm, float); y = np.asarray(y, float)
+    n = y.size
+    if n < 64:
+        return 0, 0.0, 0.0
+    order = np.argsort(ppm)
+    x, v = ppm[order], y[order]
+    v = np.clip(v - float(np.median(v)), 0.0, None)
+    if not np.any(v > 0):
+        return 0, 0.0, 0.0
+    ac = np.correlate(v, v, "full")[n - 1:]
+    if ac[0] <= 0:
+        return 0, 0.0, 0.0
+    ac = ac / ac[0]
+    half = n // 2
+    d = np.diff(ac[:half])
+    # the first local minimum after the central lobe (first sign change)
+    mins = np.where((d[:-1] < 0) & (d[1:] >= 0))[0] + 1
+    if mins.size == 0:
+        return 0, 0.0, 0.0
+    i_min = int(mins[0])
+    k = i_min + int(np.argmax(ac[i_min:half]))
+    depth = float(ac[k] - ac[i_min])
+    dx = float(np.median(np.diff(x))) if n > 1 else 0.0
+    if k < COMB_MIN_PERIOD_PTS or depth < COMB_MIN_DEPTH:
+        return 0, 0.0, depth
+    return int(k), float(k * dx), depth
+
+
+@dataclass
+class WindowSeed:
+    """A proposed centre-of-gravity window and how it was found."""
+
+    hi_ppm: float
+    lo_ppm: float
+    comb: bool = False            # the trace is a spikelet comb
+    period_ppm: float = 0.0       # spikelet spacing (ppm) when it is
+    n_spikelets: int = 0          # spikelets inside the seeded window
+    note: str = ""
+
+    @property
+    def window(self) -> tuple[float, float]:
+        return (self.lo_ppm, self.hi_ppm)
+
+
+def seed_window(ppm: np.ndarray, y: np.ndarray, meta: dict | None = None
+                ) -> WindowSeed:
+    """The window to propose for a δ_CG measurement: :func:`cg_window` on the
+    trace itself, or -- when the trace is a spikelet COMB (a TopSpin 1r of a
+    QCPMG EXPNO) -- on its envelope.
+
+    The first-minima walk of :func:`cg_window` stops at the first gap of a
+    comb, so on a QCPMG 1r it returns ONE spikelet (measured: (-139.9, -73.2)
+    and δcg -105.1 on a real 35Cl 1r whose sum-echo window is (-206.8, -35.4)
+    and δcg -112.8 -- 7.7 ppm, 8.6 ppm on δiso through the low-field lever).
+    The comb is detected from the DATA (:func:`detect_comb`); a max-filter
+    over one spikelet period gives the envelope, whose first-minima window
+    spans the band ((-208.1, -38.8) on that dataset, δcg -114.1). The
+    pulse-program name in ``meta`` only sharpens the wording.
+    """
+    ppm = np.asarray(ppm, float); y = np.asarray(y, float)
+    hi, lo = cg_window(ppm, y)
+    k, period_ppm, _depth = detect_comb(ppm, y)
+    if k <= 0:
+        return WindowSeed(hi, lo)
+    from scipy.ndimage import maximum_filter1d
+    order = np.argsort(ppm)
+    x, v = ppm[order], y[order]
+    env = maximum_filter1d(v, size=int(k), mode="nearest")
+    ehi, elo = cg_window(x, env)
+    if not (np.isfinite(ehi) and np.isfinite(elo)) or ehi <= elo:
+        return WindowSeed(hi, lo)
+    n_spk = int(round((ehi - elo) / period_ppm)) if period_ppm > 0 else 0
+    if n_spk < COMB_MIN_SPIKELETS:
+        return WindowSeed(hi, lo)
+    pp = str((meta or {}).get("pulse_program", "") or "").lower()
+    what = ("a QCPMG spikelet spectrum" if "cpmg" in pp
+            else "a spikelet comb")
+    note = (f"this is {what} (spacing {period_ppm:.1f} ppm, {n_spk} spikelets "
+            "in the band): the window was seeded from its envelope -- prefer "
+            "the sum-echo dataset (Tools > QCPMG, Save as dataset / -> "
+            "infinite-field)")
+    return WindowSeed(float(ehi), float(elo), True, float(period_ppm), n_spk, note)
+
+
 def centre_of_gravity(ppm: np.ndarray, y: np.ndarray,
                       window: tuple[float, float] | None = None, *,
                       jitter_frac: float = 0.10

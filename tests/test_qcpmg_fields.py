@@ -321,3 +321,121 @@ def test_shared_dialog_reconciles_the_nucleus(qapp):
         e.close(); d.close()
     finally:
         qfd._shared = None
+
+
+# ---------------------------------------------------------------- fix 6
+def _comb_spectrum(asymmetric=True):
+    """A CT-like envelope sampled by a spikelet comb whose spacing is ~1/25
+    of the band -- what a TopSpin 1r of a QCPMG EXPNO looks like."""
+    x = np.linspace(-300.0, 100.0, 4001)
+    if asymmetric:
+        env = np.where(x < -105.0, np.exp(-(((x + 105.0) / 80.0) ** 2)),
+                       np.exp(-(((x + 105.0) / 30.0) ** 2)))
+    else:
+        env = np.exp(-(((x + 105.0) / 60.0) ** 2))
+    comb = np.zeros_like(x)
+    for c in np.arange(-300.0, 100.0, 4.0):
+        comb += np.exp(-((x - c) / 0.3) ** 2)
+    return x, env, env * comb
+
+
+def test_seed_window_detects_a_spikelet_comb_and_seeds_from_the_envelope():
+    from larmor import qcpmg
+
+    x, env, y = _comb_spectrum()
+    seed = qcpmg.seed_window(x, y, {"pulse_program": "qcpmg_dec.ih"})
+    assert seed.comb and seed.period_ppm == pytest.approx(4.0, abs=0.2)
+    assert seed.n_spikelets >= 5 and "QCPMG spikelet" in seed.note
+    # the seeded window spans the envelope, the raw first-minima one does not
+    hi0, lo0 = qcpmg.cg_window(x, y)
+    assert (seed.hi_ppm - seed.lo_ppm) > 5 * (hi0 - lo0)
+    cg_env = qcpmg.centre_of_gravity(x, env, seed.window)[0]
+    cg_comb = qcpmg.centre_of_gravity(x, y, seed.window)[0]
+    cg_old = qcpmg.centre_of_gravity(x, y)[0]
+    assert abs(cg_comb - cg_env) < 1.0                 # tracks the envelope
+    assert abs(cg_old - cg_env) > 8.0                  # the bug this pins
+    # a smooth band, with noise at any S/N, is NOT a comb
+    rng = np.random.default_rng(0)
+    for sn in (100.0, 20.0, 8.0):
+        ys = env + rng.standard_normal(x.size) / sn
+        assert not qcpmg.seed_window(x, ys).comb
+        assert qcpmg.detect_comb(x, ys)[0] == 0
+
+
+def test_add_dataset_spectrum_flags_a_comb_and_measures_its_envelope(qapp):
+    from larmor import qcpmg
+    from larmor.desktop.qcpmg_fields_dialog import QcpmgFieldsDialog
+
+    x, env, y = _comb_spectrum()
+    d = QcpmgFieldsDialog(None, "35Cl")
+    r = d.add_dataset_spectrum(78.354, x, y, magnitude=None,
+                               source="Bruker 1r test/1/pdata/1")
+    ds = d._ds[d._row_ds_id(r)]
+    assert ds["comb"] and "spikelet" in ds["seed_note"]
+    assert "spikelet" in d.table.item(r, 1).toolTip()
+    assert "spikelet" in d.wresult.text()
+    cg_env = qcpmg.centre_of_gravity(x, env, ds["window"])[0]
+    assert float(d.table.item(r, 1).text()) == pytest.approx(cg_env, abs=1.0)
+    assert "mode unknown" in d.table.item(r, 0).toolTip()      # magnitude=None
+    assert "source: Bruker 1r" in d.table.item(r, 0).toolTip()
+    d.close()
+
+
+def test_pick_datasets_accepts_a_larmor_csv(qapp, tmp_path, monkeypatch):
+    """The picker promised 'saved datasets' but only opened Bruker 1r files:
+    the LAW*.csv sum-echo datasets were 'skipped'."""
+    from PySide6.QtWidgets import QFileDialog, QMessageBox
+
+    from larmor.desktop.qcpmg_fields_dialog import QcpmgFieldsDialog
+    from larmor.io import spectra
+
+    x = np.linspace(-300.0, 100.0, 3001)
+    y = np.exp(-(((x + 105.0) / 25.0) ** 2))
+    p = tmp_path / "LAW0Ca-3Cl_850_MHz.csv"
+    spectra.write_csv(p, x, y, {"nucleus": "35Cl", "larmor_MHz": 78.354,
+                                "sample": "x · QCPMG sum echo (LB 75 Hz, magnitude)"})
+    monkeypatch.setattr(QFileDialog, "getOpenFileNames",
+                        staticmethod(lambda *a, **k: ([str(p)], "")))
+    warned = []
+    monkeypatch.setattr(QMessageBox, "warning",
+                        staticmethod(lambda *a, **k: warned.append(a)))
+    d = QcpmgFieldsDialog(None, "35Cl")
+    n0 = d.table.rowCount()
+    d._pick_datasets()
+    assert not warned
+    assert d.table.rowCount() == n0 + 1
+    r = n0
+    assert float(d.table.item(r, 0).text()) == pytest.approx(78.354)
+    assert float(d.table.item(r, 1).text()) == pytest.approx(-105.0, abs=1.0)
+    ds = d._ds[d._row_ds_id(r)]
+    assert ds["magnitude"] is True                   # legacy ', magnitude)'
+    assert "LAW0Ca-3Cl_850_MHz.csv" in ds["source"]
+    d.close()
+
+
+def test_real_qcpmg_1r_is_a_comb_read_as_magnitude():
+    """The MagLab 35Cl EXPNO 1 1r (PH_mod = 2): its first-minima window is one
+    spikelet gap (dcg -105.1) while the sum-echo CSV gives -112.8; seeded
+    from the envelope the 1r tracks the CSV to ~1.3 ppm."""
+    from larmor.io import spectra
+    from larmor.qcpmg_fields import read_field_spectrum
+    from larmor import qcpmg
+    from tests.conftest import MAGLAB_35CL, require
+
+    one_r = require(MAGLAB_35CL / "1" / "pdata" / "1" / "1r")
+    csv = require(MAGLAB_35CL.parent / "LAW0Ca-3Cl_850_MHz.csv")
+    fs = read_field_spectrum(str(one_r))
+    assert fs["magnitude"] is True and fs["meta"].get("ph_mod") == 2
+    assert fs["nucleus"] == "35Cl"
+    assert fs["larmor"] == pytest.approx(78.354, abs=1e-3)
+    seed = fs["seed"]
+    assert seed.comb and seed.period_ppm == pytest.approx(6.8, abs=0.2)
+    assert seed.lo_ppm == pytest.approx(-208.1, abs=3.0)
+    assert seed.hi_ppm == pytest.approx(-38.8, abs=4.0)
+    cg_1r = qcpmg.centre_of_gravity(fs["ppm"], fs["amp"], seed.window)[0]
+    px, py, _ = spectra.read_csv(csv)
+    cg_csv = qcpmg.centre_of_gravity(px, py)[0]
+    assert cg_csv == pytest.approx(-112.76, abs=0.05)
+    assert abs(cg_1r - cg_csv) < 2.0
+    # and the raw first-minima window really was the 7.7 ppm bug
+    assert qcpmg.centre_of_gravity(fs["ppm"], fs["amp"])[0] == pytest.approx(-105.1, abs=0.3)

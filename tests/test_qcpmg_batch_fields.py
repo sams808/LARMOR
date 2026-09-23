@@ -157,3 +157,27 @@ def test_batch_grid_checks_the_files_nucleus(qapp, tmp_path, monkeypatch):
     from larmor.qcpmg_fields import cq_from_slope
     assert res.cq_MHz == pytest.approx(cq_from_slope(res.slope, 1.5, 0.7))
     d.close()
+
+
+# ---------------------------------------------------------------- fix 6
+def test_batch_cell_seeds_a_comb_from_its_envelope(qapp, tmp_path):
+    from larmor import qcpmg
+    from larmor.desktop.qcpmg_batch_dialog import QcpmgBatchFieldsDialog
+
+    x = np.linspace(-300.0, 100.0, 4001)
+    env = np.where(x < -105.0, np.exp(-(((x + 105.0) / 80.0) ** 2)),
+                   np.exp(-(((x + 105.0) / 30.0) ** 2)))
+    comb = np.zeros_like(x)
+    for c in np.arange(-300.0, 100.0, 4.0):
+        comb += np.exp(-((x - c) / 0.3) ** 2)
+    p = tmp_path / "comb.csv"
+    spectra.write_csv(p, x, env * comb, {"nucleus": "35Cl", "larmor_MHz": 78.354})
+    d = QcpmgBatchFieldsDialog(None, "35Cl")
+    d._load_cell(0, 1, str(p))
+    cell = d.cells[(0, 1)]
+    assert cell["comb"] and "spikelet" in cell["seed_note"]
+    assert "spikelet" in d.table.item(0, 1).text()
+    cg_env = qcpmg.centre_of_gravity(x, env, cell["window"])[0]
+    assert cell["cg"] == pytest.approx(cg_env, abs=1.0)
+    assert abs(qcpmg.centre_of_gravity(x, env * comb)[0] - cg_env) > 8.0
+    d.close()

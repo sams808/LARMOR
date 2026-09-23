@@ -26,6 +26,7 @@ the excitation for provenance; it does not change Eq. (1) in this limit.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import numpy as np
 
@@ -343,6 +344,74 @@ def centre_of_gravity(ppm: np.ndarray, amp: np.ndarray,
         ppm, a = ppm[m], a[m]
     s = a.sum()
     return float((ppm * a).sum() / s) if s > 0 else float("nan")
+
+
+def spectrum_mode_from_meta(meta: dict) -> bool | None:
+    """True (magnitude) / False (absorption) / None (unknown) from a spectrum's
+    metadata: the ``spectrum_mode`` header a saved dataset carries, else the
+    legacy ', magnitude)' suffix of its sample line, else procs ``ph_mod``
+    (2 = mc) of a Bruker 1r."""
+    mode = str(meta.get("spectrum_mode", "") or "").lower()
+    if mode.startswith("magnitude"):
+        return True
+    if mode.startswith("absorption"):
+        return False
+    sample = str(meta.get("sample", "") or "")
+    if "QCPMG sum echo" in sample:
+        return "magnitude" in sample.lower()
+    if meta.get("ph_mod") is not None:
+        try:
+            return int(meta["ph_mod"]) == 2
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def read_field_spectrum(path: str) -> dict:
+    """Load one field's spectrum for either multi-field dialog.
+
+    Returns ``{"ppm", "amp", "larmor", "nucleus", "magnitude", "source",
+    "meta", "seed"}``. A LARMOR .csv (the sum-echo dataset *Save as
+    dataset...* writes) supplies the Larmor frequency, nucleus and processing
+    mode from its header; a Bruker 1r supplies them from acqus/procs (mode
+    from PH_mod) and is checked for a spikelet comb, whose window is then
+    seeded from the envelope (:func:`larmor.qcpmg.seed_window`).
+    """
+    from larmor import qcpmg
+    from larmor.io import bruker
+
+    try:
+        ref = bruker.resolve(path)
+    except (ValueError, FileNotFoundError):
+        ref = None
+    if ref is not None:
+        d = bruker.read(path)
+        if d.ndim != 1 or d.domain != "freq":
+            raise ValueError("not a processed 1D spectrum")
+        ppm = np.asarray(d.axes[0].values, float)
+        amp = np.asarray(d.data, float)
+        meta = dict(d.meta)
+        larmor = float(meta.get("larmor_MHz", 0.0) or 0.0)
+        nucleus = str(meta.get("nucleus", "") or "").strip()
+        source = f"Bruker 1r {ref.expno}/pdata/{ref.procno}"
+    else:
+        from larmor.io import spectra
+        from larmor.loader import load_any
+
+        ppm, amp, recipe, _summary, _warn = load_any(path)
+        ppm = np.asarray(ppm, float); amp = np.asarray(amp, float)
+        larmor = float(recipe.get("larmor_frequency_MHz") or 0.0)
+        nucleus = str(recipe.get("nucleus") or "").strip()
+        meta = {}
+        if str(recipe.get("source_kind", "")) == "csv":
+            _, _, meta = spectra.read_csv(path)
+        source = f"dataset {Path(path).name}"
+    if not larmor:
+        raise ValueError("no Larmor frequency in the file — save it from "
+                         "the QCPMG dialog, which records one")
+    return {"ppm": ppm, "amp": amp, "larmor": larmor, "nucleus": nucleus,
+            "magnitude": spectrum_mode_from_meta(meta), "source": source,
+            "meta": meta, "seed": qcpmg.seed_window(ppm, amp, meta)}
 
 
 def fit_samples(rows, spin: float, eta: float = DEFAULT_ETA

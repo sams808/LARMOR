@@ -300,6 +300,17 @@ spectrum's visible range** — zoom to the CT band first), tick whether that fie
 was CT-selective, set η, and **Compute**. It plots δcg vs $1/\nu_0^2$ with the
 fit line and reports δiso, $C_Q$, and $P_Q$ with propagated uncertainties.
 
+**Add from datasets…** expects the **sum-echo dataset** written by *Save as
+dataset…* (its header carries the Larmor frequency, the nucleus and the
+processing mode). A TopSpin `1r` of a QCPMG EXPNO can be opened too, but it
+is a **spikelet comb**: the first-minima window would stop at the first
+spikelet gap (measured: δcg −105.1 ppm against −112.8 ppm from the sum echo
+of the same EXPNO, 8.6 ppm on δiso through the low-field lever). The comb is
+detected from the data, the window is seeded from the envelope over one
+spikelet period, and the row is flagged — process the `fid` in *Tools ▸
+QCPMG* and use *Save as dataset…* / *→ infinite-field δiso…* instead. A
+`1r` processed with `mc` (procs `PH_mod = 2`) is recorded as magnitude.
+
 > **Selective vs non-selective pulses.** Equation (1) is the shift of the
 > *central-transition* centre of gravity. In the **large-$C_Q$ limit**
 > ($C_Q \gtrsim 1.5$ MHz) only the ½ ↔ −½ transition is excited even by a

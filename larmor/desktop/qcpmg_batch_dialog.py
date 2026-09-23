@@ -246,19 +246,10 @@ class QcpmgBatchFieldsDialog(QDialog):
             self.msg.setText("⚠ " + "  ·  ".join(seen))
 
     def _load_cell(self, row: int, col: int, path: str):
-        from larmor import qcpmg
-        from larmor.loader import load_any
+        from larmor.qcpmg_fields import read_field_spectrum
 
-        # load_any's recipe dict carries the Larmor frequency and the nucleus
-        # for EVERY source (csv header, Bruker acqus); its 4th element is a
-        # one-line text summary, never a dict
-        ppm, amp, recipe, _summary, _warn = load_any(path)
-        ppm = np.asarray(ppm, float); amp = np.asarray(amp, float)
-        larmor = float(recipe.get("larmor_frequency_MHz") or 0.0)
-        file_nuc = str(recipe.get("nucleus") or "").strip()
-        if not larmor:
-            raise ValueError("no Larmor frequency in the file — save it from "
-                             "the QCPMG dialog, which records one")
+        fs = read_field_spectrum(path)
+        larmor, file_nuc = fs["larmor"], fs["nucleus"]
         # the file's nucleus must be the grid's: a 35Cl spectrum in a 27Al
         # grid would be fitted with I = 5/2 and C_Q would come out 2x too
         # large with no sign of it
@@ -268,14 +259,19 @@ class QcpmgBatchFieldsDialog(QDialog):
             elif file_nuc != self._nucleus:
                 raise ValueError(f"{Path(path).name} is {file_nuc}, the grid "
                                  f"is {self._nucleus}")
-        hi, lo = qcpmg.cg_window(ppm, amp)
+        ppm, amp = fs["ppm"], fs["amp"]
+        seed = fs["seed"]
+        hi, lo = seed.hi_ppm, seed.lo_ppm
         if not (np.isfinite(hi) and np.isfinite(lo)) or hi <= lo:
             span = float(ppm.max() - ppm.min())
             mid = float(ppm.min()) + span / 2.0
             lo, hi = mid - span / 6.0, mid + span / 6.0
         self.cells[(row, col)] = {"path": path, "ppm": ppm, "amp": amp,
                                   "larmor": larmor, "window": (lo, hi),
-                                  "nucleus": file_nuc}
+                                  "nucleus": file_nuc,
+                                  "magnitude": fs["magnitude"],
+                                  "source": fs["source"],
+                                  "comb": seed.comb, "seed_note": seed.note}
         self._measure_cell(row, col)
 
     def _set_nucleus(self, nucleus: str):
@@ -302,9 +298,16 @@ class QcpmgBatchFieldsDialog(QDialog):
                 txt += f"\nδcg {cg:.1f} ± {d['sigma']:.1f}   FWHM {fw_ppm:.0f} ppm"
             else:
                 txt += "\n⚠ no usable signal in the window"
+            if d.get("comb"):
+                txt += "\n⚠ spikelet comb -- window from its envelope"
+            tip = d["path"]
+            if d.get("source"):
+                tip += f"\nsource: {d['source']}"
+            if d.get("seed_note"):
+                tip += f"\n⚠ {d['seed_note']}"
             self.table.blockSignals(True)
             it.setText(txt)
-            it.setToolTip(d["path"])
+            it.setToolTip(tip)
             self.table.blockSignals(False)
 
     # -------------------------------------------------------- supervision

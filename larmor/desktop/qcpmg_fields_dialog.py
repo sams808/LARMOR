@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
 
 from larmor.qcpmg_fields import (
     ERR_FLOOR_PPM, FieldPoint, centre_of_gravity, field_plausibility_warning,
-    fmt_result_lines, infinite_field_diso,
+    fmt_result_lines, infinite_field_diso, read_field_spectrum,
 )
 
 
@@ -100,10 +100,13 @@ class QcpmgFieldsDialog(QDialog):
         b_del = QPushButton("Remove selected")
         b_del.clicked.connect(self._del_row)
         b_ds = QPushButton("Add from datasets…")
-        b_ds.setToolTip("pick the processed spectra (1r) measured at each "
+        b_ds.setToolTip("pick the sum-echo datasets (.csv from Save as "
+                        "dataset…) or processed 1r spectra measured at each "
                         "field: δcg ± σ and FWHM are read off automatically, "
                         "and selecting the row shows the spectrum with a "
-                        "draggable band to supervise the values")
+                        "draggable band to supervise the values. A QCPMG 1r "
+                        "is a spikelet comb: its window is seeded from the "
+                        "envelope and the row is flagged")
         b_ds.clicked.connect(self._pick_datasets)
         self.b_cur = QPushButton("δcg from open spectrum (visible range)")
         self.b_cur.setToolTip("centre of gravity of the currently open spectrum "
@@ -170,24 +173,29 @@ class QcpmgFieldsDialog(QDialog):
     def _pick_datasets(self):
         from PySide6.QtWidgets import QFileDialog, QMessageBox
         paths, _ = QFileDialog.getOpenFileNames(
-            self, "Choose the processed spectrum (1r) measured at each field",
-            "", "Bruker processed (1r);;All files (*)")
+            self, "Choose the processed spectrum measured at each field",
+            "", "LARMOR spectrum (*.csv *.txt);;Bruker processed (1r);;"
+                "All files (*)")
         errors = []
         for p in paths:
             try:
-                from larmor.io import bruker
-                d = bruker.read(p)
-                if d.ndim != 1 or d.domain != "freq":
-                    raise ValueError("not a processed 1D spectrum")
-                ppm = np.asarray(d.axes[0].values, float)
-                amp = np.asarray(d.data, float)
-                self.add_dataset_spectrum(
-                    float(d.meta.get("larmor_MHz", 0.0) or 0.0), ppm, amp)
+                self.add_dataset_file(p)
             except Exception as exc:                          # noqa: BLE001
                 errors.append(f"{p}: {exc}")
         if errors:
             QMessageBox.warning(self, "Some datasets were skipped",
                                 "\n".join(errors))
+
+    def add_dataset_file(self, path: str) -> int:
+        """One field from a file: the sum-echo .csv written by *Save as
+        dataset...* (its header carries the Larmor frequency, nucleus and
+        processing mode) or a Bruker 1r (mode from procs PH_mod; a QCPMG 1r
+        is a spikelet comb and is seeded from its envelope, see
+        :func:`larmor.qcpmg.seed_window`)."""
+        fs = read_field_spectrum(path)
+        return self.add_dataset_spectrum(
+            fs["larmor"], fs["ppm"], fs["amp"], magnitude=fs["magnitude"],
+            nucleus=fs["nucleus"], source=fs["source"], meta=fs["meta"])
 
     def _set_nucleus(self, nucleus: str, spin: bool = True):
         self._nucleus = nucleus or ""
@@ -224,21 +232,26 @@ class QcpmgFieldsDialog(QDialog):
         return False
 
     def add_dataset_spectrum(self, larmor_MHz: float, ppm, amp,
-                             window=None, magnitude: bool = False,
-                             nucleus: str = "") -> int:
+                             window=None, magnitude: bool | None = False,
+                             nucleus: str = "", source: str = "",
+                             meta: dict | None = None) -> int:
         """Add one field's spectrum: δcg ± σ and FWHM are computed over the
-        given window (or an automatic one) and written into a new row; the
+        given window (or a seeded one) and written into a new row; the
         spectrum stays attached so selecting the row shows it for
-        supervision. Returns the row, or -1 when the spectrum's ``nucleus``
-        is not this dialog's (see :meth:`accept_nucleus`)."""
+        supervision. ``magnitude`` None = mode unknown. ``source`` names
+        where the spectrum came from (1r path, sum-echo, workspace) for the
+        row tooltip and the report. Returns the row, or -1 when the
+        spectrum's ``nucleus`` is not this dialog's (:meth:`accept_nucleus`)."""
         from larmor import qcpmg
         if not self.accept_nucleus(nucleus):
             return -1
         ppm = np.asarray(ppm, float); amp = np.asarray(amp, float)
+        seed = None
         if window is not None:
             lo, hi = float(min(window)), float(max(window))
         else:
-            hi, lo = qcpmg.cg_window(ppm, amp)
+            seed = qcpmg.seed_window(ppm, amp, meta)
+            hi, lo = seed.hi_ppm, seed.lo_ppm
         if not (np.isfinite(hi) and np.isfinite(lo)) or hi <= lo:
             span = float(ppm.max() - ppm.min())
             mid = float(ppm.min()) + span / 2.0
@@ -246,14 +259,24 @@ class QcpmgFieldsDialog(QDialog):
         self._ds_seq += 1
         ds_id = self._ds_seq
         self._ds[ds_id] = {"ppm": ppm, "amp": amp, "window": (lo, hi),
-                           "magnitude": bool(magnitude)}
+                           "magnitude": None if magnitude is None else bool(magnitude),
+                           "source": source or "",
+                           "comb": bool(seed is not None and seed.comb),
+                           "seed_note": seed.note if seed is not None else ""}
         self._add_row(larmor_MHz)
         r = self.table.rowCount() - 1
         self.table.item(r, 0).setData(Qt.UserRole, ds_id)
-        if magnitude:
-            it = self.table.item(r, 1)
-            if it is not None:
-                it.setToolTip("δcg measured on a MAGNITUDE (mc) spectrum")
+        mode = ("MAGNITUDE (mc)" if magnitude else
+                "absorption" if magnitude is not None else
+                "mode unknown -- taken from the workspace")
+        tip = f"δcg measured on the {mode} spectrum"
+        if source:
+            tip += f"\nsource: {source}"
+        if seed is not None and seed.comb:
+            tip += f"\n⚠ {seed.note}"
+            self.wresult.setText(
+                f"<span style='color:#c0392b'>⚠ row {r + 1}: {seed.note}</span>")
+        self._ds[ds_id]["tip"] = tip
         self._apply_ds_values(r, ds_id)
         self._warn_mixed_modes()
         self.table.selectRow(r)
@@ -264,7 +287,8 @@ class QcpmgFieldsDialog(QDialog):
         fields; one measured in magnitude and one in absorption are not the
         same observable, so say so rather than fitting them together
         silently."""
-        modes = {bool(d.get("magnitude")) for d in self._ds.values()}
+        modes = {bool(d.get("magnitude")) for d in self._ds.values()
+                 if d.get("magnitude") is not None}
         if len(modes) > 1:
             self.wresult.setText(
                 "<span style='color:#c0392b'>⚠ these fields mix magnitude "
@@ -283,6 +307,12 @@ class QcpmgFieldsDialog(QDialog):
             self.table.setItem(r, 1, QTableWidgetItem(f"{cg:.2f}"))
             self.table.setItem(r, 2, QTableWidgetItem(f"{max(sigma, ERR_FLOOR_PPM):.1f}"))
         self.table.setItem(r, 3, QTableWidgetItem(f"{fw_ppm:.2f}"))
+        tip = d.get("tip", "")
+        if tip:                       # the cells were just recreated
+            for c in range(4):
+                it = self.table.item(r, c)
+                if it is not None:
+                    it.setToolTip(tip)
         if self._cg_line is not None and np.isfinite(cg):
             self._cg_line.setValue(cg)
 
