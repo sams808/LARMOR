@@ -405,6 +405,19 @@ printed with the table.
 > covariance error with the program's *Errors Analysis* (χ² profile) rather
 > than the first-order value.
 
+`quantify()` now measures this caveat: every row carries `tail_outside_pct`,
+the share of the line's simulated area outside the window (a lower bound,
+taken on the simulation axis), the fit-health strip flags a line above 2 %
+and a click widens the window to 99.5 % coverage of every line before
+re-integrating. The same strip judges the acquisition of a Bruker source from
+`acqus`, the title and the sibling saturation-recovery EXPNO's `ct1t2.txt`:
+the recycle delay D1 + AQ against each site's $T_1$ through the steady-state
+recovery $(1-E)/(1-E\cos\theta)$, $E = e^{-(D_1+AQ)/T_1}$ (stated limits: the
+$(I+1/2)\,\theta$ effective angle holds in the central-transition-selective
+regime, MAS coherence effects and incomplete saturation are ignored, 90° is
+assumed when no flip angle is known), and the flip angle against 30°/(I + ½)
+for single-pulse spectra. Both are caveats, never corrections.
+
 ---
 
 ## 8. Processing and phasing
@@ -463,7 +476,7 @@ provenance only.
 | 5-point Gaussian for dCS / σζ | Czjzek 2D, csa_czjzek | coarse but adequate for a smooth Gaussian |
 | Quantification error = amplitude error only | `quantify.py` | first-order, stated in output; use *Errors Analysis* for the full χ² profile |
 | `sidebands` intensities empirical | `sidebands` model | use `csa_mas` for CSA extraction |
-| Integration window truncates broad tails | populations | widen the window to contain tails before quoting populations |
+| Integration window truncates broad tails | populations | measured per site (`tail_outside_pct`); the strip flags a line above 2 %; one click widens the window to 99.5 % coverage |
 | fxmla Czjzek amplitude ×3.92 to dmfit | export only | calibrated to one $^{27}$Al @ 195 MHz glass; verify for other nuclei/fields. *Does not affect LARMOR's own fit or reported numbers.* |
 | CSA ζ uses mrsimulator's *shielding* sign | `csa_mas` | confirm the sign against your convention if you quote ζ |
 | DFT shielding → shift needs a calibration line | `dft.py` / `shiftcal.py` | a 2-point line has no residual degrees of freedom and its ± reflects the reference-shift errors only; use ≥ 3 references computed with the same code/functional/cutoffs/pseudopotential; the seeded ζ is scaled by −a |
@@ -530,7 +543,8 @@ contributions (Sandland Eq. 2)."*
 1. **Populations** — integrate over a window wide enough to contain every
    tail; report the stated first-order errors and cross-check important
    ratios with the χ² profile (*Errors Analysis*) rather than the covariance
-   alone.
+   alone. Confirm the fit-health strip shows no tail / recovery / excitation
+   chip, or carry the caveat into the Methods text.
 2. **Czjzek glasses** — report σ, $\sqrt{\langle P_Q^2\rangle}$, and dCS
    rather than a single $C_Q$; in 2D check that `cq_max` covers the distribution if
    σ is large (mode $\approx 3.7\sigma$; the 1D kernel reaches 10σ automatically).

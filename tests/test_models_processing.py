@@ -117,3 +117,58 @@ def test_ops_validation():
         processing.apply(s, [{"op": "sorcery"}])
     with pytest.raises(ValueError, match="time-domain"):
         processing.apply(s, [{"op": "em", "lb_hz": 10}])
+
+
+def test_quantify_tail_outside_pct_and_widen():
+    """The share of a line outside the integration window, and the window
+    that contains 99.5 % of every line (the fit-health 'widen' click)."""
+    import math
+
+    from larmor.quantify import TAIL_COVERAGE, window_containing_tails
+
+    def gl(pos, label, model="gauss_lor"):
+        return SiteModel(model=model, label=label, params={
+            "isotropic_chemical_shift_ppm": Param(pos), "shift_fwhm_ppm": Param(8.0),
+            "amplitude": Param(1.0), "gl": Param(1.0, vary=False)})
+
+    rec = Recipe(nucleus="27Al", larmor_frequency_MHz=130.3, sites=[gl(60.0, "p")])
+    sigma = 8.0 / 2.3548
+    q = quantify(rec, window_ppm=(120.0, -20.0))
+    assert q["rows"][0]["tail_outside_pct"] < 0.01
+    assert q["axis_ppm"] == [300.0, -300.0]
+    assert "lower bound" in q["note"]
+    # half the line: the window edges are interpolated on the cumulative area
+    assert quantify(rec, window_ppm=(60.0, -20.0))["rows"][0]["tail_outside_pct"] == \
+        pytest.approx(50.0, abs=0.5)
+    narrow = quantify(rec, window_ppm=(63.0, 57.0))["rows"][0]["tail_outside_pct"]
+    assert narrow == pytest.approx(100.0 * (1 - math.erf(3.0 / (sigma * math.sqrt(2)))), abs=2)
+    hi, lo, clipped = window_containing_tails(rec, TAIL_COVERAGE)
+    assert hi == pytest.approx(60 + 2.807 * sigma, abs=0.5)
+    assert lo == pytest.approx(60 - 2.807 * sigma, abs=0.5)
+    assert clipped == {}
+    assert quantify(rec, window_ppm=(hi, lo))["rows"][0]["tail_outside_pct"] <= 0.5 + 1e-6
+    # clipped to an acquired axis that ends at 50 ppm: the share beyond it is named
+    hi2, lo2, clipped = window_containing_tails(rec, exp_ppm=np.linspace(-20, 50, 300))
+    assert hi2 == 50.0 and lo2 == pytest.approx(lo, abs=1e-9)
+    assert list(clipped) == ["p"] and clipped["p"] > 0.1
+    # one tail per row; a background row has none
+    two = Recipe(nucleus="27Al", larmor_frequency_MHz=130.3,
+                 sites=[gl(60.0, "p"), gl(-40.0, "q"),
+                        SiteModel(model="function", label="bg", func="a + 0*x", params={
+                            "isotropic_chemical_shift_ppm": Param(0.0),
+                            "amplitude": Param(1.0), "a": Param(0.1)})])
+    rows = quantify(two, window_ppm=(70.0, -60.0))["rows"]
+    assert rows[0]["tail_outside_pct"] > 0.05 and rows[1]["tail_outside_pct"] < 0.01
+    assert rows[2]["tail_outside_pct"] is None
+    hi3, lo3, _ = window_containing_tails(two)
+    assert hi3 == pytest.approx(hi, abs=0.5) and lo3 == pytest.approx(-40 - 2.807 * sigma, abs=0.5)
+    # the fractions of test_quantify_fractions are untouched by the new keys
+    q = quantify(Recipe(nucleus="27Al", larmor_frequency_MHz=195.5, spin_rate_Hz=0, sites=[
+        SiteModel(model="gauss_lor", label="a", params={
+            "isotropic_chemical_shift_ppm": Param(20.0), "shift_fwhm_ppm": Param(8.0),
+            "amplitude": Param(2.0, stderr=0.1), "gl": Param(1.0, vary=False)}),
+        SiteModel(model="gauss_lor", label="b", params={
+            "isotropic_chemical_shift_ppm": Param(-20.0), "shift_fwhm_ppm": Param(8.0),
+            "amplitude": Param(1.0, stderr=0.1), "gl": Param(1.0, vary=False)})]),
+        window_ppm=(100.0, -100.0))
+    assert [r["fraction_pct"] for r in q["rows"]] == pytest.approx([66.67, 33.33], abs=0.5)

@@ -12,7 +12,7 @@ import os
 import numpy as np
 import pytest
 
-from conftest import CAALGLASS, require
+from conftest import CAALGLASS, LAW_CA_11B, require
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("LARMOR_NO_SESSION", "1")
@@ -289,3 +289,165 @@ def test_real_glass_fit_verdict(qapp, win):
     # is the documented outcome (docs/tutorials/01, section 4)
     assert "degenerate" in h.kinds() and h.level == "bad"
     assert win._health_fit is h and win._last_lmfit is result.lmfit_result
+
+
+# ------------------------------------------------------ quantitativity chips
+def _chips(win) -> dict:
+    return {c.property("flag_kind"): c for c in win.health_strip.chips}
+
+
+def test_tail_chip_widens_the_window_and_requantifies(qapp, win):
+    x, y, result = _fitted(win, qapp)
+    sigma = 8.0 / 2.3548
+    assert win.qtable.columnCount() == 5
+    assert win.qtable.horizontalHeaderItem(4).text() == "outside window (%)"
+    # quantify integrates the VIEW; offscreen the auto-range has not been
+    # applied yet, so set the fit window explicitly: no tail chip there
+    from larmor.quantify import TAIL_LIMIT_PCT
+
+    win.view.setXRange(-20.0, 120.0, padding=0)
+    win.run_quantify(show=False)
+    win._health_from_result(result)
+    assert "tail" not in win._health.kinds() and win._health.tail_checked
+    # the fitted mix is part Lorentzian: its wings leave ~1.7 % outside
+    assert 0.0 <= float(win.qtable.item(0, 4).text()) < TAIL_LIMIT_PCT
+    win.view.setXRange(57.0, 63.0, padding=0)
+    win.run_quantify(show=False)
+    win._health_from_result(result)
+    qapp.processEvents()
+    chip = _chips(win)["tail"]
+    assert chip.text().startswith("tail outside window: p ")
+    assert float(win.qtable.item(0, 4).text()) > 2
+    assert "⚠ tail outside window" in win.results_summary.text()
+    chip.click()
+    qapp.processEvents()
+    # the fitted mix is half Lorentzian, whose 99.5 % window (~±250 ppm) is
+    # clipped to the acquired -20 … 120 ppm axis: the view spans the whole
+    # spectrum, ~1.7 % stays beyond it (under the 2 % limit) and is named
+    (x0, x1), _ = win.view.getPlotItem().getViewBox().viewRange()
+    assert max(x0, x1) >= 60 + 2.8 * sigma - 0.6 and min(x0, x1) <= 60 - 2.8 * sigma + 0.6
+    assert max(x0, x1) == pytest.approx(120.0, abs=0.5)
+    assert min(x0, x1) == pytest.approx(-20.0, abs=0.5)
+    outside = float(win.qtable.item(0, 4).text())
+    assert 0.0 <= outside < TAIL_LIMIT_PCT
+    assert "tail" not in win._health.kinds()
+    assert win._health is win._health_fit and not win._health.stale
+    msg = win.statusBar().currentMessage()
+    assert "window widened to 120 … -20 ppm" in msg
+    assert "of p lies beyond the acquired spectrum" in msg
+    assert "tails inside the window" in win.health_strip.pill.toolTip()
+    # a pure Gaussian (gl fixed) is contained: the widened window leaves ≤ 0.5 %
+    win.recipe["sites"][0]["params"]["gl"]["value"] = 1.0
+    win.recipe["sites"][0]["params"]["gl"]["vary"] = False
+    win.view.setXRange(57.0, 63.0, padding=0)
+    win.run_quantify(show=False)
+    assert float(win.qtable.item(0, 4).text()) > 30
+    win._health_widen_window()
+    (x0, x1), _ = win.view.getPlotItem().getViewBox().viewRange()
+    assert max(x0, x1) == pytest.approx(60 + 2.807 * sigma, abs=0.6)
+    assert min(x0, x1) == pytest.approx(60 - 2.807 * sigma, abs=0.6)
+    assert float(win.qtable.item(0, 4).text()) <= 0.5
+    assert "beyond the acquired spectrum" not in win.statusBar().currentMessage()
+    win.copy_csv()
+    head = QApplication.clipboard().text().splitlines()[0]
+    assert head.endswith(",tail_outside_pct")
+
+
+def test_acquisition_chips_from_stubbed_facts_and_click_throughs(qapp, win, monkeypatch):
+    from larmor import quantitativity as Q
+    from larmor.desktop import dialogs, satrec_dialog
+    from larmor.satrec import T1Region
+
+    acq = Q.Acquisition(expno="/x/2704", nucleus="27Al", pulprog="zg", kind="Single pulse",
+                        ns=512, d1_s=1.0, aq_s=0.02, p1_us=0.375, plw1_w=207.0,
+                        probhd="SPRB600511_7297 (MAS)", title="P1(90)=3.125; 11deg tip",
+                        p90_us_title=3.125, flip_deg_title=11.0, t1_multiple_claimed=None)
+    t1 = Q.T1Source(expno="/x/2701", kind="ct1t2",
+                    regions=[T1Region(1, 120.0, -40.0, 0.557, (0.557,), None, 10)])
+    facts = Q.AcqFacts(acquisition=acq, t1=t1, sibling_expno="/x/2701", spin=2.5,
+                       folder="/x", t1_status="ok")
+    monkeypatch.setattr(Q, "facts_for", lambda src: facts)
+    _fitted(win, qapp)
+    chips = _chips(win)
+    assert chips["recovery"].text().startswith("D1 = 1.8 T1 at 10.8° → ")
+    assert chips["excitation"].text() == "flip 10.8° > 10° limit (I = 5/2)"
+    assert "just above the limit (8 %)" in chips["excitation"].toolTip()
+    assert "⚠ D1 = 1.8 T1" in win.results_summary.text()
+    assert win._acq_cache == {"src": facts}
+    # the recycle chip opens the Relaxation tool on the sibling EXPNO
+    opened = []
+    monkeypatch.setattr(satrec_dialog.SatrecDialog, "__init__",
+                        lambda self, parent, expno: opened.append((parent, expno)))
+    monkeypatch.setattr(satrec_dialog.SatrecDialog, "exec", lambda self: 0)
+    win.health_strip.open_relaxation.emit()
+    assert opened and opened[-1][0] is win and str(opened[-1][1]).endswith("2701")
+    # the F7 menu offers the per-site measurement and the tool on that EXPNO
+    win.health_strip.show_details = lambda extra: setattr(win, "_f7_extra", list(extra))
+    win.show_fit_health()
+    texts = [a.text() for a in win._f7_extra]
+    assert "Measure T1 per site from EXPNO 2701 (uses this fit)…" in texts
+    assert "Open T1 measurement (EXPNO 2701)…" in texts
+    # the flip chip opens Experiment parameters on the 90° pulse; a typed
+    # flip angle re-judges the last fit without a refit
+    seen = {}
+
+    def fake_exec(dlg):
+        seen["focus"] = dlg.p90.hasFocus() or dlg.focusWidget() is dlg.p90
+        seen["p90"] = dlg.p90.value()
+        seen["rows"] = dlg.t1 is not None
+        dlg.flip.setValue(8.0)
+        dlg._accept()
+        return 1
+
+    monkeypatch.setattr(dialogs.ExperimentDialog, "exec", fake_exec)
+    win.health_strip.enter_flip.emit()
+    qapp.processEvents()
+    assert seen["p90"] == 3.125 and seen["rows"]           # prefilled from P1(90)=
+    assert win.recipe["provenance"]["quantitativity"]["flip_deg"] == 8.0
+    chips = _chips(win)
+    assert "excitation" not in chips
+    assert chips["recovery"].text().startswith("D1 = 1.8 T1 at 8° → ")
+    assert not chips["recovery"].text().endswith("(90° assumed)")
+    assert win._health is win._health_fit and not win._health.stale
+    win._health_reset()
+    assert win._acq_cache == {}
+
+
+def test_real_base1ca_recovery_chip(qapp, win):
+    path = require(LAW_CA_11B[1])
+    from larmor import fit as fitmod
+    from larmor.recipe import Param, Recipe, SiteModel
+
+    # the 1r itself: the EXPNO has two procnos and load_source would ask
+    win.load_source(str(path / "pdata" / "1" / "1r"), keep_fit=False)
+    qapp.processEvents()
+    assert win.recipe.get("source_path", "").endswith("24")
+    sites = [SiteModel(model="gauss_lor", label=lab, params={
+        "isotropic_chemical_shift_ppm": Param(pos, min=pos - 6, max=pos + 6),
+        "shift_fwhm_ppm": Param(8.0, min=2, max=30), "gl": Param(0.5, vary=False),
+        "amplitude": Param(float(win.exp_amp.max()), min=0)})
+        for lab, pos in (("BO3", 15.0), ("BO4", 1.0))]
+    win.recipe["sites"] = Recipe(nucleus="11B", larmor_frequency_MHz=192.43,
+                                 sites=sites).to_dict()["sites"]
+    result = fitmod.fit(Recipe.from_dict(win.recipe), win.exp_ppm, win.exp_amp,
+                        window_ppm=(40.0, -20.0))
+    win._fit_done(result)
+    qapp.processEvents()
+    h = win._health
+    (rec,) = [f for f in h.flags if f.kind == "recovery"]
+    assert rec.level == "check" and rec.text.endswith("(90° assumed)")
+    assert rec.text.startswith("D1 = 3.0–3.6 T1 → 95–97 %")
+    assert "EXPNO 23" in rec.detail and "4.64" in rec.detail
+    (exc,) = [f for f in h.flags if f.kind == "excitation"]
+    assert exc.level == "info" and exc.text == "flip angle unknown (I = 3/2)"
+    assert h.acquisition.facts.t1.expno.endswith("23")
+    assert h.acquisition.facts.acquisition.d1_s == 14.0
+    # the 90° pulse typed once clears both chips without a refit
+    win.recipe["provenance"] = {"quantitativity": {"p90_us": 3.5}}
+    win._health_requantify()
+    h = win._health
+    assert not ({"recovery", "excitation"} & {f.kind for f in h.flags if f.level == "check"})
+    assert "excitation" not in h.kinds()
+    passing = h.passing()
+    assert any(p.startswith("recycle 14 s = 3.0–3.6 T1 → ") for p in passing), passing
+    assert "flip 10.9° within the linear regime (≤ 15°)" in passing

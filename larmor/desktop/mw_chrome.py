@@ -156,9 +156,14 @@ class _ChromeMixin:
         btnBundle.clicked.connect(self.export_publication_bundle)
         head.addWidget(btnBundle)
         v.addLayout(head)
-        self.qtable = QTableWidget(0, 4)
+        self.qtable = QTableWidget(0, 5)
         self.qtable.setHorizontalHeaderLabels(
-            ["line", "position (ppm)", "integral", "fraction (%)"])
+            ["line", "position (ppm)", "integral", "fraction (%)",
+             "outside window (%)"])
+        self.qtable.horizontalHeaderItem(4).setToolTip(
+            "share of the line's simulated area outside the integration "
+            "window — biases its population low; the fit-health strip flags "
+            "> 2 % and a click on that chip widens the window")
         self.qtable.horizontalHeader().setStretchLastSection(True)
         self.qtable.verticalHeader().setVisible(False)
         v.addWidget(self.qtable)

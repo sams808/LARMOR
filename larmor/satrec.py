@@ -5,10 +5,13 @@ on the longest-delay slice or magnitude mode), integrates a ppm window, and
 fits I(t) = I0 * (1 - exp(-(t/T1)^beta)) -- beta fixed to 1 unless stretched.
 
 The per-slice integrals can be cross-checked against TopSpin's own t1ints.txt
-when present (the test suite does exactly that on real data).
+when present (the test suite does exactly that on real data). ``read_ct1t2``
+reads TopSpin's own per-integral T1 result (both the legacy and the SIMFIT
+layout) for the quantitativity chip.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -38,6 +41,23 @@ class SatrecResult:
         return f"T1 = {self.t1_s:.4g}{err} s" + (b if self.beta != 1.0 else "")
 
 
+def _seconds(tok: str) -> float:
+    """A TopSpin duration token in seconds: 'm' → 1e-3, 'u' → 1e-6, 'n' →
+    1e-9 (TopSpin writes a zero delay as '0.000n'), 's' or a bare number →
+    seconds. Raises ValueError on anything else (callers decide)."""
+    tok = tok.strip().lower()
+    mult = 1.0
+    if tok.endswith("m"):
+        mult, tok = 1e-3, tok[:-1]
+    elif tok.endswith("u"):
+        mult, tok = 1e-6, tok[:-1]
+    elif tok.endswith("n"):
+        mult, tok = 1e-9, tok[:-1]
+    elif tok.endswith("s"):
+        tok = tok[:-1]
+    return float(tok) * mult
+
+
 def read_vdlist(expno: str | Path) -> np.ndarray:
     """Parse Bruker vdlist (supports m/s/u suffixes)."""
     text = (Path(expno) / "vdlist").read_text().split()
@@ -46,15 +66,102 @@ def read_vdlist(expno: str | Path) -> np.ndarray:
         tok = tok.strip().lower()
         if not tok:
             continue
-        mult = 1.0
-        if tok.endswith("m"):
-            mult, tok = 1e-3, tok[:-1]
-        elif tok.endswith("u"):
-            mult, tok = 1e-6, tok[:-1]
-        elif tok.endswith("s"):
-            tok = tok[:-1]
-        out.append(float(tok) * mult)
+        out.append(_seconds(tok))
     return np.array(out)
+
+
+@dataclass(frozen=True)
+class T1Region:
+    """One integral region (or peak point) of a TopSpin t1/t2 analysis and
+    the T1 it fitted there. ``hi_ppm == lo_ppm`` for a 'Peak Point' block;
+    ``components_s`` keeps every SIMFIT component, ``t1_s`` the longest."""
+
+    index: int
+    hi_ppm: float
+    lo_ppm: float
+    t1_s: float
+    components_s: tuple = ()
+    sd: float | None = None
+    npoints: int | None = None
+
+
+_CT1T2_BLOCK_RE = re.compile(
+    r"(\d+) points for (?:Integral|Peak) (\d+),\s+"
+    r"(?:Integral Region from (\S+) to (\S+) ppm|Peak Point at (\S+) ppm)")
+_CT1T2_T1_RE = re.compile(r"^\s*T1\s*=\s*(.+)$")
+_CT1T2_SD_RE = re.compile(r"^\s*SD\s*=\s*(\S+)")
+
+
+def read_ct1t2(pdata_dir: str | Path) -> list[T1Region]:
+    """TopSpin's per-integral T1 result from ``pdata/N/ct1t2.txt``.
+
+    Understands the legacy layout ('AREA fit : I[t]=I[0]+P*exp(-t/T1)', one
+    'T1 = 4.643s' line per '7 points for Integral 1, Integral Region from
+    27.382 to 5.846 ppm' block), the SIMFIT layout ('T1 = 60.764m 1.759s
+    4.539s 4.466s' — every component parsed, the longest governs recovery)
+    and the INTENSITY 'Peak Point at -68.561 ppm' variant. Returns [] for a
+    missing file, a file without a T1 line or garbage; never raises. Accepts
+    the pdata folder or the file itself.
+    """
+    p = Path(pdata_dir)
+    if p.is_dir():
+        p = p / "ct1t2.txt"
+    try:
+        text = p.read_text(encoding="utf-8", errors="replace")
+    except (OSError, ValueError):
+        return []
+    regions: list[T1Region] = []
+    cur: dict | None = None
+
+    def _flush():
+        if cur is None or not cur.get("components"):
+            return
+        comps = tuple(cur["components"])
+        regions.append(T1Region(
+            index=cur["index"], hi_ppm=cur["hi"], lo_ppm=cur["lo"],
+            t1_s=max(comps), components_s=comps, sd=cur.get("sd"),
+            npoints=cur.get("npoints")))
+
+    try:
+        for line in text.splitlines():
+            m = _CT1T2_BLOCK_RE.search(line)
+            if m:
+                _flush()
+                npts, idx, a, b, pk = m.groups()
+                try:
+                    if pk is not None:
+                        hi = lo = float(pk)
+                    else:
+                        hi, lo = max(float(a), float(b)), min(float(a), float(b))
+                except ValueError:
+                    cur = None
+                    continue
+                cur = {"index": int(idx), "npoints": int(npts), "hi": hi,
+                       "lo": lo, "components": [], "sd": None}
+                continue
+            if cur is None:
+                continue
+            m = _CT1T2_T1_RE.match(line)
+            if m:
+                comps = []
+                for tok in m.group(1).split():
+                    try:
+                        comps.append(_seconds(tok))
+                    except ValueError:
+                        continue
+                if comps and not cur["components"]:
+                    cur["components"] = comps
+                continue
+            m = _CT1T2_SD_RE.match(line)
+            if m and cur.get("sd") is None:
+                try:
+                    cur["sd"] = float(m.group(1))
+                except ValueError:
+                    pass
+        _flush()
+    except Exception:
+        return []
+    return regions
 
 
 def process_slices(expno: str | Path, lb_hz: float = 100.0,

@@ -53,6 +53,8 @@ class ExperimentInfo:
     has_ser: bool
     has_1r: bool
     has_2rr: bool
+    #: pdata/1/ct1t2.txt exists: TopSpin's t1/t2 analysis was run here
+    has_t1_fit: bool = False
 
     @property
     def openable(self) -> str | None:
@@ -121,7 +123,8 @@ def read_experiment(expno: str | Path) -> ExperimentInfo:
         title=title,
         has_fid=(p / "fid").exists(), has_ser=(p / "ser").exists(),
         has_1r=(p / "pdata" / "1" / "1r").exists(),
-        has_2rr=(p / "pdata" / "1" / "2rr").exists())
+        has_2rr=(p / "pdata" / "1" / "2rr").exists(),
+        has_t1_fit=(p / "pdata" / "1" / "ct1t2.txt").exists())
 
 
 def is_sample_folder(folder: str | Path) -> bool:
@@ -146,6 +149,40 @@ def scan_sample(folder: str | Path) -> list[ExperimentInfo]:
             except Exception:
                 continue
     return out
+
+
+#: experiment kinds that measure T1 (the sibling the quantitativity chip reads)
+T1_KINDS = ("Saturation recovery (T1)", "Inversion recovery (T1)")
+
+
+def find_sibling_t1(expno_dir: str | Path, nucleus: str, *,
+                    kinds: tuple = T1_KINDS) -> list[ExperimentInfo]:
+    """The T1 measurements of ``nucleus`` in the sample folder that holds
+    ``expno_dir`` (the EXPNO itself excluded), best first: those with a
+    TopSpin fit (``has_t1_fit``) before those without, then the nearest EXPNO
+    number, then the number itself; non-numeric EXPNO names sort last. []
+    when the parent is not a sample folder."""
+    p = Path(expno_dir)
+    parent = p.parent
+    if not nucleus or not is_sample_folder(parent):
+        return []
+    try:
+        target = int(p.name)
+    except ValueError:
+        target = None
+
+    def _key(info: ExperimentInfo):
+        try:
+            n = int(info.expno)
+        except ValueError:
+            return (not info.has_t1_fit, 1, float("inf"), info.expno.lower())
+        dist = abs(n - target) if target is not None else 0
+        return (not info.has_t1_fit, 0, dist, n)
+
+    out = [info for info in scan_sample(parent)
+           if info.nucleus == nucleus and info.kind in kinds
+           and Path(info.path).resolve() != p.resolve()]
+    return sorted(out, key=_key)
 
 
 def _expno_sort_key(p: Path):

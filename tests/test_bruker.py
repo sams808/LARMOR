@@ -253,3 +253,52 @@ def test_read_2702_three_way_and_1903_outvoted():
         "MAS rate: acqus says 4200 Hz but the title says 35714 Hz")
     assert "outvoted" in law.conflicts[0]
     assert law.mas_sources["booking_Hz"] == pytest.approx(35714.0)
+
+
+
+def _jcamp(path, **params):
+    lines = ["##TITLE= Parameter file, TopSpin 4.1", "##JCAMPDX= 5.0",
+             "##DATATYPE= Parameter Values", "##ORIGIN= Bruker BioSpin GmbH"]
+    for k, v in params.items():
+        if isinstance(v, (list, tuple)):
+            lines.append(f"##${k}= (0..{len(v) - 1})")
+            lines.append(" ".join(str(x) for x in v))
+        else:
+            lines.append(f"##${k}= {v}")
+    lines.append("##END=")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def test_meta_1d_reads_ns_pulse_power_and_aq(tmp_path):
+    """The additive acquisition keys the quantitativity chips read (Base1Ca/24
+    values); every pre-existing key is unchanged."""
+    # nmrglue delivers the <...> strings stripped, PROBHD sometimes not
+    acqus = {"NUC1": "11B", "SFO1": 192.43, "SW_h": 100000, "TD": 7988,
+             "NS": 256, "D": [0.2, 14.0], "P": [0, 0.425], "PLW": [0, 100],
+             "PROBHD": "<16_Solenoid (PMAS16)>", "PULPROG": "zg"}
+    m = bruker._meta_1d(acqus, "title", tmp_path)
+    assert m["ns"] == 256 and m["d1_s"] == 14.0
+    assert m["aq_s"] == pytest.approx(0.03994)
+    assert m["p_us"][1] == 0.425 and m["plw_w"][1] == 100.0
+    assert m["probhd"] == "16_Solenoid (PMAS16)"
+    assert m["d"] == [0.2, 14.0] and m["td"] == 7988 and m["sw_Hz"] == 100000.0
+    assert m["nucleus"] == "11B" and m["pulse_program"] == "zg" and m["title"] == "title"
+    assert m["expno"] == str(tmp_path) and "sf_MHz" not in m     # no procs here
+    bare = bruker._meta_1d({"NUC1": "<27Al>", "SFO1": 130.3}, "", tmp_path)
+    assert bare["d1_s"] is None and bare["aq_s"] is None and bare["ns"] == 0
+    assert bare["p_us"] == [] and bare["plw_w"] == [] and bare["probhd"] == ""
+    # the fid-free reader gives the same keys from a folder
+    e = tmp_path / "24"
+    _jcamp(e / "acqus", NUC1="<11B>", SFO1=192.43, SW_h=100000, TD=7988, NS=256,
+           D=[0.2, 14.0, 0, 0], P=[0, 0.425, 0, 0], PLW=[0, 100, 0, 0],
+           PROBHD="<16_Solenoid (PMAS16)>", PULPROG="<zg>")
+    (e / "pdata" / "1").mkdir(parents=True)
+    (e / "pdata" / "1" / "title").write_text("11B with short tip angle\n")
+    r = bruker.read_acqus_meta(e)
+    assert r["ns"] == 256 and r["d1_s"] == 14.0 and r["aq_s"] == pytest.approx(0.03994)
+    assert r["p_us"][1] == 0.425 and r["plw_w"][1] == 100.0
+    assert r["probhd"] == "16_Solenoid (PMAS16)" and r["nucleus"] == "11B"
+    assert r["title"].startswith("11B with short tip angle")
+    assert set(m) == set(r)
+    assert bruker.read_acqus_meta(tmp_path / "nothing") == {}

@@ -104,6 +104,14 @@ If a component's population has a 100 % relative uncertainty, the data do
 not support that component. Report that, or remove it. The strip shows an
 amber `population ±≥100 %` chip for exactly that case, naming the component.
 
+The integral is taken over the window in view, so a broad tail reaching
+beyond it is cut off and that population is biased low. The Report table's
+*outside window (%)* column gives the share of each line's simulated area
+the window leaves out; above 2 % the strip shows an amber `tail outside
+window` chip naming the line, and a click widens the window to contain
+99.5 % of every line and re-integrates (F5 then refits over the wider
+window).
+
 ## 6 · Quantitative intensities from quadrupolar nuclei
 
 Peak areas of half-integer quadrupolar nuclei (²⁷Al, ¹¹B, ²³Na, ¹⁷O …) are
@@ -123,6 +131,27 @@ with different efficiency and the fitted populations are biased — no fit
 can repair that afterwards. Also verify **full relaxation** (recycle delay
 vs the *longest* T₁ — measure it with **Tools ▸ Relaxation**, don't assume
 it) before treating any integral as quantitative.
+
+**What LARMOR checks for you.** After a fit of a Bruker dataset the
+fit-health strip reads D1, AQ, P1/PLW1 and the title of the EXPNO
+(read-only), finds the saturation-recovery EXPNO of the same nucleus in the
+sample folder and takes the T₁ per integral region from TopSpin's
+`ct1t2.txt`, matched to each site by its δiso (the nearest region when the
+δiso falls outside every integral, marked as such). It reports the
+steady-state recovery $(1-E)/(1-E\cos\theta)$ with $E = e^{-(D_1+AQ)/T_1}$,
+where θ is the flip angle — 90° when none is known — and $(I+1/2)\,\theta$
+replaces θ for a half-integer quadrupolar nucleus (the central-transition
+nutation of a short pulse); the chip turns amber below 99 % (≈ 5 T₁ at
+90°). The flip angle itself comes from the title (`P1(90)=3.750; 30 deg
+tip`, `11 degree tip`) or from the 90° pulse typed once in **Process ▸
+Experiment parameters…** (remembered per nucleus, probe and power), and is
+compared with 30°/(I + ½) for single-pulse spectra; echo and CPMG
+excitation is not judged. Grey chips name what could not be checked (no T₁
+measurement in the folder, a TopSpin fit that did not converge, an unknown
+flip angle); the **F7** menu's *Measure T1 per site* runs LARMOR's own
+per-site decomposition of the relaxation series on the fitted lineshapes
+instead. Nothing is corrected — the chips are the caveats to carry into
+the Methods text.
 
 ## 7 · MQMAS: resolution yes, populations no
 

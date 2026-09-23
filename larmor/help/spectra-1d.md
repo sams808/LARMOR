@@ -234,14 +234,20 @@ flag, not the quality of the fit — LARMOR does not grade a fit.
 | `at bounds: …` | a parameter that finished pinned at a min/max bound | its cell |
 | `no error bars (no covariance)` | the fit returned no covariance matrix | Errors Analysis (χ² profile) |
 | `population ±≥100 %: …` | a population whose relative error reaches 100 % (see *Fitting glasses for publication* §5) | the Report |
+| `tail outside window: …` | a line whose simulated area lies more than 2 % outside the integration window — its population is biased low (*Fitting glasses for publication* §5); the Report table's *outside window (%)* column carries the number | widens the window to 99.5 % of every line and re-integrates (F5 then refits over it) |
+| `D1 = n T1 → m %` / `recycle n s — T1 unknown` | the recycle delay D1 + AQ against the T1 of each site, read from TopSpin's `ct1t2.txt` of the same-nucleus saturation-recovery EXPNO in the sample folder (steady-state recovery; 90° assumed until a flip angle is known) | Tools ▸ Relaxation on that EXPNO |
+| `flip n° > m° limit (I = …)` / `flip angle unknown` | the flip angle (from `P1(90)=` or `n deg tip` in the title, or the 90° pulse typed in Experiment parameters) against 30°/(I + ½) for single-pulse spectra of half-integer quadrupolar nuclei | Process ▸ Experiment parameters… |
 | `frozen: …` | a site the fit held because its centre lies outside the window | its δiso cell |
 
 After an edit the pill reads **Model** instead of **Fit**, with `edited since
 fit`: the residual and physical chips follow the live model, while the
-covariance-based chips (degenerate, at bounds, no error bars, population) are
-dimmed — they describe the last fit until the next **F5**. Re-processing the
-spectrum drops the verdict altogether, since the covariance no longer describes
-the data. **View ▸ Panels ▸ Fit health strip** hides the strip.
+covariance-based chips (degenerate, at bounds, no error bars, population, tail
+outside window) are dimmed — they describe the last fit until the next **F5**.
+The recycle-delay and flip-angle chips describe the acquisition rather than the
+fit, so they stay live and appear as soon as lines are placed on a Bruker
+dataset. Re-processing the spectrum drops the verdict altogether, since the
+covariance no longer describes the data. **View ▸ Panels ▸ Fit health strip**
+hides the strip.
 
 **Zones** restrict the fit to chosen spectral regions (union of intervals) — fit
 only where the model is valid and let peaks outside float frozen. **Auto Fit**

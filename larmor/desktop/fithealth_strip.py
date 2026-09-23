@@ -31,6 +31,12 @@ class FitHealthStrip(QWidget):
     open_correlations = Signal()
     open_errors = Signal()
     open_help = Signal()
+    #: the quantitativity chips: widen the integration window to the tails,
+    #: Tools ▸ Relaxation on the sibling T1 EXPNO, the 90° pulse field of
+    #: Experiment parameters
+    widen_window = Signal()
+    open_relaxation = Signal()
+    enter_flip = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -186,6 +192,12 @@ class FitHealthStrip(QWidget):
             self.open_errors.emit()
         elif f.target == "report":
             self.open_report.emit()
+        elif f.target == "widen":
+            self.widen_window.emit()
+        elif f.target == "relaxation":
+            self.open_relaxation.emit()
+        elif f.target == "flip":
+            self.enter_flip.emit()
 
     # ------------------------------------------------------------ details
     def details_menu(self, extra_actions=()) -> QMenu:

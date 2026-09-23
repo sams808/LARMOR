@@ -132,6 +132,10 @@ class MainWindow(_MenusMixin, _ChromeMixin, _FilesMixin, _SessionMixin,
         self._last_lmfit = None
         self._health = None         # fithealth.Health currently shown (fit or live)
         self._health_fit = None     # fithealth.Health of the last fit
+        # acquisition facts per source_path for the quantitativity chips
+        # (recycle delay vs T1, flip angle); dropped by _health_reset
+        self._acq_cache: dict = {}
+        self._health_extra_actions: list = []
 
         # central area holds a 1D spectrum view AND a 2D contour view; the
         # loader switches between them so ANY dataset opens with a basic
@@ -200,6 +204,9 @@ class MainWindow(_MenusMixin, _ChromeMixin, _FilesMixin, _SessionMixin,
         self.health_strip.open_help.connect(
             lambda: self._open_manual("spectra-1d",
                                       "1D spectra — processing & fitting"))
+        self.health_strip.widen_window.connect(self._health_widen_window)
+        self.health_strip.open_relaxation.connect(self._health_open_relaxation)
+        self.health_strip.enter_flip.connect(self._health_enter_flip)
         self.central_stack.currentChanged.connect(self._health_show)
         self.health_strip.setVisible(False)      # shown once a 1D recipe has sites
 

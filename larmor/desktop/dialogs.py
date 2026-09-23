@@ -1,6 +1,9 @@
 """Dialogs: experiment parameters, parameter links, and fit bounds."""
 from __future__ import annotations
 
+import os
+
+from PySide6.QtCore import QSettings
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
     QFormLayout, QGridLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
@@ -68,6 +71,41 @@ class BoundsDialog(QDialog):
         self.accept()
 
 
+def _p90_settings_key(nucleus: str, probhd: str, plw1) -> str:
+    """The QSettings key the 90° pulse is remembered under: per nucleus,
+    probe and power level."""
+    try:
+        power = f"{float(plw1):g}" if plw1 is not None else ""
+    except (TypeError, ValueError):
+        power = ""
+    return f"p90/{nucleus}/{probhd}/{power}"
+
+
+def parse_t1_text(text: str):
+    """'4.6' → 4.6; 'BO3: 4.64, BO4: 3.90' → {'BO3': 4.64, 'BO4': 3.9};
+    '' → None; unparsable → ValueError."""
+    text = (text or "").strip()
+    if not text:
+        return None
+    if ":" in text:
+        out = {}
+        for part in text.replace(";", ",").split(","):
+            if not part.strip():
+                continue
+            label, _, val = part.partition(":")
+            v = float(val.strip().rstrip("s").strip())
+            if not label.strip() or v <= 0:
+                raise ValueError(part)
+            out[label.strip()] = v
+        if not out:
+            raise ValueError(text)
+        return out
+    v = float(text.rstrip("s").strip())
+    if v <= 0:
+        raise ValueError(text)
+    return v
+
+
 class ExperimentDialog(QDialog):
     """Edit nucleus / Larmor frequency / MAS rate (nu_rot) for the recipe.
 
@@ -79,12 +117,21 @@ class ExperimentDialog(QDialog):
     records the confirmed rate for later spectra of the same session folder,
     rotor and nucleus (``larmor.masrate``). CSV / fxmla / VOCS recipes have
     no block and keep the plain four-row dialog.
+
+    With ``acq`` (a ``quantitativity.Check`` of a Bruker source) the dialog
+    also shows the acquisition read from acqus (read-only) and takes the
+    three values the quantitativity chips cannot read from disk: the 90°
+    pulse at this power, a flip angle, a T1 (one value or per site). They
+    are stored under ``recipe['provenance']['quantitativity']`` and the 90°
+    pulse is remembered per nucleus / probe / power (outside
+    LARMOR_NO_SESSION). ``focus='p90'`` gives that field the focus.
     """
 
     _SOURCE_NAMES = {"acqus": "acqus MASR", "title": "title",
                      "booking": "booking sidecar"}
 
-    def __init__(self, parent, recipe: dict, *, measure=None):
+    def __init__(self, parent, recipe: dict, acq=None, focus=None, *,
+                 measure=None):
         super().__init__(parent)
         self.setWindowTitle("Experiment parameters")
         self.recipe = recipe
@@ -94,6 +141,8 @@ class ExperimentDialog(QDialog):
         self.source_rows: dict[str, QPushButton] = {}
         #: set by [Forget]: edit_experiment appends a reversal to the store
         self.forget_requested = False
+        self.acq = acq
+        self.p90 = self.flip = self.t1 = None
         form = QFormLayout(self)
 
         self.nucleus = QLineEdit(recipe.get("nucleus", ""))
@@ -139,6 +188,9 @@ class ExperimentDialog(QDialog):
         sr_row.addWidget(btnCopy)
         form.addRow("SR (reference)", sr_row)
 
+        if acq is not None:
+            self._build_acquisition(form, acq, recipe)
+
         note = QLabel("Changing nucleus / field / νrot re-simulates every line; "
                       "changing SR re-references the ppm axis.")
         note.setWordWrap(True)
@@ -149,6 +201,97 @@ class ExperimentDialog(QDialog):
         buttons.accepted.connect(self._accept)
         buttons.rejected.connect(self.reject)
         form.addRow(buttons)
+        if focus == "p90" and self.p90 is not None:
+            self.p90.setFocus()
+            self.p90.selectAll()
+
+    # ------------------------------------------------ acquisition (quantitativity)
+    def _build_acquisition(self, form: QFormLayout, acq, recipe: dict):
+        from larmor.quantitativity import _deg, spin_text
+
+        a = acq.acquisition
+        box = QGroupBox("Acquisition (read from acqus — read-only)")
+        g = QFormLayout(box)
+        if a is not None:
+            g.addRow("pulse program", QLabel(f"{a.pulprog}  ({a.kind})"))
+            g.addRow("NS", QLabel(f"{a.ns}" if a.ns is not None else "—"))
+            d1 = f"{a.d1_s:g} s" if a.d1_s is not None else "—"
+            aq = f"  (+ AQ {a.aq_s:.3g} s)" if a.aq_s is not None else ""
+            g.addRow("D1 (+ AQ)", QLabel(d1 + aq))
+            p1 = f"{a.p1_us:g} µs" if a.p1_us is not None else "—"
+            pw = f" at {a.plw1_w:g} W" if a.plw1_w else ""
+            g.addRow("P1 at PLW1", QLabel(p1 + pw))
+            if acq.flip_deg is not None:
+                src = {"P1(90)": "P1(90) in the title", "title": "tip stated in the title",
+                       "user": "typed", "echo(90)": "echo program"}.get(acq.flip_source, "")
+                flip = f"{_deg(acq.flip_deg)}°" + (f"  ({src})" if src else "")
+                if acq.flip_limit_deg is not None:
+                    flip += f"  — limit {_deg(acq.flip_limit_deg)}° for I = {spin_text(acq.spin)}"
+            else:
+                flip = "unknown"
+                if acq.flip_limit_deg is not None:
+                    flip += (f"  — limit {_deg(acq.flip_limit_deg)}° for "
+                             f"I = {spin_text(acq.spin)}; type the 90° pulse below")
+            g.addRow("flip angle", QLabel(flip))
+        src = acq.facts.t1 if acq.facts is not None else None
+        if src is not None and src.regions:
+            regions = ", ".join(
+                (f"{r.hi_ppm:.1f} … {r.lo_ppm:.1f} ppm: {r.t1_s:.3g} s"
+                 if r.hi_ppm != r.lo_ppm else f"{r.hi_ppm:.1f} ppm: {r.t1_s:.3g} s")
+                for r in src.regions)
+            t1 = f"EXPNO {src.name} (TopSpin ct1t2.txt) — {regions}"
+        elif acq.t1_status == "implausible":
+            t1 = "TopSpin fit did not converge — " + (acq.facts.t1_note or "")
+        elif acq.facts is not None and acq.facts.sibling_expno:
+            t1 = (f"EXPNO {os.path.basename(str(acq.facts.sibling_expno))}: no TopSpin "
+                  "result (F7 ▸ Measure T1 per site, or type a value below)")
+        else:
+            t1 = "none found in the sample folder"
+        lab = QLabel(t1)
+        lab.setWordWrap(True)
+        g.addRow("T1 source", lab)
+        form.addRow(box)
+
+        over = dict((recipe.get("provenance") or {}).get("quantitativity") or {})
+        nucleus = recipe.get("nucleus") or (a.nucleus if a is not None else "")
+        self._p90_key = _p90_settings_key(
+            nucleus, a.probhd if a is not None else "", a.plw1_w if a is not None else None)
+        self.p90 = QDoubleSpinBox()
+        self.p90.setDecimals(3)
+        self.p90.setRange(0.0, 1000.0)
+        self.p90.setSuffix(" µs")
+        self.p90.setSpecialValueText("unknown")
+        self.p90.setToolTip("the 90° pulse length at PLW1 (P1(90)= in the title, or "
+                            "the probe's calibration); the flip angle follows as "
+                            "90·P1/P90 and is remembered per nucleus, probe and power")
+        p90 = over.get("p90_us")
+        if not p90 and a is not None and a.p90_us_title:
+            p90 = a.p90_us_title
+        if not p90 and not os.environ.get("LARMOR_NO_SESSION"):
+            try:
+                p90 = float(QSettings("LARMOR", "app").value(self._p90_key, 0.0) or 0.0)
+            except (TypeError, ValueError):
+                p90 = 0.0
+        self.p90.setValue(float(p90 or 0.0))
+        form.addRow("90° pulse at this power (µs)", self.p90)
+        self.flip = QDoubleSpinBox()
+        self.flip.setDecimals(1)
+        self.flip.setRange(0.0, 180.0)
+        self.flip.setSuffix(" °")
+        self.flip.setSpecialValueText("not set")
+        self.flip.setToolTip("overrides the computed flip angle; 0 = not set")
+        self.flip.setValue(float(over.get("flip_deg") or 0.0))
+        form.addRow("flip angle (°)", self.flip)
+        self.t1 = QLineEdit()
+        self.t1.setPlaceholderText("e.g. 4.6   or   BO3: 4.64, BO4: 3.90  (seconds)")
+        self.t1.setToolTip("a T1 for every line, or one per line label; overrides "
+                           "the TopSpin result of the sibling EXPNO")
+        by_site = over.get("t1_by_site")
+        if isinstance(by_site, dict) and by_site:
+            self.t1.setText(", ".join(f"{k}: {v:g}" for k, v in by_site.items()))
+        elif over.get("t1_s"):
+            self.t1.setText(f"{float(over['t1_s']):g}")
+        form.addRow("T1 (s)", self.t1)
 
     # ------------------------------------------------- where the rate comes from
     def _build_mas_sources(self, form, block: dict):
@@ -311,10 +454,37 @@ class ExperimentDialog(QDialog):
                 self.nucleus.setStyleSheet("border: 1px solid #b0442e;")
                 self.nucleus.setToolTip(f"unknown isotope: {nuc!r}")
                 return
+        t1 = None
+        if self.t1 is not None:
+            try:
+                t1 = parse_t1_text(self.t1.text())
+            except ValueError:
+                self.t1.setStyleSheet("border: 1px solid #b0442e;")
+                self.t1.setToolTip("a number of seconds, or 'label: seconds, …'")
+                return
         self.recipe["nucleus"] = nuc
         self.recipe["larmor_frequency_MHz"] = float(self.larmor.value())
         self.recipe["spin_rate_Hz"] = float(self.mas.value())
         self.recipe["sr_hz"] = float(self.sr.value())
+        if self.acq is not None:
+            prov = self.recipe.setdefault("provenance", {})
+            q = dict(prov.get("quantitativity") or {})
+            p90 = float(self.p90.value())
+            flip = float(self.flip.value())
+            for key, val in (("p90_us", p90), ("flip_deg", flip)):
+                if val > 0:
+                    q[key] = val
+                else:
+                    q.pop(key, None)
+            q.pop("t1_s", None)
+            q.pop("t1_by_site", None)
+            if isinstance(t1, dict):
+                q["t1_by_site"] = t1
+            elif t1:
+                q["t1_s"] = float(t1)
+            prov["quantitativity"] = q
+            if p90 > 0 and not os.environ.get("LARMOR_NO_SESSION"):
+                QSettings("LARMOR", "app").setValue(self._p90_key, p90)
         self.accept()
 
     def _copy_sr(self):

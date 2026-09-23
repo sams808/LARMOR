@@ -229,3 +229,33 @@ def test_export_curves_csv_roundtrips_exactly_and_reopens_in_larmor(tmp_path):
     tab2 = _read_curves(p2)
     assert np.array_equal(tab2["experiment_raw"], raw[order])
     assert np.array_equal(out2["experiment_raw"], raw[order])
+
+
+def _acqus_min(path, nuc, pulprog):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"##TITLE= x\n##$NUC1= <{nuc}>\n##$PULPROG= <{pulprog}>\n"
+                    "##$PARMODE= 0\n##END=\n", encoding="utf-8")
+
+
+def test_find_sibling_t1_orders_by_fit_then_distance(tmp_path):
+    sample = tmp_path / "sample"
+    for expno, nuc, pp, fit in ((10, "11B", "zg", False), (9, "11B", "satrect1", False),
+                                (12, "11B", "satrect1", True), (11, "27Al", "satrect1", True),
+                                (14, "11B", "satrect1_echo.nmrfam", False)):
+        e = sample / str(expno)
+        _acqus_min(e / "acqus", nuc, pp)
+        (e / "pdata" / "1").mkdir(parents=True)
+        if fit:
+            (e / "pdata" / "1" / "ct1t2.txt").write_text("T1    =       4.643s\n")
+    (sample / "sample_24_3_norm-to-area.txt").write_text("stray operator export")
+    sibs = scan.find_sibling_t1(sample / "10", "11B")
+    assert [e.expno for e in sibs] == ["12", "9", "14"]
+    assert [e.has_t1_fit for e in sibs] == [True, False, False]
+    assert all(e.kind == "Saturation recovery (T1)" for e in sibs)
+    assert {e.expno: e.has_t1_fit for e in scan.scan_sample(sample)} == {
+        "9": False, "10": False, "11": True, "12": True, "14": False}
+    assert scan.find_sibling_t1(sample / "10", "31P") == []
+    assert scan.find_sibling_t1(sample / "10", "") == []
+    assert scan.find_sibling_t1(tmp_path / "nowhere" / "3", "11B") == []
+    # the EXPNO itself is never its own sibling; 14 is nearer to 12 than 9
+    assert [e.expno for e in scan.find_sibling_t1(sample / "12", "11B")] == ["14", "9"]

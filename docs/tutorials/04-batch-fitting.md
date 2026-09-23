@@ -67,6 +67,19 @@ lists the sources side by side; confirming once with *Remember for this
 session* covers every EXPNO of that session, rotor and nucleus with the same
 three source values.
 
+The title also says `short tip angle` without a number. EXPNO 23 of every
+folder is the ¹¹B saturation-recovery measurement, and its TopSpin result
+(`pdata/1/ct1t2.txt`) gives T₁ = 4.64 s for the BO₃ region and 3.90 s for
+the BO₄ region of Base1Ca against a recycle delay D1 = 14 s. After the fit
+the fit-health strip therefore shows `D1 = 3.0–3.6 T1 → 95–97 % (90°
+assumed)`; typing the ¹¹B 90° pulse in **Process > Experiment
+parameters…** turns it into the steady-state value for the short pulse
+actually used. Six of the ten glasses of this session (Base1Ca, Base2Ca and
+four of the fluorinated ones) were acquired with their slowest boron site
+at 2.5–3.3 T₁ (D1 = 9 … 18 s), the two sites relaxing differently in every
+glass; the other four sit at 4.7–7.3 T₁. A caveat to carry into the Methods
+text, not something a fit can repair.
+
 ## 3. Build the shared model on the first glass
 
 The shipped ¹¹B recipe, `examples/pCABS2-4_11B.recipe.json`, has the model

@@ -34,15 +34,16 @@ class _ProcessingMixin:
             self.apply_processing(dlg.result_ops(),
                                   bool(self.recipe.get("processing_from_raw")))
 
-    def edit_experiment(self):
+    def edit_experiment(self, focus=None):
         if self.recipe is None:
             return
         from larmor.desktop.dialogs import ExperimentDialog
 
+        focus = focus if isinstance(focus, str) else None   # a QAction passes `checked`
         self.snapshot(with_axis=True)         # an SR change re-references the axis
         old_sr = self.recipe.get("sr_hz", 0.0) or 0.0
         dlg = ExperimentDialog(
-            self, self.recipe,
+            self, self.recipe, acq=self._experiment_acquisition(), focus=focus,
             measure=lambda: self._run_sideband_detection(scan=True))
         if dlg.exec():
             self.recipe["mas_uncertain"] = False     # user confirmed the params
@@ -75,6 +76,11 @@ class _ProcessingMixin:
                 + " — re-simulating (a new spin rate builds a new kernel once)")
             self.request_simulation()
             self._persist_session()
+            # a typed 90° pulse / flip angle / T1 re-judges the last fit's
+            # quantitativity chips at once (the live pass picks the override
+            # up on the next simulation anyway)
+            if self._health_fit is not None:
+                self._health_requantify()
         else:
             self.undo_stack.pop()   # dialog cancelled: drop the snapshot
 
@@ -110,6 +116,26 @@ class _ProcessingMixin:
             return "remembered for " + masrate.describe_key(key)
         block["uncertain"] = False
         return ""
+
+    def _experiment_acquisition(self):
+        """The quantitativity.Check the Experiment dialog shows: the one behind
+        the verdict on screen, else a fresh judgement of the cached facts
+        against the current sites (so the 90° pulse can be typed before the
+        first fit); None for a non-Bruker source."""
+        chk = getattr(self._health, "acquisition", None)
+        if chk is not None:
+            return chk
+        facts = self._acq_facts()
+        if facts is None:
+            return None
+        from larmor import quantitativity
+
+        try:
+            return quantitativity.check(
+                facts, (self.recipe or {}).get("sites") or [],
+                ((self.recipe or {}).get("provenance") or {}).get("quantitativity"))
+        except Exception:                                 # noqa: BLE001
+            return None
 
     # ------------------------------------------------------------- baseline
     def _baseline_mode(self, on: bool):

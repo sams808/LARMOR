@@ -15,8 +15,9 @@ cannot be read as physical values (an unphysical value, or a pair the data
 cannot separate), ``check`` is a statistical caveat, ``ok`` is a fitted model
 with no flag and ``none`` is a model that has not been fitted yet. Every
 threshold is the one its source module already applies (1.5x edge noise,
-|z| > 3 / lag-1 > 0.4, |r| >= 0.95, a population error of 100 %); no new
-judgement is introduced.
+|z| > 3 / lag-1 > 0.4, |r| >= 0.95, a population error of 100 %, the 2 %
+tail, 99 % recovery and 30°/(I+½) rules of quantify.py / quantitativity.py);
+no new judgement is introduced.
 """
 from __future__ import annotations
 
@@ -26,8 +27,10 @@ from dataclasses import dataclass, field, replace
 
 import numpy as np
 
-from larmor import diagnostics, sanity
+from larmor import diagnostics, quantitativity, sanity
 from larmor.identifiability import IDENTIFIABILITY_THRESHOLD, unidentifiable_pairs
+from larmor.quantify import TAIL_LIMIT_PCT
+from larmor.quantitativity import RECOVERY_MIN
 from larmor.recipe import Recipe
 
 LEVELS = ("none", "ok", "check", "bad")
@@ -50,7 +53,10 @@ GLYPH = {"bad": "✗", "check": "⚠", "info": "·"}
 #: display order of the flags: what makes the numbers unreadable first, then
 #: the statistical caveats, then information
 KIND_ORDER = ("physical", "degenerate", "nocov", "at_bounds", "structured",
-              "noise", "population", "frozen")
+              "noise", "population", "tail", "recovery", "excitation", "frozen")
+#: the flags derived from the quantify rows and the acquisition facts, the
+#: ones ``with_quantification`` rebuilds without a new fit
+QUANT_KINDS = ("population", "tail", "recovery", "excitation")
 _WINDOW_MSG = "is outside the fit window"
 _BOUND_RE = re.compile(r"^s(\d+)\.(.+)$")
 
@@ -62,9 +68,11 @@ class Flag:
     ``kind`` names the check (see ``KIND_ORDER``), ``level`` is ``bad`` /
     ``check`` / ``info``, ``text`` is the chip wording, ``detail`` the one-line
     explanation (tooltip / details menu), ``target`` what a click opens
-    (``residual`` / ``param`` / ``correlations`` / ``errors`` / ``report`` or
-    empty) and ``params`` the ``(site index, parameter name)`` cells the flag
-    concerns, the first being the focus target.
+    (``residual`` / ``param`` / ``correlations`` / ``errors`` / ``report`` /
+    ``widen`` (widen the integration window) / ``relaxation`` (Tools ▸
+    Relaxation on the sibling T1 EXPNO) / ``flip`` (Experiment parameters,
+    the 90° pulse) or empty) and ``params`` the ``(site index, parameter
+    name)`` cells the flag concerns, the first being the focus target.
     """
 
     kind: str
@@ -75,8 +83,9 @@ class Flag:
     params: list = field(default_factory=list)
     #: True on flags carried forward from the last fit by ``reassess_live``
     stale: bool = False
-    #: degenerate / at_bounds / nocov / population: derived from the fit's
-    #: covariance, so a live pass cannot recompute them
+    #: degenerate / at_bounds / nocov / population / tail: derived from the
+    #: FIT (its covariance or its quantify rows), so a live pass cannot
+    #: recompute them
     covariance_based: bool = False
 
 
@@ -99,6 +108,12 @@ class Health:
     flags: list
     recipe_sig: tuple | None = None
     data_sig: tuple | None = None
+    #: the quantitativity.Check behind the recovery / excitation flags (plain
+    #: scalars; in memory only, like the rest of the snapshot); None when the
+    #: source is not a Bruker dataset
+    acquisition: object = None
+    #: the quantify rows of the fit carried a tail measurement
+    tail_checked: bool = False
 
     # ------------------------------------------------------------ verdict
     @property
@@ -171,6 +186,14 @@ class Health:
                     out.append("parameters separable")
             if "at_bounds" not in kinds:
                 out.append("none at a bound")
+            if self.tail_checked and "tail" not in kinds:
+                out.append(f"tails inside the window (≤ {TAIL_LIMIT_PCT:g} %)")
+        if self.acquisition is not None:
+            try:
+                out.extend(self.acquisition.passing_lines(
+                    exclude=kinds & {"recovery", "excitation"}))
+            except Exception:
+                pass
         return out
 
     def tooltip(self) -> str:
@@ -186,6 +209,8 @@ class Health:
         passing = self.passing()
         if passing:
             lines.append(" · ".join(passing))
+        if self.fitted and self.acquisition is None:
+            lines.append("acquisition not checked (not a Bruker dataset)")
         for f in self.flags:
             lines.append(f"{GLYPH[f.level]} {f.detail}"
                          + (" — from the last fit" if f.stale else ""))
@@ -224,9 +249,9 @@ class Health:
                         "(see Correlations)")
         if "nocov" in kinds:
             bits.append("⚠ no covariance (no error bars)")
-        pop = next((f for f in self.flags if f.kind == "population"), None)
-        if pop is not None:
-            bits.append("⚠ " + pop.text)
+        for f in self.flags:
+            if f.kind in QUANT_KINDS and f.level == "check":
+                bits.append("⚠ " + f.text)
         return "   ·   ".join(bits)
 
     def summary_tooltip(self) -> str:
@@ -410,6 +435,94 @@ def _unsupported_populations(rows) -> list:
     return out
 
 
+def _tail_rows(rows) -> list:
+    """[(label, tail_outside_pct)] of the quantify rows whose line lies more
+    than TAIL_LIMIT_PCT outside the integration window; rows without the
+    key → []."""
+    out = []
+    for r in rows or []:
+        pct = r.get("tail_outside_pct")
+        if pct is None:
+            continue
+        try:
+            pct = float(pct)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(pct) and pct > TAIL_LIMIT_PCT:
+            idx = None
+            m = re.match(r"^s(\d+)$", str(r.get("site", "")))
+            if m:
+                idx = int(m.group(1))
+            out.append((str(r.get("label") or r.get("site") or "?"), pct, idx))
+    return out
+
+
+def _tails_checked(rows) -> bool:
+    return any(r.get("tail_outside_pct") is not None for r in rows or [])
+
+
+def _quant_flags(rec: Recipe, rows, facts, fitted: bool) -> tuple:
+    """The flags derived from the quantify rows (population, tail — a FIT's
+    numbers, so fitted only) and from the acquisition facts (recovery,
+    excitation — live). Returns (flags, quantitativity.Check or None)."""
+    flags = []
+    if fitted:
+        unsupported = _unsupported_populations(rows)
+        if unsupported:
+            flags.append(Flag(
+                kind="population", level="check",
+                text=_bounded("population ±≥100 %", unsupported),
+                detail=("relative uncertainty ≥ 100 % on the population of "
+                        + ", ".join(unsupported)
+                        + " — the data do not support that component (report "
+                        "it, or remove it)"),
+                target="report", covariance_based=True))
+        tails = _tail_rows(rows)
+        if tails:
+            flags.append(Flag(
+                kind="tail", level="check",
+                text=_bounded("tail outside window",
+                              [f"{label} {pct:.0f} %" for label, pct, _ in tails]),
+                detail=("; ".join(f"{pct:.0f} % of {label}'s simulated area lies "
+                                  "outside the integration window"
+                                  for label, pct, _ in tails)
+                        + f" (limit {TAIL_LIMIT_PCT:g} %) — its population is "
+                        "biased low; click to widen the window to 99.5 % of "
+                        "every line, then F6 re-integrates and F5 refits over it"),
+                target="widen",
+                params=[(i, "amplitude") for _, _, i in tails if i is not None],
+                covariance_based=True))
+    chk = None
+    if facts is not None:
+        prov = getattr(rec, "provenance", None)
+        override = prov.get("quantitativity") if isinstance(prov, dict) else None
+        try:
+            chk = quantitativity.check(facts, rec.sites, override)
+        except Exception:
+            chk = None
+    if chk is not None and chk.acquisition is not None:
+        if chk.recovery_min is not None and chk.recovery_min < RECOVERY_MIN:
+            flags.append(Flag(
+                kind="recovery", level="check", text=chk.recovery_text(),
+                detail=chk.recovery_detail(), target="relaxation"))
+        elif chk.recovery_min is None and chk.t1_status in ("missing",
+                                                            "implausible", "none"):
+            flags.append(Flag(
+                kind="recovery", level="info", text=chk.recovery_unknown_text(),
+                detail=chk.recovery_unknown_detail(), target="relaxation"))
+        if chk.excitation_judged:
+            if chk.excitation_over():
+                flags.append(Flag(
+                    kind="excitation", level="check", text=chk.excitation_text(),
+                    detail=chk.excitation_detail(), target="flip"))
+            elif chk.flip_deg is None:
+                flags.append(Flag(
+                    kind="excitation", level="info",
+                    text=chk.excitation_unknown_text(),
+                    detail=chk.excitation_unknown_detail(), target="flip"))
+    return flags, chk
+
+
 def _sort_flags(flags: list) -> list:
     return sorted(flags, key=lambda f: KIND_ORDER.index(f.kind)
                   if f.kind in KIND_ORDER else len(KIND_ORDER))
@@ -418,15 +531,18 @@ def _sort_flags(flags: list) -> list:
 # ------------------------------------------------------------------ assess
 def assess(recipe, y_exp, y_fit, *, lmfit_result=None, at_bounds=(), frozen=(),
            window=None, rmsd=None, quant_rows=None, fitted=True, ppm=None,
-           x_fit=None) -> Health:
+           x_fit=None, acquisition=None) -> Health:
     """Judge a model against the data.
 
     ``recipe`` is a Recipe or a recipe dict (converted with Recipe.from_dict,
     never mutated); ``window`` defaults to the recipe's fit window. Residual
     flags need ``y_exp`` / ``y_fit`` on the same axis with at least 40 points
     (``x_fit`` + ``ppm`` interpolate a model simulated on its own grid);
-    covariance flags (degenerate, no covariance, at bounds, population) are
-    only emitted for a fitted model. Sanity's δiso-outside-window warning is
+    covariance flags (degenerate, no covariance, at bounds, population, tail)
+    are only emitted for a fitted model. ``acquisition`` is the
+    ``quantitativity.AcqFacts`` of the source EXPNO (None for a non-Bruker
+    source): the recycle-delay and flip-angle flags are judged from it and
+    the current sites, fitted or not. Sanity's δiso-outside-window warning is
     not repeated for a site the fit froze for exactly that reason (it stays in
     ``warns``; the frozen chip reports it once).
     """
@@ -470,7 +586,7 @@ def assess(recipe, y_exp, y_fit, *, lmfit_result=None, at_bounds=(), frozen=(),
     names = list(getattr(lmfit_result, "var_names", []) or []) if lmfit_result is not None else []
     nocov = fitted and (lmfit_result is None or not names
                         or getattr(lmfit_result, "covar", None) is None)
-    unsupported = _unsupported_populations(quant_rows) if fitted else []
+    quant, chk = _quant_flags(rec, quant_rows, acquisition, fitted)
 
     flags = []
     if shown:
@@ -522,15 +638,7 @@ def assess(recipe, y_exp, y_fit, *, lmfit_result=None, at_bounds=(), frozen=(),
                     f"the edge noise (limit {NOISE_RATIO_LIMIT:g}×) — structure "
                     "the model does not describe"),
             target="residual"))
-    if unsupported:
-        flags.append(Flag(
-            kind="population", level="check",
-            text=_bounded("population ±≥100 %", unsupported),
-            detail=("relative uncertainty ≥ 100 % on the population of "
-                    + ", ".join(unsupported)
-                    + " — the data do not support that component (report "
-                    "it, or remove it)"),
-            target="report", covariance_based=True))
+    flags.extend(quant)
     if frozen:
         flags.append(Flag(
             kind="frozen", level="info", text=_bounded("frozen", frozen),
@@ -544,11 +652,12 @@ def assess(recipe, y_exp, y_fit, *, lmfit_result=None, at_bounds=(), frozen=(),
     return Health(fitted=fitted, stale=False, rmsd=rmsd, redchi=redchi,
                   noise_ratio=noise_ratio, runs_z=runs_z, lag1=lag1,
                   warns=warns, pairs=list(pairs), at_bounds=at_bounds,
-                  frozen=frozen, flags=_sort_flags(flags))
+                  frozen=frozen, flags=_sort_flags(flags), acquisition=chk,
+                  tail_checked=bool(fitted and _tails_checked(quant_rows)))
 
 
 def reassess_live(prev, recipe_dict, y_exp, y_model_on_exp, *, ppm=None,
-                  window=None) -> Health:
+                  window=None, acquisition=None) -> Health:
     """Re-judge the live model after an edit, cheaply.
 
     With a previous fit (``prev`` fitted): when the recipe and data signatures
@@ -558,15 +667,19 @@ def reassess_live(prev, recipe_dict, y_exp, y_model_on_exp, *, ppm=None,
     experimental axis) and the covariance-based flags of the fit are carried
     forward marked stale. Before any fit, only the physical checks run — a
     hand-placed model is always far from the data, so its residual says
-    nothing yet.
+    nothing yet. The acquisition facts (``acquisition``, else the ones behind
+    ``prev``) are re-judged against the current sites on every pass: the
+    recycle-delay and flip-angle chips are live, the tail chip is carried.
     """
+    facts = acquisition if acquisition is not None else getattr(
+        getattr(prev, "acquisition", None), "facts", None)
     fitted = prev is not None and prev.fitted
     if fitted:
         if (recipe_signature(recipe_dict) == prev.recipe_sig
                 and data_signature(ppm, y_exp) == prev.data_sig):
             return prev
         h = assess(recipe_dict, y_exp, y_model_on_exp, frozen=prev.frozen,
-                   window=window, fitted=False, ppm=ppm)
+                   window=window, fitted=False, ppm=ppm, acquisition=facts)
         live = [replace(f, stale=True) if f.kind == "frozen" else f
                 for f in h.flags if not f.covariance_based]
         carried = [replace(f, stale=True) for f in prev.flags if f.covariance_based]
@@ -575,5 +688,23 @@ def reassess_live(prev, recipe_dict, y_exp, y_model_on_exp, *, ppm=None,
         h.rmsd, h.redchi = prev.rmsd, prev.redchi
         h.pairs, h.at_bounds = list(prev.pairs), list(prev.at_bounds)
         h.recipe_sig, h.data_sig = prev.recipe_sig, prev.data_sig
+        h.tail_checked = prev.tail_checked
         return h
-    return assess(recipe_dict, None, None, window=window, fitted=False, ppm=ppm)
+    return assess(recipe_dict, None, None, window=window, fitted=False, ppm=ppm,
+                  acquisition=facts)
+
+
+def with_quantification(prev: Health, recipe, quant_rows, acquisition=None) -> Health:
+    """``prev`` with its quantification-derived flags (population, tail,
+    recovery, excitation) rebuilt from fresh quantify rows and acquisition
+    facts — a re-integration over a wider window or a typed 90° pulse / T1
+    re-judged without a new fit. Everything else (residual flags, signatures,
+    stale, rmsd) is kept; ``acquisition`` defaults to the facts behind
+    ``prev``."""
+    rec = recipe if isinstance(recipe, Recipe) else Recipe.from_dict(recipe)
+    facts = acquisition if acquisition is not None else getattr(
+        getattr(prev, "acquisition", None), "facts", None)
+    keep = [f for f in prev.flags if f.kind not in QUANT_KINDS]
+    quant, chk = _quant_flags(rec, quant_rows, facts, prev.fitted)
+    return replace(prev, flags=_sort_flags(keep + quant), acquisition=chk,
+                   tail_checked=bool(prev.fitted and _tails_checked(quant_rows)))
