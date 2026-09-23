@@ -4,13 +4,14 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QDoubleValidator
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QDoubleSpinBox, QFrame, QGridLayout, QHBoxLayout,
-    QLabel, QLineEdit, QPushButton, QRadioButton, QScrollArea, QSizePolicy,
-    QSlider, QSpinBox, QToolButton, QVBoxLayout, QWidget,
+    QButtonGroup, QCheckBox, QComboBox, QDoubleSpinBox, QFrame, QGridLayout,
+    QHBoxLayout, QLabel, QLineEdit, QPushButton, QRadioButton, QScrollArea,
+    QSizePolicy, QSlider, QSpinBox, QToolButton, QVBoxLayout, QWidget,
 )
 
 from larmor.desktop import theme
 from larmor.desktop.plot import site_color
+from larmor.processing import CHANNELS, OPS, TIME_DOMAIN_OPS
 
 PARAM_LABELS = {
     "isotropic_chemical_shift_ppm": "δiso (ppm)",
@@ -230,9 +231,22 @@ class ProcessingPanel(QWidget):
     twopoint_mode = Signal(bool)           # 2-point background: pick-two toggle
     twopoint_apply = Signal()
     twopoint_clear = Signal()
+    #: display projection requested: (domain "time"|"freq", channel
+    #: "real"|"imag"|"magnitude") -- a view of the pipeline result, never a
+    #: pipeline step (see view_state / reset_view)
+    view_changed = Signal(str, str)
+
+    #: recorded time-domain steps the panel has no control for
+    _UNSYNCABLE = frozenset({"lp", "shift_fid", "swap_echo", "echo_apodize"})
+    _WINDOW_OPS = ("em", "gm", "sine", "traf")
 
     def __init__(self):
         super().__init__()
+        #: frequency-domain steps of a recorded chain the widgets cannot express
+        #: (baseline, autophase, subtract_avg, ...), re-appended by _emit so a
+        #: forced re-apply keeps them (see sync_from_ops)
+        self._carried_ops: list[dict] = []
+        self._hilbert_before_reapod = False
         # All controls live inside a scroll area so this panel can be made
         # narrow without forcing the main window wider than the screen (a wide
         # row scrolls instead of pushing the whole window past the monitor).
@@ -307,6 +321,21 @@ class ProcessingPanel(QWidget):
         raw.addWidget(self.off)
         adv.addLayout(raw)
 
+        # re-apodize a spectrum that did NOT come from a raw fid (TopSpin 1r,
+        # CSV, the FID / QCPMG / VOCS dialogs' output): Hilbert -> IFT -> the
+        # window block above -> FT, still applied from the unprocessed base
+        self.chkReapod = QCheckBox(
+            "re-apodize this spectrum  (Hilbert → IFT → window → FT)")
+        self.chkReapod.setToolTip(
+            "for a TopSpin-processed 1r, a CSV, or a spectrum sent from the "
+            "FID / QCPMG / VOCS dialogs: rebuild the imaginary channel, go back "
+            "to the FID, apply the window functions above, transform again — "
+            "a reconstruction that compounds with whatever window was already "
+            "applied; the raw-fid mode restarts from the instrument file and "
+            "is exact. Hilbert first is mandatory (the IFT of a real-only "
+            "spectrum is two-sided) and stays locked while this is on.")
+        adv.addWidget(self.chkReapod)
+
         srrow = QHBoxLayout()
         srrow.addWidget(QLabel("<b>SR</b> (Hz)"))
         self.sr = QDoubleSpinBox(); self.sr.setRange(-1e6, 1e6); self.sr.setDecimals(2)
@@ -320,6 +349,40 @@ class ProcessingPanel(QWidget):
                                    "so phase correction works on it")
         srrow.addWidget(self.chkHilbert)
         v.addLayout(srrow)
+
+        # Display: which projection of the pipeline result the canvas shows.
+        # The FID button flips to the windowed, zero-filled FID the transform
+        # sees (window / LB / GB / ZF re-apply live there); the radios pick the
+        # real, imaginary or magnitude channel. Display only: the fit, S/N,
+        # save and overlays always use the real frequency-domain spectrum.
+        v.addWidget(QLabel("<b>Display</b>"))
+        disp = QHBoxLayout()
+        self.btnDomain = QPushButton("FID ⇄ spectrum")
+        self.btnDomain.setCheckable(True)
+        self.btnDomain.setToolTip(
+            "show the windowed FID the transform sees — WDW / LB / GB / ZF "
+            "re-apply live; press again for the spectrum (Ctrl+T)")
+        disp.addWidget(self.btnDomain)
+        # REQUIRED: rb_pdata / rb_raw are plain radios on the same content
+        # widget and Qt auto-groups sibling radios -- without an explicit
+        # group, checking 'imag' would un-check the source radio and flip the
+        # pipeline to raw. Buttons in a QButtonGroup leave the sibling group.
+        self._chan_group = QButtonGroup(self)
+        self.rb_real = QRadioButton("real")
+        self.rb_imag = QRadioButton("imag")
+        self.rb_mag = QRadioButton("|S|")
+        self.rb_real.setToolTip("the real channel — what the fit uses")
+        self.rb_imag.setToolTip("the imaginary channel: inspect it while "
+                                "phasing (dispersion should vanish under the "
+                                "pivot when p0 / p1 are right); Ctrl+I cycles")
+        self.rb_mag.setToolTip("|S| for display only — the destructive "
+                               "'magnitude' pipeline op is the checkbox above")
+        for i, rb in enumerate((self.rb_real, self.rb_imag, self.rb_mag)):
+            self._chan_group.addButton(rb, i)
+            disp.addWidget(rb)
+        self.rb_real.setChecked(True)
+        disp.addStretch(1)
+        v.addLayout(disp)
 
         v.addWidget(QLabel("<b>Phase</b>"))
         self.btnAuto = QPushButton("Autophase (ACME)")
@@ -409,6 +472,7 @@ class ProcessingPanel(QWidget):
         self.btnAuto.clicked.connect(lambda: self._emit([{"op": "autophase"}]))
         self.btnBaseline.clicked.connect(
             lambda: self._emit([{"op": "baseline", "order": self.blOrder.value()}]))
+        self.btnReset.clicked.connect(self._clear_carried)   # before the reload
         self.btnReset.clicked.connect(self.reset_requested)
         self.btnBlPick.toggled.connect(self.baseline_mode)
         self.btnBlApply.clicked.connect(self.baseline_apply)
@@ -428,12 +492,21 @@ class ProcessingPanel(QWidget):
         for w in (self.tdeff, self.zf):
             w.valueChanged.connect(self._schedule_live)
         self.wdw.currentTextChanged.connect(self._schedule_live)
-        for w in (self.chkMag, self.chkHilbert, self.rb_raw, self.rb_pdata):
+        for w in (self.chkMag, self.chkHilbert, self.rb_raw, self.rb_pdata,
+                  self.chkReapod):
             w.toggled.connect(self._schedule_live)
+        self.chkReapod.toggled.connect(self._toggle_reapod)
+        # re-apodizing is meaningless in raw-fid mode (the window applies to
+        # the instrument fid directly)
+        self.rb_raw.toggled.connect(lambda on: self.chkReapod.setEnabled(not on))
         self.adv_toggle.toggled.connect(self._toggle_adv)
         # picking raw-FID mode reveals the window-function controls it needs
         self.rb_raw.toggled.connect(
             lambda on: self.adv_toggle.setChecked(True) if on else None)
+        # display projection: both controls funnel into one signal
+        self.btnDomain.toggled.connect(self._emit_view)
+        self._chan_group.idToggled.connect(
+            lambda _id, on: self._emit_view() if on else None)
 
     def _toggle_adv(self, on: bool):
         self._adv.setVisible(on)
@@ -452,30 +525,225 @@ class ProcessingPanel(QWidget):
             v_ += 360.0
         self.p0v.setValue(v_)          # fires valueChanged -> live re-apply
 
+    # ---------------------------------------------------------- display state
+    def view_state(self) -> tuple[str, str]:
+        """(domain, channel) the canvas should show: ("freq"|"time",
+        "real"|"imag"|"magnitude")."""
+        cid = self._chan_group.checkedId()
+        channel = CHANNELS[cid] if 0 <= cid < len(CHANNELS) else "real"
+        return ("time" if self.btnDomain.isChecked() else "freq", channel)
+
+    def reset_view(self):
+        """Back to (freq, real) SILENTLY -- no view_changed. The workbench
+        calls this when new data arrives or a bypassing edit invalidates the
+        complex pipeline result."""
+        ws = (self.btnDomain, self.rb_real, self.rb_imag, self.rb_mag,
+              self._chan_group)
+        for w in ws:
+            w.blockSignals(True)
+        try:
+            self.btnDomain.setChecked(False)
+            self.rb_real.setChecked(True)
+        finally:
+            for w in ws:
+                w.blockSignals(False)
+
+    def _emit_view(self, *_):
+        self.view_changed.emit(*self.view_state())
+
+    def chain_has_ft(self) -> bool:
+        """Does the chain _emit builds contain a transform (so a windowed FID
+        exists to show)? Raw-fid mode always does; pdata only re-apodizing."""
+        return self.rb_raw.isChecked() or self.chkReapod.isChecked()
+
+    def _toggle_reapod(self, on: bool):
+        # Hilbert is mandatory for a one-sided FID: force and lock it while
+        # re-apodizing, restore the user's own choice afterwards
+        if on:
+            self._hilbert_before_reapod = self.chkHilbert.isChecked()
+            self.chkHilbert.setChecked(True)
+            self.chkHilbert.setEnabled(False)
+        else:
+            self.chkHilbert.setEnabled(True)
+            self.chkHilbert.setChecked(self._hilbert_before_reapod)
+
+    def _clear_carried(self, *_):
+        self._carried_ops = []
+
+    def arm_reapodize(self):
+        """Tick 're-apodize this spectrum' for the caller's own synchronous
+        Apply: Hilbert forced + locked, the window block expanded, EM selected
+        when no window was (so LB is live at once), and the live timer stopped
+        so the caller's Apply is the only one."""
+        self.chkReapod.blockSignals(True)
+        try:
+            self.chkReapod.setChecked(True)
+        finally:
+            self.chkReapod.blockSignals(False)
+        self._toggle_reapod(True)              # signals were blocked: run it
+        if self.wdw.currentText() == "none":
+            self.wdw.blockSignals(True)
+            self.wdw.setCurrentText("EM")
+            self.wdw.blockSignals(False)
+        self.adv_toggle.setChecked(True)
+        self._live_timer.stop()
+
+    def arm_hilbert(self):
+        """Tick 'Hilbert first' without a live tick (the caller applies): a
+        real-only spectrum has an identically zero imaginary channel."""
+        self.chkHilbert.blockSignals(True)
+        try:
+            self.chkHilbert.setChecked(True)
+        finally:
+            self.chkHilbert.blockSignals(False)
+        self._live_timer.stop()
+
+    def sync_from_ops(self, ops: list[dict], use_raw: bool) -> bool:
+        """Set every control from a RECORDED chain so that the next _emit([])
+        reproduces it -- the inverse of _emit. Frequency-domain steps the
+        widgets cannot express (baseline, autophase, subtract_avg, ...) are
+        carried and re-appended in recorded order. Returns False WITHOUT
+        touching any widget when the chain holds a time-domain step the panel
+        has no control for (lp, shift_fid, whole-echo, zf to an absolute SI,
+        two windows, ...). Silent: no live tick, no signal."""
+        ops = [dict(o) for o in (ops or [])]
+        names = [o.get("op") for o in ops]
+        if any(n not in OPS for n in names) or (self._UNSYNCABLE & set(names)):
+            return False
+        if names.count("ft") > 1 or names.count("ift") > 1:
+            return False
+        if "ift" in names and use_raw:
+            return False
+        if sum(n in self._WINDOW_OPS for n in names) > 1:
+            return False
+        for o in ops:
+            if o.get("op") == "zf" and (
+                    o.get("si") or not 1 <= int(o.get("factor", 2)) <= 16):
+                return False
+            if o.get("op") == "sine" and int(o.get("power", 1)) not in (1, 2):
+                return False
+        # time-domain steps must sit between the ift (if any) and the ft
+        td = [i for i, n in enumerate(names)
+              if n in TIME_DOMAIN_OPS and n != "ft"]
+        if td or "ft" in names:
+            if "ft" not in names or not (use_raw or "ift" in names):
+                return False
+            k_ft = names.index("ft")
+            k_ift = names.index("ift") if "ift" in names else -1
+            if any(not (k_ift < i < k_ft) for i in td):
+                return False
+
+        widgets = (self.wdw, self.lb, self.gb, self.ssb, self.tdeff, self.zf,
+                   self.fcor, self.off, self.sr, self.p0, self.p0v, self.p1,
+                   self.p1v, self.chkMag, self.chkHilbert, self.chkReapod,
+                   self.rb_raw, self.rb_pdata)
+        for w in widgets:
+            w.blockSignals(True)
+        try:
+            self._carried_ops = []
+            # neutral: EM with LB 0 emits no window step (an empty chain
+            # round-trips to an empty chain) and leaves LB live
+            self.wdw.setCurrentText("EM"); self.lb.setValue(0.0)
+            self.gb.setValue(0.1); self.ssb.setValue(2.0)
+            self.tdeff.setValue(0); self.zf.setValue(1); self.fcor.setValue(1.0)
+            self.off.setValue(0.0); self.sr.setValue(0.0)
+            self.p0.setValue(0); self.p0v.setValue(0.0)
+            self.p1.setValue(0); self.p1v.setValue(0.0)
+            self.chkMag.setChecked(False)
+            self.chkReapod.setChecked(False)
+            self.chkHilbert.setEnabled(True); self.chkHilbert.setChecked(False)
+            self.rb_raw.setChecked(bool(use_raw))
+            self.rb_pdata.setChecked(not use_raw)
+            self.chkReapod.setEnabled(not use_raw)
+            for o in ops:
+                name = o.pop("op")
+                if name == "tdeff":
+                    self.tdeff.setValue(int(o.get("points", 0)))
+                elif name == "fcor":
+                    self.fcor.setValue(float(o.get("factor", 0.5)))
+                elif name == "em":
+                    self.wdw.setCurrentText("EM")
+                    self.lb.setValue(abs(float(o.get("lb_hz", 0.0))))
+                elif name == "gm":
+                    self.wdw.setCurrentText("GM")
+                    self.lb.setValue(abs(float(o.get("lb_hz", -10.0))))
+                    self.gb.setValue(float(o.get("gb", 0.1)))
+                elif name == "sine":
+                    self.wdw.setCurrentText(
+                        "QSINE" if int(o.get("power", 1)) == 2 else "SINE")
+                    self.ssb.setValue(float(o.get("ssb", 2.0)))
+                elif name == "traf":
+                    self.wdw.setCurrentText("TRAF")
+                    self.lb.setValue(abs(float(o.get("lb_hz", 10.0))))
+                elif name == "zf":
+                    self.zf.setValue(int(o.get("factor", 2)))
+                elif name == "ft":
+                    self.off.setValue(float(o.get("offset_ppm", 0.0)))
+                elif name == "hilbert":
+                    self.chkHilbert.setChecked(True)
+                elif name == "ift":
+                    self.chkReapod.setChecked(True)
+                    self._toggle_reapod(True)
+                elif name == "phase":            # pivot_frac: the live pivot governs
+                    p0 = float(o.get("p0", 0.0)); p1 = float(o.get("p1", 0.0))
+                    self.p0v.setValue(p0); self.p0.setValue(int(round(p0)))
+                    self.p1v.setValue(p1); self.p1.setValue(int(round(p1)))
+                elif name == "magnitude":
+                    self.chkMag.setChecked(True)
+                elif name == "sr":
+                    self.sr.setValue(float(o.get("sr_hz", 0.0)))
+                else:
+                    self._carried_ops.append({"op": name, **o})
+            if use_raw or self.chkReapod.isChecked():
+                self.adv_toggle.setChecked(True)
+        finally:
+            for w in widgets:
+                w.blockSignals(False)
+        self._live_timer.stop()
+        return True
+
+    # ----------------------------------------------------------- the chain
+    def _time_domain_ops(self, with_fcor: bool) -> list[dict]:
+        """TDeff, (FCOR,) window, ZF -- the panel's time-domain block, in the
+        order the raw-fid chain has always used."""
+        ops: list[dict] = []
+        if self.tdeff.value() > 0:
+            ops.append({"op": "tdeff", "points": self.tdeff.value()})
+        if with_fcor and self.fcor.value() != 1.0:
+            ops.append({"op": "fcor", "factor": self.fcor.value()})
+        w = self.wdw.currentText()
+        if w == "EM" and self.lb.value():
+            ops.append({"op": "em", "lb_hz": abs(self.lb.value())})
+        elif w == "GM":
+            ops.append({"op": "gm", "lb_hz": -abs(self.lb.value()),
+                        "gb": self.gb.value()})
+        elif w == "SINE":
+            ops.append({"op": "sine", "ssb": self.ssb.value(), "power": 1})
+        elif w == "QSINE":
+            ops.append({"op": "sine", "ssb": self.ssb.value(), "power": 2})
+        elif w == "TRAF":
+            ops.append({"op": "traf", "lb_hz": abs(self.lb.value()) or 10.0})
+        if self.zf.value() > 1:
+            ops.append({"op": "zf", "factor": self.zf.value()})
+        return ops
+
     def _emit(self, extra: list[dict]):
         raw = self.rb_raw.isChecked()
+        reapod = not raw and self.chkReapod.isChecked()
         ops: list[dict] = []
         if raw:
-            if self.tdeff.value() > 0:
-                ops.append({"op": "tdeff", "points": self.tdeff.value()})
-            if self.fcor.value() != 1.0:
-                ops.append({"op": "fcor", "factor": self.fcor.value()})
-            w = self.wdw.currentText()
-            if w == "EM" and self.lb.value():
-                ops.append({"op": "em", "lb_hz": abs(self.lb.value())})
-            elif w == "GM":
-                ops.append({"op": "gm", "lb_hz": -abs(self.lb.value()),
-                            "gb": self.gb.value()})
-            elif w == "SINE":
-                ops.append({"op": "sine", "ssb": self.ssb.value(), "power": 1})
-            elif w == "QSINE":
-                ops.append({"op": "sine", "ssb": self.ssb.value(), "power": 2})
-            elif w == "TRAF":
-                ops.append({"op": "traf", "lb_hz": abs(self.lb.value()) or 10.0})
-            if self.zf.value() > 1:
-                ops.append({"op": "zf", "factor": self.zf.value()})
+            ops += self._time_domain_ops(with_fcor=True)
             ops.append({"op": "ft", "offset_ppm": self.off.value()})
-        if not raw and self.chkHilbert.isChecked():
+        elif reapod:
+            # Hilbert first is mandatory (the ift of a real-only spectrum is
+            # two-sided; a one-sided window on it gives a dispersive line); no
+            # fcor (halving the first point of an ift'd spectrum injects a DC
+            # step instead of removing one) and no offset (op_ft restores the
+            # held axis, centre included)
+            ops += [{"op": "hilbert"}, {"op": "ift"}]
+            ops += self._time_domain_ops(with_fcor=False)
+            ops.append({"op": "ft"})
+        if not raw and not reapod and self.chkHilbert.isChecked():
             ops.append({"op": "hilbert"})
         if self.p0v.value() or self.p1v.value():
             ops.append({"op": "phase", "p0": self.p0v.value(), "p1": self.p1v.value()})
@@ -483,5 +751,6 @@ class ProcessingPanel(QWidget):
             ops.append({"op": "magnitude"})
         if self.sr.value():
             ops.append({"op": "sr", "sr_hz": self.sr.value()})
+        ops.extend(self._carried_ops)
         ops.extend(extra)
         self.apply_requested.emit(ops, raw)

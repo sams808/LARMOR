@@ -126,6 +126,7 @@ every consumer produces plausible, wrong numbers.
 | Czjzek width | LARMOR stores **σ** (mrsimulator's: the std of each EFG component); the width in Czjzek's formula is **σ_Cz = dmfit `sCZ_CQ` = 2σ**; dmfit's displayed C_Q = **4σ** ≈ the mode of \|C_Q\| (3.73σ, exactly the mode of P_Q); √⟨P_Q²⟩ = **2√5·σ** = √5·σ_Cz (general d: √d·σ_Cz) | `czjzek_dist.py`, `desktop/table.py` (`CZJZEK_DISPLAYS`); pinned to mrsimulator's weights in `tests/test_physics_validation.py` |
 | EFG → C_Q | C_Q[MHz] = 234.9647·Q[barn]·V_zz[a.u.] | `convert.cq_from_efg` |
 | Axis | IUPAC δ, increasing to the left | `figures.py`, plot widgets |
+| Processing replay source | raw fid only when a time-domain op precedes the first `ift` (`processing.chain_start_domain`, `loader.apply_processing`); the Processing panel emits the ABSOLUTE chain from its widgets, so it is synced from `recipe["processing"]` (`ProcessingPanel.sync_from_ops`, unrepresentable frequency-domain steps carried) before a forced re-apply | `processing.py`, `loader.py`, `desktop/panels.py` |
 
 The Czjzek factor of two is the single most dangerous number in the project:
 a value copied from dmfit and stored without dividing by two makes every
@@ -193,6 +194,12 @@ comments in the source explain them; this is the index.
 | **`keyboardTracking(False)` on every spinbox** in the QCPMG dialog | `qcpmg_dialog.py:161` | Typing "293" acts on "29" and clamps the echo top; one point of top moved T₂ by up to 7400 % |
 | **`PARAM_COLUMNS` must keep its automatic fallback column** | `table.py:102` | Without it a model's parameters become fitted-but-invisible, as Amorphous ΔC_Q was |
 | **`load_any` returns `(ppm, amp, recipe, meta, warnings)`** | `app.py:2331`, `app.py:2889` | It was once unpacked as `(recipe, ppm, amp, …)`; every overlay format except raw Bruker silently failed. The same slip survived in `add_background_spectrum` until it was found in use: the recipe dict landed in `amp`, `np.asarray(..., float)` raised a `TypeError` out of the Qt slot, and no background/reference spectrum could ever be added. Grep every `_load_any(` call site when this shape changes |
+| **Phase pivot fraction is computed on the frequency axis** (`SpectrumView._freq_x`), never on the displayed trace | `plot.py` `phase_pivot_frac` / `show_phase_pivot` / `_snap_peak` | With the FID or the imaginary channel shown, `_exp.xData` is milliseconds or the wrong channel: every live tick would phase about a garbage pivot |
+| **`op_ift` derives `sw_Hz` and parks the axis in `x_ppm_hold`; `op_ft` anchors on `hold[n//2]`** (the fftshift zero bin), not the mid-span | `processing.py` `op_ift` / `op_ft` | A `from_processed` spectrum has `sw_Hz = 0` (every window then divides by zero, silently — numpy gives inf/NaN) and the ift→ft round trip landed at 0 ppm; the mid-span centre is half a bin off for even n |
+| **Capturing a pipeline stage needs `dataclasses.replace(s, y=s.y.copy())`** | `app.py` `apply_processing` | Ops mutate the `Spectrum1D` in place and `op_ft` reassigns `y` / `x_ppm` / `domain` on the same object — a plain reference to the "FID" becomes the spectrum |
+| **`hilbert` must precede `ift` before any window** on a real-only spectrum | `desktop/panels.py` `_emit` (forced and locked in re-apodize mode) | The IFT of a real spectrum is two-sided (hermitian); a one-sided EM window damps the mirrored half, loses ~half the signal and distorts the line — the whole-echo trap in a new guise |
+| **`FidDialog` puts `ft` BEFORE the `phase` step** | `fid_dialog.py` `_chain` | `fourier.ft1d` appends `ft` at the END when none is given; with the phase op ahead of it every non-zero p0 / p1 made the preview fail on time-domain data |
+| **A reopened `.json` recipe seeds `_proc_base` from `load_any(path, replay=False)`** | `app.py` `_load_source_body` | The exp arrays arrive ALREADY replayed; seeding the live pipeline's base from them compounds the recorded chain on the first panel touch (p0 40 became 80) |
 
 ---
 

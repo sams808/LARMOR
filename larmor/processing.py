@@ -10,9 +10,12 @@ dicts so a processing chain can be stored in a recipe and replayed:
      {"op": "phase", "p0": 12.0, "p1": 0.0},
      {"op": "baseline", "order": 3}]
 
-Time-domain ops (em, zf, ft) apply only when starting from a raw fid;
-frequency-domain ops (phase, autophase, baseline) work on any spectrum,
-including TopSpin-processed 1r data.
+Time-domain ops (em, zf, ft) apply from a raw fid OR after an `ift` step,
+so a chain may start in the frequency domain (`[hilbert, ift, em, ft]`
+re-apodizes a TopSpin-processed 1r); frequency-domain ops (phase, autophase,
+baseline) work on any spectrum. `chain_start_domain` says which kind of input
+a recorded chain needs; TIME_DOMAIN_OPS lists the ops that refuse
+frequency-domain data.
 """
 from __future__ import annotations
 
@@ -29,6 +32,9 @@ class Spectrum1D:
     sw_Hz: float
     domain: str = "freq"          # "time" | "freq"
     whole_echo: bool = False      # set by swap_echo; magnitude is then usual
+    #: the frequency axis parked by op_ift so op_ft can restore it exactly
+    #: (a processed spectrum has no SW of its own; see op_ift / op_ft)
+    x_ppm_hold: np.ndarray | None = None
 
 
 # --------------------------------------------------------------------------
@@ -56,6 +62,12 @@ def from_processed(x_ppm: np.ndarray, y: np.ndarray, sfo1_MHz: float,
 
 def _taxis(s: Spectrum1D) -> np.ndarray:
     return np.arange(s.y.size) / s.sw_Hz
+
+
+def time_axis_s(s: Spectrum1D) -> np.ndarray:
+    """Acquisition time of every point of a time-domain Spectrum1D, in s
+    (t = k / SW). Public name of the abscissa every window function uses."""
+    return _taxis(s)
 
 
 def _need_time(s: Spectrum1D, name: str):
@@ -127,7 +139,14 @@ def op_shift_fid(s: Spectrum1D, points: int = 0) -> Spectrum1D:
 def op_fcor(s: Spectrum1D, factor: float = 0.5) -> Spectrum1D:
     """TopSpin FCOR: scale the first fid point (0.5 removes the DC ridge)."""
     _need_time(s, "fcor")
-    s.y[0] = s.y[0] * factor
+    # never write into the caller's array: fourier.ft1d wraps a fid with
+    # np.asarray (no copy for complex input), so an in-place s.y[0] *= f halved
+    # the Open-FID dialog's instrument data again on EVERY preview -- the
+    # spectrum drifted by a DC step per control change and no longer matched
+    # the chain that claimed to have produced it
+    y = np.array(s.y, dtype=complex, copy=True)
+    y[0] = y[0] * factor
+    s.y = y
     return s
 
 
@@ -151,7 +170,22 @@ def op_ft(s: Spectrum1D, offset_ppm: float = 0.0) -> Spectrum1D:
     # lands at +f (verified against real Bruker 1r data: a raw-fid FT peaks at
     # the same ppm as TopSpin's own processed spectrum, up to the SR offset).
     freq_hz = np.fft.fftshift(np.fft.fftfreq(n, d=1.0 / s.sw_Hz))
-    s.x_ppm = freq_hz / s.sfo1_MHz + offset_ppm
+    hold = s.x_ppm_hold
+    if hold is not None and hold.size == n:
+        # back from an ift of a processed spectrum with the same point count:
+        # the original axis is restored exactly (a ppm grid rebuilt from a
+        # derived SW would be off by float noise and would lose any SR/offset
+        # already applied to the axis)
+        s.x_ppm = hold + offset_ppm
+    elif hold is not None and hold.size:
+        # zero-filled (or truncated) since the ift: fftshift puts the 0 Hz bin
+        # at index n//2 on BOTH grids, so anchoring the new grid on the held
+        # zero bin keeps every peak at its ppm. The mid-span value
+        # 0.5*(x[0]+x[-1]) would be half a bin off for even n.
+        s.x_ppm = freq_hz / s.sfo1_MHz + hold[hold.size // 2] + offset_ppm
+    else:
+        s.x_ppm = freq_hz / s.sfo1_MHz + offset_ppm
+    s.x_ppm_hold = None
     s.y = spec
     s.domain = "freq"
     return s
@@ -483,10 +517,34 @@ def op_scale_sw(s: Spectrum1D, factor: float = 1.0) -> Spectrum1D:
 
 def op_ift(s: Spectrum1D) -> Spectrum1D:
     """Inverse Fourier transform back to the time domain (ssNake Toggle
-    Time/Frequency) so you can re-apodize / reprocess."""
+    Time/Frequency) so you can re-apodize / reprocess.
+
+    Works on a processed spectrum too (TopSpin 1r, CSV): a descending axis is
+    reversed first (ifftshift assumes the ascending grid op_ft produces), the
+    spectral width is derived from the axis when the spectrum carries none
+    (`sw_Hz = dx * n * sfo1`, which needs the Larmor frequency), and the axis
+    is parked in `x_ppm_hold` so the next op_ft restores it exactly instead
+    of rebuilding a grid about 0 ppm. A real-only spectrum should go through
+    `hilbert` first: its ift is two-sided (hermitian), and a one-sided window
+    on it gives a dispersive line.
+    """
     if s.domain != "freq":
         raise ValueError("inverse FT needs frequency-domain data")
     y = np.asarray(s.y, complex)
+    x = None if s.x_ppm is None else np.asarray(s.x_ppm, float)
+    if x is not None and x.size > 1 and x[-1] < x[0]:
+        x, y = x[::-1].copy(), y[::-1]
+    if not s.sw_Hz > 0:
+        if x is None or x.size < 2:
+            raise ValueError("inverse FT needs a spectral width or a ppm axis")
+        if not s.sfo1_MHz > 0:
+            raise ValueError(
+                "inverse FT of a processed spectrum needs the Larmor frequency "
+                "— set it in Process ▸ Experiment parameters")
+        n = x.size
+        dx = abs(float(x[-1]) - float(x[0])) / max(n - 1, 1)
+        s.sw_Hz = dx * n * s.sfo1_MHz
+    s.x_ppm_hold = None if x is None else x.copy()
     s.y = np.fft.ifft(np.fft.ifftshift(y))          # inverse of fftshift(fft)
     s.x_ppm = None
     s.domain = "time"
@@ -653,6 +711,54 @@ OPS = {
     "imag": op_imag,
     "conj": op_conj,
 }
+
+#: the ops that refuse frequency-domain input: every op guarded by _need_time,
+#: plus ft itself. The single truth for "this chain needs a time-domain start"
+#: (loader.apply_processing, the desktop's processing panel). Must stay a
+#: subset of OPS -- pinned by tests/test_processing_ops.py.
+TIME_DOMAIN_OPS = frozenset({
+    "em", "gm", "sine", "traf", "tdeff", "shift_fid", "fcor", "zf", "lp",
+    "swap_echo", "echo_apodize", "ft",
+})
+
+#: ops that work in either domain and therefore say nothing about where a
+#: chain starts
+DOMAIN_AGNOSTIC_OPS = frozenset({"scale", "offset", "real", "imag", "conj"})
+
+#: display channels of a complex spectrum or fid (see channel_view)
+CHANNELS = ("real", "imag", "magnitude")
+
+
+def chain_start_domain(ops: list[dict] | None) -> str:
+    """Which input a recorded chain needs: "time" (a raw fid) or "freq".
+
+    Walks the chain in order; the first op that restricts the domain decides
+    -- a time-domain op (TIME_DOMAIN_OPS) means the raw fid, any other
+    registered, non-agnostic op (ift, hilbert, phase, baseline, ...) means a
+    processed spectrum, so `[hilbert, ift, em, ft]` replays from the processed
+    arrays while `[em, ft]` needs the fid. Empty or all-agnostic: "freq".
+    """
+    for step in ops or []:
+        name = step.get("op")
+        if name in TIME_DOMAIN_OPS:
+            return "time"
+        if name in OPS and name not in DOMAIN_AGNOSTIC_OPS:
+            return "freq"
+    return "freq"
+
+
+def channel_view(y: np.ndarray, channel: str) -> np.ndarray:
+    """One real-valued display channel of complex data: "real", "imag" or
+    "magnitude" (|y|). A projection for display -- unlike op_real / op_imag /
+    op_magnitude it changes nothing in the pipeline."""
+    y = np.asarray(y)
+    if channel == "real":
+        return np.real(y).astype(float, copy=False)
+    if channel == "imag":
+        return np.imag(y).astype(float, copy=False)
+    if channel == "magnitude":
+        return np.abs(y).astype(float, copy=False)
+    raise ValueError(f"unknown display channel {channel!r} (valid: {CHANNELS})")
 
 
 def apply(s: Spectrum1D, ops: list[dict]) -> Spectrum1D:

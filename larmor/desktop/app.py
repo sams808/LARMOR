@@ -293,6 +293,14 @@ class MainWindow(QMainWindow):
         #: unprocessed workbench spectrum the pipeline is (re)applied from, so
         #: live processing reflects ABSOLUTE settings instead of compounding
         self._proc_base: tuple[np.ndarray, np.ndarray] | None = None
+        #: complex frequency-domain Spectrum1D from the last apply_processing
+        #: (the imag / |S| display channels); None until a pipeline ran
+        self._proc_spec = None
+        #: the windowed, zero-filled FID captured just before the pipeline's
+        #: LAST ft -- what the transform sees (the FID display); None when the
+        #: chain has no ft
+        self._proc_fid = None
+        self._proc_apply_count = 0     # completed applies (a bail-out detector)
         self.hidden: set[int] = set()
         self.undo_stack: list[str] = []
         self.redo_stack: list[str] = []
@@ -330,6 +338,10 @@ class MainWindow(QMainWindow):
                 f"x: {self._format_x(x)}   y: {y:.4g}"))
         self.view.calibrate_picked.connect(self.on_calibrate_picked)
         self.view.measure_changed.connect(self.on_measure_changed)
+        # every 'a real spectrum arrived' site (loads, workspace switch, undo,
+        # baseline tools, calibrate, SR, ...) re-validates the FID / channel
+        # display through this one hook -- no per-site edits
+        self.view.experiment_set.connect(self._on_view_experiment_set)
         self.view2d.slice_to_fit.connect(self._trace_to_workbench)
 
         self._build_menus()
@@ -455,6 +467,33 @@ class MainWindow(QMainWindow):
         m_proc.addSeparator()
         self._add(m_proc, "Show processing panel",
                   lambda: self.proc_dock.show())
+        # display projections of the pipeline result (F6): the FID the
+        # transform sees, and the real / imaginary / |S| channel
+        from PySide6.QtGui import QActionGroup
+
+        self.actTimeDomain = self._add(
+            m_proc, "&FID ⇄ spectrum  (time ↔ frequency, re-apodize)",
+            self._toggle_time_domain, "Ctrl+T", checkable=True)
+        self.actTimeDomain.setToolTip(
+            "show the windowed FID the transform sees and re-apply the window "
+            "functions live; press again to return to the spectrum")
+        m_chan = m_proc.addMenu("Display &channel")
+        chan_group = QActionGroup(self)
+        chan_group.setExclusive(True)
+        self.actChannel = {}
+        for name, label in (
+                ("real", "&Real"),
+                ("imag", "&Imaginary  (inspect while phasing)"),
+                ("magnitude", "&Magnitude  |S|  (display only — the pipeline "
+                              "op is the panel checkbox)")):
+            a = self._add(m_chan, label,
+                          lambda _=False, n=name: self._set_channel(n),
+                          checkable=True, checked=(name == "real"))
+            chan_group.addAction(a)
+            self.actChannel[name] = a
+        m_chan.addSeparator()
+        self._add(m_chan, "C&ycle channel  (real → imag → |S|)",
+                  self._cycle_channel, "Ctrl+I")
         self._add(m_proc, "Processing s&teps…  (remove a step)",
                   self.edit_processing_steps)
         self._add(m_proc, "Autophase (ACME)",
@@ -1206,6 +1245,14 @@ class MainWindow(QMainWindow):
             a.setToolTip(tip)
             a.triggered.connect(slot)
             sb.addAction(a)
+        # a checkable mirror of Process ▸ FID ⇄ spectrum (kept in sync by
+        # _mirror_view_actions with setChecked -- no triggered emission)
+        self.sbFid = QAction("FID", self)
+        self.sbFid.setCheckable(True)
+        self.sbFid.setToolTip("show the windowed FID / back to the spectrum "
+                              "(Ctrl+T)")
+        self.sbFid.triggered.connect(self._toggle_time_domain)
+        sb.addAction(self.sbFid)
         sb.addSeparator()
         # a short-labelled sidebar mirror of View ▸ Scroll nudges fit values
         self.sbScroll = QAction("Scroll", self)
@@ -1429,6 +1476,7 @@ class MainWindow(QMainWindow):
         self.proc_panel.twopoint_mode.connect(self._twopoint_mode)
         self.proc_panel.twopoint_apply.connect(self.apply_twopoint_bg)
         self.proc_panel.twopoint_clear.connect(self.view.clear_baseline)
+        self.proc_panel.view_changed.connect(self._on_proc_view_changed)
         self.proc_dock.setWidget(self.proc_panel)
         self.addDockWidget(Qt.RightDockWidgetArea, self.proc_dock)
         self.proc_dock.hide()
@@ -1505,6 +1553,8 @@ class MainWindow(QMainWindow):
 
     def _format_x(self, x_ppm: float) -> str:
         """A cursor/readout position in the display unit (always with ppm)."""
+        if self.view.domain == "time":       # the FID curve's data is in ms
+            return f"{x_ppm:.3f} ms"
         sfo = float((self.recipe or {}).get("larmor_frequency_MHz", 0.0) or 0.0)
         unit = getattr(self, "_axis_unit", "ppm")
         if unit == "kHz" and sfo > 0:
@@ -1808,6 +1858,8 @@ class MainWindow(QMainWindow):
         self.view.getPlotItem().enableAutoRange()
 
     def zoom_sites(self):
+        if self.view.domain == "time":       # a ppm window on the ms axis
+            return
         if not self.recipe or not self.recipe["sites"]:
             return
         pos = [s["params"]["isotropic_chemical_shift_ppm"]["value"]
@@ -1821,6 +1873,11 @@ class MainWindow(QMainWindow):
     def autoscale_y(self):
         """Fit Y to everything visible in the current X window: experiment,
         model, and the residual offset below zero."""
+        if self.view.domain == "time":
+            # the FID: its ppm-window selection would pick experiment points
+            # whose ppm happens to fall in the ms range
+            self.view.getPlotItem().getViewBox().enableAutoRange(y=True)
+            return
         if not self.exp_ppm.size:
             return
         (x0, x1), _ = self.view.getPlotItem().getViewBox().viewRange()
@@ -2056,6 +2113,12 @@ class MainWindow(QMainWindow):
             larmor_frequency_MHz=meta.get("larmor_MHz", 0.0),
             spin_rate_Hz=(meta.get("spin_rate_Hz") or meta.get("masr_Hz") or 0.0),
             mas_uncertain=bool(meta.get("mas_uncertain", False)),
+            # the Open FID dialog records the chain that produced its result
+            # (window, zf, ft, phase | autophase): the fit is reproducible and
+            # FID ⇄ spectrum replays it from the instrument fid. QCPMG's meta
+            # has no such record and keeps an empty (pdata) chain, as before.
+            processing=list(meta.get("processing") or []),
+            processing_from_raw=bool(meta.get("processing_from_raw", False)),
             # the FULL processing record (every qcpmg_* key) rides along so a
             # saved fit of a QCPMG spectrum still says how it was made
             provenance={k: v for k, v in meta.items()
@@ -2472,6 +2535,18 @@ class MainWindow(QMainWindow):
         self._retarget_watch()
         self.exp_ppm, self.exp_amp = ppm, amp
         self._proc_base = None
+        if (Path(path).suffix.lower() == ".json" and recipe.get("processing")
+                and not recipe.get("processing_from_raw")):
+            # a reopened recipe arrives ALREADY replayed; the live pipeline
+            # must re-apply from the unprocessed source, else the first panel
+            # touch (or FID ⇄ spectrum) compounds the recorded chain on top
+            # of its own result (p0 40 became 80)
+            try:
+                b_ppm, b_amp, *_ = _load_any(path, replay=False)
+                self._proc_base = (np.asarray(b_ppm, float),
+                                   np.asarray(b_amp, float))
+            except Exception:
+                pass
         self.recipe = recipe
         self.hidden.clear()
         self.undo_stack.clear()
@@ -2554,9 +2629,18 @@ class MainWindow(QMainWindow):
                              data.meta.get("spin_rate_Hz")
                              or data.meta.get("masr_Hz"),
                              Path(path).name + " (FID preview)", str(ref.expno))
+            # the exact chain the preview applied, recorded so the first
+            # FID ⇄ spectrum syncs the panel to raw / EM 100 / magnitude and
+            # shows the TRUE fid; unticking 'magnitude' and phasing turns the
+            # preview into a real workbench
+            self.recipe["processing"] = [
+                {"op": "fcor", "factor": 0.5}, {"op": "em", "lb_hz": 100},
+                {"op": "ft", "offset_ppm": 0.0}, {"op": "magnitude"}]
+            self.recipe["processing_from_raw"] = True
             self.statusBar().showMessage(
-                "raw FID preview (magnitude) — Process ▸ Open FID to apodize, "
-                "phase and transform properly, then fit")
+                "raw FID preview (magnitude, EM 100 Hz) — FID ⇄ spectrum "
+                "(Ctrl+T) to re-apodize, untick magnitude and phase in the "
+                "Processing panel, or File ▸ Open FID for the full dialog")
             return True
         return False
 
@@ -3597,6 +3681,14 @@ class MainWindow(QMainWindow):
         if self.central_stack.currentWidget() is self.view2d:
             self.run_fit_2d()
             return
+        if self.view.domain == "time":
+            # the fit window is the viewbox X range (below): in FID view that
+            # would be a millisecond window. Covers the menu, F5 and the
+            # table's Fit button in one place.
+            self.statusBar().showMessage(
+                "return to the spectrum first (FID ⇄ spectrum, Ctrl+T) — the "
+                "fit window is read from the frequency axis")
+            return
         if self._fit_worker and self._fit_worker.isRunning():
             return
         self._sanitize_constraints_before_fit()
@@ -3955,6 +4047,8 @@ class MainWindow(QMainWindow):
             return
         if not use_raw and not self.exp_ppm.size:
             return
+        import dataclasses
+
         from larmor import processing as proc
         from larmor.io import bruker
 
@@ -3965,9 +4059,16 @@ class MainWindow(QMainWindow):
             QApplication.processEvents()
         try:
             if use_raw:
-                if not bruker.is_expno(Path(self.source_path)):
-                    raise ValueError("raw-fid processing needs a Bruker EXPNO")
-                s = proc.from_bruker_fid(self.source_path)
+                src = Path(self.source_path)
+                if not bruker.is_expno(src):
+                    # a dropped `fid` FILE leaves source_path at the file (the
+                    # preview); resolve it to its EXPNO instead of refusing
+                    try:
+                        src = bruker.resolve(src).expno
+                    except Exception:
+                        raise ValueError(
+                            "raw-fid processing needs a Bruker EXPNO")
+                s = proc.from_bruker_fid(str(src))
             else:
                 # apply the pipeline from the UNPROCESSED baseline every time, so
                 # a live slider shows the absolute phase rather than compounding
@@ -3981,17 +4082,38 @@ class MainWindow(QMainWindow):
             piv = self.view.phase_pivot_frac()
             ops = [dict(o, pivot_frac=piv) if o.get("op") == "phase" else o
                    for o in ops]
-            s = proc.apply(s, ops)
+            # split at the LAST ft: the state just before it is the windowed,
+            # zero-filled FID the transform sees (the FID display). Copied --
+            # ops mutate the Spectrum1D in place and op_ft reassigns y / x_ppm
+            # / domain on the same object, so a reference would become the
+            # spectrum.
+            k = max((i for i, o in enumerate(ops) if o.get("op") == "ft"),
+                    default=None)
+            if k is None:
+                s = proc.apply(s, ops)
+                fid = None
+            else:
+                s = proc.apply(s, ops[:k])
+                fid = dataclasses.replace(s, y=np.array(s.y, copy=True))
+                s = proc.apply(s, ops[k:])
             if s.domain != "freq":
                 raise ValueError("pipeline must end in the frequency domain")
         except Exception as exc:
+            self._proc_spec = self._proc_fid = None   # never show a stale result
             if not live:                       # never nag on every keystroke
                 QMessageBox.warning(self, "Processing failed", str(exc))
             self.statusBar().showMessage("processing failed")
+            if self.proc_panel.view_state() != ("freq", "real"):
+                self._display_fallback()       # the canvas may show an old FID
             return
         order = np.argsort(s.x_ppm)
         self.exp_ppm, self.exp_amp = np.asarray(s.x_ppm)[order], s.y.real[order]
-        self.view.set_experiment(self.exp_ppm, self.exp_amp)
+        self._proc_spec = proc.Spectrum1D(
+            x_ppm=np.asarray(s.x_ppm, float)[order],
+            y=np.asarray(s.y, complex)[order],
+            sfo1_MHz=s.sfo1_MHz, sw_Hz=s.sw_Hz)
+        self._proc_fid = fid
+        self._proc_apply_count += 1
         self._update_sn()
         # remember the pipeline in the recipe: saving the fit then saves the
         # processing that produced the spectrum it was fitted against
@@ -4001,6 +4123,179 @@ class MainWindow(QMainWindow):
         self.request_simulation()
         self.statusBar().showMessage(
             f"processing applied ({len(ops)} step(s), stored in the recipe)")
+        # draw whichever projection the panel selects (last, so a FID /
+        # channel hint replaces the generic status line)
+        self._refresh_display()
+
+    # ------------------------------------------- display projections (F6)
+    def _proc_spec_valid(self) -> bool:
+        """Is the complex pipeline result the spectrum on the workbench? Exact
+        (same code path produced both; ~50 us on 64k points), so a bypassing
+        edit of the exp arrays (2-point / manual baseline, WURST, subtract,
+        calibrate, SR, undo, workspace switch, any load) can never leave a
+        stale imaginary channel or FID on screen."""
+        sp = self._proc_spec
+        return (sp is not None and sp.y.size == self.exp_amp.size
+                and np.array_equal(sp.x_ppm, self.exp_ppm)
+                and np.array_equal(sp.y.real, self.exp_amp))
+
+    def _mirror_view_actions(self):
+        """Menu + sidebar follow the panel (setChecked: no triggered)."""
+        domain, channel = self.proc_panel.view_state()
+        self.actTimeDomain.setChecked(domain == "time")
+        self.sbFid.setChecked(domain == "time")
+        self.actChannel[channel].setChecked(True)
+
+    def _display_fallback(self, hint: str | None = None):
+        """Controls and canvas back to the real spectrum."""
+        self.proc_panel.reset_view()
+        self.view.set_experiment(self.exp_ppm, self.exp_amp)
+        self._mirror_view_actions()
+        if hint:
+            self.statusBar().showMessage(hint)
+
+    def _on_view_experiment_set(self):
+        """A real spectrum was placed on the canvas. With the FID or another
+        channel selected: drop the selection when the complex result no
+        longer matches the data (new spectrum, bypassing edit); re-draw the
+        channel when the same spectrum was merely re-placed (workspace
+        switch back, reload of an identical file)."""
+        pp = getattr(self, "proc_panel", None)
+        if pp is None:
+            return
+        domain, channel = pp.view_state()
+        if (domain, channel) == ("freq", "real"):
+            return
+        if domain == "time" or not self._proc_spec_valid():
+            pp.reset_view()
+            if not self._proc_spec_valid():
+                self._proc_spec = self._proc_fid = None
+            self._mirror_view_actions()
+            return
+        self._refresh_display()
+
+    def _refresh_display(self):
+        """Draw the projection the panel selects of the last pipeline result:
+        (freq, real) the real spectrum as always; (freq, imag | magnitude)
+        that channel of the complex result on the same ppm axis; (time, ch)
+        the windowed FID captured before the last ft. What the result cannot
+        honour falls back to the real spectrum with a hint."""
+        from larmor import processing as proc
+
+        pp = self.proc_panel
+        domain, channel = pp.view_state()
+        if (domain, channel) == ("freq", "real"):
+            self.view.set_experiment(self.exp_ppm, self.exp_amp)
+            self._mirror_view_actions()
+            return
+        if not self._proc_spec_valid():
+            self._display_fallback(
+                "display reset to the real spectrum — Apply processing "
+                "rebuilds the complex channel")
+            return
+        if domain == "time":
+            fid = self._proc_fid
+            if fid is None:
+                self._display_fallback(
+                    "the time domain needs a transform in the pipeline — pick "
+                    "raw fid, or tick re-apodize (needs the Larmor frequency)")
+                return
+            t_ms = proc.time_axis_s(fid) * 1e3
+            label = {"real": "FID (real)", "imag": "FID (imag)",
+                     "magnitude": "|FID|"}[channel]
+            self.view.set_fid(t_ms, proc.channel_view(fid.y, channel), label)
+            self.statusBar().showMessage(
+                f"time domain — {fid.y.size} points, AQ {t_ms[-1]:.2f} ms · "
+                "LB / WDW / ZF re-apply live · FID ⇄ spectrum (Ctrl+T) returns")
+        else:
+            self.view.set_channel_trace(
+                proc.channel_view(self._proc_spec.y, channel),
+                "experiment (imag)" if channel == "imag" else "|experiment|")
+            msg = (("showing the imaginary channel" if channel == "imag"
+                    else "showing |S| (display only)")
+                   + " — the fit always uses the real spectrum")
+            if not np.any(self._proc_spec.y.imag):
+                msg += " · this spectrum has no imaginary channel: tick Hilbert first"
+            self.statusBar().showMessage(msg)
+        self._mirror_view_actions()
+
+    def _on_proc_view_changed(self, domain: str, channel: str):
+        """The panel (or its menu / sidebar mirrors) asked for a display
+        projection. A non-default one needs a valid complex result: when
+        there is none (fresh data, a bypassing edit) the panel is first synced
+        to the RECORDED chain so the forced Apply replays that chain -- not
+        the panel's leftovers -- then the time domain arms re-apodization for
+        a pdata source (no ft in the chain) and the imaginary channel arms
+        Hilbert (a real-only spectrum has none)."""
+        pp = self.proc_panel
+        want_default = (domain, channel) == ("freq", "real")
+        if (self.central_stack.currentWidget() is not self.view
+                or not self.exp_ppm.size or self.recipe is None):
+            pp.reset_view()
+            self._mirror_view_actions()
+            if not want_default:
+                self.statusBar().showMessage("load a 1D spectrum first")
+            return
+        if want_default:
+            self._refresh_display()
+            return
+        need_apply = False
+        if not self._proc_spec_valid():
+            ok = pp.sync_from_ops(self.recipe.get("processing") or [],
+                                  bool(self.recipe.get("processing_from_raw")))
+            if not ok:
+                self._display_fallback(
+                    "the recorded pipeline has steps the panel cannot drive "
+                    "(lp / shift_fid / whole-echo) — Process ▸ Processing steps")
+                return
+            need_apply = True
+        if domain == "time" and not pp.chain_has_ft():
+            pp.arm_reapodize()
+            need_apply = True
+            self.statusBar().showMessage(
+                "re-apodizing a processed spectrum: Hilbert-reconstructed "
+                "imaginary channel, the window compounds with the one already "
+                "applied (raw-fid mode / Open FID are exact)")
+        elif (channel != "real" and not pp.chain_has_ft()
+                and not pp.chkHilbert.isChecked()):
+            pp.arm_hilbert()
+            need_apply = True
+        if need_apply or (domain == "time" and self._proc_fid is None):
+            n0 = self._proc_apply_count
+            pp.btnApply.click()       # -> _emit([]) -> apply_processing -> _refresh_display
+            if (self._proc_apply_count == n0
+                    and pp.view_state() != ("freq", "real")):
+                # the pipeline did not run (no source file, a 2D map up)
+                self._display_fallback(
+                    "processing could not run — the display stays on the "
+                    "real spectrum")
+        else:
+            self._refresh_display()
+
+    def _toggle_time_domain(self, on: bool):
+        """Process ▸ FID ⇄ spectrum (Ctrl+T) and the sidebar FID button:
+        reveal the Processing dock and drive its button, which emits the
+        view_changed the workbench listens to (same flow as the panel)."""
+        pp = self.proc_panel
+        if on:
+            self.proc_dock.show()
+            self.proc_dock.raise_()
+        if pp.btnDomain.isChecked() != bool(on):
+            pp.btnDomain.setChecked(bool(on))        # -> view_changed
+        self._mirror_view_actions()          # the trigger never stays out of sync
+
+    def _set_channel(self, name: str):
+        pp = self.proc_panel
+        rb = {"real": pp.rb_real, "imag": pp.rb_imag, "magnitude": pp.rb_mag}[name]
+        if not rb.isChecked():
+            rb.setChecked(True)                      # -> view_changed
+        self._mirror_view_actions()
+
+    def _cycle_channel(self):
+        from larmor.processing import CHANNELS
+
+        cur = self.proc_panel.view_state()[1]
+        self._set_channel(CHANNELS[(CHANNELS.index(cur) + 1) % len(CHANNELS)])
 
     # ------------------------------------------------------------- calibrate
     def start_calibrate(self):
@@ -5289,11 +5584,13 @@ class MainWindow(QMainWindow):
             pass
 
 
-def _load_any(path: str):
-    """Load any supported source (shared with the CLI and figure studio)."""
+def _load_any(path: str, replay: bool = True):
+    """Load any supported source (shared with the CLI and figure studio).
+    ``replay=False`` returns a recipe's source data WITHOUT its recorded
+    processing (the unprocessed base the live pipeline re-applies from)."""
     from larmor.loader import load_any
 
-    return load_any(path)
+    return load_any(path, replay=replay)
 
 
 def _nmrdata_to_data2d(data):

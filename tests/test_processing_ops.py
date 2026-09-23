@@ -15,6 +15,153 @@ def test_ft_ift_roundtrip():
     assert np.max(np.abs(s.y - fid)) < 1e-9
 
 
+# ---------------------------------------------------------------- F6: ift of a
+# processed spectrum (time <-> frequency toggle, re-apodization)
+def _lorentzian(x, x0, fwhm):
+    g = fwhm / 2.0
+    return g ** 2 / ((x - x0) ** 2 + g ** 2)
+
+
+def _fwhm(x, y):
+    """Half-height width walked out from the maximum on the grid."""
+    y = np.asarray(y, float)
+    i = int(np.argmax(y))
+    half = y[i] / 2.0
+    li = i
+    while li > 0 and y[li] > half:
+        li -= 1
+    ri = i
+    while ri < y.size - 1 and y[ri] > half:
+        ri += 1
+    return abs(float(x[ri] - x[li]))
+
+
+_X = np.linspace(-50.0, 50.0, 1024)
+_DX = float(_X[1] - _X[0])
+_Y = _lorentzian(_X, 12.3, 1.0)          # FWHM 1 ppm = 100 Hz at 100 MHz
+
+
+def _fid(n=1024, sw=10000.0, f=1000.0, t2=0.02):
+    t = np.arange(n) / sw
+    y = np.exp(2j * np.pi * f * t) * np.exp(-t / t2)
+    return P.Spectrum1D(x_ppm=None, y=y, sfo1_MHz=100.0, sw_Hz=sw,
+                        domain="time")
+
+
+def test_ift_derives_sw_and_ft_restores_the_axis_exactly():
+    """from_processed leaves sw_Hz = 0; the old op_ift kept it (every window
+    then divided by zero) and op_ft rebuilt the axis about 0 ppm."""
+    s = P.from_processed(_X, _Y, 100.0)
+    assert s.sw_Hz == 0.0
+    s = P.apply(s, [{"op": "hilbert"}, {"op": "ift"}])
+    assert s.domain == "time" and s.x_ppm is None
+    assert np.allclose(s.x_ppm_hold, _X)
+    assert s.sw_Hz == pytest.approx(_DX * 1024 * 100.0, rel=1e-9)
+    s = P.apply(s, [{"op": "ft"}])
+    assert s.domain == "freq"
+    assert np.allclose(s.x_ppm, _X, atol=1e-9)
+    assert np.allclose(s.y.real, _Y, atol=1e-8 * _Y.max())
+    assert s.x_ppm_hold is None
+
+
+def test_ift_of_a_processed_spectrum_without_larmor_frequency_is_a_clear_error():
+    s = P.from_processed(_X, _Y, 0.0)
+    with pytest.raises(ValueError, match="Larmor"):
+        P.op_ift(s)
+
+
+def test_ift_zf_ft_keeps_the_zero_frequency_bin_and_the_peak():
+    """fftshift puts 0 Hz at index n//2 on both grids: the zero-filled axis is
+    anchored on the held zero bin, not on the mid-span (half a bin off)."""
+    s = P.from_processed(_X, _Y, 100.0)
+    s = P.apply(s, [{"op": "hilbert"}, {"op": "ift"},
+                    {"op": "zf", "factor": 2}, {"op": "ft"}])
+    assert s.x_ppm.size == 2048
+    assert s.x_ppm[1024] == pytest.approx(_X[512], abs=1e-12)
+    d = np.diff(s.x_ppm)
+    assert np.all(d > 0) and np.allclose(d, _DX / 2.0)
+    assert s.x_ppm[int(np.argmax(s.y.real))] == pytest.approx(12.3, abs=_DX)
+
+
+def test_reapodize_chain_broadens_by_lb_only_with_hilbert():
+    """The panel forces Hilbert before ift: a real-only spectrum's ift is
+    two-sided (hermitian), so a one-sided EM window damps the mirrored half
+    and loses about half the signal (measured: 0.17 of a 0.33 peak)."""
+    s = P.from_processed(_X, _Y, 100.0)
+    s = P.apply(s, [{"op": "hilbert"}, {"op": "ift"}])
+    e = np.abs(s.y) ** 2
+    assert e[:256].sum() > 0.9 * e.sum()                  # one-sided fid
+    assert abs(s.y[-1]) < 1e-6 * abs(s.y[0])
+    s = P.apply(s, [{"op": "em", "lb_hz": 200}, {"op": "ft"}])
+    # 1 ppm + 200 Hz / 100 MHz = 3 ppm; the grid step is 0.098 ppm
+    assert _fwhm(s.x_ppm, s.y.real) == pytest.approx(3.0, abs=2 * _DX)
+    peak_ok = float(s.y.real.max())
+    assert peak_ok == pytest.approx(1.0 / 3.0, rel=0.1)   # area conserved
+
+    bad = P.from_processed(_X, _Y, 100.0)
+    bad = P.apply(bad, [{"op": "ift"}])
+    assert abs(bad.y[-1]) > 0.5 * abs(bad.y[1])          # two-sided
+    bad = P.apply(bad, [{"op": "em", "lb_hz": 200}, {"op": "ft"}])
+    assert float(bad.y.real.max()) < 0.6 * peak_ok        # half the signal gone
+
+
+def test_ift_accepts_a_descending_axis():
+    s = P.from_processed(_X[::-1], _Y[::-1], 100.0)
+    s = P.apply(s, [{"op": "hilbert"}, {"op": "ift"}, {"op": "ft"}])
+    order = np.argsort(s.x_ppm)
+    assert np.allclose(s.x_ppm[order], _X, atol=1e-9)
+    assert np.allclose(s.y.real[order], _Y, atol=1e-8)
+
+
+def test_channel_view_and_time_domain_ops_constant():
+    g = np.exp(-(_X / 5.0) ** 2)
+    y = (1 + 2j) * g
+    assert np.allclose(P.channel_view(y, "real"), g)
+    assert np.allclose(P.channel_view(y, "imag"), 2 * g)
+    assert np.allclose(P.channel_view(y, "magnitude"), np.sqrt(5.0) * g)
+    with pytest.raises(ValueError):
+        P.channel_view(y, "phase")
+    assert P.CHANNELS == ("real", "imag", "magnitude")
+    assert P.TIME_DOMAIN_OPS <= set(P.OPS)
+    assert "ft" in P.TIME_DOMAIN_OPS and "ift" not in P.TIME_DOMAIN_OPS
+    assert P.DOMAIN_AGNOSTIC_OPS <= set(P.OPS)
+    assert not (P.DOMAIN_AGNOSTIC_OPS & P.TIME_DOMAIN_OPS)
+    f = _fid()
+    assert P.time_axis_s(f)[-1] == pytest.approx((f.y.size - 1) / f.sw_Hz)
+
+
+def test_fcor_does_not_mutate_the_caller_array():
+    """ft1d wraps a complex fid with np.asarray (no copy); an in-place fcor
+    halved the Open-FID dialog's instrument data on every preview."""
+    from larmor import fourier
+
+    fid = _fid().y
+    first = complex(fid[0])
+    fourier.ft1d(fid, 10000.0, 100.0, ops=[{"op": "fcor", "factor": 0.5}])
+    fourier.ft1d(fid, 10000.0, 100.0, ops=[{"op": "fcor", "factor": 0.5}])
+    assert fid[0] == first
+    s = _fid()
+    y_in = s.y
+    out = P.op_fcor(s, 0.5)
+    assert y_in[0] == first and out.y[0] == first * 0.5
+
+
+def test_chain_start_domain():
+    em, ft = {"op": "em", "lb_hz": 50}, {"op": "ft"}
+    hil, ift = {"op": "hilbert"}, {"op": "ift"}
+    assert P.chain_start_domain([em, ft]) == "time"
+    assert P.chain_start_domain([{"op": "phase", "p0": 10}]) == "freq"
+    assert P.chain_start_domain([hil, ift, em, ft]) == "freq"
+    assert P.chain_start_domain([]) == "freq"
+    assert P.chain_start_domain(None) == "freq"
+    assert P.chain_start_domain([{"op": "tdeff", "points": 8}, {"op": "zf"},
+                                 ft, {"op": "phase"}]) == "time"
+    assert P.chain_start_domain([ift, em, ft]) == "freq"
+    # the first domain-restricted op decides; agnostic ops are skipped
+    assert P.chain_start_domain([{"op": "baseline"}, em]) == "freq"
+    assert P.chain_start_domain([{"op": "scale", "factor": 2}, em, ft]) == "time"
+
+
 def test_subtract_averages():
     x = np.linspace(-50, 50, 1000)
     y = np.exp(-(x / 5) ** 2) + 0.3

@@ -76,6 +76,47 @@ onto whichever peak you want to hold. **Autophase** minimises the spectral
 entropy of the real part (the **ACME** criterion of Chen *et al.* 2002), finding
 p0 **and** p1 robustly even on crowded spectra.
 
+### Back to the FID (time ↔ frequency) and the imaginary channel
+
+**FID ⇄ spectrum** (*Process ▸ FID ⇄ spectrum*, **Ctrl+T**, the sidebar **FID**
+button, or the button in the panel's **Display** row) flips the canvas to the
+**windowed, zero-filled FID the transform sees** — the state of the pipeline just
+before its last `ft` — on a non-inverted time axis in ms. Model, components,
+residual, paddles, zones, overlays, pivot and literature ranges are hidden until
+you return; clicks on the canvas place nothing, the cursor reads ms, and **Fit** is
+refused until the spectrum is back (its window is read from the frequency axis).
+Every **WDW / LB / GB / SSB / TDeff / ZF** change redraws the FID live, so an echo
+train or a truncated signal is re-apodized while watching the decay; **Ctrl+T**
+again returns to the spectrum with the new lineshape and the previous zoom.
+Nothing is reloaded: the chain is re-applied from the unprocessed data.
+
+**Display channel.** The **real / imag / |S|** radios in the same row (*Process ▸
+Display channel*, **Ctrl+I** cycles) draw one channel of the complex result on the
+same ppm axis: inspect the **imaginary channel while phasing** — under the pivot
+the dispersion signal should vanish when p0 / p1 are right — or the magnitude.
+The channel is display only: the fit, S/N, save and overlays always use the real
+frequency-domain spectrum, and **|S|** is not the destructive `magnitude`
+pipeline step (that is the checkbox next to SR). A spectrum that came in
+real-only (a TopSpin 1r, a CSV) has an identically zero imaginary channel, so
+selecting imag or |S| ticks **Hilbert first** automatically (the real part is
+unchanged by it).
+
+**Re-apodizing a spectrum that did not come from a raw fid.** The raw-fid mode
+re-applies the window to the instrument file and is exact. For a TopSpin 1r, a
+CSV, or a spectrum sent from the FID / QCPMG / VOCS dialogs, the toggle ticks
+**re-apodize this spectrum** in the window block, which builds
+`Hilbert → IFT → window → FT` ahead of the phase steps. Hilbert first is mandatory
+and stays locked: the inverse transform of a real-only spectrum is two-sided
+(hermitian), and a one-sided window on it loses half the signal and distorts the
+line — the whole-echo trap in a new guise. The result is a **reconstruction**: it
+assumes a well-phased, flat-baseline spectrum, and the new window compounds with
+the one already applied in TopSpin, so for a genuine re-processing use the
+raw-fid mode or *File ▸ Open FID*. Open FID records its own chain in the recipe,
+so after *Use this spectrum* the first **Ctrl+T** shows the TRUE windowed FID from
+the instrument file; a raw `fid` opened directly does the same with its preview
+chain (`fcor`, EM 100 Hz, `ft`, `magnitude` — untick *magnitude* and phase to turn
+the preview into a working spectrum).
+
 ### Baseline
 
 - **Automatic** — an asymmetrically reweighted penalized least-squares baseline
@@ -100,8 +141,9 @@ resulting SR. Double-click the **experiment strip** to edit nucleus / field /
 shift of the axis; the raw data is untouched.
 
 > **Processing history.** *Process ▸ Processing steps* lists every applied op;
-> remove any one and LARMOR re-applies the reduced pipeline. The full op list is
-> in the **Processing reference** manual.
+> remove any one and LARMOR re-applies the reduced pipeline. Removing `ift` alone
+> breaks a re-apodize chain (`hilbert, ift, em, ft`) — remove the window step
+> instead. The full op list is in the **Processing reference** manual.
 
 ---
 

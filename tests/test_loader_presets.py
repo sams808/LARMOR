@@ -71,6 +71,46 @@ def test_apply_processing_needs_raw_reports_clearly():
         loader.apply_processing(r, x, np.zeros(100), source_path=None)
 
 
+def test_apply_processing_reapodize_pipeline_replays_from_the_processed_arrays():
+    """A re-apodized 1r/CSV records [hilbert, ift, em, ft]: it starts in the
+    frequency domain, so it must replay from the processed arrays -- the old
+    'any time-domain op means raw fid' rule refused it for CSV sources."""
+    x = np.linspace(-50, 50, 1024)
+    g = 0.5
+    y = g ** 2 / ((x - 12.3) ** 2 + g ** 2)
+    r = Recipe(nucleus="27Al", larmor_frequency_MHz=100.0,
+               processing=[{"op": "hilbert"}, {"op": "ift"},
+                           {"op": "em", "lb_hz": 50}, {"op": "ft"}])
+    ppm, amp, notes = loader.apply_processing(r, x, y, source_path=None)
+    assert np.allclose(ppm, x, atol=1e-9)
+    assert amp.size == y.size
+    assert abs(ppm[int(np.argmax(amp))] - 12.3) < 0.5
+    assert amp.max() < y.max()                         # broadened, not replaced
+    assert any("replayed 4" in n for n in notes)
+
+
+def test_time_domain_ops_constant_matches_the_ops_that_refuse_frequency_data():
+    """TIME_DOMAIN_OPS is exactly the set of ops that raise on frequency-domain
+    input; every other op accepts a frequency-domain spectrum."""
+    from larmor import processing as proc
+
+    x = np.linspace(-10, 10, 64)
+    y = np.exp(-(x / 3.0) ** 2) + 0j
+    minimal = {"tdeff": {"points": 1}, "shift_fid": {"points": 0},
+               "swap_echo": {"point": 1}, "lp": {"n_predict": 0}}
+    for name in proc.TIME_DOMAIN_OPS:
+        s = proc.from_processed(x, y.copy(), 100.0, sw_Hz=1000.0)
+        with pytest.raises(ValueError):
+            proc.OPS[name](s, **minimal.get(name, {}))
+    accepts_freq = ("phase", "hilbert", "magnitude", "sr", "scale", "offset",
+                    "real", "imag", "conj", "subtract_avg", "flat_baseline",
+                    "normalize", "ift", "baseline", "scale_sw")
+    for name in accepts_freq:
+        assert name not in proc.TIME_DOMAIN_OPS
+        s = proc.from_processed(x, y.copy(), 100.0, sw_Hz=1000.0)
+        proc.OPS[name](s)                               # must not raise
+
+
 def test_reopened_recipe_replays_its_processing(tmp_path):
     """The reproducibility contract: a saved recipe re-derives the exact
     spectrum it was fitted against, from the untouched source file."""

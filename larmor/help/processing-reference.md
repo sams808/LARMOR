@@ -44,6 +44,16 @@ A window $w(t)$ trades resolution for sensitivity (Lindon & Ferrige 1980):
   baseline offset it would otherwise create.
 - **FT / IFT** — forward and inverse Fourier transform (`ift` round-trips `ft` to
   ~$10^{-9}$), letting you return to the FID, re-apodize, and transform again.
+  On a processed spectrum (TopSpin 1r, CSV) `ift` derives the spectral width from
+  the ppm axis (`SW = Δδ · n · SFO1`, so the Larmor frequency must be set) and
+  parks the axis so the next `ft` restores it exactly; zero-filling in between
+  keeps the zero-frequency bin, so peaks stay at their ppm. A uniform ppm grid is
+  assumed. *Process ▸ FID ⇄ spectrum* (**Ctrl+T**) shows the FID the transform
+  sees and re-applies the window live; for a spectrum that did not come from a
+  raw fid the panel's **re-apodize this spectrum** checkbox builds
+  `hilbert → ift → window → ft` (Hilbert first is mandatory: the inverse
+  transform of a real-only spectrum is two-sided, and a one-sided window on it
+  loses half the signal).
 - **2D quadrature recombination** — States / TPPI / States-TPPI / Echo–Antiecho /
   QF for the indirect dimension (see **2D processing**).
 
@@ -98,10 +108,14 @@ $$S_\text{corr}(\nu) = S(\nu)\,e^{i(\phi_0+\phi_1(\nu-\nu_\text{pivot})/\text{SW
 
 - **scale / offset / normalize** — multiply, add a constant, or normalise
   (max or area) — e.g. to put datasets on a common scale before overlay.
-- **magnitude** — $|S| = \sqrt{\text{Re}^2+\text{Im}^2}$ (phase-insensitive
-  display).
+- **magnitude** — $|S| = \sqrt{\text{Re}^2+\text{Im}^2}$ (phase-insensitive; a
+  destructive step — the **|S|** display channel shows the same without altering
+  the data).
 - **real / imag / conj** — take a single channel or complex-conjugate (spectral
-  reversal); inspect the imaginary channel while phasing.
+  reversal). These are destructive pipeline steps; to merely *look at* the
+  imaginary channel while phasing use the non-destructive **Display channel**
+  (Real / Imaginary / |S|, **Ctrl+I**, the radios in the Processing panel), which
+  changes nothing in the pipeline.
 - **extract** — keep a spectral region.
 - **combine / align / subtract averages** — algebra between spectra: add, align by
   cross-correlation, or subtract an average reference (ssNake *Subtract
@@ -128,6 +142,15 @@ Processing steps* shows the applied sequence; remove any step and LARMOR
 re-applies the reduced pipeline from the raw data (steps never silently
 compound). A saved `.json` recipe reopens to the identical processed state, and a
 dmfit `.fxmla` or CSV export carries the result out.
+
+Where a chain replays from is decided by its first domain-restricted step
+(`processing.chain_start_domain`): a chain beginning with a time-domain op (`em`,
+`zf`, `ft`, …) needs the raw fid; a chain beginning with a frequency-domain op and
+then `ift` (a re-apodized 1r or CSV: `hilbert, ift, em, ft`) replays from the
+processed data. *File ▸ Open FID* records the chain behind the spectrum it hands
+over (window, zero-fill, `ft`, then the typed phase or `autophase`), and a raw
+`fid` opened directly records its preview chain. The FID / spectrum display and
+the display channel are view state, not recipe content.
 
 ---
 
