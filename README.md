@@ -48,7 +48,9 @@ disorder, second-order quadrupolar, quad+CSA and CSA powder patterns, to externa
 spectra used as backgrounds. The quadrupolar models take the nucleus and field
 from the data, so there is nothing special to do for a new isotope. Fit windows
 can be a union of regions, dmfit-style, and a multi-start "Auto fit" helps with
-awkward starting points.
+awkward starting points. Spinning-sideband manifolds are detected from the data
+itself — the repeat at ±νrot, tolerant to a recorded rate off by 2 % — and
+offered as a linked manifold or a shifted copy of the spectrum in one click.
 
 **Uncertainties.** Every fit reports errors, three ways: from the covariance
 matrix, by Monte-Carlo resampling, or from χ² profiling (proper 1σ/2σ confidence

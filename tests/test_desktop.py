@@ -1271,3 +1271,289 @@ def test_staticct_dialog_reads_a_simulated_pattern(win, qapp, monkeypatch):
     assert got["Cq_MHz"]["value"] == pytest.approx(cq, rel=0.05)
     assert got["eta"]["value"] == pytest.approx(eta, abs=0.05)
     dlg.close()
+
+
+# ------------------------------------------------ spinning-sideband offer (F3)
+def _write_csv_manifold(path, rate_hz=20000.0, header_rate_hz=None, ratio=0.3,
+                        n=2, fwhm=4.0):
+    """A CSV 11B manifold at 160.46 MHz: a centreband at 0 ppm and ±k·νrot
+    Gaussians of height ratio**k on a −400…400 ppm axis (4096 points); the
+    header carries ``header_rate_hz`` (default: the true rate)."""
+    lar = 160.46
+    ppm = np.linspace(-400.0, 400.0, 4096)
+    amp = np.zeros_like(ppm)
+    spacing = rate_hz / lar
+    for k in range(-n, n + 1):
+        amp += ratio ** abs(k) * np.exp(
+            -4 * np.log(2) * ((ppm - k * spacing) / fwhm) ** 2)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("# LARMOR spectrum\n# nucleus=11B\n"
+                f"# larmor_MHz={lar}\n# spin_rate_Hz={header_rate_hz or rate_hz}\n")
+        f.write("ppm,intensity\n")
+        for x, y in zip(ppm, amp):
+            f.write(f"{x},{y}\n")
+    return ppm, amp
+
+
+def _banner_shown(win) -> bool:
+    b = getattr(win, "ssb_banner", None)
+    return b is not None and not b.isHidden()
+
+
+def test_sideband_offer_appears_and_adds_a_linked_manifold_in_one_undo_step(
+        win, qapp, tmp_path):
+    """Loading a spectrum that repeats at ±νrot shows the banner with its
+    comb guides; [Add linked manifold] builds one centreband plus one linked
+    line per matched order -- position = parent ± k·νrot as a constraint the
+    table renders as 'A+124.6', every shape parameter tied, amplitude free
+    -- valid for the fit translator, undone in ONE step, and never offered
+    again on a model that already carries a manifold."""
+    from larmor import cellparse
+    from larmor.fit import _make_params
+    from larmor.recipe import Recipe
+
+    data = tmp_path / "manifold.csv"
+    _write_csv_manifold(data)
+    win.load_source(str(data), keep_fit=False)
+    qapp.processEvents()
+    assert _banner_shown(win)
+    det = win._ssb_detection
+    assert det.ok and det.nu_rot_Hz == pytest.approx(20000.0, rel=3e-3)
+    assert len(win.ssb_banner.guides) == 5                # centre + 4 orders
+    assert "⚠" not in win.ssb_banner.label.text()
+    assert "20 000 Hz" in win.ssb_banner.label.text()
+    assert win.recipe["sites"] == []
+
+    win.ssb_banner.btnManifold.click()
+    sites = win.recipe["sites"]
+    assert len(sites) == 5
+    parent, bands = sites[0], sites[1:]
+    assert parent["model"] == "gauss_lor" and "sb" not in parent["label"]
+    assert parent["params"]["isotropic_chemical_shift_ppm"]["value"] == \
+        pytest.approx(0.0, abs=0.1)
+    assert parent["params"]["shift_fwhm_ppm"]["value"] == pytest.approx(4.0, abs=0.4)
+    assert parent["params"]["amplitude"]["value"] == pytest.approx(1.0, abs=0.05)
+    spacing = 20000.0 / 160.46
+    seen = []
+    for s in bands:
+        assert s["model"] == "gauss_lor"
+        k = int(s["label"][-4:-2])                        # '...+1sb' -> +1
+        seen.append(k)
+        p = s["params"]
+        off = k * det.spacing_ppm
+        sign = "+" if off >= 0 else "-"
+        assert p["isotropic_chemical_shift_ppm"]["expr"] == \
+            f"s0.isotropic_chemical_shift_ppm {sign} {abs(off):.6g}"
+        shown = cellparse.format_link(p["isotropic_chemical_shift_ppm"]["expr"],
+                                      "isotropic_chemical_shift_ppm")
+        assert shown.startswith("A+") or shown.startswith("A-")
+        assert p["isotropic_chemical_shift_ppm"]["value"] == \
+            pytest.approx(k * spacing, abs=0.5)
+        assert p["shift_fwhm_ppm"]["expr"] == "s0.shift_fwhm_ppm"
+        assert p["gl"]["expr"] == "s0.gl"
+        assert p["amplitude"]["expr"] is None and p["amplitude"]["vary"] is True
+        assert p["amplitude"]["value"] == pytest.approx(0.3 ** abs(k), rel=0.15)
+        assert s["label"].endswith(f"{k:+d}sb")
+    assert sorted(seen) == [-2, -1, 1, 2]
+    _make_params(Recipe.from_dict(win.recipe))            # constraints valid
+    assert win.recipe["spin_rate_Hz"] == 20000.0          # certain: untouched
+    assert not _banner_shown(win) and win.ssb_banner.guides == []
+    assert "linked sideband" in win.statusBar().currentMessage()
+
+    win.undo()
+    assert win.recipe["sites"] == []
+    win.redo()
+    assert len(win.recipe["sites"]) == 5
+    win._maybe_offer_sidebands()
+    assert not _banner_shown(win)          # linked positions ARE a manifold
+
+
+def test_sideband_offer_copy_action_adds_held_copies_seeded_from_the_teeth(
+        win, qapp, tmp_path):
+    data = tmp_path / "manifold.csv"
+    ppm, amp = _write_csv_manifold(data)
+    win.load_source(str(data), keep_fit=False)
+    qapp.processEvents()
+    assert _banner_shown(win)
+    win.ssb_banner.btnCopy.click()
+    sites = win.recipe["sites"]
+    assert len(sites) == 2 and all(s["model"] == "spectrum" for s in sites)
+    spacing = 20000.0 / 160.46
+    shifts = sorted(s["params"]["shift_ppm"]["value"] for s in sites)
+    assert shifts[0] == pytest.approx(-spacing, rel=1e-3)
+    assert shifts[1] == pytest.approx(spacing, rel=1e-3)
+    for s in sites:
+        p = s["params"]
+        assert p["shift_ppm"]["vary"] is False
+        assert p["amplitude"]["vary"] is True and p["amplitude"]["min"] is None
+        assert p["amplitude"]["value"] == pytest.approx(0.3 * amp.max(), rel=0.15)
+        assert max(abs(v) for v in s["ref"]["amp"]) == pytest.approx(1.0)
+        assert len(s["ref"]["ppm"]) == win.exp_ppm.size
+    assert sorted(s["label"] for s in sites) == ["copy+1sb", "copy-1sb"]
+    assert "shifted cop" in win.statusBar().currentMessage()
+    win.undo()
+    assert win.recipe["sites"] == []
+
+
+def test_sideband_offer_warns_on_a_wrong_rate_and_writes_it_only_when_uncertain(
+        win, qapp, tmp_path):
+    from PySide6.QtCore import QSettings
+
+    # (a) a certain rate 1.5 % off: the banner warns, the rate is left alone
+    data = tmp_path / "manifold.csv"
+    ppm, amp = _write_csv_manifold(data, rate_hz=20000.0, header_rate_hz=20300.0)
+    win.load_source(str(data), keep_fit=False)
+    qapp.processEvents()
+    assert _banner_shown(win)
+    assert "⚠" in win.ssb_banner.label.text()
+    assert "20 300" in win.ssb_banner.label.text()
+    assert win._ssb_detection.nu_rot_Hz == pytest.approx(20000.0, rel=3e-3)
+    win.ssb_banner.btnManifold.click()
+    assert win.recipe["spin_rate_Hz"] == 20300.0
+    assert "νrot set" not in win.statusBar().currentMessage()
+
+    # (b) the same rate flagged uncertain: the write is due, undo restores it
+    win._display_1d(ppm, amp, "11B", 160.46, 20300.0, "m", "m")
+    qapp.processEvents()
+    win.recipe["mas_uncertain"] = True
+    win._update_mas_label()
+    assert not win.mas_label.isHidden()
+    win._maybe_offer_sidebands()
+    assert _banner_shown(win)
+    win.ssb_banner.btnManifold.click()
+    assert win.recipe["spin_rate_Hz"] == pytest.approx(20000.0, rel=3e-3)
+    assert win.recipe["mas_uncertain"] is False
+    assert win.mas_label.isHidden()
+    assert "νrot set to 20 000 Hz" in win.statusBar().currentMessage()
+    assert "20000" in win.exp_label.text()
+    win.undo()
+    assert win.recipe["spin_rate_Hz"] == 20300.0
+    assert "20300" in win.exp_label.text()
+    assert win.recipe["sites"] == []
+
+    # (c) the drop-down `sidebands` model line, seeded from the teeth
+    win._display_1d(ppm, amp, "11B", 160.46, 20300.0, "m", "m")
+    qapp.processEvents()
+    win.recipe["mas_uncertain"] = True
+    win._maybe_offer_sidebands()
+    assert _banner_shown(win)
+    win.ssb_banner.actModelLine.trigger()
+    sites = win.recipe["sites"]
+    assert len(sites) == 1 and sites[0]["model"] == "sidebands"
+    p = sites[0]["params"]
+    assert p["n_ssb"]["value"] == 2 and p["n_ssb"]["vary"] is False
+    assert 0.2 < p["ssb_ratio"]["value"] < 0.4
+    assert p["isotropic_chemical_shift_ppm"]["value"] == pytest.approx(0.0, abs=0.5)
+    assert p["shift_fwhm_ppm"]["value"] == pytest.approx(4.0, abs=0.4)
+    assert win.recipe["spin_rate_Hz"] == pytest.approx(20000.0, rel=3e-3)
+    assert "`sidebands` line" in win.statusBar().currentMessage()
+    assert QSettings("LARMOR", "app").value("ssbAutoOffer", True, type=bool) \
+        == win.actSsbOffer.isChecked()
+
+
+def test_sideband_offer_is_silent_for_plain_static_and_toggled_off_data(
+        win, qapp, tmp_path, monkeypatch):
+    from PySide6.QtCore import QSettings
+
+    # (a) the default fixture: two lines, a 20 kHz header whose spacing
+    # (124.6 ppm) exceeds half the 160 ppm axis -> nothing, and the menu
+    # action says why
+    plain = tmp_path / "plain.csv"
+    _write_csv_spectrum(plain)
+    win.load_source(str(plain), keep_fit=False)
+    qapp.processEvents()
+    assert not _banner_shown(win)
+    win.detect_sidebands()
+    assert not _banner_shown(win)
+    assert win.statusBar().currentMessage().startswith("no ±νrot repeat")
+
+    # (b) a confirmed-static recipe never runs the detector, even on data
+    # that repeats
+    ppm, amp = _write_csv_manifold(tmp_path / "m.csv")
+    calls = []
+    real = win._run_sideband_detection
+    monkeypatch.setattr(win, "_run_sideband_detection",
+                        lambda **kw: calls.append(kw) or real(**kw))
+    win._display_1d(ppm, amp, "11B", 160.46, 0.0, "s", "s")
+    qapp.processEvents()
+    assert not _banner_shown(win) and calls == []
+    # ... but a rate flagged uncertain is a question the data may answer
+    win.recipe["mas_uncertain"] = True
+    win._maybe_offer_sidebands()
+    assert calls == [{"scan": True}] and _banner_shown(win)
+    assert win._ssb_detection.scanned
+    monkeypatch.undo()
+
+    # (c) the View toggle, persisted in QSettings
+    settings = QSettings("LARMOR", "app")
+    before = settings.value("ssbAutoOffer", True, type=bool)
+    try:
+        win.actSsbOffer.setChecked(False)
+        assert settings.value("ssbAutoOffer", True, type=bool) is False
+        assert not _banner_shown(win)
+        data = tmp_path / "manifold.csv"
+        _write_csv_manifold(data)
+        win.load_source(str(data), keep_fit=False)
+        qapp.processEvents()
+        assert not _banner_shown(win)
+        win.actSsbOffer.setChecked(True)               # no reload needed
+        assert settings.value("ssbAutoOffer", True, type=bool) is True
+        assert _banner_shown(win)
+    finally:
+        settings.setValue("ssbAutoOffer", bool(before))
+        win.actSsbOffer.setChecked(bool(before))
+
+
+def test_sideband_offer_escape_dismiss_and_workspace_switch(win, qapp, tmp_path):
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QKeySequence
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QMenu
+
+    data = tmp_path / "manifold.csv"
+    _write_csv_manifold(data)
+    win.load_source(str(data), keep_fit=False)
+    qapp.processEvents()
+    assert _banner_shown(win)
+    QTest.keyClick(win, Qt.Key_Escape)
+    assert not _banner_shown(win) and win.ssb_banner.guides == []
+    assert not any(a.isChecked() for a in win._model_actions.values())
+    assert win._ssb_dismissed is not None
+    # the same trace, re-processed to the same values: still dismissed
+    win.apply_processing([{"op": "scale", "factor": 1.0}], False)
+    qapp.processEvents()
+    assert not _banner_shown(win)
+    # another document in a new workspace, then back: the dismissal survives
+    manifold_ws = win.active_ws
+    plain = tmp_path / "plain.csv"
+    _write_csv_spectrum(plain)
+    win._ws_mode = "new"
+    win.load_source(str(plain), keep_fit=False)
+    qapp.processEvents()
+    assert not _banner_shown(win)
+    win.switch_workspace(manifold_ws)
+    qapp.processEvents()
+    assert win.exp_ppm.size == 4096 and not _banner_shown(win)
+    # the menu action forgets the dismissal and re-offers
+    win.detect_sidebands()
+    assert _banner_shown(win)
+    assert "Return adds the linked manifold" in win.statusBar().currentMessage()
+    # a real rate change is a new key: Esc, then re-evaluate at a new rate
+    QTest.keyClick(win, Qt.Key_Escape)
+    assert not _banner_shown(win)
+    win.recipe["spin_rate_Hz"] = 20150.0                   # 0.75 % off, in window
+    win._maybe_offer_sidebands()
+    assert _banner_shown(win) and "⚠" in win.ssb_banner.label.text()
+
+    # menu presence and the shortcut
+    dec = next(m for m in win.menuBar().findChildren(QMenu)
+               if m.title() == "&Decomposition")
+    act = next(a for a in dec.actions()
+               if a.text().startswith("&Detect spinning sidebands"))
+    assert act.shortcut() == QKeySequence("Ctrl+Shift+D")
+    assert act is win.actDetectSsb
+    view = next(m for m in win.menuBar().findChildren(QMenu)
+                if m.title() == "&View")
+    toggle = next(a for a in view.actions()
+                  if a.text() == "&Offer spinning-sideband detection on load")
+    assert toggle.isCheckable() and toggle is win.actSsbOffer
