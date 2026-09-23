@@ -146,6 +146,11 @@ runs anywhere.
   per-spectrum amplitudes, released parameters and populations); the
   checkbox `also save individual fits (.recipe.json) next to the CSV` is on
   by default. **Save individual fits…** writes one recipe per spectrum.
+- **Publication bundle…** writes the whole batch to a folder you choose: the
+  table, one recipe and one `_curves.csv` per spectrum (experiment exactly
+  as fitted, model, residual, components), `manifest.csv` (source, SHA-256,
+  EXPNO, NS, D1, SF/SR, window, RMSD, versions) and `README.txt` with the
+  Methods paragraph — see the manual, §6.
 - **Series plot…** opens *Series evolution*: pick one or more lines and a
   parameter (BO₄ population against sample, for instance), choose the error
   bars from the computed estimators, and **Export figure…** or
@@ -205,6 +210,26 @@ wrote 3 recipe(s) + batch_table.csv to out
 ```
 <!-- measured v0.12.1, 2026-09-22: the three commands of this section, run in a scratch folder -->
 
+Adding `--curves` writes the publication bundle next to the recipes and the
+table:
+
+```
+larmor batchfit s0.csv s1.csv s2.csv --model model.recipe.json -o out --curves
+```
+
+and prints one more line after the two above:
+
+```
+wrote 3 curve file(s) + manifest.csv + README.txt to out
+```
+
+`out/s0_batch_curves.csv` holds `ppm`, `experiment` (the fitted array, written
+exactly), `model`, `residual` and `s0_A` on the experimental axis;
+`out/manifest.csv` records per spectrum the source file and its SHA-256, the
+fit window, the RMSD and the software versions, and `out/README.txt` the
+Methods paragraph. The table itself now also carries `model` and
+`source_path` columns after the six above.
+
 The mean RMSD is poor (0.17) because the shared model insists on 12 ppm for
 lines that sit at 14–16 ppm; only the amplitudes could move, and they
 absorbed the misfit by shrinking (`out/batch_table.csv` lists 90.6, 72.2 and
@@ -250,7 +275,7 @@ of §4 is fitted headlessly with
 
 ```
 larmor batchfit <the five EXPNO 24 paths> --model base0Ca_11B.recipe.json --window 30 -30 -o out
-larmor seqfit <the five EXPNO 24 paths> --model base0Ca_11B.recipe.json --window 30 -30 --passes 2 -v -o sout
+larmor seqfit <the five EXPNO 24 paths> --model base0Ca_11B.recipe.json --window 30 -30 --passes 2 -v -o sout --curves
 ```
 
 (`--window` is high ppm then low ppm; the model recipe's own window is used

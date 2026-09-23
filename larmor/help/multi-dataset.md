@@ -259,6 +259,27 @@ synthetic series from the command line.
    alongside the table too, so the Plotting studio's batch-grid finds the
    real saved fits automatically (bounds, `vary`, baseline processing
    included) instead of only having the CSV's bare values to work from.
+   **Publication bundle…** writes everything about the batch to one folder
+   of your choice: `batch_table.csv` (plus the error table for the selected
+   error-calculation method when it has been computed), one `.recipe.json`
+   and one `_curves.csv` per spectrum — named `01_<sample>`, `02_<sample>`…
+   in series order — `manifest.csv` and `README.txt`. A `_curves.csv` carries
+   the experiment **exactly as fitted** (after the recipe's processing steps
+   and any per-spectrum baseline; when a baseline was applied the pre-baseline
+   trace is included as `experiment_raw`), the total model, the residual and
+   one `s<i>_<label>` column per component, all on the experimental ppm axis,
+   and reopens in LARMOR as a spectrum through **File ▸ Open**. An excluded
+   component stays as a zero column, named in the file's header and in
+   `manifest.csv`, so every file of a series has the same layout.
+   `manifest.csv` records per spectrum the source file and its SHA-256, EXPNO
+   and procno, NS, D1, BF1/SF/SR, the processing steps, the fit window, the
+   RMSD (normalised by the window maximum, as everywhere in LARMOR), the
+   excluded sites, the error method and the software versions; `README.txt`
+   carries the Methods paragraph, the versions, the conventions (RMSD,
+   populations, number precision) and a file glossary. Read the CSVs with
+   `pandas.read_csv(path, comment="#")`. If the chosen folder already holds a
+   `manifest.csv`, the tool asks before replacing it. The same bundle comes
+   from the command line with `larmor batchfit … --curves`.
    **Series plot…** charts how any parameter (δ_iso, width, C_Q, η, or population %)
    evolves along the series. Its **Error bars** menu chooses which computed error
    to draw and export — *covariance*, *Monte-Carlo*, or *χ² profile* (whichever
@@ -378,7 +399,12 @@ and you get a **one-spectrum-at-a-time** workbench:
    reverts; **Stop** keeps what's done.
 4. **Save.** **Save individual fits…** (auto `sample_nucleus_seq_YYYYMMDD_HHMM` or
    a name per fit) and **Series plot…** (parameter/population evolution, with
-   export) — as in the batch tool.
+   export) — as in the batch tool. **Publication bundle…** is the batch tool's
+   bundle (§6, step 6) for the series — `seq_table.csv` instead of
+   `batch_table.csv`, otherwise the same files — and works after manual **Fit
+   current** steps as well as after an auto sweep (a member never fitted gets a
+   manifest row marked *not fitted*); the saved recipes carry their source
+   path. `larmor seqfit … --curves` writes the same from the command line.
 
 Use §6 when the sites are genuinely the *same* everywhere and only populations
 change; use §8 when the sites themselves **evolve** along the series.

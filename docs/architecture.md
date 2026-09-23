@@ -31,8 +31,9 @@ define no `__init__`, no `Signal` and no Qt event override, never import
 
 Ingestion lives in `larmor/io/`: `bruker.py` (1r/2rr/fid/ser, EXPNO/pdata
 layout, pseudo-2D detection), `varian.py` (VnmrJ .fid), `fxmla.py` (dmfit
-round-trip), `spectra.py` (CSV/txt), `scan.py` (sample auto-identify), and
-`export.py` (fit results to txt/csv/dmfit). One level up, `larmor/loader.py`
+round-trip), `spectra.py` (CSV/txt), `scan.py` (sample auto-identify),
+`export.py` (fit results to txt/csv/dmfit) and `bundle.py` (the series
+publication bundle: per-spectrum curves, manifest, README). One level up, `larmor/loader.py`
 exposes `load_any`, the single entry point; callers never dispatch on format
 themselves. `larmor/fourier.py` handles States/TPPI/echo-antiecho
 recombination for 2D acquisitions.
