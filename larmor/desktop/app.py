@@ -983,7 +983,8 @@ class MainWindow(QMainWindow):
                             p["value"] = float(p["value"]) * 0.3 ** k
                         elif pname == "isotropic_chemical_shift_ppm":
                             p["expr"] = (f"s{base_i}.isotropic_chemical_shift_ppm"
-                                         f" + ({sign * k * nur_ppm:.6g})")
+                                         f" {'+' if sign > 0 else '-'} "
+                                         f"{k * nur_ppm:.6g}")
                         else:
                             p["expr"] = f"s{base_i}.{pname}"
                 added.append(s)

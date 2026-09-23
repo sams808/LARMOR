@@ -161,10 +161,15 @@ def test_sidebands_are_linked_to_their_parent(qapp, monkeypatch):
         minus = next(s for s in sites if s["label"].endswith("-1sb"))
         p = plus["params"]
         assert p["isotropic_chemical_shift_ppm"]["expr"] == \
-            f"s0.isotropic_chemical_shift_ppm + ({nur:.6g})"
+            f"s0.isotropic_chemical_shift_ppm + {nur:.6g}"
         assert p["isotropic_chemical_shift_ppm"]["value"] == pytest.approx(nur)
         assert minus["params"]["isotropic_chemical_shift_ppm"]["expr"] == \
-            f"s0.isotropic_chemical_shift_ppm + ({-nur:.6g})"
+            f"s0.isotropic_chemical_shift_ppm - {nur:.6g}"
+        # the table renders this form ("A+100.0"), unlike "+ (-100)"
+        from larmor import cellparse
+        shown = cellparse.format_link(p["isotropic_chemical_shift_ppm"]["expr"],
+                                      "isotropic_chemical_shift_ppm")
+        assert shown.startswith("A+") and "(" not in shown
         assert p["shift_fwhm_ppm"]["expr"] == "s0.shift_fwhm_ppm"
         assert p["gl"]["expr"] == "s0.gl"
         assert p["amplitude"]["expr"] is None and p["amplitude"]["vary"]
