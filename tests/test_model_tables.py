@@ -86,6 +86,40 @@ def test_peak_fwhm_tables_partition_the_registry():
     assert not stale, f"tables list unregistered models: {stale}"
 
 
+def test_dft_seed_tables_partition_the_registry():
+    """The DFT import routes tensor components by ROLE (dft._SEED_KEYS): a
+    model states which parameter takes the shielding zeta / eta and C_Q /
+    eta_Q, or is declared not seedable. Matching on the shared name 'eta'
+    once wrote a quadrupolar eta into csa_mas."""
+    from larmor.dft import _NOT_SEEDABLE, _SEED_KEYS
+
+    reg = _registry()
+    keyed = set(_SEED_KEYS)
+    both = keyed & _NOT_SEEDABLE
+    assert not both, f"models both seedable and not: {both}"
+    missing = reg - keyed - _NOT_SEEDABLE
+    assert not missing, (
+        f"models with no DFT seeding decision: {missing} -- add a "
+        "(zeta_key, eta_cs_key, cq_key, eta_q_key) entry to dft._SEED_KEYS "
+        "or excuse the model in dft._NOT_SEEDABLE")
+    stale = (keyed | _NOT_SEEDABLE) - reg
+    assert not stale, f"tables list unregistered models: {stale}"
+    for name, keys in _SEED_KEYS.items():
+        assert len(keys) == 4, name
+        pnames = models.get(name).param_names
+        for k in keys:
+            assert k is None or k in pnames, (name, k)
+        zeta, eta_cs, cq, eta_q = keys
+        # an eta is only meaningful next to its anisotropy / coupling
+        assert (eta_cs is None) or (zeta is not None), name
+        assert (eta_q is None) or (cq is not None), name
+        # the two etas of one model must be two different parameters
+        assert eta_cs is None or eta_q is None or eta_cs != eta_q, name
+        if models.get(name).needs_quadrupolar:
+            assert cq is not None or zeta is None, (
+                f"{name} is quadrupolar but seeds a CSA without a C_Q")
+
+
 def test_param_columns_have_no_dead_entries():
     """PARAM_COLUMNS drives column order (its fallback covers omissions, so
     ordering is the only stake) -- but an entry no model uses is a trap."""

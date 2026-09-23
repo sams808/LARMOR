@@ -466,6 +466,7 @@ provenance only.
 | Integration window truncates broad tails | populations | widen the window to contain tails before quoting populations |
 | fxmla Czjzek amplitude ×3.92 to dmfit | export only | calibrated to one $^{27}$Al @ 195 MHz glass; verify for other nuclei/fields. *Does not affect LARMOR's own fit or reported numbers.* |
 | CSA ζ uses mrsimulator's *shielding* sign | `csa_mas` | confirm the sign against your convention if you quote ζ |
+| DFT shielding → shift needs a calibration line | `dft.py` / `shiftcal.py` | a 2-point line has no residual degrees of freedom and its ± reflects the reference-shift errors only; use ≥ 3 references computed with the same code/functional/cutoffs/pseudopotential; the seeded ζ is scaled by −a |
 
 None of these change the results above of a Czjzek or MQMAS glass
 fit — the main use case — which is validated end-to-end in §5.

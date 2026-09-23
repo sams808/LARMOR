@@ -5,6 +5,8 @@
     larmor fit recipe.json [-o out.json] [--plot out.png]
     larmor batchfit SPECTRA... --model m.recipe.json [-o out] [--curves]
     larmor seqfit SPECTRA... --model m.recipe.json [-o out] [--curves]
+    larmor shiftcal --ref NAME a.magres DELTA [ERR] ... -o f19.shiftcal.json
+    larmor magres FILE.magres --isotope 19F --calibration f19.shiftcal.json
 """
 from __future__ import annotations
 
@@ -223,38 +225,143 @@ def cmd_redor(args: argparse.Namespace) -> int:
 
 
 def cmd_magres(args: argparse.Namespace) -> int:
-    from larmor import dft
-    from larmor.recipe import Recipe
+    from larmor import dft, shiftcal
+    from larmor.recipe import Param, Recipe, SiteModel
 
-    sites = dft.read_magres(args.file)
-    warnings = dft.assign_isotopes(sites)
+    mf = dft.read_magres_file(args.file)
+    warnings = dft.assign_isotopes(mf.sites)
     for w in warnings:
         print("note:", w)
-    chosen = (dft.sites_for_isotope(sites, args.isotope)
-              if args.isotope else sites)
-    print(f"{len(chosen)} site(s)" +
-          (f" for {args.isotope}" if args.isotope else ""))
-    for s in chosen:
+    print(f"[calculation] {mf.calc.describe()}")
+    chosen = (dft.sites_for_isotope(mf.sites, args.isotope)
+              if args.isotope else mf.sites)
+    spin = dft.spin_of(args.isotope) if args.isotope else None
+    model = args.model
+    if model == "auto":
+        model = dft.default_model(spin)
+    if args.isotope and model not in dft.seedable_models(spin):
+        if model in dft._NOT_SEEDABLE:
+            print(f"{model} cannot be seeded from a computed tensor")
+        else:
+            print(f"{model} needs a quadrupolar nucleus; {args.isotope} is "
+                  f"spin-1/2 (choose one of: "
+                  f"{', '.join(dft.seedable_models(spin))})")
+        return 2
+    cal = None
+    override: list[str] = []
+    if args.calibration:
+        cal = shiftcal.ShiftCalibration.load(args.calibration)
+        diff = shiftcal.compatible(cal.calc, mf.calc,
+                                   dft.element_of(args.isotope or ""))
+        if diff:
+            if not args.calc_override:
+                print("the calibration line was computed with different "
+                      "[calculation] settings than this file: "
+                      + ", ".join(diff) + " -- pass --calc-override to apply "
+                      "it anyway (recorded in provenance)")
+                return 2
+            override = diff
+            print("note: [calculation] mismatch overridden: " + ", ".join(diff))
+    elif args.reference is not None:
+        cal = shiftcal.from_sigma_ref(args.reference, args.isotope or "")
+    groups = chosen if args.no_group else dft.group_equivalent(chosen)
+    print(f"{len(groups)} site(s)" +
+          (f" for {args.isotope}" if args.isotope else "") +
+          (f" ({len(chosen)} atoms)" if len(groups) != len(chosen) else ""))
+    for s in groups:
         q = s.quadrupolar()
         sh = s.shielding()
         bits = [s.label, s.isotope or "?"]
+        if s.multiplicity > 1:
+            bits.append(f"x{s.multiplicity}")
         if q:
             bits.append(f"Cq={q['Cq_MHz']:.3f} MHz eta={q['eta']:.2f}")
         if sh:
             bits.append(f"sigma_iso={sh['iso_ppm']:.1f} ppm")
+            if cal is not None:
+                e = cal.delta_err(sh["iso_ppm"])
+                bits.append(f"delta_pred={cal.delta(sh['iso_ppm']):.1f}"
+                            + (f"+-{e:.1f}" if e is not None else "") + " ppm")
         print("  " + "  ".join(bits))
     if args.output and args.isotope:
         recipe = Recipe(nucleus=args.isotope,
                         larmor_frequency_MHz=args.larmor or 100.0)
-        for s in chosen:
-            sd = s.to_site_dict(model=args.model, reference_ppm=args.reference)
-            from larmor.recipe import Param, SiteModel
-
+        dicts, notes = dft.sites_to_recipe_dicts(
+            groups, model, calibration=cal,
+            lock_amplitude=args.lock_multiplicity,
+            share_width=args.lock_multiplicity)
+        for sd in dicts:
             recipe.sites.append(SiteModel(
                 model=sd["model"], label=sd["label"],
                 params={k: Param(**v) for k, v in sd["params"].items()}))
+        recipe.notes.extend(notes)
+        recipe.provenance["dft_import"] = dft.import_provenance(
+            mf, args.isotope, model, groups, cal, calc_override=override,
+            lock_amplitude=args.lock_multiplicity,
+            share_width=args.lock_multiplicity)
         recipe.save(args.output)
-        print(f"recipe written: {args.output} ({len(recipe.sites)} sites)")
+        print(f"recipe written: {args.output} ({len(recipe.sites)} sites, "
+              f"{model})")
+    return 0
+
+
+def cmd_shiftcal(args: argparse.Namespace) -> int:
+    """Fit delta = a*sigma + b over reference magres files + measured shifts."""
+    from larmor import dft, shiftcal
+
+    refs = args.ref or []
+    if len(refs) < 2:
+        print("give at least two --ref NAME PATH DELTA [ERR]")
+        return 2
+    files = []
+    for r in refs:
+        if len(r) not in (3, 4):
+            print(f"--ref takes NAME PATH DELTA [ERR], got {r!r}")
+            return 2
+        try:
+            delta = float(r[2])
+            err = float(r[3]) if len(r) == 4 else None
+        except ValueError:
+            print(f"--ref {r[0]}: DELTA and ERR must be numbers")
+            return 2
+        mf = dft.read_magres_file(r[1])
+        dft.assign_isotopes(mf.sites)
+        files.append((r[0], mf, delta, err))
+    isotope = args.isotope
+    if not isotope:
+        common = None
+        for _n, mf, _d, _e in files:
+            isos = {s.isotope for s in mf.sites if s.isotope}
+            common = isos if common is None else common & isos
+        if not common or len(common) != 1:
+            print("give --isotope: the files share "
+                  + (", ".join(sorted(common)) if common else "no isotope"))
+            return 2
+        isotope = common.pop()
+    points = []
+    for name, mf, delta, err in files:
+        try:
+            points.append(shiftcal.point_from_magres(mf, isotope, name, delta,
+                                                     err, source="cli"))
+        except ValueError as exc:
+            print(f"{name}: {exc}")
+            return 2
+    try:
+        cal = shiftcal.fit_calibration(points, isotope,
+                                       allow_mismatch=args.calc_override)
+    except ValueError as exc:
+        print(str(exc))
+        return 2
+    print(cal.describe())
+    for p, r in zip(cal.points, cal.residuals):
+        e = "" if p.delta_err is None else f" +- {p.delta_err:.2f}"
+        print(f"  {p.name}: sigma_iso={p.sigma_iso:.4f}  delta_exp="
+              f"{p.delta_exp:.2f}{e}  residual={r:+.3f} ppm  ({p.n_atoms} atoms)")
+    for f in cal.flags:
+        print("flag:", f)
+    if args.output:
+        cal.save(args.output)
+        print(f"calibration written: {args.output}")
     return 0
 
 
@@ -477,13 +584,41 @@ def main(argv: list[str] | None = None) -> int:
                                          ".magres) as fittable sites")
     p_mg.add_argument("file")
     p_mg.add_argument("--isotope", help="filter to one isotope, e.g. 27Al")
-    p_mg.add_argument("--model", default="quad_ct",
-                      help="registry model to seed (default quad_ct)")
+    p_mg.add_argument("--model", default="auto",
+                      help="registry model to seed (default auto: gl_norm for "
+                           "spin-1/2, quad_ct otherwise; a quadrupolar model "
+                           "on a spin-1/2 isotope is refused)")
     p_mg.add_argument("--reference", type=float,
-                      help="sigma_ref (ppm) to convert shielding -> shift")
+                      help="sigma_ref (ppm) to convert shielding -> shift "
+                           "(delta = sigma_ref - sigma, slope -1)")
+    p_mg.add_argument("--calibration",
+                      help="a .shiftcal.json line delta = a*sigma + b from "
+                           "`larmor shiftcal` (preferred over --reference)")
+    p_mg.add_argument("--calc-override", action="store_true",
+                      help="apply a calibration whose [calculation] settings "
+                           "differ from this file's (recorded in provenance)")
+    p_mg.add_argument("--no-group", action="store_true",
+                      help="one site per atom instead of one per "
+                           "crystallographic position")
+    p_mg.add_argument("--lock-multiplicity", action="store_true",
+                      help="link amplitudes to the site multiplicities and "
+                           "share one linewidth")
     p_mg.add_argument("--larmor", type=float, help="Larmor MHz for the recipe")
     p_mg.add_argument("-o", "--output", help="write a .recipe.json")
     p_mg.set_defaults(func=cmd_magres)
+
+    p_sc2 = sub.add_parser("shiftcal", help="fit delta = a*sigma + b from "
+                           "reference magres files and measured shifts")
+    p_sc2.add_argument("--ref", nargs="+", action="append", metavar="X",
+                       help="NAME PATH DELTA [ERR] -- repeat for every "
+                            "reference compound (>= 2)")
+    p_sc2.add_argument("--isotope", help="e.g. 19F (default: the one isotope "
+                                         "common to all files)")
+    p_sc2.add_argument("--calc-override", action="store_true",
+                       help="fit even when the references' [calculation] "
+                            "settings differ (recorded as a flag)")
+    p_sc2.add_argument("-o", "--output", help="write a .shiftcal.json")
+    p_sc2.set_defaults(func=cmd_shiftcal)
 
     p_mf = sub.add_parser("multifit", help="simultaneous multi-dataset fit "
                                            "(e.g. multi-field 1D)")

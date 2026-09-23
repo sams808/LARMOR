@@ -370,7 +370,8 @@ class _MenusMixin:
                 ("correlation-hmqc", "HMQC & correlation"),
                 ("relaxation", "Relaxation (T1/T2)"),
                 ("qcpmg", "QCPMG"),
-                ("multi-dataset", "Multi-dataset & co-fitting")):
+                ("multi-dataset", "Multi-dataset & co-fitting"),
+                ("dft-tensors", "DFT tensors — import & shift calibration")):
             self._add(m_man, title,
                       lambda _=False, n=name, t=title: self._open_manual(n, t))
         m_tut = m_help.addMenu("&Tutorials")

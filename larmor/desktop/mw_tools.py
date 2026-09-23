@@ -3,7 +3,9 @@
 Each method opens a dialog with the current state or applies one small
 recipe edit handed back by a dialog (constraint sets, glass protocol, static
 CT and Herzfeld-Berger seeds go through ``_EditingMixin``; the referencing
-correction, VOCS stitching and the batch / series / error tools are here).
+correction, VOCS stitching, the DFT tensor import (``_magres_add_sites``:
+sites + note + ``provenance['dft_import']``) and the batch / series / error
+tools are here).
 The dialogs themselves live in their own ``larmor.desktop.*_dialog`` modules.
 
 Owned state: the kept-alive non-modal dialogs (``_qcpmg_dlg``,
@@ -527,16 +529,60 @@ class _ToolsMixin:
         RedorDialog(self, expno).exec()
 
     def open_magres(self):
-        from larmor.desktop.tool_dialogs import MagresDialog
+        """Tools > Import DFT tensors (.magres): spin-aware seeding from
+        computed tensors, one site per crystallographic position, shieldings
+        converted through a fitted calibration line (or σ_ref). The dialog
+        opens without a spectrum too -- its Calibration tab is useful alone;
+        Add stays disabled until a spectrum is open."""
+        from larmor.desktop.magres_dialog import MagresDialog
 
-        dlg = MagresDialog(self)
-        if dlg.exec() and dlg.result_sites and self.recipe is not None:
-            self.snapshot()
-            for sd in dlg.result_sites:
-                self.recipe["sites"].append(sd)
-            self.on_structure_changed()
-            self.statusBar().showMessage(
-                f"added {len(dlg.result_sites)} site(s) from DFT tensors")
+        rec = self.recipe or {}
+        exp_max = (float(np.max(np.abs(self.exp_amp)))
+                   if self.exp_amp is not None and self.exp_amp.size else 0.0)
+        dlg = MagresDialog(self, nucleus=rec.get("nucleus", "") or "",
+                           recipe=self.recipe,
+                           spin_rate_Hz=float(rec.get("spin_rate_Hz", 0.0) or 0.0),
+                           exp_max=exp_max)
+        if dlg.exec() and dlg.result is not None:
+            self._magres_add_sites(dlg.result)
+
+    def _magres_add_sites(self, imp):
+        """Apply a MagresImport: one undo snapshot, the master amplitude
+        seeded from the spectrum, the sites appended as-is (model / label /
+        params only), one recipe note, ``provenance['dft_import']`` and a
+        status line naming the file, the conversion and the lock ratios."""
+        if self.recipe is None:
+            self.statusBar().showMessage("load a spectrum first")
+            return
+        self.snapshot()
+        sites = self.recipe.setdefault("sites", [])
+        exp_max = (float(np.max(np.abs(self.exp_amp)))
+                   if self.exp_amp is not None and self.exp_amp.size else 0.0)
+        if imp.sites and exp_max > 0:
+            master = imp.sites[0]["params"]
+            amp = master.get("amplitude")
+            if amp is not None and not amp.get("expr"):
+                height = exp_max / max(int(imp.n_groups), 1)
+                if imp.area_amplitude:
+                    fwhm = float(master.get("shift_fwhm_ppm", {}).get("value", 1.0)
+                                 or 1.0)
+                    height *= fwhm * 1.064          # area of a unit-height Gaussian
+                amp["value"] = float(height)
+        for sd in imp.sites:
+            sites.append(sd)
+        self.recipe.setdefault("notes", []).append(imp.note)
+        prov = dict(self.recipe.get("provenance") or {})
+        prov["dft_import"] = imp.provenance
+        self.recipe["provenance"] = prov
+        self.on_structure_changed()
+        msg = (f"added {len(imp.sites)} site(s) from "
+               f"{Path(imp.provenance.get('file', '')).name} "
+               f"(δ via {imp.conversion})")
+        if imp.lock_amplitude and len(imp.ratios) > 1:
+            msg += "; populations locked " + ":".join(str(r) for r in imp.ratios)
+        if imp.share_width and len(imp.sites) > 1:
+            msg += "; one shared linewidth"
+        self.statusBar().showMessage(msg, 12000)
 
     def open_twod(self):
         from larmor.desktop.twod_dialog import TwoDDialog

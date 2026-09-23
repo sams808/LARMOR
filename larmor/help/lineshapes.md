@@ -624,7 +624,10 @@ measurement, so it works where the individual sidebands are too broad or too
 overlapped for the full lineshape fit to be trusted; the second moment of the
 sideband pattern equals the static second moment (ζν₀)²(1+η²/3)/5, which is
 the check the implementation is held to. **Tools ▸ Conversion tools** converts
-between the three tensor conventions.
+between the three tensor conventions. **Tools ▸ Import DFT tensors (.magres)**
+seeds ζ and η_CS from a computed shielding tensor in this same convention (ζ
+shielding, δ_aniso = −ζ; a calibration slope a scales the seeded anisotropy by
+−a) — see the *DFT tensors — import & shift calibration* manual.
 
 ### CSA distribution (disordered) — `csa_czjzek`
 
