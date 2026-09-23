@@ -1159,3 +1159,37 @@ def test_tutorial7_two_field_numbers_reproduce_from_the_quoted_inputs():
     for ln in fmt_result_lines(bres)[:3]:
         key, _, rest = ln.partition(" ")
         assert f"{key:14s} {rest}" in block, ln
+
+
+# ---------------------------------------------------------------- fix 19
+def test_axes_carry_no_si_prefix_across_compute_and_dataset_views(qapp):
+    """1/nu0^2 ~ 1e-4 MHz^-2 got a 'µ' prefix from pyqtgraph's autoSIPrefix,
+    and re-calling enableAutoSIPrefix(False) after a range change could
+    freeze a stale scale ('shift (µppm)' with 2e8 ticks)."""
+    from PySide6.QtWidgets import QTableWidgetItem
+
+    from larmor.desktop.qcpmg_fields_dialog import QcpmgFieldsDialog
+
+    d = QcpmgFieldsDialog(None, "35Cl", None)
+    bottom = d.plot.getPlotItem().getAxis("bottom")
+    left = d.plot.getPlotItem().getAxis("left")
+    assert bottom.autoSIPrefix is False and left.autoSIPrefix is False
+    for r, (nu, dcg, err) in enumerate(((NU_LO, -113.1, 1.5), (NU_HI, -92.1, 1.1))):
+        d.table.setItem(r, 0, QTableWidgetItem(f"{nu}"))
+        d.table.setItem(r, 1, QTableWidgetItem(f"{dcg}"))
+        d.table.setItem(r, 2, QTableWidgetItem(f"{err}"))
+    d._compute()
+    assert bottom.autoSIPrefix is False
+    assert "µ" not in bottom.labelText + bottom.labelUnits
+    assert bottom.labelUnits == "MHz⁻²" and bottom.autoSIPrefixScale == 1.0
+    # a dataset row switches the plot to ppm / intensity ...
+    x = np.linspace(-300.0, 100.0, 2001)
+    r = d.add_dataset_spectrum(58.7, x, np.exp(-(((x + 105.0) / 25.0) ** 2)))
+    d.table.selectRow(r)
+    assert bottom.labelUnits == "ppm" and bottom.autoSIPrefixScale == 1.0
+    assert "µ" not in bottom.labelUnits and "µ" not in left.labelUnits
+    # ... and back: Compute again, both axes still without a prefix
+    d._compute()
+    assert bottom.labelUnits == "MHz⁻²" and left.labelUnits == "ppm"
+    assert bottom.autoSIPrefixScale == 1.0 and left.autoSIPrefixScale == 1.0
+    d.close()

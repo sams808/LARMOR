@@ -160,9 +160,14 @@ class QcpmgFieldsDialog(QDialog):
         v.addLayout(row)
 
         self.plot = pg.PlotWidget(background=theme.active().plot_bg)
+        # SI prefixes off on BOTH axes, once, while the range is still [0, 1]:
+        # 1/ν₀² ~ 1e-4 MHz⁻² would otherwise be labelled 'µMHz⁻²', and
+        # re-calling enableAutoSIPrefix after a range change can freeze a
+        # stale scale ('shift (µppm)' with ±2e8 ticks after Compute -> row)
+        self.plot.getPlotItem().getAxis("bottom").enableAutoSIPrefix(False)
+        self.plot.getPlotItem().getAxis("left").enableAutoSIPrefix(False)
         self.plot.setLabel("bottom", "1 / ν₀²", units="MHz⁻²")
         self.plot.setLabel("left", "δcg", units="ppm")
-        self.plot.getPlotItem().getAxis("left").enableAutoSIPrefix(False)
         self.plot.showGrid(x=True, y=True, alpha=0.15)
         self.plot.setMinimumHeight(140)
         v.addWidget(self.plot, 1)        # table and plot share extra height
@@ -461,7 +466,6 @@ class QcpmgFieldsDialog(QDialog):
         self.plot.getPlotItem().invertX(True)
         self.plot.setLabel("bottom", "shift", units="ppm")
         self.plot.setLabel("left", "intensity", units="")
-        self.plot.getPlotItem().getAxis("bottom").enableAutoSIPrefix(False)
         self.plot.setTitle("dataset — drag the band edges; δcg / FWHM in the "
                            "row follow", color=theme.active().text_dim,
                            size="9pt")
