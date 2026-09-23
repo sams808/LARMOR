@@ -130,16 +130,23 @@ def load_any(path: str | Path, replay: bool = True):
         ppm = data.axes[0].values
         amp = data.data
         title = data.meta.get("title", "")
+        # a MAS rate confirmed once for this session / rotor / nucleus (and
+        # the same three source values) applies here too -- the desktop,
+        # Batch fit, Sequential fit and the CLI all load through this branch
+        from larmor import masrate
+
+        mas = masrate.resolve_for_load(data.meta, ref.expno)
         recipe = Recipe(
             sample=title.splitlines()[0] if title else "",
             source_kind="bruker", source_path=str(ref.expno),
             nucleus=data.nucleus, larmor_frequency_MHz=data.meta["larmor_MHz"],
-            spin_rate_Hz=(data.meta.get("spin_rate_Hz")
-                          or data.meta.get("masr_Hz") or 0.0),
-            mas_uncertain=bool(data.meta.get("mas_uncertain", False)),
+            spin_rate_Hz=mas["spin_rate_Hz"],
+            mas_uncertain=mas["mas_uncertain"],
             sr_hz=data.meta.get("sr_hz", 0.0),
+            provenance={"mas_rate": mas["provenance"]},
         )
-        return ppm, amp, recipe.to_dict(), data.summary, list(data.warnings)
+        warns = list(data.warnings) + ([mas["note"]] if mas["note"] else [])
+        return ppm, amp, recipe.to_dict(), data.summary, warns
 
     raise ValueError(f"unrecognized source: {p} (expected .fxmla, "
                      ".recipe.json, a Bruker 1r/2rr/fid/ser file, or an "

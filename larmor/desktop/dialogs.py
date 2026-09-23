@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
-    QFormLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout,
+    QFormLayout, QGridLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
+    QPushButton, QVBoxLayout,
 )
 
 from larmor.desktop import theme
@@ -68,12 +69,31 @@ class BoundsDialog(QDialog):
 
 
 class ExperimentDialog(QDialog):
-    """Edit nucleus / Larmor frequency / MAS rate (nu_rot) for the recipe."""
+    """Edit nucleus / Larmor frequency / MAS rate (nu_rot) for the recipe.
 
-    def __init__(self, parent, recipe: dict):
+    When the recipe carries ``provenance["mas_rate"]`` (a spectrum read from
+    an EXPNO), a "Where the rate comes from" group lists the present sources
+    (acqus MASR, title, booking sidecar) with a [Use] button each, a
+    "measured" row whose [Measure] runs ``measure()`` (the main window's
+    sideband detector) and a verdict line; "Remember for this session"
+    records the confirmed rate for later spectra of the same session folder,
+    rotor and nucleus (``larmor.masrate``). CSV / fxmla / VOCS recipes have
+    no block and keep the plain four-row dialog.
+    """
+
+    _SOURCE_NAMES = {"acqus": "acqus MASR", "title": "title",
+                     "booking": "booking sidecar"}
+
+    def __init__(self, parent, recipe: dict, *, measure=None):
         super().__init__(parent)
         self.setWindowTitle("Experiment parameters")
         self.recipe = recipe
+        self._measure_fn = measure
+        self._measured_hz = None
+        #: {'acqus' | 'title' | 'booking' | 'measured': its Use/Measure button}
+        self.source_rows: dict[str, QPushButton] = {}
+        #: set by [Forget]: edit_experiment appends a reversal to the store
+        self.forget_requested = False
         form = QFormLayout(self)
 
         self.nucleus = QLineEdit(recipe.get("nucleus", ""))
@@ -94,6 +114,16 @@ class ExperimentDialog(QDialog):
         self.mas.setToolTip("MAS spinning rate nu_rot; 0 = static")
         self.mas.setValue(recipe.get("spin_rate_Hz", 0.0) or 0.0)
         form.addRow("MAS rate (νrot)", self.mas)
+
+        # the three-source block written by the loader (larmor.masrate); a
+        # CSV / fxmla / VOCS recipe has none and the dialog stays as it was
+        block = (recipe.get("provenance") or {}).get("mas_rate") or {}
+        self.remember_mas = QCheckBox("Remember for this session")
+        self.remember_mas.setChecked(False)
+        if block:
+            self._build_mas_sources(form, block)
+        else:
+            self.remember_mas.setVisible(False)
 
         sr_row = QHBoxLayout()
         self.sr = QDoubleSpinBox()
@@ -119,6 +149,156 @@ class ExperimentDialog(QDialog):
         buttons.accepted.connect(self._accept)
         buttons.rejected.connect(self.reject)
         form.addRow(buttons)
+
+    # ------------------------------------------------- where the rate comes from
+    def _build_mas_sources(self, form, block: dict):
+        from larmor import masrate
+
+        dim = f"color: {theme.active().text_dim};"
+        group = QGroupBox("Where the rate comes from")
+        grid = QGridLayout(group)
+        grid.setColumnStretch(2, 1)
+        present = [k for k in ("acqus", "title", "booking")
+                   if block.get(f"{k}_Hz") is not None]
+        row = 0
+        for key in present:
+            hz = float(block[f"{key}_Hz"])
+            if key == "title":
+                detail = block.get("title_note") or (
+                    f'"{block["title_raw"]}"' if block.get("title_raw") else "")
+            else:
+                detail = "experiment_addenda.xml" if key == "booking" else ""
+            grid.addWidget(QLabel(self._SOURCE_NAMES[key]), row, 0)
+            grid.addWidget(QLabel(masrate.format_hz(hz) + " Hz"), row, 1)
+            d = QLabel(detail)
+            d.setStyleSheet(dim)
+            d.setWordWrap(True)
+            grid.addWidget(d, row, 2)
+            btn = QPushButton("Use")
+            btn.setToolTip(f"set νrot to {masrate.format_hz(hz)} Hz")
+            btn.clicked.connect(lambda _=False, v=hz: self.mas.setValue(v))
+            grid.addWidget(btn, row, 3)
+            self.source_rows[key] = btn
+            row += 1
+
+        # the spectrum itself: the ±νrot repeat of the pattern
+        grid.addWidget(QLabel("measured"), row, 0)
+        self.measured_label = QLabel("—")
+        self.measured_label.setWordWrap(True)
+        grid.addWidget(self.measured_label, row, 1, 1, 2)
+        self.measured_detail = QLabel("from the ±νrot repeat of this spectrum")
+        self.measured_detail.setStyleSheet(dim)
+        btn = QPushButton("Measure")
+        btn.setToolTip("run the spinning-sideband detector on the spectrum "
+                       "on screen; the button then sets νrot to the measured rate")
+        btn.setEnabled(self._measure_fn is not None)
+        btn.clicked.connect(self._measure_or_use)
+        grid.addWidget(btn, row, 3)
+        self.source_rows["measured"] = btn
+        row += 1
+        grid.addWidget(self.measured_detail, row, 1, 1, 2)
+        row += 1
+
+        # the verdict, and [Forget] when a stored confirmation is in force
+        verdict_row = QHBoxLayout()
+        self.verdict_label = QLabel(self._verdict(block))
+        self.verdict_label.setWordWrap(True)
+        self.verdict_label.setStyleSheet(dim)
+        verdict_row.addWidget(self.verdict_label, 1)
+        if block.get("source") == "confirmed" and block.get("confirmed"):
+            self.btnForget = QPushButton("Forget")
+            self.btnForget.setToolTip("stop applying this confirmation to the "
+                                      "session's spectra (the store keeps a "
+                                      "reversal record)")
+            self.btnForget.clicked.connect(self._forget)
+            verdict_row.addWidget(self.btnForget)
+        grid.addLayout(verdict_row, row, 0, 1, 4)
+        form.addRow(group)
+
+        session = block.get("session")
+        if session:
+            key = (session, block.get("rotor") or "", block.get("nucleus") or "")
+            self.remember_mas.setText(
+                f"Remember for this session ({masrate.describe_key(key)}): "
+                "spectra with the same three source values load with this "
+                "rate and no warning")
+            self.remember_mas.setChecked(bool(block.get("uncertain")))
+            form.addRow(self.remember_mas)
+        else:
+            self.remember_mas.setVisible(False)
+
+    def _verdict(self, block: dict) -> str:
+        from larmor import masrate
+
+        names = self._SOURCE_NAMES
+        present = [k for k in ("acqus", "title", "booking")
+                   if block.get(f"{k}_Hz") is not None]
+        src = str(block.get("source") or "")
+        if src == "confirmed" and block.get("confirmed"):
+            key = (block.get("session") or "", block.get("rotor") or "",
+                   block.get("nucleus") or "")
+            return (f"Confirmed on {str(block['confirmed'])[:10]} for "
+                    f"{masrate.describe_key(key)}.")
+        if src == "all":
+            return "All sources agree."
+        if "+" in src:
+            pair = src.split("+")
+            text = f"{names[pair[0]].capitalize()} and {names[pair[1]]} agree"
+            odd = [k for k in present if k not in pair]
+            if odd:
+                v = masrate.format_hz(float(block[f"{odd[0]}_Hz"]))
+                text += f"; {names[odd[0]]} ({v} Hz) is outvoted"
+            return text + "."
+        if src == "highest":
+            return ("Sources disagree. The title is typed at acquisition, the "
+                    "booking when the instrument was reserved; on this "
+                    "spectrometer acqus MASR is a leftover. If the spectrum "
+                    "shows spinning sidebands, Measure settles it.")
+        if src == "fallback":
+            return (f"No source found — {masrate.format_hz(masrate.MAS_FALLBACK_HZ)}"
+                    " Hz assumed.")
+        if src == "static":
+            return ("Static (0 Hz)" + (" — no second source confirms it."
+                                       if block.get("uncertain") else "."))
+        if src in names:
+            text = f"Only the {names[src]} carries a rate"
+            if block.get("title_note"):
+                text += f" ({block['title_note']})"
+            return text + "."
+        return ""
+
+    def _measure_or_use(self):
+        """[Measure] runs the detector; once a rate is measured the same
+        button reads [Use] and writes it into the spinbox."""
+        if self._measured_hz is not None:
+            self.mas.setValue(self._measured_hz)
+            return
+        self._measure()
+
+    def _measure(self):
+        from larmor import sidebands
+
+        if self._measure_fn is None:
+            return None
+        det = self._measure_fn()
+        if det is None or not getattr(det, "ok", False):
+            msg = getattr(det, "message", "") or "nothing to run on"
+            self.measured_label.setText("no ±νrot repeat found — " + msg)
+            return det
+        self._measured_hz = float(det.nu_rot_Hz)
+        self.measured_label.setText(sidebands.describe(det))
+        self.measured_detail.setText("")
+        btn = self.source_rows["measured"]
+        btn.setText("Use")
+        btn.setToolTip(f"set νrot to {sidebands.format_hz(self._measured_hz)} Hz")
+        return det
+
+    def _forget(self):
+        self.forget_requested = True
+        self.remember_mas.setChecked(False)
+        self.btnForget.setEnabled(False)
+        self.verdict_label.setText(self.verdict_label.text() +
+                                   " Will be forgotten on OK.")
 
     def _accept(self):
         nuc = self.nucleus.text().strip()

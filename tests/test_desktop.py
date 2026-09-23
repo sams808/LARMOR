@@ -1575,3 +1575,196 @@ def test_sideband_offer_escape_dismiss_and_workspace_switch(win, qapp, tmp_path)
     toggle = next(a for a in view.actions()
                   if a.text() == "&Offer spinning-sideband detection on load")
     assert toggle.isCheckable() and toggle is win.actSsbOffer
+
+
+# ------------------------------------------------ MAS rate: three sources
+def _mas_block(session, uncertain=True, **over):
+    """The 2702-shaped provenance block: acqus 4200 / title 20 kHz /
+    booking 22 kHz, three-way, on rotor RS2427418 in the 2026-05 session."""
+    b = {"acqus_Hz": 4200.0, "title_Hz": 20000.0, "title_note": "",
+         "title_raw": "MASR 20kHz", "booking_Hz": 22000.0, "booking_flag": True,
+         "source": "highest", "uncertain": uncertain, "session": session,
+         "rotor": "RS2427418", "nucleus": "31P", "confirmed": None,
+         "confirmed_note": ""}
+    b.update(over)
+    return b
+
+
+def test_experiment_dialog_lists_sources_and_use_buttons(win, qapp, tmp_path):
+    from larmor.desktop.dialogs import ExperimentDialog
+
+    ppm = np.linspace(-200, 200, 512)
+    win._display_1d(ppm, np.exp(-(ppm / 5) ** 2), "31P", 242.79, 22000.0, "t", "e")
+    win.recipe["provenance"] = {"mas_rate": _mas_block(str(tmp_path / "2026-05"))}
+    win.recipe["mas_uncertain"] = True
+    dlg = ExperimentDialog(win, win.recipe)
+    assert set(dlg.source_rows) == {"acqus", "title", "booking", "measured"}
+    from PySide6.QtWidgets import QLabel
+    texts = [lab.text() for lab in dlg.findChildren(QLabel)]
+    assert any("4 200 Hz" in t for t in texts)
+    assert any("20 000 Hz" in t for t in texts)
+    assert any("22 000 Hz" in t for t in texts)
+    assert any("experiment_addenda.xml" in t for t in texts)
+    assert any('"MASR 20kHz"' in t for t in texts)
+    assert any(t.startswith("Sources disagree") for t in texts)
+    assert dlg.source_rows["measured"].text() == "Measure"
+    assert not dlg.source_rows["measured"].isEnabled()    # no detector passed
+    assert dlg.mas.value() == 22000.0
+    dlg.source_rows["title"].click()
+    assert dlg.mas.value() == 20000.0
+    dlg.source_rows["acqus"].click()
+    assert dlg.mas.value() == 4200.0
+    dlg.source_rows["booking"].click()
+    assert dlg.mas.value() == 22000.0
+    assert dlg.remember_mas.isChecked() and not dlg.remember_mas.isHidden()
+    assert "2026-05 · rotor RS2427418 · 31P" in dlg.remember_mas.text()
+    assert dlg.forget_requested is False
+    dlg.source_rows["title"].click()
+    dlg._accept()
+    assert win.recipe["spin_rate_Hz"] == 20000.0
+    dlg.close()
+
+    # a certain block: the checkbox is offered but unchecked; a confirmed
+    # block shows the Forget button and its verdict
+    win.recipe["provenance"]["mas_rate"] = _mas_block(
+        str(tmp_path / "2026-05"), uncertain=False, source="title+booking",
+        booking_Hz=20000.0)
+    dlg = ExperimentDialog(win, win.recipe)
+    assert not dlg.remember_mas.isChecked()
+    texts = [lab.text() for lab in dlg.findChildren(QLabel)]
+    assert any("Title and booking sidecar agree; acqus MASR (4 200 Hz) is "
+               "outvoted." == t for t in texts)
+    assert not hasattr(dlg, "btnForget")
+    dlg.close()
+    win.recipe["provenance"]["mas_rate"] = _mas_block(
+        str(tmp_path / "2026-05"), uncertain=False, source="confirmed",
+        confirmed="2026-09-22T10:00:00")
+    dlg = ExperimentDialog(win, win.recipe)
+    texts = [lab.text() for lab in dlg.findChildren(QLabel)]
+    assert any(t == "Confirmed on 2026-09-22 for 2026-05 · rotor RS2427418 · 31P."
+               for t in texts)
+    dlg.btnForget.click()
+    assert dlg.forget_requested is True and not dlg.remember_mas.isChecked()
+    dlg.close()
+
+
+def test_experiment_dialog_without_block_is_unchanged(win, qapp, tmp_path,
+                                                      monkeypatch):
+    from PySide6.QtWidgets import QGroupBox
+    from larmor.desktop.dialogs import ExperimentDialog
+
+    data = tmp_path / "plain.csv"
+    _write_csv_manifold(data, rate_hz=20000.0)
+    win.load_source(str(data), keep_fit=False)
+    qapp.processEvents()
+    assert not (win.recipe.get("provenance") or {}).get("mas_rate")
+    dlg = ExperimentDialog(win, win.recipe)
+    assert dlg.source_rows == {}
+    assert dlg.findChildren(QGroupBox) == []
+    assert dlg.remember_mas.isHidden() and not dlg.remember_mas.isChecked()
+    assert dlg.forget_requested is False
+    assert dlg.nucleus.text() == "11B"
+    assert dlg.larmor.value() == pytest.approx(160.46)
+    assert dlg.mas.value() == 20000.0
+    dlg.mas.setValue(12500.0)
+    dlg._accept()
+    assert win.recipe["spin_rate_Hz"] == 12500.0
+    dlg.close()
+    # edit_experiment on a CSV recipe writes nothing to the store
+    from larmor import masrate
+    store = tmp_path / "store.jsonl"
+    monkeypatch.setenv("LARMOR_MAS_LOG", str(store))
+    assert win._commit_mas_choice(dlg) == ""
+    assert not store.exists()
+    assert masrate.log_path() == store
+
+
+def test_edit_experiment_remembers_and_clears_badge(win, qapp, monkeypatch, tmp_path):
+    from larmor import masrate
+    from larmor.desktop.dialogs import ExperimentDialog
+
+    store = tmp_path / "mas_confirmations.jsonl"
+    monkeypatch.setenv("LARMOR_MAS_LOG", str(store))
+    ppm = np.linspace(-200, 200, 512)
+    win._display_1d(ppm, np.exp(-(ppm / 5) ** 2), "31P", 242.79, 22000.0, "t", "e")
+    session = str(tmp_path / "2026-05")
+    win.recipe["provenance"] = {"mas_rate": _mas_block(session)}
+    win.recipe["mas_uncertain"] = True
+    win._update_exp_label()                  # strip tooltip + badge
+    assert not win.mas_label.isHidden()
+    assert "acqus 4 200 Hz · title 20 000 Hz · booking 22 000 Hz disagree" \
+        in win.mas_label.toolTip()
+    assert "highest of disagreeing sources" in win.exp_label.toolTip()
+
+    def fake_exec(dlg_self):             # the user kept 22 000 Hz and pressed OK
+        assert dlg_self.remember_mas.isChecked()
+        dlg_self.mas.setValue(22000.0)
+        dlg_self._accept()
+        return 1
+
+    monkeypatch.setattr(ExperimentDialog, "exec", fake_exec)
+    win.edit_experiment()
+    key = (session, "RS2427418", "31P")
+    ev = masrate.MasEvidence.from_dict(_mas_block(session))
+    assert masrate.lookup(key, ev)["rate_Hz"] == 22000.0
+    assert win.recipe["mas_uncertain"] is False
+    assert win.mas_label.isHidden()
+    block = win.recipe["provenance"]["mas_rate"]
+    assert block["source"] == "confirmed" and block["confirmed"]
+    msg = win.statusBar().currentMessage()
+    assert "νrot 22 000 Hz confirmed" in msg
+    assert "remembered for 2026-05 · rotor RS2427418 · 31P" in msg
+    assert "confirmed on" in win.exp_label.toolTip()
+
+    # a second visit with [Forget]: the store gets a reversal
+    def fake_exec_forget(dlg_self):
+        assert hasattr(dlg_self, "btnForget")
+        dlg_self.btnForget.click()
+        dlg_self._accept()
+        return 1
+
+    monkeypatch.setattr(ExperimentDialog, "exec", fake_exec_forget)
+    win.edit_experiment()
+    assert masrate.lookup(key, ev) is None
+    assert block["confirmed"] is None and block["source"] == "highest"
+    assert "forgotten" in win.statusBar().currentMessage()
+    assert win.recipe["mas_uncertain"] is False
+    lines = store.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 2 and json.loads(lines[1])["action"] == "forget"
+
+    # OK with Remember unchecked: nothing written, badge still cleared
+    def fake_exec_plain(dlg_self):
+        dlg_self.remember_mas.setChecked(False)
+        dlg_self._accept()
+        return 1
+
+    win.recipe["mas_uncertain"] = True
+    monkeypatch.setattr(ExperimentDialog, "exec", fake_exec_plain)
+    win.edit_experiment()
+    assert len(store.read_text(encoding="utf-8").splitlines()) == 2
+    assert win.recipe["mas_uncertain"] is False and win.mas_label.isHidden()
+    assert "remembered" not in win.statusBar().currentMessage()
+
+
+def test_experiment_dialog_measure_uses_sideband_detector(win, qapp, tmp_path):
+    from larmor.desktop.dialogs import ExperimentDialog
+
+    ppm, amp = _write_csv_manifold(tmp_path / "m.csv", rate_hz=20000.0,
+                                   header_rate_hz=20300.0)
+    win._display_1d(ppm, amp, "11B", 160.46, 20300.0, "m", "m")
+    qapp.processEvents()
+    win.recipe["provenance"] = {"mas_rate": _mas_block(
+        str(tmp_path / "2026-05"), title_Hz=20300.0, booking_Hz=None,
+        source="highest", nucleus="11B")}
+    dlg = ExperimentDialog(win, win.recipe,
+                           measure=lambda: win._run_sideband_detection(scan=True))
+    assert set(dlg.source_rows) == {"acqus", "title", "measured"}
+    btn = dlg.source_rows["measured"]
+    assert btn.isEnabled() and btn.text() == "Measure"
+    det = dlg._measure()
+    assert det is not None and det.ok
+    assert dlg.measured_label.text().startswith("Spinning sidebands: νrot 20 0")
+    assert btn.text() == "Use"
+    btn.click()
+    assert dlg.mas.value() == pytest.approx(20000.0, rel=3e-3)
+    dlg.close()

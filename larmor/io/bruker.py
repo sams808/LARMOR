@@ -10,7 +10,9 @@ list of delays rather than a chemical-shift axis.
 Design guarantees kept from the first version:
   - never writes into instrument folders; ``snapshot`` / ``verify_untouched``
     make it checkable and ``read_expno(..., verify=True)`` enforces it;
-  - surfaces metadata conflicts (acqus MASR vs the operator-typed title).
+  - surfaces metadata conflicts (acqus MASR vs the operator-typed title vs
+    the NMRFAM booking sidecar ``experiment_addenda.xml``; the resolution
+    rule lives in ``larmor.masrate``).
 """
 from __future__ import annotations
 
@@ -21,6 +23,8 @@ from pathlib import Path
 
 import numpy as np
 import nmrglue as ng
+
+from larmor import masrate
 
 # nmrglue warns when it can't parse a pulse program; harmless for our purposes
 warnings.filterwarnings("ignore", message="Error reading the pulse program")
@@ -339,7 +343,8 @@ def _read_title(pdata: Path) -> str:
 
 #: default MAS rate when none can be found anywhere (flagged uncertain so the
 #: user is warned in the app). 35714 Hz is a common 27Al fast-MAS rate here.
-MAS_FALLBACK_HZ = 35714.0
+#: Owned by larmor.masrate; re-exported so ``bruker.MAS_FALLBACK_HZ`` holds.
+MAS_FALLBACK_HZ = masrate.MAS_FALLBACK_HZ
 
 #: pulse-program fragments that imply a STATIC (non-spinning) experiment.
 #: Conservative on purpose: qcpmg alone is NOT here (MAS-QCPMG is a real
@@ -350,7 +355,8 @@ _STATIC_PULPROGS = ("wcpmg", "wurst", "static")
 _STATIC_TITLE_RE = re.compile(r"\bstati(?:c|que)\b", re.IGNORECASE)
 
 
-def _resolve_mas(acqus: dict, title: str) -> tuple[float, bool]:
+def _resolve_mas(acqus: dict, title: str,
+                 booking_Hz: float | None = None) -> tuple[float, bool]:
     """Resolve the MAS rate from all available sources. Returns
     (rate_Hz, uncertain) where uncertain flags a guess or a disagreement so
     the app can warn (red indicator). rate_Hz == 0.0 means STATIC.
@@ -373,42 +379,52 @@ def _resolve_mas(acqus: dict, title: str) -> tuple[float, bool]:
       static probe the rotor controller is not connected and MASR is
       whatever the previous MAS session left behind (measured: the MagLab
       81Br WCPMG set records MASR=14000 for five static acquisitions).
+
+    Three positive sources (``larmor.masrate.resolve``): acqus MASR, the
+    title rate and the NMRFAM booking sidecar ``experiment_addenda.xml``
+    (``booking_Hz``, read by ``_meta_1d``). Any two agreeing within 2 %
+    settle the rate and the third is outvoted; a lone source is trusted;
+    all disagreeing keeps the highest, flagged. The sidecar's
+    ``magic_angle_spinning=false`` is NOT static evidence (the booking form
+    was left blank on spinning MQMAS and 19F echoes too); only a positive
+    booked rate counts. A title rate outside 1-150 kHz ("35741 kHz",
+    "35.714 Hz") is re-read in the other unit and flagged unless another
+    source agrees with it; "0 kHz" is an operator static declaration.
     """
-    cands = []
+    res, _ = _resolve_mas_full(acqus, title, booking_Hz)
+    return res.rate_Hz, res.uncertain
+
+
+def _resolve_mas_full(acqus: dict, title: str, booking_Hz: float | None = None
+                      ) -> tuple[masrate.MasResolution, masrate.MasEvidence]:
+    """The resolution with its evidence (what ``_meta_1d`` records)."""
     masr = acqus.get("MASR")
     masr_zero = masr is not None and float(masr) == 0.0
-    if masr is not None and float(masr) > 0:
-        cands.append(float(masr))
-    m = re.search(r"MASR?\s*[=:]?\s*([\d.]+)\s*kHz", title or "", re.IGNORECASE)
-    if m:
-        cands.append(float(m.group(1)) * 1000.0)
+    tr = masrate.parse_title_rate(title or "")
+    ev = masrate.MasEvidence(
+        acqus_Hz=float(masr) if masr is not None and float(masr) > 0 else None,
+        title_Hz=tr.hz, booking_Hz=booking_Hz, title_note=tr.note,
+        title_repaired=tr.repaired, title_raw=tr.raw)
 
     pulprog = str(acqus.get("PULPROG", "")).strip().strip('<>').lower()
-    static_title = bool(_STATIC_TITLE_RE.search(title or ""))
+    static_title = bool(_STATIC_TITLE_RE.search(title or "")) or tr.static_zero
     static_pp = any(s in pulprog for s in _STATIC_PULPROGS)
-
-    if cands:
-        rate = max(cands)
-        # ambiguous if two sources disagree by more than 2 % -- and a recorded
-        # MASR of 0 against a title rate is just as much a disagreement
-        uncertain = ((max(cands) - min(cands)) > 0.02 * max(cands)
-                     or masr_zero or static_title or static_pp)
-        return rate, uncertain
-
-    if masr_zero:
-        return 0.0, not (static_title or static_pp)
-    if static_title:
-        return 0.0, False
-    if static_pp:
-        return 0.0, True
-    return MAS_FALLBACK_HZ, True
+    res = masrate.resolve(ev, masr_zero=masr_zero, static_title=static_title,
+                          static_pp=static_pp)
+    return res, ev
 
 
 def _meta_1d(acqus: dict, title: str, expno: Path) -> dict:
     # masr_Hz stays the raw acqus reading (so conflict detection and the
     # backward-compat API are unchanged); spin_rate_Hz is the resolved rate the
-    # recipe should use (highest of the sources, or a flagged fallback).
-    spin_hz, mas_uncertain = _resolve_mas(acqus, title)
+    # recipe should use (majority of the sources, highest when all disagree,
+    # or a flagged fallback). The NMRFAM booking sidecar is read here (parse
+    # only, so snapshot/verify_untouched stay green); its `false` spinning
+    # flag is informational -- 214 such files sit under spinning titles, e.g.
+    # 2025-12/neg8A2O-0F/35 (MQMAS, 'MASR 35.714 kHz').
+    booking_hz, booking_flag = masrate.read_booking_rate(Path(expno))
+    res, ev = _resolve_mas_full(acqus, title, booking_hz)
+    ev.booking_flag = booking_flag
     return {
         "nucleus": str(acqus.get("NUC1", "")).strip(),
         "larmor_MHz": float(acqus.get("SFO1", 0.0)),
@@ -417,8 +433,15 @@ def _meta_1d(acqus: dict, title: str, expno: Path) -> dict:
         "pulse_program": str(acqus.get("PULPROG", "")).strip(),
         "masr_Hz": (float(acqus["MASR"]) if acqus.get("MASR") is not None
                     else None),
-        "spin_rate_Hz": spin_hz,
-        "mas_uncertain": mas_uncertain,
+        "spin_rate_Hz": res.rate_Hz,
+        "mas_uncertain": res.uncertain,
+        # the three parsed sources, the verdict and the rotor in the probe
+        # (larmor.masrate: the Experiment dialog, the conflict lines and the
+        # per-session confirmation store all read these)
+        "mas_sources": ev.as_dict(),
+        "mas_source": res.source,
+        "mas_note": res.note,
+        "rotor": masrate.rotor_id(title, Path(expno).parent.name),
         "o1_Hz": float(acqus.get("O1", 0.0)),
         "bf1_MHz": float(acqus.get("BF1", 0.0)),
         "title": title,
@@ -491,13 +514,40 @@ def _read_procs_ref(expno: Path) -> dict:
 
 
 def _conflicts(meta: dict, title: str) -> list[str]:
+    """The 'MAS rate:' line(s) of `larmor info`, Explorer > dataset info and
+    the load message, worded from the three parsed sources in
+    ``meta['mas_sources']`` (no title re-parse). The two-source sentence is
+    byte-identical to the pre-sidecar one (tutorial 04 pins its prefix)."""
+    src = meta.get("mas_sources") or {}
+    a, t, b = src.get("acqus_Hz"), src.get("title_Hz"), src.get("booking_Hz")
+    said = {"acqus": (a, "acqus says {v:.0f} Hz"),
+            "title": (t, "the title says {v:.0f} Hz"),
+            "booking": (b, "the booking sidecar says {v:.0f} Hz")}
+    present = [n for n in ("acqus", "title", "booking") if said[n][0]]
+    agrees = {"acqus": "acqus agrees", "title": "the title agrees",
+              "booking": "the booking sidecar agrees"}
     out = []
-    m = re.search(r"MASR?\s*[=:]?\s*([\d.]+)\s*kHz", title, re.IGNORECASE)
-    if m and meta.get("masr_Hz"):
-        title_hz = float(m.group(1)) * 1000.0
-        if abs(title_hz - meta["masr_Hz"]) > 0.02 * max(title_hz, meta["masr_Hz"]):
-            out.append(f"MAS rate: acqus says {meta['masr_Hz']:.0f} Hz but the "
-                       f"title says {title_hz:.0f} Hz -- confirm before fitting")
+    source = str(meta.get("mas_source") or "")
+    if len(present) >= 2 and source not in ("all", "acqus", "title", "booking",
+                                            "static", "fallback"):
+        say = {n: said[n][1].format(v=said[n][0]) for n in present}
+        if source == "highest":
+            if len(present) == 3:
+                out.append(f"MAS rate: {say['acqus']}, {say['title']} and "
+                           f"{say['booking']} -- confirm before fitting")
+            else:
+                out.append(f"MAS rate: {say[present[0]]} but {say[present[1]]}"
+                           " -- confirm before fitting")
+        elif "+" in source and len(present) == 3:
+            pair = source.split("+")
+            (odd,) = [n for n in present if n not in pair]
+            rate = float(meta.get("spin_rate_Hz") or 0.0)
+            out.append(f"MAS rate: {say[odd]} but {say[pair[0]]} and "
+                       f"{agrees[pair[1]]} -- {odd} outvoted, using "
+                       f"{rate:.0f} Hz")
+    note = str(src.get("title_note") or "")
+    if note:
+        out.append(f"MAS rate: {note}")
     return out
 
 
@@ -518,6 +568,8 @@ class BrukerExperiment:
     processed: np.ndarray | None
     processed_ppm: np.ndarray | None
     conflicts: list = field(default_factory=list)
+    #: the three parsed MAS sources (larmor.masrate.MasEvidence.as_dict)
+    mas_sources: dict = field(default_factory=dict)
 
     @property
     def summary(self) -> str:
@@ -527,8 +579,12 @@ class BrukerExperiment:
             f"pulse program: {self.pulse_program}   TD: {self.td}   "
             f"SW: {self.sw_Hz:.0f} Hz",
             f"MASR (acqus): {self.masr_Hz} Hz",
-            f"title: {self.title.splitlines()[0] if self.title else '(none)'}",
         ]
+        booking = (self.mas_sources or {}).get("booking_Hz")
+        if booking is not None:        # only NMRFAM EXPNOs carry a sidecar
+            lines.append(f"MAS (booking sidecar): {booking:.0f} Hz")
+        lines.append(
+            f"title: {self.title.splitlines()[0] if self.title else '(none)'}")
         for c in self.conflicts:
             lines.append(f"CONFLICT: {c}")
         return "\n".join(lines)
@@ -555,7 +611,7 @@ def read_expno(path: str | Path, procno: int = 1,
         pulse_program=meta["pulse_program"], td=meta["td"],
         sw_Hz=meta["sw_Hz"], masr_Hz=meta["masr_Hz"], title=title, fid=fid,
         processed=processed, processed_ppm=processed_ppm,
-        conflicts=_conflicts(meta, title))
+        conflicts=_conflicts(meta, title), mas_sources=meta["mas_sources"])
     if verify:
         verify_untouched(path, before)
     return exp

@@ -219,8 +219,51 @@ class _ChromeMixin:
         self.exp_label.setText(
             f"{self.recipe.get('nucleus', '?')} · "
             f"{self.recipe.get('larmor_frequency_MHz', 0):.3f} MHz · {mas}{sr_txt}")
+        origin = self._mas_origin_sentence()
+        self.exp_label.setToolTip(
+            (f"{mas} — {origin} · " if origin else "")
+            + "double-click to edit the experiment parameters")
         self._update_mas_label()
         self._apply_axis_unit()          # SFO may have changed with the dataset
+
+    _MAS_SOURCE_NAMES = {"acqus": "acqus MASR", "title": "title",
+                         "booking": "booking sidecar"}
+
+    def _mas_origin_sentence(self) -> str:
+        """Where the recipe's νrot came from, from provenance['mas_rate']
+        (larmor.masrate); '' when the spectrum carries no block (CSV…)."""
+        block = ((self.recipe or {}).get("provenance") or {}).get("mas_rate")
+        if not block:
+            return ""
+        from larmor import masrate
+
+        names = self._MAS_SOURCE_NAMES
+        present = [k for k in ("acqus", "title", "booking")
+                   if block.get(f"{k}_Hz") is not None]
+        src = str(block.get("source") or "")
+        if src == "confirmed" and block.get("confirmed"):
+            key = (block.get("session") or "", block.get("rotor") or "",
+                   block.get("nucleus") or "")
+            return (f"confirmed on {str(block['confirmed'])[:10]} for "
+                    f"{masrate.describe_key(key)}")
+        if src == "all":
+            return "all sources agree"
+        if "+" in src:
+            pair = src.split("+")
+            text = f"{names[pair[0]]} and {names[pair[1]]} agree"
+            odd = [k for k in present if k not in pair]
+            return text + (f"; {names[odd[0]]} outvoted" if odd else "")
+        if src == "highest":
+            return ("highest of disagreeing sources"
+                    + ("" if block.get("uncertain")
+                       else ", confirmed in Experiment parameters"))
+        if src == "fallback":
+            return "assumed (no source found)"
+        if src == "static":
+            return "static from acqus / title / pulse program"
+        if src in names:
+            return f"from the {names[src]} only"
+        return ""
 
     def _update_mas_label(self):
         """Red bottom-right MAS indicator when the spin rate was guessed or the
@@ -229,15 +272,40 @@ class _ChromeMixin:
         if self.recipe and self.recipe.get("mas_uncertain"):
             self.mas_label.setText("⚠ assumed static — check!" if rate == 0
                                    else f"⚠ MAS {rate:.0f} Hz — check!")
-            self.mas_label.setToolTip(
-                ("The dataset looks static (MASR recorded as 0, or a wideline "
-                 "pulse program) but no second source confirms it, so LARMOR "
-                 "assumed static (0 Hz). "
-                 if rate == 0 else
-                 "The MAS rate was missing or the acqus/title sources "
-                 "disagreed, so LARMOR guessed (highest found, or 35714 Hz). ")
-                + "Double-click here (or the experiment strip) to open "
-                  "Experiment parameters and clear this warning.")
+            block = (self.recipe.get("provenance") or {}).get("mas_rate") or {}
+            present = [k for k in ("acqus", "title", "booking")
+                       if block.get(f"{k}_Hz") is not None]
+            if present and rate:
+                from larmor import masrate
+
+                listed = " · ".join(
+                    f"{k} {masrate.format_hz(float(block[f'{k}_Hz']))} Hz"
+                    for k in present)
+                src = str(block.get("source") or "")
+                if src == "highest":
+                    why = f"{listed} disagree; LARMOR took the highest. "
+                elif len(present) == 1:
+                    why = (f"{listed} is the only source"
+                           + (" and the title's unit had to be repaired"
+                              if block.get("title_repaired") else "") + ". ")
+                else:
+                    why = f"{listed}; a static hint flagged the rate. "
+                if block.get("title_note"):
+                    why += str(block["title_note"]) + ". "
+                self.mas_label.setToolTip(
+                    why + "Double-click here (or the experiment strip) to "
+                    "compare them, measure from the spinning sidebands, and "
+                    "confirm once for this session.")
+            else:
+                self.mas_label.setToolTip(
+                    ("The dataset looks static (MASR recorded as 0, or a "
+                     "wideline pulse program) but no second source confirms "
+                     "it, so LARMOR assumed static (0 Hz). "
+                     if rate == 0 else
+                     "The MAS rate was missing or the acqus/title sources "
+                     "disagreed, so LARMOR guessed (highest found, or 35714 Hz). ")
+                    + "Double-click here (or the experiment strip) to open "
+                      "Experiment parameters and clear this warning.")
             self.mas_label.setVisible(True)
         else:
             self.mas_label.setVisible(False)

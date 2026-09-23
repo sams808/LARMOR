@@ -57,11 +57,21 @@ where it lands:
 in its own workspace, so you can keep two processings of one experiment side by
 side.
 
-**MAS-rate check.** LARMOR takes the MAS rate from `acqus`/title (the highest if
-they disagree) and, if none is found, falls back to 35714 Hz. Whenever the rate
-had to be guessed a **red "⚠ MAS … — check!"** badge appears bottom-right;
-confirm the rate in the experiment parameters (double-click the strip on the
-left) to clear it.
+**MAS-rate check.** The MAS rate is read from three sources: `acqus` MASR, the
+operator's title line (`MASR 20 kHz`) and, on NMRFAM data, the booking sidecar
+`experiment_addenda.xml` written when the instrument was reserved. Two sources
+agreeing within 2 % settle the rate and the third is reported as outvoted in
+the load message (on that spectrometer `acqus` MASR is a constant leftover, so
+it is usually the one outvoted). When the sources all disagree the highest is
+taken and a **red "⚠ MAS … — check!"** badge appears bottom-right; a title rate
+outside 1–150 kHz (`35741 kHz`, `35.714 Hz`) is re-read in the other unit and
+flagged as a probable typo; nothing found at all falls back to 35 714 Hz,
+flagged. **Process ▸ Experiment parameters…** (or double-click the strip or the
+badge) lists the sources side by side with a **Use** button each, can
+**Measure** νrot from the spinning sidebands of the spectrum on screen, and
+offers **Remember for this session**: the confirmed rate then applies to every
+later spectrum of the same session folder, rotor and nucleus that shows the
+same three source values, without the badge (**Forget** undoes it).
 
 ## 2 · The Explorer
 

@@ -12,6 +12,7 @@ the real-data layer elsewhere (the default root is the original development
 machine's home, so existing runs are unchanged).
 """
 import os
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -26,6 +27,15 @@ DATA_ROOT = Path(os.environ.get("LARMOR_TEST_DATA", r"C:\Users\samso"))
 # hung, right after the tests that load 11B/27Al data. The one test of the
 # warm-up itself deletes this variable and stubs the worker.
 os.environ.setdefault("LARMOR_NO_KERNEL_WARM", "1")
+
+# The MAS-rate confirmation store (larmor.masrate) lives under
+# %LOCALAPPDATA%/LARMOR on a real machine. A confirmation recorded there
+# would silently change what the real-data cases assert (2702 must load
+# FLAGGED), and a test writing there would pollute the developer's store: every
+# run gets its own empty store, the way LARMOR_REF_LOG isolates the audit log.
+os.environ.setdefault(
+    "LARMOR_MAS_LOG",
+    str(Path(tempfile.mkdtemp(prefix="larmor_mas_")) / "mas_confirmations.jsonl"))
 
 
 def _data(rel: str) -> Path:
