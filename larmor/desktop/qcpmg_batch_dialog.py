@@ -282,6 +282,16 @@ class QcpmgBatchFieldsDialog(QDialog):
             span = float(ppm.max() - ppm.min())
             mid = float(ppm.min()) + span / 2.0
             lo, hi = mid - span / 6.0, mid + span / 6.0
+        # prefill the sample name from the dataset (header sample line, else
+        # the file stem without its field token) -- never over a typed name
+        name_item = self.table.item(row, 0)
+        if name_item is not None and name_item.text().strip() in ("", f"sample {row + 1}"):
+            from larmor.qcpmg_fields import sample_label
+            guess = sample_label(fs["meta"], path)
+            if guess:
+                self.table.blockSignals(True)
+                name_item.setText(guess)
+                self.table.blockSignals(False)
         self.cells[(row, col)] = {"path": path, "ppm": ppm, "amp": amp,
                                   "larmor": larmor, "window": (lo, hi),
                                   "nucleus": file_nuc,
@@ -454,10 +464,14 @@ class QcpmgBatchFieldsDialog(QDialog):
             if d.get("cg") is None or not np.isfinite(d["cg"]):
                 continue
             name = labels.get(r, f"sample {r + 1}")
+            # fit the values the report PRINTS (dcg and sigma at 2 dp) so the
+            # printed inputs reproduce the printed result -- the two-field
+            # dialog does the same through its cell text
             out.append((name, FieldPoint.from_measurement(
                 d["larmor"], d["meas"], magnitude=d.get("magnitude"),
                 source=d.get("source", ""), rotor_Hz=d.get("rotor_Hz", 0.0),
-                label=name, dcg_ppm=float(d["cg"]), dcg_err_ppm=float(d["sigma"]),
+                label=name, dcg_ppm=round(float(d["cg"]), 2),
+                dcg_err_ppm=round(float(d["sigma"]), 2),
                 meta=d.get("meta"), ref_sf_h_MHz=self.ref_sf_h_MHz(),
                 nucleus=self._nucleus)))
         return out

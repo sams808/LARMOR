@@ -27,6 +27,7 @@ change Eq. (1) in this limit.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -693,6 +694,30 @@ def point_provenance(p: FieldPoint) -> dict:
             "sf_MHz": p.sf_MHz, "sr_hz": p.sr_hz, "referenced": p.referenced,
             "ct_selective": p.ct_selective, "flags": list(p.flags),
             "cg_sequence": p.cg_sequence}
+
+
+_FIELD_TOKEN_RE = re.compile(r"[_\-\s]+\d+(?:p\d+)?_?(?:MHz|GHz|T)$", re.IGNORECASE)
+_SUMECHO_SUFFIX_RE = re.compile(r"\s*(?:·|\||-)?\s*QCPMG sum echo.*$")
+_DATE_ONLY_RE = re.compile(r"\s*\d{1,4}[/.-]\d{1,2}[/.-]\d{2,4}\s*")
+
+
+def sample_label(meta: dict | None, path: str | Path | None) -> str:
+    """A sample name for a dataset: the header's sample line with the
+    ' · QCPMG sum echo (...)' suffix and a leading date token removed
+    (qcpmg.sample_name), else the file stem with its trailing field token
+    removed ('LAW0Ca-3Cl_850_MHz' -> 'LAW0Ca-3Cl')."""
+    from larmor.qcpmg import sample_name
+
+    raw = str((meta or {}).get("sample", "") or "")
+    raw = _SUMECHO_SUFFIX_RE.sub("", raw).strip()
+    name = sample_name(raw) if raw else ""
+    if not name and (meta or {}).get("title"):
+        name = sample_name(str(meta["title"]))          # a Bruker title
+    if _DATE_ONLY_RE.fullmatch(name or ""):
+        name = ""                     # a title that is only a date names nothing
+    if not name and path:
+        name = _FIELD_TOKEN_RE.sub("", Path(path).stem).strip()
+    return name
 
 
 def spectrum_mode_from_meta(meta: dict) -> bool | None:

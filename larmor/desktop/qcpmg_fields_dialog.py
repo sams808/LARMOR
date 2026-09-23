@@ -89,6 +89,15 @@ class QcpmgFieldsDialog(QDialog):
                             "0.7 is the conventional choice (Stebbins & Du 2002)")
         top.addWidget(self.eta)
         top.addSpacing(16)
+        top.addWidget(QLabel("sample"))
+        self.sampleName = QLineEdit()
+        self.sampleName.setPlaceholderText("sample")
+        self.sampleName.setMaximumWidth(160)
+        self.sampleName.setToolTip("the name the report block and the figure "
+                                   "legend use (prefilled from the first "
+                                   "dataset's title or file name)")
+        top.addWidget(self.sampleName)
+        top.addSpacing(16)
         top.addWidget(QLabel("1H reference SF (MHz)"))
         self.refSF = QLineEdit()
         self.refSF.setPlaceholderText("optional")
@@ -322,6 +331,16 @@ class QcpmgFieldsDialog(QDialog):
             self.wresult.setText(
                 f"<span style='color:#c0392b'>⚠ row {r + 1}: {seed.note}</span>")
         self._ds[ds_id]["tip"] = tip
+        if not self.sampleName.text().strip():
+            from larmor.qcpmg_fields import sample_label
+            guess = sample_label(meta, None)
+            if not guess and source:
+                for tok in source.split():
+                    if tok.lower().endswith((".csv", ".txt")):
+                        guess = sample_label(None, tok)
+                        break
+            if guess:
+                self.sampleName.setText(guess)
         pp = str((meta or {}).get("pulse_program", "") or "")
         if pp:
             w = self.table.cellWidget(r, 4)
@@ -479,9 +498,12 @@ class QcpmgFieldsDialog(QDialog):
         pts = self._points()
         if len(pts) < 2:
             return {}
-        name = self._nucleus or "sample"
-        return fit_samples([(name, p) for p in pts],
+        return fit_samples([(self.sample_label(), p) for p in pts],
                            spin=self.spin.value(), eta=self.eta.value())
+
+    def sample_label(self) -> str:
+        """The typed sample name, else 'sample' -- never the nucleus."""
+        return self.sampleName.text().strip() or "sample"
 
     def _figure_spec(self) -> dict:
         from larmor.qcpmg_fields import InfiniteFieldResult

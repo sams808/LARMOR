@@ -1087,3 +1087,75 @@ def test_dialog_label_quotes_pq_with_its_error(qapp):
     assert "P_Q = 3.306 +- 0.146 MHz (η-independent)" in t
     assert "C_Q = 3.065 +- 0.136 MHz" in t and "2.863-3.306 over η 0-1" in t
     dlg.close()
+
+
+# ---------------------------------------------------------------- fix 18
+def test_sample_label_from_header_or_file_stem():
+    from larmor.qcpmg_fields import sample_label
+
+    assert sample_label({"sample": "12/09/2025 · QCPMG sum echo (LB 75 Hz, magnitude)"},
+                        "x/LAW0Ca-3Cl_850_MHz.csv") == "LAW0Ca-3Cl"
+    assert sample_label({"sample": "Sample LAW3CL0CA · QCPMG sum echo (LB 75 Hz)"},
+                        "x/qcpmg_1_sumecho.csv") == "Sample LAW3CL0CA"
+    assert sample_label({}, "LAW2Ca-3Cl_1p1GHz.csv") == "LAW2Ca-3Cl"
+    assert sample_label(None, "glass_18p8T.csv") == "glass"
+    assert sample_label(None, None) == ""
+
+
+def test_two_field_report_key_is_the_typed_sample_name(qapp):
+    from PySide6.QtWidgets import QTableWidgetItem
+
+    from larmor.desktop.qcpmg_fields_dialog import QcpmgFieldsDialog
+
+    d = QcpmgFieldsDialog(None, "35Cl", None)
+    for r, (nu, dcg, err) in enumerate(((NU_LO, -113.1, 1.5), (NU_HI, -92.1, 1.1))):
+        d.table.setItem(r, 0, QTableWidgetItem(f"{nu}"))
+        d.table.setItem(r, 1, QTableWidgetItem(f"{dcg}"))
+        d.table.setItem(r, 2, QTableWidgetItem(f"{err}"))
+    assert list(d._result_map()) == ["sample"]               # never '35Cl'
+    d.sampleName.setText("LAW0Ca-3Cl")
+    assert list(d._result_map()) == ["LAW0Ca-3Cl"]
+    assert d._figure_spec()["samples"][0]["label"] == "LAW0Ca-3Cl"
+    d.close()
+    # a dataset with a title prefills it
+    x = np.linspace(-300.0, 100.0, 2001)
+    d2 = QcpmgFieldsDialog(None, "35Cl")
+    d2.add_dataset_spectrum(78.354, x, np.exp(-(((x + 105.0) / 25.0) ** 2)),
+                            meta={"title": "12/09/2025\nSample LAW3CL0CA\nCPMG"})
+    assert d2.sampleName.text() == "Sample LAW3CL0CA"
+    d2.close()
+
+
+# ---------------------------------------------------------------- fix 18 (doc)
+def test_tutorial7_two_field_numbers_reproduce_from_the_quoted_inputs():
+    """The tutorial quotes the dialog's two (nu0, dcg +- sigma) cells and the
+    headline the dialog then shows; feeding the quoted cells to the fitter
+    and formatting with the dialog's own function must give that line
+    (the old text quoted -68.5 +- 2.8 / 3.07 +- 0.13 for inputs that give
+    -68.6 +- 2.9 / 3.07 +- 0.14)."""
+    import re
+    from pathlib import Path
+
+    from larmor.qcpmg_fields import fmt_result_lines
+
+    text = (Path(__file__).resolve().parents[1]
+            / "docs/tutorials/07-static-81Br-wcpmg.md").read_text(encoding="utf-8")
+    cells = re.findall(r"δCG = (−?-?[\d.]+) ± ([\d.]+) ppm at ([\d.]+) MHz", text)
+    assert len(cells) >= 2, "the tutorial must quote both cells"
+    pts = [FieldPoint(float(nu), float(d.replace("−", "-")), float(s))
+           for d, s, nu in cells[:2]]
+    res = infinite_field_diso(pts, spin=1.5, eta=0.7)
+    lines = fmt_result_lines(res)
+    quoted = re.search(r"```\n(δiso = .*?)\n```", text, flags=re.DOTALL).group(1)
+    assert lines[0].replace("delta_iso", "δiso") in quoted
+    assert lines[1].replace("eta", "η") in quoted
+    assert lines[2].replace("eta", "η") in quoted
+    # and the batch block quotes the report's own numbers for LAW0Ca
+    block = re.search(r"--- LAW0Ca-3Cl -+\n(.*?)\n\n", text, flags=re.DOTALL).group(1)
+    rows = re.findall(r"^\s+([\d.]+)\s+(-[\d.]+)\s+([\d.]+)\s+", block, flags=re.M)
+    assert len(rows) == 2
+    bpts = [FieldPoint(float(nu), float(d), float(s)) for nu, d, s in rows]
+    bres = infinite_field_diso(bpts, spin=1.5, eta=0.7)
+    for ln in fmt_result_lines(bres)[:3]:
+        key, _, rest = ln.partition(" ")
+        assert f"{key:14s} {rest}" in block, ln
