@@ -478,12 +478,8 @@ constrain ζ and η_CS.
 intensity of the N-th sideband is the powder average of the squared Fourier
 coefficient of the crystallite's periodic phase,
 
-$$I_N = \left\langle \left| rac{1}{	au_r} \int_0^{	au_r} e^{\,i\Phi(t)}\, e^{-i N \omega_r t}\, dt 
-ight|^2 
-ight
-angle_{eta,\gamma}, \qquad \Phi(t) = 2\pi \int_0^{t} 
-u_{
-m CSA}(t')\,dt'$$
+$$I_N = \left\langle \left| rac{1}{	au_r} \int_0^{	au_r} e^{\,i\Phi(t)}\, e^{-i N \omega_r t}\, dt ight|^2 ightangle_{eta,\gamma}, \qquad \Phi(t) = 2\pi \int_0^{t} 
+u_{m CSA}(t')\,dt'$$
 
 which is exactly the result Herzfeld and Berger tabulated as a function of
 (μ, ρ). The model above generates these intensities through mrsimulator; the
