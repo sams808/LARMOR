@@ -9,15 +9,18 @@ LARMOR needs.
   it (`pdata/1/1r.fxml`) is included, so the dmfit import path can be tried on
   a real file.
 - `pCABS2-4/1118` — ¹¹B MAS, single pulse, 20 kHz, with its dmfit fit.
-- `pCABS2-4/3620` — ²⁷Al 3QMAS (mp3qdfsz), the 2D dataset used by the MQMAS
-  workflow.
+- `pCABS2-4/3620` — ²⁷Al 3QMAS (mp3qdfsz), the 2D dataset Tutorial 5 fits and
+  Tutorial 3 draws (its `2ri`/`2ir`/`2ii` quadrants and the raw `ser` are
+  included so both the processed and the raw route can be tried).
 
 `pCABS2-4_27Al.recipe.json` and `pCABS2-4_11B.recipe.json` are LARMOR fits of
 the two 1D spectra, started from the dmfit models. `pCABS2-4_fits.figure.json`
 is the figure spec that renders both deconvolutions side by side
-(`pCABS2-4_fits.png`, the figure shown in the README). Recipes reference their
-source data by a path relative to the repository root and a SHA-256 hash, so
-run commands from the repository root:
+(`pCABS2-4_fits.png`, the figure shown in the README). Tutorial 6 runs the
+three error estimators on `pCABS2-4_27Al.recipe.json` and
+`pCABS2-4_11B.recipe.json`. Recipes reference their source data by a path
+relative to the repository root and a SHA-256 hash, so run commands from the
+repository root:
 
 ```
 larmor info examples/pCABS2-4/3616
@@ -26,3 +29,8 @@ larmor fit examples/pCABS2-4_27Al.recipe.json --window 150 -80 --plot fit.png
 
 LARMOR never modifies the acquired files themselves; fits saved next to
 them are ordinary new files.
+
+Tutorials 4 and 7 (a ¹¹B composition series, a static ⁸¹Br WURST-CPMG
+acquisition) reference instrument datasets by path instead of shipping them;
+Tutorial 4 includes a self-contained synthetic series for its command-line
+section.

@@ -134,7 +134,9 @@ For a **series measured the same way** (a composition series, a time course),
 you often want *one* set of lineshape/position parameters describing every
 spectrum, with only the **amplitudes** free — the sites are the same, their
 populations change. **Ctrl/Shift-click** the spectra in the Explorer and press
-**Batch fit selected…** (or *Tools ▸ Batch fit spectra*).
+**Batch fit selected…** (or *Tools ▸ Batch fit spectra*). Tutorial 4
+(Help ▸ Tutorials) runs this on a five-glass composition series and on a
+synthetic series from the command line.
 
 1. **One model, applied.** The batch uses a single model for all spectra — your
    current fit, or a recipe you load in the dialog. The recipe is treated as the

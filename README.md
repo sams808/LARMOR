@@ -18,7 +18,9 @@ next to the spectrum it fits.
 
 The figure above is rendered by LARMOR itself from the example data in
 [examples/](examples/README.md) — a real ¹¹B and ²⁷Al dataset of one glass
-that all the tutorials run against.
+that Tutorials 1–3, 5 and 6 run against. Tutorials 4 and 7 walk through a
+composition series and a static wideline dataset that are described but
+not shipped.
 
 ## Installation
 
@@ -128,9 +130,19 @@ numbers depend on, the validation anchors a change must not break, and an
 index of the bugs already fixed here. [docs/architecture.md](docs/architecture.md)
 maps the modules.
 
-Tutorials live in [docs/tutorials/](docs/tutorials/). Raw instrument data is
-never committed to this repository and never written to — `data/` holds only
-notes about where data lives.
+Tutorials live in [docs/tutorials/](docs/tutorials/):
+
+1. [A first fit — ²⁷Al Czjzek](docs/tutorials/01-first-fit-27Al-czjzek.md)
+2. [Constraints — fix, bound, link](docs/tutorials/02-constraints.md)
+3. [Plotting studio figures](docs/tutorials/03-figures.md)
+4. [Batch fitting a composition series](docs/tutorials/04-batch-fitting.md)
+5. [MQMAS — 2D processing and fitting](docs/tutorials/05-mqmas.md)
+6. [Error analysis — covariance, Monte-Carlo, χ² profile](docs/tutorials/06-error-analysis.md)
+7. [Static wideline — ⁸¹Br WURST-CPMG](docs/tutorials/07-static-81Br-wcpmg.md)
+
+They are also reachable in the app under Help ▸ Tutorials. Raw instrument
+data is never committed to this repository and never written to — `data/`
+holds only notes about where data lives.
 
 ## License
 

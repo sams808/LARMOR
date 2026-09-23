@@ -265,7 +265,9 @@ amplified). Do this before quantifying anything across a wide pattern.
 7. **Stage 6** — place the window, read δ_CG ± σ and FWHM.
 8. **Copy CSV** for the lab book, then **Send to fit →** to model the
    lineshape (see the *Lineshapes* manual — for a glass, `czjzek` or
-   `ext_czjzek`).
+   `ext_czjzek`). Tutorial 7 (Help ▸ Tutorials) walks this end to end on a
+   static ⁸¹Br WURST-CPMG dataset, through *Read static pattern* and the
+   infinite-field δiso reasoning.
 
 > Fitting a single-field QCPMG spectrum gives correlated δ_iso/C_Q. Quote
 > δ_CG and the central-band width as the primary numbers, and treat the fit as

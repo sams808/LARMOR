@@ -1,4 +1,4 @@
-"""Render a bundled Markdown manual in a scrollable dialog."""
+"""Render a bundled Markdown manual (or tutorial) in a scrollable dialog."""
 from __future__ import annotations
 
 import sys
@@ -20,10 +20,25 @@ def help_path(name: str) -> Path | None:
     return None
 
 
-def show_help(parent, name: str, title: str = "Help") -> None:
-    p = help_path(name)
+def tutorial_path(name: str) -> Path | None:
+    """Locate docs/tutorials/<name>.md, whether from source or a frozen build
+    (packaging/larmor.spec bundles the folder as docs/tutorials)."""
+    here = Path(__file__).resolve()
+    for base in (here.parents[2] / "docs" / "tutorials",
+                 Path(getattr(sys, "_MEIPASS", "")) / "docs" / "tutorials"):
+        p = base / f"{name}.md"
+        if p.is_file():
+            return p
+    return None
+
+
+def show_help(parent, name: str, title: str = "Help",
+              kind: str = "manual") -> None:
+    """``kind`` is "manual" (larmor/help) or "tutorial" (docs/tutorials)."""
+    p = tutorial_path(name) if kind == "tutorial" else help_path(name)
+    missing = "Tutorial not found." if kind == "tutorial" else "Manual not found."
     text = (p.read_text(encoding="utf-8") if p
-            else f"# {name}\n\nManual not found.")
+            else f"# {name}\n\n{missing}")
     dlg = QDialog(parent)
     dlg.setWindowTitle(title)
     dlg.resize(880, 720)
