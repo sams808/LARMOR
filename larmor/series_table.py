@@ -549,10 +549,11 @@ def propose_mapping(table: SeriesTable, csv_rows: list, sample_header: str) -> l
     """Pair series rows with CSV rows: exact on the display name, then exact
     on the group, then normalised-key equality (name, then group), then the
     CSV name read as a sample FOLDER (``04272026_P5-Bi8-12_SS_ALP`` -> key
-    ``P5-Bi8-12``, as a batch CSV written before the folder-derived names
-    carries; ``how`` = ``folder``). More than one candidate at a stage ->
-    ``ambiguous`` with the candidates listed and no default -- the person
-    decides."""
+    ``P5-Bi8-12`` and its dated form ``P5-Bi8-12 (04272026)``, the shape
+    ``scan.disambiguate`` gives a replicate -- as a batch CSV written before
+    the folder-derived names carries; ``how`` = ``folder``). More than one
+    candidate at a stage -> ``ambiguous`` with the candidates listed and no
+    default -- the person decides."""
     names = [(r.get(sample_header) or "").strip() for r in csv_rows]
     exact: dict = {}
     normed: dict = {}
@@ -563,12 +564,14 @@ def propose_mapping(table: SeriesTable, csv_rows: list, sample_header: str) -> l
         parts = scan.name_parts(nm)
         if parts.from_folder:
             folder.setdefault(norm_key(parts.key), []).append(i)
+            if parts.date:
+                folder.setdefault(norm_key(f"{parts.key} ({parts.date})"), []).append(i)
     out = []
     for k, row in enumerate(table.rows):
         found = None
         for cand_name, how in ((row.display_name, "exact"), (row.group, "exact"),
                                (row.display_name, "normalised"), (row.group, "normalised"),
-                               (row.group, "folder"), (row.display_name, "folder")):
+                               (row.display_name, "folder"), (row.group, "folder")):
             if not cand_name:
                 continue
             idx = (exact.get(cand_name) if how == "exact"

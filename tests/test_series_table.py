@@ -170,6 +170,13 @@ def test_propose_mapping_exact_then_group_then_normalised_and_flags_ambiguity():
     assert m5[2].how == "none" and m5[3].how == "none"
     m6 = st.propose_mapping(rep, old, "scope")           # the triple, through its group
     assert [(x.how, x.csv_row) for x in m6] == [("folder", 0)] * 3
+    # two dated scopes of one glass (the real PBi 31P table): a row's own date
+    # tag pairs it uniquely; the run absent from the CSV stays ambiguous
+    two = [{"scope": "04272026_P5-Bi8-12_SS_ALP"}, {"scope": "05082026_P5-Bi8-12_SS_ALP"}]
+    m7 = st.propose_mapping(rep, two, "scope")
+    assert [(x.how, x.csv_row) for x in m7] == [("ambiguous", None), ("folder", 0),
+                                                ("folder", 1)]
+    assert m7[0].candidates == [0, 1]
 
 
 def test_apply_join_writes_numbers_only_and_tags_labels(tmp_path):
