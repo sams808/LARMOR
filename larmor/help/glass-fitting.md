@@ -92,13 +92,17 @@ deconvolution. LARMOR's tools map one-to-one:
 - **Monte-Carlo errors** — the parametric bootstrap, robust for correlated
   parameters;
 - **identifiability warnings** — parameter pairs the data cannot separate
-  are flagged after every fit;
+  are flagged after every fit: the fit-health strip under the spectrum turns
+  red with a `degenerate` chip, and a click on it opens the correlation
+  matrix;
 - **residual diagnostics** — the runs-test flags structured residuals even
   when the rms looks small (a systematically wrong model, e.g. too few or
-  wrongly-placed components).
+  wrongly-placed components); the strip shows an amber `structured residual`
+  or `residual N× noise` chip, and a click turns the residual trace on.
 
 If a component's population has a 100 % relative uncertainty, the data do
-not support that component. Report that, or remove it.
+not support that component. Report that, or remove it. The strip shows an
+amber `population ±≥100 %` chip for exactly that case, naming the component.
 
 ## 6 · Quantitative intensities from quadrupolar nuclei
 
