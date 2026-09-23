@@ -546,8 +546,8 @@ class SeriesPlotDialog(QDialog):
     def _draw(self):
         sites = self._selected()
         ax = self._axis()
-        ref = self._points(self._params[0], sites[0] if sites else 0)
-        self._apply_axis(ax, ref["names"])
+        ref = self._ref_points(self._params, sites or [0])
+        self._apply_axis(ax, ref["names"] if ref is not None else list(self._labels))
         for spec in self._params:
             pw = self._subplots[spec["param"]]
             pw.clear()
