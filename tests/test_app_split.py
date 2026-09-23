@@ -56,7 +56,8 @@ HOMES = {"FitWorker": "larmor.desktop.workers",
          "SimWorker": "larmor.desktop.workers",
          "_emit_progress": "larmor.desktop.workers",
          "humanize_error": "larmor.desktop.workers",
-         "_fit_tol": "larmor.desktop.workers"}
+         "_fit_tol": "larmor.desktop.workers",
+         "_load_any": "larmor.desktop.mw_files"}
 #: children of these submenus come from QSettings (recent files / recipes),
 #: which LARMOR_NO_SESSION does not gate, so they vary per machine
 EXCLUDE_CHILDREN = frozenset({"Open &recent",
