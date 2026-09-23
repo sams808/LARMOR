@@ -25,7 +25,8 @@ Workplan"; this file is the ground truth for progress.
   reasons in `packaging/README.md`); not rebuilt at 0.14.0. Still owed:
   verification on a machine with no development setup, and publishing a
   release (zip `dist/LARMOR/` or wrap it with Inno Setup).
-- **Full suite**: FULL_SUITE_PLACEHOLDER
+- **Full suite**: at v0.14.0 (0de34c7), **1324 passed / 0 failed** in 20 min 39 s,
+  real-data layer complete (all 19 datasets present).
 
 ## Done — the workplan is closed
 
