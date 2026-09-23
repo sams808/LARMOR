@@ -92,6 +92,14 @@ gives (IUPAC Ξ ratios, the `xiref` rule); forgotten or stale references are
 listed as TopSpin-ready `sr` values, and old and new values go to a permanent
 log so the correction stays reversible (`larmor srcheck`).
 
+**Session inventory.** One month folder read into a sample × nucleus grid: the
+production EXPNO of every block is pre-picked by the operator's rule (the
+highest EXPNO with a `pdata/1/1r`, demoted when its NS is a small fraction of
+the block's maximum or its title says power check / test / failed), sample
+names come from the folder convention rather than the title's pulse note,
+titles whose rotor ID or sample contradict their folder are flagged, and one
+action hands the picks to Batch fit (`larmor inventory`).
+
 **Relaxation and dipolar experiments.** T1/T2 extraction from arrayed experiments
 (saturation/inversion recovery, CPMG, T1ρ), including per-site decomposition;
 REDOR curves to dipolar couplings and distances; QCPMG echo trains to spikelet or

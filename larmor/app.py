@@ -111,7 +111,7 @@ def load(req: LoadRequest):
         ppm, amp = dm.spectrum.ppm, dm.spectrum.amplitude
         meta = f"dmfit {dm.version} | {dm.comment}"
     else:
-        from larmor.io import bruker
+        from larmor.io import bruker, scan
 
         if not bruker.is_expno(path):
             raise HTTPException(422, f"not a .fxmla file or Bruker EXPNO folder: {path}")
@@ -120,7 +120,7 @@ def load(req: LoadRequest):
             raise HTTPException(422, "EXPNO has no processed pdata/1 to display")
         ppm, amp = exp.processed_ppm, exp.processed.astype(float)
         recipe = Recipe(
-            sample=exp.title.splitlines()[0] if exp.title else "",
+            sample=scan.sample_name(Path(path), exp.title).key,
             source_kind="bruker", source_path=str(path),
             nucleus=exp.nucleus, larmor_frequency_MHz=exp.sfo1_MHz,
             spin_rate_Hz=exp.masr_Hz or 0.0,

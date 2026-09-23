@@ -38,6 +38,7 @@ from larmor.desktop.comparability_dialog import (
 )
 from larmor.desktop.panels import PARAM_LABELS
 from larmor.desktop.plot import site_color
+from larmor.io.scan import disambiguate, sample_label
 
 PER_TAB = 9        # 3×3 grid per tab
 
@@ -472,6 +473,11 @@ class BatchFitDialog(QDialog):
                 "params": comparability.read_params(p),
                 "proc_ops": [], "expno": "",
                 "baseline_ops": []})   # per-spectrum manual baseline (2-point…)
+        # two folders of one glass (or two EXPNOs of one folder) must never
+        # share a label: labels become table scopes and recipe file names
+        for d, lab in zip(data, disambiguate([d["sample"] for d in data],
+                                             [d["path"] for d in data])):
+            d["sample"] = lab
             if self._model_sites is None and rec.get("sites"):
                 self._model_sites = rec["sites"]
         self._comparison = comparability.compare(
@@ -1974,25 +1980,6 @@ def _finite(v) -> bool:
 
 def _num(v, fmt: str) -> str:
     return format(float(v), fmt) if _finite(v) else ""
-
-
-def sample_label(path, rec) -> str:
-    """A meaningful sample name for a spectrum: the recipe's sample if it is not
-    just the nucleus, else the sample **folder** derived from the path (the first
-    ancestor that is not a proc/expno number) — so a title of "31P" becomes the
-    real sample directory name."""
-    nucleus = (rec.get("nucleus") or "").strip()
-    name = (rec.get("sample") or "").strip()
-    if name and name.lower() != nucleus.lower():
-        return name
-    for seg in reversed(Path(path).parts):
-        low = seg.lower()
-        if low.endswith(".fid"):                 # a Varian dataset folder
-            return seg[:-4]
-        if seg == "pdata" or seg.isdigit() or low in ("1r", "2rr", "fid", "ser"):
-            continue
-        return seg
-    return name or Path(path).stem
 
 
 def _snr(amp) -> float:

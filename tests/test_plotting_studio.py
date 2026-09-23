@@ -159,9 +159,10 @@ def test_simulate_model_curve_for_dataless_fit():
 def test_studio_names_explorer_traces_by_sample(qapp):
     from larmor.desktop.plotting_studio import PlottingStudio
     st = PlottingStudio(None)
-    # a Bruker 1r path → the sample folder, NOT "1r"
+    # a Bruker 1r path → the sample folder's key (date / operator tokens
+    # stripped, larmor.io.scan.sample_name), NOT "1r"
     st._add_from_explorer("C:/data/03232026_P1-Bi0_SS_ALP/3102/pdata/1/1r")
-    assert st._traces[-1]["label"] == "03232026_P1-Bi0_SS_ALP"
+    assert st._traces[-1]["label"] == "P1-Bi0"
     # a dmfit fit file → its own (stemmed) name
     st._add_from_explorer("C:/data/sample/3102/pdata/1/P1-Bi0_31P.fxml")
     assert st._traces[-1]["label"] == "P1-Bi0_31P"

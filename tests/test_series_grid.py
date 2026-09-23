@@ -62,6 +62,26 @@ def test_find_recipes_near_csv_matches_by_scope(tmp_path):
     assert set(matched) == {str(p0), str(p1)}   # g2 correctly excluded, "shared" ignored
 
 
+def test_find_recipes_prefers_exact_scope_over_substring(tmp_path):
+    """Short folder-derived scopes: 'Ab' must not grab 'AbNa_…' because the
+    substring happens to match first -- exact stem / recipe sample win."""
+    p_ab = _make_fit(tmp_path, "Ab")
+    p_abna = _make_fit(tmp_path, "AbNa")
+    # a batch-named file whose stem starts with the scope also counts as exact
+    p_ns3 = _make_fit(tmp_path, "NS3_batch")
+    _make_fit(tmp_path, "NS3-F-IPGP_batch")
+
+    csv_path = tmp_path / "batch_table.csv"
+    csv_path.write_text(
+        "scope,site,label,param,value,stderr\n"
+        "AbNa,s0,A,amplitude,100,2\n"
+        "Ab,s0,A,amplitude,90,3\n"
+        "NS3,s0,A,amplitude,80,3\n"
+        "shared,s0,A,shift_fwhm_ppm,4.0,\n")
+    matched = series_grid.find_recipes_near_csv(csv_path)
+    assert matched == [str(p_abna), str(p_ab), str(p_ns3)]
+
+
 def test_load_panels_reports_has_data_and_falls_back_gracefully(tmp_path):
     _make_fit(tmp_path, "g0", has_data=True)
     _make_fit(tmp_path, "g1", has_data=False)     # no source_path at all

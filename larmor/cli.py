@@ -8,6 +8,7 @@
     larmor shiftcal --ref NAME a.magres DELTA [ERR] ... -o f19.shiftcal.json
     larmor magres FILE.magres --isotope 19F --calibration f19.shiftcal.json
     larmor compare SPECTRA... [--all] [--csv out.csv]
+    larmor inventory MONTH [--csv out.csv] [--nucleus 31P] [--picks]
 """
 from __future__ import annotations
 
@@ -133,6 +134,38 @@ def cmd_compare(args: argparse.Namespace) -> int:
         cmp.to_csv(args.csv)
         _say(f"wrote {args.csv}")
     return 2 if cmp.level == "bad" else 0
+
+
+def cmd_inventory(args: argparse.Namespace) -> int:
+    """Session inventory of one month folder (see larmor.inventory): the
+    sample x nucleus grid of production picks, the demoted / flagged rows,
+    a CSV; ``--picks`` prints the picks' paths only, one per line, so
+    ``larmor batchfit $(larmor inventory MONTH --picks --nucleus 31P)`` composes."""
+    from larmor import inventory as I
+
+    inv = I.build(args.path, ns_frac=args.ns_frac, sr_audit=not args.no_sr)
+    if not inv.rows:
+        print(f"no EXPNO found under {inv.root} -- give the month folder that holds "
+              "the sample folders", file=sys.stderr)
+        return 1
+    if args.picks:
+        for r in inv.picks(args.nucleus):
+            print(r.openable or r.path)
+        return 0
+    print(f"session {inv.root}: {len(inv.rows)} EXPNOs in {inv.n_folders()} sample "
+          f"folder(s), {len(inv.samples())} sample(s), nuclei "
+          f"{' '.join(inv.nuclei())}, {len(inv.picks())} production pick(s), "
+          f"{inv.n_flags()} flagged EXPNO(s)")
+    print(I.grid_text(inv))
+    print(I.text_report(inv, all_rows=args.all))
+    counts = inv.counts()
+    print("summary: " + ", ".join(f"{k} {n}" for k, n in sorted(counts.items())))
+    if args.csv:
+        I.to_csv(inv, args.csv)
+        txt = Path(args.csv).with_suffix("").as_posix() + "_picks.txt"
+        Path(txt).write_text(I.picks_text(inv, args.nucleus), encoding="utf-8")
+        print(f"wrote {args.csv} and {txt}")
+    return 0
 
 
 def cmd_import(args: argparse.Namespace) -> int:
@@ -442,6 +475,7 @@ def _series_entries(spectra, model_path, window_arg):
     spectrum that carries sites."""
     import copy
     import numpy as np
+    from larmor.io import scan
     from larmor.loader import load_any
     from larmor.recipe import Recipe
 
@@ -470,13 +504,17 @@ def _series_entries(spectra, model_path, window_arg):
         return None, "no model — pass --model recipe.json (or a spectrum with a fit)"
     if window_arg:
         win = tuple(window_arg)
+    # the same sample names (and the same collision rule) as the desktop
+    # dialogs, so CSV scopes and recipe slugs match between the two routes
+    labels = scan.disambiguate([scan.sample_label(p, rec) for _, _, rec, p in loaded],
+                               [str(p) for _, _, _, p in loaded])
     entries = []
-    for ppm, amp, rec, p in loaded:
+    for (ppm, amp, rec, p), label in zip(loaded, labels):
         r = Recipe.from_dict({
             "nucleus": rec.get("nucleus", ""),
             "larmor_frequency_MHz": rec.get("larmor_frequency_MHz", 0.0),
             "spin_rate_Hz": rec.get("spin_rate_Hz", 0.0),
-            "sample": rec.get("sample") or Path(p).stem,
+            "sample": label,
             # load_any fills both for Bruker / csv / fxmla sources; the saved
             # recipes and the publication bundle then reopen with their data
             "source_path": rec.get("source_path") or str(p),
@@ -604,6 +642,26 @@ def main(argv: list[str] | None = None) -> int:
                        help="list every parameter, not only the differences")
     p_cmp.add_argument("--csv", help="write the full parameter table here")
     p_cmp.set_defaults(func=cmd_compare)
+
+    p_inv = sub.add_parser("inventory", help="session inventory: every EXPNO of a "
+                           "month folder as a sample x nucleus grid with the production "
+                           "pick per block, roles (setup/short/failed/arrayed) and "
+                           "title-vs-folder flags")
+    p_inv.add_argument("path", help="month/session folder (or any EXPNO inside it)")
+    p_inv.add_argument("--csv", help="write the inventory table here (and a "
+                       "*_picks.txt list of the production picks)")
+    p_inv.add_argument("--nucleus", help="restrict --picks / the picks list to one "
+                       "nucleus, e.g. 31P")
+    p_inv.add_argument("--picks", action="store_true",
+                       help="print only the picks' openable paths, one per line")
+    p_inv.add_argument("--ns-frac", dest="ns_frac", type=float, default=0.25,
+                       help="a spectrum whose NS is below this fraction of the "
+                            "block's maximum is a short shot (default 0.25)")
+    p_inv.add_argument("--no-sr", dest="no_sr", action="store_true",
+                       help="skip the referencing-audit column (faster)")
+    p_inv.add_argument("--all", action="store_true",
+                       help="list every EXPNO, not only the demoted / flagged ones")
+    p_inv.set_defaults(func=cmd_inventory)
 
     p_imp = sub.add_parser("import", help="convert a dmfit .fxmla to a LARMOR recipe")
     p_imp.add_argument("path")

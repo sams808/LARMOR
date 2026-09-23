@@ -4,6 +4,10 @@ Shared by the desktop app, the CLI and the figure studio so they cannot
 drift apart. Applies the recipe's stored processing pipeline, which is what
 makes a saved fit reproducible end to end: reopening a recipe re-derives the
 exact spectrum it was fitted against, from the untouched instrument files.
+The sample of a Bruker source is the sample folder without its date / rotor /
+operator tokens (or the title's ``Sample …`` line for EXPNO-per-sample
+layouts, see ``larmor.io.scan.sample_name``); the title's first line is kept
+in the recipe's provenance.
 """
 from __future__ import annotations
 
@@ -109,7 +113,7 @@ def load_any(path: str | Path, replay: bool = True):
                 ["Varian import: a default EM+FT+phase was applied — "
                  "re-process / re-phase as needed"])
 
-    from larmor.io import bruker
+    from larmor.io import bruker, scan
 
     # any Bruker path: a 1r/2rr/fid/ser file, a pdata folder, or an EXPNO
     try:
@@ -136,8 +140,13 @@ def load_any(path: str | Path, replay: bool = True):
         from larmor import masrate
 
         mas = masrate.resolve_for_load(data.meta, ref.expno)
+        # the sample of a Bruker source is the sample folder without its
+        # date / rotor / operator tokens (or the title's "Sample …" line for
+        # EXPNO-per-sample layouts), never the title's pulse note; the
+        # title's first line and the raw folder survive in the provenance
+        name = scan.sample_name(Path(ref.expno), title)
         recipe = Recipe(
-            sample=title.splitlines()[0] if title else "",
+            sample=name.key,
             source_kind="bruker", source_path=str(ref.expno),
             nucleus=data.nucleus, larmor_frequency_MHz=data.meta["larmor_MHz"],
             spin_rate_Hz=mas["spin_rate_Hz"],
@@ -145,6 +154,9 @@ def load_any(path: str | Path, replay: bool = True):
             sr_hz=data.meta.get("sr_hz", 0.0),
             provenance={"mas_rate": mas["provenance"]},
         )
+        if (title or "").strip():
+            recipe.provenance["title"] = name.title_first
+            recipe.provenance["sample_folder"] = name.folder
         warns = list(data.warnings) + ([mas["note"]] if mas["note"] else [])
         return ppm, amp, recipe.to_dict(), data.summary, warns
 

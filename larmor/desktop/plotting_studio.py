@@ -713,7 +713,7 @@ class PlottingStudio(QDialog):
             self.pathSer.setText(path); self._refresh(); return
         # name the trace by the SAMPLE (from the recipe, else the sample folder),
         # not the bare file name ("1r")
-        from larmor.desktop.batchfit_dialog import sample_label
+        from larmor.io.scan import sample_label
         label = sample_label(path, {})
         if label.lower().endswith((".fxml", ".fxmla", ".json")):
             label = _P(label).stem                  # a fit file → its own name

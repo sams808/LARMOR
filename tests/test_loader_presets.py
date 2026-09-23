@@ -5,7 +5,7 @@ import pytest
 from larmor import loader
 from larmor.recipe import Recipe
 
-from conftest import CAALGLASS, CAALGLASS_MQ, require
+from conftest import BRUKER_1R, CAALGLASS, CAALGLASS_MQ, MAGLAB_35CL, require
 
 
 def test_load_fxmla():
@@ -26,6 +26,32 @@ def test_load_unknown_source(tmp_path):
     p.write_text("hello")
     with pytest.raises(ValueError, match="unrecognized source"):
         loader.load_any(p)
+
+
+def test_bruker_sample_is_the_folder_key():
+    """A Bruker source is named by its sample folder (date and operator tokens
+    off), not by the title's pulse note; the title's first line and the raw
+    folder survive in the provenance."""
+    _, _, rec, _, _ = loader.load_any(require(BRUKER_1R))
+    assert rec["sample"] == "P1-Bi1-12"
+    assert rec["provenance"]["title"] == "27Al failed, MAS stopped"
+    assert rec["provenance"]["sample_folder"] == "04272026_P1-Bi1-12_SS_ALP"
+    assert rec["nucleus"] == "27Al" and rec["larmor_frequency_MHz"] > 100
+
+
+def test_maglab_sample_comes_from_the_title_sample_line():
+    """EXPNO-per-sample layout: the folder carries no sample, the title's
+    second line reads 'Sample LAW3CL0CA'."""
+    _, _, rec, _, _ = loader.load_any(require(MAGLAB_35CL / "1" / "pdata" / "1" / "1r"))
+    assert rec["sample"] == "LAW3CL0CA"
+    assert rec["provenance"]["sample_folder"] == "35Cl_2025-12"
+
+
+def test_saved_recipe_keeps_its_own_sample(tmp_path):
+    r = Recipe(nucleus="27Al", larmor_frequency_MHz=156.28, sample="my glass")
+    p = tmp_path / "r.recipe.json"
+    r.save(p)
+    assert Recipe.load(p).sample == "my glass"
 
 
 def test_recipe_roundtrip_keeps_processing(tmp_path):

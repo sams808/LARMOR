@@ -48,7 +48,10 @@ class FitEntry:
 
 
 def _fit_entry(path: str, rec: dict, ppm, amp, warns=()) -> FitEntry:
-    sample = rec.get("sample") or Path(path).stem
+    from larmor.io import scan
+
+    # the report never labels a spectrum "1r": the sample folder's key
+    sample = scan.sample_label(path, rec)
     return FitEntry(
         path=path, sample=sample, nucleus=rec.get("nucleus", ""),
         larmor_MHz=float(rec.get("larmor_frequency_MHz", 0.0) or 0.0),
