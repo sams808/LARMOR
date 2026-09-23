@@ -8,12 +8,13 @@ Workplan"; this file is the ground truth for progress.
 ## State of the repository
 
 - **Version**: 0.13.0 (`larmor/__init__.py` + `pyproject.toml`, bumped in step).
-- **Local commits ahead of `origin/master`**: see `git log origin/master..HEAD`
-  (v0.10.1 … v0.13.0, about 45). **Not pushed** — pushing needs Sam's
-  explicit word, after a full-suite green run with the real-data banner
-  complete.
-- **Tests**: ~1000 collected in 89 files. Trust a green bar only when the
-  terminal banner says "real-data layer: complete (all 14 datasets present)"
+- **Local commits ahead of `origin/master`**: 59 (v0.10.1 … v0.13.0; see
+  `git log origin/master..HEAD`). **Not pushed** — pushing needs Sam's
+  explicit word.
+- **Tests**: 1004 collected in 89 files. Last full run, at v0.13.0
+  (7ec83e7): **1004 passed / 0 failed** in 9 min 26 s with the real-data
+  layer complete. Trust a green bar only when the terminal banner says
+  "real-data layer: complete (all 14 datasets present)"
   — two datasets were added this session (the MagLab ⁸¹Br WCPMG set and the
   LAW ¹¹B series used by the tutorials).
 - **Environment**: conda env `larmor` (`C:\Users\samso\xraylarch\envs\larmor`,
