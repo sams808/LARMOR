@@ -63,7 +63,7 @@ HOMES = {"FitWorker": "larmor.desktop.workers",
 EXCLUDE_CHILDREN = frozenset({"Open &recent",
                               "&Apply recipe  (a recent fit → this data)"})
 
-# 309 MainWindow members
+# 310 MainWindow members
 SURFACE = (
     '__init__', '_build_menus', '_add', '_rebuild_recent', '_add_recent',
     '_add_recent_recipe', '_rebuild_apply_recipe', 'apply_recipe_browse',
@@ -150,7 +150,7 @@ SURFACE = (
     'open_vt', 'show_correlations', 'show_czjzek_dist',
     'open_qcpmg_batch_fields', 'open_qcpmg_fields', 'open_staticct',
     '_staticct_seed', 'open_herzfeld_berger', '_hb_seed',
-    'open_referencing_audit', '_apply_sr_correction', 'open_vocs',
+    'open_referencing_audit', 'open_session_inventory', '_apply_sr_correction', 'open_vocs',
     '_vocs_to_workbench', 'open_qcpmg', 'open_satrec', 'open_redor',
     'open_magres', 'open_twod', 'run_auto_fit', 'run_errors_analysis',
     'run_monte_carlo', 'run_batch_report', 'run_batch_fit', 'run_seq_fit',
@@ -160,7 +160,7 @@ SURFACE = (
     'closeEvent', '_restore_session',
 )
 
-# 189 menu rows: (menu path, text, shortcut, checkable, has submenu)
+# 190 menu rows: (menu path, text, shortcut, checkable, has submenu)
 GOLDEN_MENU = (
     ((), '&File', '', False, True),
     (('&File',), '&Open…  (spectrum / recipe / 1r / 2rr)', 'Ctrl+O', False, False),
@@ -304,6 +304,7 @@ GOLDEN_MENU = (
     ((), '&Tools', '', False, True),
     (('&Tools',), '&Integrals && measurements…  (integral, %, FWHM, CoM)', '', False, False),
     (('&Tools',), '&Batch fit report…  (publication table + plots)', '', False, False),
+    (('&Tools',), '&Session inventory…  (a month folder as a sample × nucleus grid; production EXPNO picks)', '', False, False),
     (('&Tools',), 'Batch &fit spectra…  (one shared model, 1D)', '', False, False),
     (('&Tools',), 'Se&quential fit…  (forward–backward series sweep, 1D)', '', False, False),
     (('&Tools',), 'Relaxation / series (T1, T2)…', '', False, False),

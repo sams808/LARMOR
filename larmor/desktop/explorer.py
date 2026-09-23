@@ -69,6 +69,7 @@ def _proc_openable(procdir: Path):
 class ExplorerPanel(QWidget):
     open_requested = Signal(str)        # openable data path
     batch_requested = Signal(list)      # openable paths for a batch fit
+    inventory_requested = Signal(str)   # a month or sample folder -> Session inventory
 
     def __init__(self):
         super().__init__()
@@ -243,6 +244,10 @@ class ExplorerPanel(QWidget):
         m = QMenu(self)
         if (Path(path) / "acqus").exists():          # an EXPNO: it has a story
             m.addAction("Dataset info…", lambda: self._dataset_info(path))
+            m.addSeparator()
+        else:                                        # a month or sample folder
+            m.addAction("Session inventory…  (production picks for every sample)",
+                        lambda: self.inventory_requested.emit(path))
             m.addSeparator()
         if path in self._pinned:
             m.addAction("Rename pin…", lambda: self._rename_pin(path))

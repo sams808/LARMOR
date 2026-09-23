@@ -64,6 +64,7 @@ class _ChromeMixin:
         self._pending_apply_model = None  # a model awaiting an Explorer data pick
         self.explorer.open_requested.connect(self._explorer_open)
         self.explorer.batch_requested.connect(self.run_batch_fit)
+        self.explorer.inventory_requested.connect(self.open_session_inventory)
         self.explorer_dock.setWidget(self.explorer)
         self.explorer_dock.setMinimumWidth(230)
         self.addDockWidget(Qt.LeftDockWidgetArea, self.explorer_dock)

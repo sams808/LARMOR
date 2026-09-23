@@ -59,6 +59,21 @@ enters every quadrupolar lineshape, so confirm it before fitting — here the
 title is right, the probe was spinning at 35.7 kHz. All five EXPNOs of the
 series carry the same acquisition and the same conflict.
 
+The whole month at once:
+
+```
+larmor inventory <NMR>/NMRFAM/DATA/2026-01 --picks --nucleus 11B
+```
+
+prints one path per line: the production ¹¹B spectrum of every sample folder,
+by the operator's rule — the highest EXPNO of the nucleus block that has a
+`pdata/1/1r`, demoted when its NS is a small fraction of the block's maximum
+or when its title says power check / test / failed. For the five glasses that
+is EXPNO `24` (NS 256) in every folder; the NS 4 setup shots `21` and `22`
+appear as `setup` and `short` in the full report (the same command without
+`--picks`). The samples are named after their folders — `Base0Ca` …
+`Base4Ca` — not after the title all ten EXPNO `24` share.
+
 ## 3. Build the shared model on the first glass
 
 The shipped ¹¹B recipe, `examples/pCABS2-4_11B.recipe.json`, has the model
@@ -95,16 +110,22 @@ Report (quantify)** (F6).
 
 ## 4. Batch fit in the app
 
-1. In the *Explorer* dock press **Browse…** and choose the `2026-01` folder;
-   expand the five sample folders and Ctrl-click their EXPNO `24` rows
-   (Shift-click selects a range). Selecting fewer than two and pressing the
-   button leaves the status bar saying
-   `Ctrl/Shift-select at least two spectra in the Explorer first`.
-2. Press **Batch fit selected…** (**Tools > Batch fit spectra…** is the same
-   action). The dialog *Batch fit — one shared model, amplitudes per
-   spectrum* opens with one panel per spectrum. The current fit is
-   pre-loaded as the model; **Model from recipe…** loads
-   `base0Ca_11B.recipe.json` instead.
+1. **Tools > Session inventory…**, **Browse…** to the `2026-01` folder and
+   press **Scan**. The grid lists one row per sample folder — `Base0Ca` …
+   `Base4Ca`, named after the folder rather than the shared title — and one
+   column per nucleus. Choose `11B` as the hand-off nucleus and check that
+   the five picks read EXPNO `24` (NS 256; the NS 4 setup shots `21` and
+   `22` are listed as `setup` and `short` in the detail table, and a tick in
+   the first column overrides a pick). Press **Batch fit picks…**. The
+   Explorer route is the one-step alternative: **Browse…**, expand the five
+   sample folders, Ctrl-click their EXPNO `24` rows (Shift-click selects a
+   range) and press **Batch fit selected…** (**Tools > Batch fit spectra…**
+   is the same action); selecting fewer than two leaves the status bar
+   saying `Ctrl/Shift-select at least two spectra in the Explorer first`.
+2. Either route opens the dialog *Batch fit — one shared model, amplitudes
+   per spectrum* with one panel per spectrum, titled by sample (`Base0Ca` …
+   `Base4Ca`) in that order. The current fit is pre-loaded as the model;
+   **Model from recipe…** loads `base0Ca_11B.recipe.json` instead.
 3. Options worth knowing before the first run: `components` overlays each
    site's curve on every panel; `shared scale` puts all panels on one axis
    scale; **Fit baseline…** estimates and subtracts a baseline from every

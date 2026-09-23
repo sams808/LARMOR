@@ -70,6 +70,28 @@ nucleus, 1D/2D, and kind (single pulse, MQMAS, satrec, QCPMG…) — by reading
 `acqus` and the pulse program, so you can see at a glance what an EXPNO holds
 before opening it. **File ▸ Open sample** points it at a folder.
 
+**Session inventory (Tools ▸ Session inventory…).** One month folder read into
+a sample × nucleus grid. Every EXPNO gets a role — production, candidate,
+short, setup, failed, arrayed, 2D, reference, unprocessed — and the production
+spectrum of each block is pre-picked by the operator's rule: the highest EXPNO
+that has a `pdata/1/1r`, demoted when its NS is a small fraction of the block's
+maximum (the fraction is adjustable, 0.25 by default) or when its title says
+power check / optimisation / test / failed. The sample name is the normalised
+folder — date, rotor ID and the `_SS_ALP` operator suffix removed, so
+`01192026_SR31649_Base0Ca_SS_ALP` is `Base0Ca` — or, for sets that keep one
+EXPNO per sample, the title's `Sample …` line; never a pulse note such as
+"11B with short tip angle". The same rule names every Bruker spectrum opened in
+the workbench (plot title, workspace row, default save names, batch scopes);
+the title's first line is kept in the recipe's provenance. Flags mark a title
+whose rotor ID or sample name contradicts the folder, a leading nucleus that is
+not NUC1, `zg` in the title of a non-zg pulse program, two folders sharing one
+sample name, and an unprocessed EXPNO with more scans than the pick; flags
+never move a pick. A tick in the detail table overrides a pick, and **Batch fit
+picks…** (or **Sequential fit picks…**) hands the picks of the chosen nucleus
+over in sample order. The Explorer's right-click on a month or sample folder
+opens the same window; `larmor inventory <month>` prints the grid and the
+demoted or flagged rows, `--picks --nucleus 31P` the picks' paths only.
+
 ## 3 · Workspaces
 
 The **Workspaces** dock lists everything you have open. Each entry carries an

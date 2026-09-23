@@ -7,7 +7,7 @@ correction, VOCS stitching and the batch / series / error tools are here).
 The dialogs themselves live in their own ``larmor.desktop.*_dialog`` modules.
 
 Owned state: the kept-alive non-modal dialogs (``_qcpmg_dlg``,
-``_qcpmg_batch_dlg``, ``_ref_audit``).
+``_qcpmg_batch_dlg``, ``_ref_audit``, ``_inventory_dlg``).
 """
 from __future__ import annotations
 
@@ -409,6 +409,36 @@ class _ToolsMixin:
             dlg.current_source = self.source_path
             if start and not dlg.folder.text():
                 dlg.folder.setText(start)
+        dlg.show()
+        dlg.raise_()
+
+    def open_session_inventory(self, folder=None):
+        """Tools > Session inventory: one month folder as a sample × nucleus
+        grid with the production EXPNO pre-picked per block (the highest
+        EXPNO with a pdata/1/1r, demoted for a short NS or a setup / failed
+        title), title-vs-folder flags, and one-action hand-off of the picks
+        to Batch fit or Sequential fit. Non-modal and kept alive; also reached
+        from the Explorer's folder context menu, which passes the folder
+        (a QAction passes a bool, which is ignored)."""
+        from larmor.desktop.inventory_dialog import SessionInventoryDialog
+        from larmor.inventory import inventory_root
+
+        folder = folder if isinstance(folder, str) and folder else None
+        if folder:
+            start = str(inventory_root(folder))
+        elif self.source_path and Path(self.source_path).exists():
+            start = str(inventory_root(self.source_path))
+        else:
+            start = str(QSettings("LARMOR", "app").value("lastDir", "") or "")
+        dlg = getattr(self, "_inventory_dlg", None)
+        if dlg is None:
+            dlg = SessionInventoryDialog(self, start)
+            dlg.batch_requested.connect(self.run_batch_fit)
+            dlg.seq_requested.connect(self.run_seq_fit)
+            dlg.open_requested.connect(self.load_source)
+            self._inventory_dlg = dlg
+        elif start and (folder or not dlg.folder.text()):
+            dlg.folder.setText(start)
         dlg.show()
         dlg.raise_()
 

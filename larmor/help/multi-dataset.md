@@ -147,6 +147,17 @@ populations change. **Ctrl/Shift-click** the spectra in the Explorer and press
 (Help ▸ Tutorials) runs this on a five-glass composition series and on a
 synthetic series from the command line.
 
+**Which EXPNO is the spectrum?** For a month of instrument folders,
+**Tools ▸ Session inventory…** reads every EXPNO into a sample × nucleus grid,
+pre-picks the production spectrum of each block (the highest EXPNO with a
+`pdata/1/1r`, demoted for a short NS or a setup / failed title) and
+**Batch fit picks…** hands the picks over in sample order, named by sample
+folder (`Base0Ca` … `Base4Ca`), so the panels, the table scopes and the
+auto-named recipes carry the sample and not a shared title. Two spectra of one
+glass never share a scope: the folder's date token (or the EXPNO) is appended
+— `P5-Bi8-12 (04272026)` and `P5-Bi8-12 (05082026)`. The *Getting started*
+manual, §2, describes the rule and the flags.
+
 1. **One model, applied.** The batch uses a single model for all spectra — your
    current fit, or a recipe you load in the dialog. The recipe is treated as the
    **answer for lineshape**: every parameter is **held fixed at its recipe value
