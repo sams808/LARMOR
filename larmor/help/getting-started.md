@@ -46,7 +46,9 @@ where it lands:
 
 - a **1D frequency** spectrum → the workbench (process & fit);
 - a **2D** dataset → the contour view;
-- a raw **FID** → a magnitude-FT preview so you can see it before you phase;
+- a raw **FID** → a magnitude-FT preview (EM 100 Hz) whose pipeline is recorded —
+  *FID ⇄ spectrum* (Ctrl+T) shows the FID and re-apodizes live; untick *magnitude*
+  and phase in the Processing panel, or use *File ▸ Open FID* for the full dialog;
 - a raw **`ser`** → a 2D preview (or the guided relaxation tool if it's a series).
 
 **Several processed datasets.** If you open a bare EXPNO that has more than one

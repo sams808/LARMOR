@@ -22,7 +22,7 @@ The weak points are engineering and onboarding. The main window lives in a singl
 
 Lineshapes and physics. Per-dimension lineshapes for 2D fits, so an MQMAS site can carry independent F1 and F2 widths and shapes. A correlated δiso–Cq distribution (a 2D Gaussian on the (δiso, Cq) plane) for lineshapes closer to real amorphous materials.
 
-Processing depth. LPSVD linear prediction — an autoregressive LP op already exists; the SVD variant is the upgrade for truncated FIDs. Reference deconvolution to divide out field inhomogeneity. A time↔frequency toggle that returns to the FID for re-apodization without reloading, and real/imaginary component views for inspecting the imaginary channel while phasing.
+Processing depth. LPSVD linear prediction — an autoregressive LP op already exists; the SVD variant is the upgrade for truncated FIDs. Reference deconvolution to divide out field inhomogeneity.
 
 2D. DQ/SQ handling: building the double-quantum axis and the associated sum and projection combinations.
 

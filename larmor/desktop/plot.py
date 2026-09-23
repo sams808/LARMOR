@@ -109,6 +109,10 @@ class SpectrumView(pg.PlotWidget):
     file_dropped = Signal(str)                # a data file dragged onto the plot
     calibrate_picked = Signal(float)          # snapped peak ppm to reference
     measure_changed = Signal(float, float)    # two ppm cursors (ruler)
+    #: a REAL frequency-domain spectrum was placed on the canvas
+    #: (set_experiment) -- the workbench's hook to re-validate its display
+    #: state (FID / imaginary channel) against the new data
+    experiment_set = Signal()
 
     def __init__(self, parent=None):
         t = theme.active()
@@ -180,6 +184,17 @@ class SpectrumView(pg.PlotWidget):
         # phase pivot (TopSpin-style): p1 rotates about this reference point
         self._pivot: pg.InfiniteLine | None = None
 
+        # display domain: "freq" (ppm axis, every item) or "time" (the FID on
+        # a non-inverted ms axis, every ppm item hidden). The real frequency
+        # trace is remembered so the pivot, calibrate snapping and the return
+        # from the FID never read the displayed channel or a ms axis.
+        self._domain = "freq"
+        self._freq_x: np.ndarray | None = None
+        self._freq_y: np.ndarray | None = None
+        self._freq_ranges = None            # (xRange, yRange) saved on entry
+        self._fid_aq: float | None = None   # AQ (ms) of the FID last drawn
+        self._trace_label = "experiment"
+
         # live fit animation: a bright morphing curve + fading ghost trail
         self._anim_ghosts: list[pg.PlotDataItem] = []
         self._anim_main: pg.PlotDataItem | None = None
@@ -198,6 +213,8 @@ class SpectrumView(pg.PlotWidget):
     # ---------------------------------------------------------------- fit animation
     def start_fit_animation(self):
         """Prepare the animated-fit overlay (call before a fit begins)."""
+        if self._domain == "time":          # ppm curves never go on the ms axis
+            return
         t = theme.active()
         if self._anim_main is None:
             self._anim_ghosts = []
@@ -220,6 +237,8 @@ class SpectrumView(pg.PlotWidget):
     def set_fit_frame(self, x, y, iteration: int, rms: float | None = None):
         """Show the current model curve, pushing the previous ones into a fading
         trail — so convergence (or divergence) is visible as it happens."""
+        if self._domain == "time":
+            return
         if self._anim_main is None:
             self.start_fit_animation()
         from PySide6.QtGui import QColor
@@ -317,7 +336,28 @@ class SpectrumView(pg.PlotWidget):
         t = theme.active()
         self._apply_axis_label({"color": t.axis, "font-size": "10pt"})
 
+    @property
+    def domain(self) -> str:
+        """"freq" while the spectrum is shown, "time" while the FID is."""
+        return self._domain
+
+    def set_trace_label(self, text: str):
+        """Rename the experiment curve's legend entry ('experiment',
+        'experiment (imag)', 'FID (real)', ...) -- also what an export says."""
+        if text == self._trace_label:
+            return
+        self._trace_label = text
+        try:
+            lab = self._legend.getLabel(self._exp)
+        except Exception:
+            lab = None
+        if lab is not None:
+            lab.setText(text)
+
     def _apply_axis_label(self, label_style: dict):
+        if self._domain == "time":         # a theme change keeps the ms label
+            self.setLabel("bottom", "time", units="ms", **label_style)
+            return
         unit = self._axis_unit
         if unit != "ppm" and self._axis_sfo_MHz > 0:
             self.setLabel("bottom", "frequency offset", units=unit,
@@ -352,7 +392,7 @@ class SpectrumView(pg.PlotWidget):
         if self.sceneBoundingRect().contains(scene_pos):
             p = vb.mapSceneToView(scene_pos)
             self.cursor_moved.emit(float(p.x()), float(p.y()))
-            if not self.show_labels:
+            if not self.show_labels and self._domain == "freq":
                 self._hover_component(float(p.x()))
 
     # ---------- add mode ----------
@@ -383,6 +423,8 @@ class SpectrumView(pg.PlotWidget):
             return
         if ev.button() != Qt.LeftButton:
             return
+        if self._domain == "time":
+            return          # no add-site / calibrate / baseline picks on a ms axis
         vb = self.getPlotItem().getViewBox()
         if not self.sceneBoundingRect().contains(ev.scenePos()):
             return
@@ -405,8 +447,9 @@ class SpectrumView(pg.PlotWidget):
         self.setCursor(Qt.CrossCursor if on else Qt.ArrowCursor)
 
     def _snap_peak(self, x_click: float) -> float:
-        """Snap a click to the nearest local maximum of the experiment."""
-        x, y = self._exp.xData, self._exp.yData
+        """Snap a click to the nearest local maximum of the experiment (the
+        real frequency trace, whatever channel is displayed)."""
+        x, y = self._freq_x, self._freq_y
         if x is None or not len(x):
             return x_click
         span = 0.01 * (float(np.max(x)) - float(np.min(x)))
@@ -423,7 +466,10 @@ class SpectrumView(pg.PlotWidget):
         self._measure_lines.clear()
         if not on:
             return
-        (x0, x1), _ = self.getPlotItem().getViewBox().viewRange()
+        if self._domain == "time" and self._freq_ranges is not None:
+            (x0, x1) = self._freq_ranges[0]     # ppm cursors, even from FID view
+        else:
+            (x0, x1), _ = self.getPlotItem().getViewBox().viewRange()
         lo, hi = min(x0, x1), max(x0, x1)
         mc = theme.active().measure
         for frac in (0.35, 0.65):
@@ -435,6 +481,7 @@ class SpectrumView(pg.PlotWidget):
                                  labelOpts={"color": mc, "position": 0.92})
             ln.sigPositionChanged.connect(self._emit_measure)
             self.addItem(ln)
+            ln.setVisible(self._domain == "freq")
             self._measure_lines.append(ln)
         self._emit_measure()
 
@@ -454,7 +501,8 @@ class SpectrumView(pg.PlotWidget):
             return
         if self._pivot is not None:
             return
-        x, y = self._exp.xData, self._exp.yData
+        # the tallest REAL peak, whatever channel (or the FID) is displayed
+        x, y = self._freq_x, self._freq_y
         if x is None or not len(x):
             return
         px = (float(x[int(np.argmax(y))]) if y is not None and len(y)
@@ -466,10 +514,13 @@ class SpectrumView(pg.PlotWidget):
             hoverPen=pg.mkPen(pv, width=2.4),
             label="pivot", labelOpts={"color": pv, "position": 0.06})
         self.addItem(self._pivot)
+        self._pivot.setVisible(self._domain == "freq")
 
     def phase_pivot_frac(self) -> float:
-        """The pivot as a 0..1 fraction along the data (op_phase convention)."""
-        x = self._exp.xData
+        """The pivot as a 0..1 fraction along the data (op_phase convention).
+        Read on the frequency axis -- with the FID shown, _exp.xData is
+        milliseconds and would give a garbage pivot on every live tick."""
+        x = self._freq_x
         if self._pivot is None or x is None or not len(x):
             return 0.5
         idx = int(np.argmin(np.abs(np.asarray(x) - float(self._pivot.value()))))
@@ -515,7 +566,7 @@ class SpectrumView(pg.PlotWidget):
         return np.nan_to_num(out)
 
     def _update_baseline_curve(self):
-        x = self._exp.xData
+        x = self._freq_x
         if x is None or not len(x):
             return
         y = self.baseline_curve(np.asarray(x))
@@ -541,6 +592,7 @@ class SpectrumView(pg.PlotWidget):
                 region.sigRegionChangeFinished.connect(
                     lambda *_: on_change(self.zone_values()))
             self.addItem(region)
+            region.setVisible(self._domain == "freq")
             self._zones.append(region)
 
     def zone_values(self) -> list:
@@ -595,6 +647,8 @@ class SpectrumView(pg.PlotWidget):
             # each other; positions refresh with the view via ViewBox signal
             self.addItem(region)
             self.addItem(label)
+            region.setVisible(self._domain == "freq")
+            label.setVisible(self._domain == "freq")
             self._ref_items += [region, label]
             self._place_ref_label(label, r, k)
         vb = self.getPlotItem().getViewBox()
@@ -620,6 +674,7 @@ class SpectrumView(pg.PlotWidget):
                 line, r["label"], position=0.97 - 0.04 * (k % 4),
                 color=t.text_dim, movable=False)
             self.addItem(line)
+            line.setVisible(self._domain == "freq")
             self._ref_items.append(line)
 
     def _place_ref_label(self, label, r: dict, k: int):
@@ -673,9 +728,89 @@ class SpectrumView(pg.PlotWidget):
 
     # ---------- data ----------
     def set_experiment(self, x: np.ndarray, y: np.ndarray):
+        """A REAL frequency-domain spectrum arrived: remember it, leave the
+        FID view if it was on, draw it, and tell the workbench
+        (experiment_set) so a stale FID / imaginary display is dropped."""
+        self._freq_x, self._freq_y = x, y
+        if self._domain == "time":
+            self._leave_time_domain()
         if x is not None and len(x):
             self.set_placeholder(None)          # real data arrived — hide the hint
         self._exp.setData(x, y)
+        self.set_trace_label("experiment")
+        self.experiment_set.emit()
+
+    def set_channel_trace(self, y: np.ndarray, label: str):
+        """Draw another channel (imag, |S|) of the SAME spectrum on the ppm
+        axis. The remembered real trace is untouched (pivot default and
+        calibrate snapping keep using it) and experiment_set is not emitted."""
+        if self._domain == "time":
+            self._leave_time_domain()
+        self._exp.setData(self._freq_x, y)
+        self.set_trace_label(label)
+
+    def set_fid(self, t_ms: np.ndarray, y: np.ndarray, label: str):
+        """Show a time-domain trace (ms, not inverted) instead of the
+        spectrum; every ppm item is hidden until set_experiment /
+        set_channel_trace brings the frequency axis back."""
+        pi = self.getPlotItem()
+        t_ms = np.asarray(t_ms, float)
+        aq = float(t_ms[-1]) if t_ms.size else 0.0
+        entering = self._domain == "freq"
+        if entering:
+            self._freq_ranges = pi.getViewBox().viewRange()
+            self._domain = "time"
+            pi.invertX(False)
+            ax = pi.getAxis("bottom")
+            if isinstance(ax, ScaledAxis):
+                ax.set_factor(1.0)
+            th = theme.active()
+            self._apply_axis_label({"color": th.axis, "font-size": "10pt"})
+            self._set_freq_items_visible(False)
+        self._exp.setData(t_ms, np.asarray(y, float))
+        self.set_trace_label(label)
+        if entering or self._fid_aq != aq:      # new AQ (zf / TDeff): refit
+            pi.enableAutoRange()
+        self._fid_aq = aq
+
+    def _leave_time_domain(self):
+        """Frequency axis back: ppm items visible, unit/label/factor and the
+        pre-toggle zoom restored."""
+        pi = self.getPlotItem()
+        self._domain = "freq"
+        self._fid_aq = None
+        pi.invertX(True)
+        self.set_axis_unit(self._axis_unit, self._axis_sfo_MHz)
+        self._set_freq_items_visible(True)
+        if self._freq_ranges is not None:
+            (x0, x1), (y0, y1) = self._freq_ranges
+            pi.setXRange(min(x0, x1), max(x0, x1), padding=0)
+            pi.setYRange(min(y0, y1), max(y0, y1), padding=0)
+            self._freq_ranges = None
+
+    def _set_freq_items_visible(self, on: bool):
+        """Hide / show everything that lives in ppm (the experiment curve is
+        the one item that switches meaning)."""
+        for it in (self._model, self._resid, self._bl_curve):
+            it.setVisible(on)
+        groups = (self._components, self._paddles, self._markers,
+                  self._overlay_items, self._zones, self._measure_lines,
+                  self._bl_anchors, self._comp_labels,
+                  getattr(self, "_ref_items", []))
+        for group in groups:
+            for it in group:
+                it.setVisible(on)
+        if self._pivot is not None:
+            self._pivot.setVisible(on)
+        if self._hover_label is not None and not on:
+            self._hover_label.setVisible(False)
+        if on:
+            # the zero line belongs to a drawn residual strip only
+            rx = self._resid.xData
+            self._resid_zero.setVisible(rx is not None and len(rx) > 0)
+        else:
+            self._resid_zero.setVisible(False)
+            self.stop_fit_animation()
 
     def set_title(self, text: str):
         self.getPlotItem().setTitle(
@@ -706,10 +841,12 @@ class SpectrumView(pg.PlotWidget):
             self._resid_zero.setVisible(False)
             self._resid.setData([], [])
 
-        # components: reuse items, add/remove as needed
+        # components: reuse items, add/remove as needed (created hidden while
+        # the FID is displayed -- every simulation allocates new ones)
         while len(self._components) < len(per_site):
             item = self.plot([], [])
             self._tune_curve(item)
+            item.setVisible(self._domain == "freq")
             self._components.append(item)
         while len(self._components) > len(per_site):
             self.removeItem(self._components.pop())
@@ -756,6 +893,7 @@ class SpectrumView(pg.PlotWidget):
             lab.setZValue(30)
             self.addItem(lab)
             lab.setPos(float(cx[j]), float(cy[j]))
+            lab.setVisible(self._domain == "freq")
             self._comp_labels.append(lab)
 
     def _hover_component(self, x: float):
@@ -795,6 +933,7 @@ class SpectrumView(pg.PlotWidget):
                              name=label, antialias=True)
             self._tune_curve(item)
             item.setZValue(-10)
+            item.setVisible(self._domain == "freq")
             self._overlay_items.append(item)
 
     # ---------- markers (legacy InfiniteLine API kept for tests) ----------
@@ -813,6 +952,7 @@ class SpectrumView(pg.PlotWidget):
             if draggable:
                 line.sigPositionChangeFinished.connect(self._marker_done)
             self.addItem(line)
+            line.setVisible(self._domain == "freq")
             self._markers.append(line)
 
     def _marker_done(self, line):
@@ -831,12 +971,24 @@ class SpectrumView(pg.PlotWidget):
             pad.moved.connect(self.paddle_moved)
             pad.released.connect(self.paddle_released)
             self.addItem(pad)
+            pad.setVisible(self._domain == "freq")
             self._paddles.append(pad)
 
     def show_paddles(self, on: bool):
         for p in self._paddles:
-            p.setVisible(on)
+            p.setVisible(on and self._domain == "freq")
 
     def current_xrange(self) -> tuple[float, float]:
+        """(hi, lo) of the displayed frequency window in ppm -- while the FID
+        is shown, the window saved on entry (callers hand it to dialogs as a
+        ppm range)."""
+        if self._domain == "time":
+            if self._freq_ranges is not None:
+                x0, x1 = self._freq_ranges[0]
+            elif self._freq_x is not None and len(self._freq_x):
+                x0, x1 = float(np.min(self._freq_x)), float(np.max(self._freq_x))
+            else:
+                x0 = x1 = 0.0
+            return (max(x0, x1), min(x0, x1))
         (x0, x1), _ = self.getPlotItem().getViewBox().viewRange()
         return (max(x0, x1), min(x0, x1))

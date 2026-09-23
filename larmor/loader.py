@@ -24,10 +24,10 @@ def apply_processing(recipe: Recipe, ppm: np.ndarray, amp: np.ndarray,
     from larmor import processing as proc
     from larmor.io import bruker
 
-    needs_raw = any(o.get("op") in ("em", "gm", "sine", "traf", "tdeff",
-                                    "fcor", "zf", "ft", "lp", "shift_fid",
-                                    "swap_echo", "echo_apodize")
-                    for o in ops)
+    # a chain starting with a time-domain op needs the raw fid; one that first
+    # goes through ift (e.g. [hilbert, ift, em, ft], a re-apodized 1r/CSV)
+    # replays from the processed arrays -- one rule, shared with the panel
+    needs_raw = proc.chain_start_domain(ops) == "time"
     notes = []
     if needs_raw:
         if not (source_path and bruker.is_expno(Path(source_path))):

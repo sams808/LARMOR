@@ -80,8 +80,10 @@ figures with projections and computed CS/QIS reference lines.
 **Processing.** The usual TopSpin/ssNake operations: apodization windows,
 zero-filling, Fourier transform, phasing (manual or automatic), baseline
 correction, linear prediction, Hilbert reconstruction, whole-echo processing,
-region extraction, spectrum algebra and alignment. Processing steps are stored in
-the recipe and replayed whenever the data is reloaded.
+region extraction, spectrum algebra and alignment, a time ↔ frequency toggle that
+returns to the FID for re-apodization without reloading, and real / imaginary /
+magnitude display channels for phasing. Processing steps are stored in the recipe
+and replayed whenever the data is reloaded.
 
 **Relaxation and dipolar experiments.** T1/T2 extraction from arrayed experiments
 (saturation/inversion recovery, CPMG, T1ρ), including per-site decomposition;

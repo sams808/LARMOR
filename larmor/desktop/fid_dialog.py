@@ -27,6 +27,7 @@ class FidDialog(QDialog):
         self.setWindowTitle("Open FID — process before Fourier transform")
         self.resize(940, 660)
         self.data = None                # raw NMRData
+        self._autophased = False        # the shown result came from Autophase
         v = QVBoxLayout(self)
 
         top = QHBoxLayout()
@@ -162,17 +163,32 @@ class FidDialog(QDialog):
             ops.append({"op": "zf", "factor": self.zf.value()})
         return ops
 
+    def _chain(self) -> list[dict]:
+        """The full 1D chain behind the shown result: the time-domain steps,
+        the transform (the very step fourier.ft1d appends when none is given),
+        then autophase or the typed p0 / p1. Recorded in the accepted
+        spectrum's meta so the workbench can replay it (reproducible fits, and
+        FID ⇄ spectrum shows the TRUE windowed fid)."""
+        ops = self._ops() + [{"op": "ft", "offset_ppm": 0.0}]
+        if self._autophased:
+            ops.append({"op": "autophase"})
+        elif self.p0.value() or self.p1.value():
+            ops.append({"op": "phase", "p0": self.p0.value(),
+                        "p1": self.p1.value()})
+        return ops
+
     def _preview(self):
         if self.data is None:
             return
         from larmor import fourier
 
+        self._autophased = False
         try:
             if self.data.ndim == 1:
-                ops = self._ops()
-                if self.p0.value() or self.p1.value():
-                    ops.append({"op": "phase", "p0": self.p0.value(),
-                                "p1": self.p1.value()})
+                # the ft goes BEFORE the phase step: appended after it (the
+                # old behaviour) the phase op met time-domain data and every
+                # non-zero p0 / p1 made the preview fail
+                ops = self._chain()
                 ppm, spec = fourier.ft1d(
                     self.data.data, self.data.axes[0].sw_Hz,
                     self.data.meta["larmor_MHz"], ops=ops)
@@ -207,13 +223,18 @@ class FidDialog(QDialog):
         self.plot.clear()
         self.plot.plot(ppm, s.y.real, pen=pg.mkPen("#1a2831", width=1.2))
         self._result = ("1d", ppm, s.y)
+        self._autophased = True          # recorded as a deterministic op
 
     def _accept(self):
         if not getattr(self, "_result", None):
             return
         if self._result[0] == "1d":
             _, ppm, spec = self._result
-            self.accepted_1d.emit(ppm, spec.real, self.data.meta)
+            # the payload stays the real spectrum; the meta carries the chain
+            # that produced it (a copy -- self.data.meta is the reader's)
+            meta = dict(self.data.meta, processing=self._chain(),
+                        processing_from_raw=True)
+            self.accepted_1d.emit(ppm, spec.real, meta)
         else:
             self.accepted_2d.emit(self._result[1])
         self.accept()
