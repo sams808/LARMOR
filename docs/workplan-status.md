@@ -8,9 +8,9 @@ Workplan"; this file is the ground truth for progress.
 ## State of the repository
 
 - **Version**: 0.13.0 (`larmor/__init__.py` + `pyproject.toml`, bumped in step).
-- **Local commits ahead of `origin/master`**: 59 (v0.10.1 … v0.13.0; see
-  `git log origin/master..HEAD`). **Not pushed** — pushing needs Sam's
-  explicit word.
+- **Pushed** to `origin/master` on 2026-09-22 on Sam's go-ahead (62 commits,
+  v0.10.1 … v0.13.0). The three commits after the full-suite run touch only
+  the frozen-exe start-up guard (`_install_faulthandler`) and this file.
 - **Tests**: 1004 collected in 89 files. Last full run, at v0.13.0
   (7ec83e7): **1004 passed / 0 failed** in 9 min 26 s with the real-data
   layer complete. Trust a green bar only when the terminal banner says
