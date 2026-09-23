@@ -139,3 +139,43 @@ def test_seqfit_dialog_publication_bundle_after_manual_fits(qapp, tmp_path, monk
         rows2 = list(csv.DictReader(f))
     assert [r["note"] for r in rows2] == ["", "", ""]
     assert all(float(r["rmsd"]) > 0 for r in rows2)
+
+
+def test_seqfit_comparability_bar_title_and_source_path(qapp, tmp_path, monkeypatch):
+    """The sequential dialog shows the same comparability line (Details
+    only, no reprocess) and marks the current spectrum's title when it was
+    acquired / processed unlike the series majority; its seed recipes carry
+    their source path so saved fits reopen."""
+    from pathlib import Path
+    from conftest import fake_spectrum_params
+    from larmor import comparability
+    from larmor.recipe import Recipe
+    from larmor.desktop.comparability_dialog import _CHECK_CSS_COLOR
+    from larmor.desktop.seqfit_dialog import SeqFitDialog
+
+    paths, model = _series(tmp_path)
+    dlg = SeqFitDialog(None, paths, model)
+    assert dlg.compBar.isHidden() and dlg._comparison.level == "none"
+    seed = dlg._seed_recipe(dlg._data[0])
+    assert seed["source_path"] == dlg._data[0]["path"]
+    assert Recipe.from_dict(seed).source_path == paths[0]
+
+    fakes = {"s0": fake_spectrum_params("s0"), "s1": fake_spectrum_params("s1"),
+             "s2": fake_spectrum_params("s2", tdeff=768)}
+    monkeypatch.setattr(comparability, "read_params",
+                        lambda p, procno=None: fakes.get(Path(str(p)).stem))
+    dlg = SeqFitDialog(None, paths, model)
+    assert not dlg.compBar.isHidden()
+    assert "TDeff 768 / 1024" in dlg.compBar.text()
+    assert dlg.compBar.btnReprocess.isHidden()          # no reprocess in the sequential fit
+    assert not dlg.compBar.btnDetails.isHidden()
+    assert dlg.plotTitle.text() == "s0" and dlg.plotTitle.toolTip() == ""
+    dlg._next()
+    dlg._next()
+    assert dlg._cur == 2
+    assert dlg.plotTitle.text().endswith("⚠")
+    assert "TDeff 768" in dlg.plotTitle.toolTip() and "majority 1024" in dlg.plotTitle.toolTip()
+    assert _CHECK_CSS_COLOR in dlg.plotTitle.styleSheet()
+    dlg._prev()
+    assert dlg.plotTitle.text() == "s1" and dlg.plotTitle.toolTip() == ""
+    assert _CHECK_CSS_COLOR not in dlg.plotTitle.styleSheet()

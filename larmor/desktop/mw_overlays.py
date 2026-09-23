@@ -31,6 +31,54 @@ class _OverlaysMixin:
             return
         self._add_overlay(label, ppm, amp, path, info)
 
+    def compare_overlays(self):
+        """Datasets ▸ Compare acquisition…: acqus / procs / auditp of the
+        active spectrum and every overlay with a source, in the shared
+        comparability table (larmor.comparability)."""
+        from larmor import comparability
+        from larmor.desktop.comparability_dialog import ComparabilityDialog
+
+        paths, labels = self._overlay_sources()
+        cmp = comparability.compare(
+            [comparability.read_params(p) if p else None for p in paths], labels)
+        if cmp.level == "none":
+            self.statusBar().showMessage(
+                "no Bruker acquisition files among these spectra — nothing to compare")
+            return
+        ComparabilityDialog(self, cmp).exec()
+
+    def _overlay_sources(self):
+        """(paths, labels) of the active spectrum then every overlay, in the
+        Datasets dock's order (index 0 = active; '' when it has no source)."""
+        active = ""
+        if getattr(self, "recipe", None):
+            active = self.recipe.get("sample") or ""
+        src = getattr(self, "source_path", "") or ""
+        if not active and src:
+            active = Path(src).name
+        paths, labels = [src], [active or "active"]
+        for ov in self._overlays:
+            paths.append(ov.get("source") or "")
+            labels.append(str(ov.get("label", "")))
+        return paths, labels
+
+    def _overlay_comparison(self):
+        """The comparison of active + overlays, recomputed only when the
+        tuple of sources changes (a colour or offset change must not re-read a
+        dozen JCAMP files); None when it cannot be built."""
+        from larmor import comparability
+
+        paths, labels = self._overlay_sources()
+        srcs = tuple(paths)
+        if srcs != getattr(self, "_cmp_srcs", None):
+            self._cmp_srcs = srcs
+            try:
+                self._cmp_ov = comparability.compare(
+                    [comparability.read_params(p) if p else None for p in paths], labels)
+            except Exception:  # noqa: BLE001 -- a read failure never breaks overlays
+                self._cmp_ov = None
+        return getattr(self, "_cmp_ov", None)
+
     @staticmethod
     def _read_overlay_source(path: str):
         """(label, ppm, amp) for any of the overlay-file-picker's supported
@@ -140,6 +188,13 @@ class _OverlaysMixin:
                                 f"{self.exp_ppm.size} pts"
                                 if self.exp_ppm.size else "") if b]
             detail = " · ".join(bits)
+        # the comparability marker: an overlay acquired / processed unlike
+        # the compared set's majority gets '⚠ LB 100 Hz' on its detail line
+        cmp = self._overlay_comparison()
+        for i, ov in enumerate(self._overlays):
+            ov["comparability"] = cmp.signature(i + 1) if cmp is not None else ""
+        if cmp is not None and cmp.signature(0):
+            detail = (detail + " · " if detail else "") + "⚠ " + cmp.signature(0)
         self.datasets_panel.rebuild(label, self._overlays, detail)
 
     #: colour assigned to each HMQC projection axis (matches the overlay + the

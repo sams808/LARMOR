@@ -1575,3 +1575,63 @@ def test_sideband_offer_escape_dismiss_and_workspace_switch(win, qapp, tmp_path)
     toggle = next(a for a in view.actions()
                   if a.text() == "&Offer spinning-sideband detection on load")
     assert toggle.isCheckable() and toggle is win.actSsbOffer
+
+
+def test_datasets_compare_button_and_overlay_marker(qapp, win, monkeypatch):
+    """Datasets dock: 'Compare acquisition…' wakes once an overlay with a
+    source exists, an overlay acquired / processed unlike the compared set's
+    majority gets a ⚠ marker on its detail line, the comparison is cached
+    by the tuple of sources (a stack-offset change does not re-read), and a
+    set without Bruker files says so in the status bar."""
+    from pathlib import Path
+    from conftest import fake_spectrum_params
+    from larmor import comparability
+    from larmor.desktop import comparability_dialog, datasets
+
+    assert not win.datasets_panel.btnCompare.isEnabled()
+    fakes = {"srcA": fake_spectrum_params("srcA", lb=0),
+             "srcB": fake_spectrum_params("srcB", lb=100)}
+    monkeypatch.setattr(comparability, "read_params",
+                        lambda p, procno=None: fakes.get(Path(str(p)).name))
+    real_compare = comparability.compare
+    calls = {"n": 0}
+
+    def counting_compare(params, labels=None):
+        calls["n"] += 1
+        return real_compare(params, labels)
+
+    monkeypatch.setattr(comparability, "compare", counting_compare)
+    x = np.linspace(-100, 100, 200)
+    win._display_1d(x, np.exp(-(x ** 2) / 200), "11B", 192.43, None, "A", "srcA")
+    win.source_path = "srcA"          # _display_1d leaves it to load_source
+    win._refresh_overlays()
+    qapp.processEvents()
+    assert not win.datasets_panel.btnCompare.isEnabled()      # no overlay yet
+    win._add_overlay("B", x, 0.5 * np.exp(-((x - 20) ** 2) / 200), "srcB")
+    qapp.processEvents()
+    assert win.datasets_panel.btnCompare.isEnabled()
+    assert win._overlays[0]["comparability"] == "LB 100 Hz"
+    detail = datasets.DatasetsPanel._detail_of(win._overlays[0])
+    assert "⚠" in detail and "LB 100 Hz" in detail
+    n = calls["n"]
+    assert n >= 1
+    win.datasets_panel.offset.setValue(0.4)                    # a second _refresh_overlays
+    qapp.processEvents()
+    assert calls["n"] == n                                     # cached by the source tuple
+    win.overlay_set_color(0, "#123456")
+    assert calls["n"] == n
+    seen = []
+    monkeypatch.setattr(comparability_dialog.ComparabilityDialog, "exec",
+                        lambda self: seen.append(self._cmp) or 0)
+    win.datasets_panel.compare_requested.emit()
+    qapp.processEvents()
+    assert len(seen) == 1 and seen[0].report("LB").deviants == [1]
+    assert seen[0].labels[1] == "B"
+    # nothing Bruker among the compared spectra: a status-bar line, no dialog
+    monkeypatch.setattr(comparability, "read_params", lambda p, procno=None: None)
+    win._add_overlay("C", x, 0.3 * np.exp(-((x + 30) ** 2) / 200), "srcC")
+    qapp.processEvents()
+    assert win._overlays[0]["comparability"] == ""              # recomputed: sources changed
+    win.compare_overlays()
+    assert "no Bruker acquisition files" in win.statusBar().currentMessage()
+    assert len(seen) == 1

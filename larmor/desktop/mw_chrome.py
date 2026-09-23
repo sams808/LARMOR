@@ -98,6 +98,7 @@ class _ChromeMixin:
         self.datasets_panel.visibility_changed.connect(self.overlay_visibility)
         self.datasets_panel.color_changed.connect(self.overlay_set_color)
         self.datasets_panel.offset_changed.connect(lambda _: self._refresh_overlays())
+        self.datasets_panel.compare_requested.connect(self.compare_overlays)
         self.datasets_dock.setWidget(self.datasets_panel)
         self.addDockWidget(Qt.LeftDockWidgetArea, self.datasets_dock)
         # stack the left docks as tabs so they share one footprint (kinder on

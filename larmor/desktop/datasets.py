@@ -30,6 +30,7 @@ class DatasetsPanel(QScrollArea):
     visibility_changed = Signal(int, bool)
     offset_changed = Signal(float)         # global vertical stack offset
     color_changed = Signal(int, str)       # overlay i gets a new hex color
+    compare_requested = Signal()           # acqus/procs of active + overlays
 
     def __init__(self):
         super().__init__()
@@ -43,6 +44,13 @@ class DatasetsPanel(QScrollArea):
         self.btnAdd = QPushButton("＋ Add spectrum to compare…")
         self.btnAdd.clicked.connect(self.add_requested)
         head.addWidget(self.btnAdd)
+        self.btnCompare = QPushButton("Compare acquisition…")
+        self.btnCompare.setToolTip(
+            "compare acqus / procs of the active spectrum and every overlay — "
+            "window, LB, TDeff, SI, phase, D1, NS, pulse… (Bruker sources only)")
+        self.btnCompare.setEnabled(False)       # until an overlay with a source exists
+        self.btnCompare.clicked.connect(self.compare_requested)
+        head.addWidget(self.btnCompare)
         self._v.addLayout(head)
 
         off = QHBoxLayout()
@@ -69,6 +77,8 @@ class DatasetsPanel(QScrollArea):
             bits.append(f"{int(ov['npts'])} pts")
         if ov.get("title"):
             bits.append(str(ov["title"]))
+        if ov.get("comparability"):          # differs from the compared set's majority
+            bits.append("⚠ " + str(ov["comparability"]))
         return " · ".join(b for b in bits if b)
 
     def _pick_color(self, i: int, current: str):
@@ -86,6 +96,7 @@ class DatasetsPanel(QScrollArea):
             if w:
                 w.deleteLater()
 
+        self.btnCompare.setEnabled(any(ov.get("source") for ov in overlays))
         t = theme.active()
         active = QLabel(f"● active: <b>{active_label or '(none)'}</b>"
                         + (f"<br><span style='color:{t.text_dim}; "
@@ -131,6 +142,8 @@ class DatasetsPanel(QScrollArea):
             tip = ov.get("source", "")
             if ov.get("title"):
                 tip = (tip + "\n" if tip else "") + str(ov["title"])
+            if ov.get("comparability"):
+                tip = (tip + "\n" if tip else "") + "⚠ " + str(ov["comparability"])
             lab.setToolTip(tip)
             h.addWidget(lab, 1)
             act = QPushButton("active")
