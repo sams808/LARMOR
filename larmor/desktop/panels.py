@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
 
 from larmor.desktop import theme
 from larmor.desktop.plot import site_color
+from larmor.phasedrag import wrap_p0
 from larmor.processing import CHANNELS, OPS, TIME_DOMAIN_OPS
 
 PARAM_LABELS = {
@@ -231,6 +232,7 @@ class ProcessingPanel(QWidget):
     twopoint_mode = Signal(bool)           # 2-point background: pick-two toggle
     twopoint_apply = Signal()
     twopoint_clear = Signal()
+    phase_drag_mode = Signal(bool)         # TopSpin drag-to-phase toggle
     #: display projection requested: (domain "time"|"freq", channel
     #: "real"|"imag"|"magnitude") -- a view of the pipeline result, never a
     #: pipeline step (see view_state / reset_view)
@@ -386,12 +388,27 @@ class ProcessingPanel(QWidget):
 
         v.addWidget(QLabel("<b>Phase</b>"))
         self.btnAuto = QPushButton("Autophase (ACME)")
-        v.addWidget(self.btnAuto)
+        # TopSpin drag-to-phase: a checkable mode the workbench arms on the
+        # plot (see MainWindow._phase_drag_mode); this button is the single
+        # source of truth for the mode, the Process-menu entry toggles it
+        self.btnDrag = QPushButton("Drag to phase")
+        self.btnDrag.setCheckable(True)
+        self.btnDrag.setToolTip(
+            "TopSpin-style: drag on the spectrum — left/right = p0 (0.25°/px), "
+            "up/down = p1 (1°/px) about the pivot line; Shift = fine ×0.1, "
+            "Ctrl+drag = pan; start the drag on empty canvas (items keep their "
+            "own drags); Esc or click again to stop "
+            "(Process ▸ Drag to phase, Ctrl+P)")
+        phb = QHBoxLayout()
+        phb.addWidget(self.btnAuto)
+        phb.addWidget(self.btnDrag)
+        v.addLayout(phb)
         ph0 = QHBoxLayout()
         ph0.addWidget(QLabel("p0"))
         self.p0 = QSlider(Qt.Horizontal); self.p0.setRange(-180, 180)
         self.p0v = QDoubleSpinBox(); self.p0v.setRange(-180, 180)
-        self.p0.valueChanged.connect(self.p0v.setValue)
+        self.p0.valueChanged.connect(
+            lambda v_: self._slider_to_spin(self.p0v, v_))
         self.p0v.valueChanged.connect(lambda v_: self.p0.setValue(int(v_)))
         ph0.addWidget(self.p0); ph0.addWidget(self.p0v)
         v.addLayout(ph0)
@@ -399,7 +416,8 @@ class ProcessingPanel(QWidget):
         ph1.addWidget(QLabel("p1"))
         self.p1 = QSlider(Qt.Horizontal); self.p1.setRange(-720, 720)
         self.p1v = QDoubleSpinBox(); self.p1v.setRange(-720, 720)
-        self.p1.valueChanged.connect(self.p1v.setValue)
+        self.p1.valueChanged.connect(
+            lambda v_: self._slider_to_spin(self.p1v, v_))
         self.p1v.valueChanged.connect(lambda v_: self.p1.setValue(int(v_)))
         ph1.addWidget(self.p1); ph1.addWidget(self.p1v)
         v.addLayout(ph1)
@@ -480,6 +498,7 @@ class ProcessingPanel(QWidget):
         self.btnTpPick.toggled.connect(self.twopoint_mode)
         self.btnTpApply.clicked.connect(self.twopoint_apply)
         self.btnTpClear.clicked.connect(self.twopoint_clear)
+        self.btnDrag.toggled.connect(self.phase_drag_mode)
 
         # ---- live preview: coalesce rapid edits into one re-apply ----
         self._live_timer = QTimer(self)
@@ -517,13 +536,48 @@ class ProcessingPanel(QWidget):
         if self.chkLive.isChecked():
             self._live_timer.start()
 
+    @staticmethod
+    def _slider_to_spin(spin: QDoubleSpinBox, v: int):
+        """An integer slider tick reaches its spin box only when it carries
+        new information. The spin box writes int(value) to the slider, whose
+        valueChanged echoed the truncated value straight back, so any
+        fractional phase written to the spin box (typed, dragged,
+        re-expressed by a pivot move) was clobbered whenever the integer
+        part changed (35.96 became 35.0)."""
+        if int(spin.value()) != int(v):
+            spin.setValue(float(v))
+
     def _nudge_p0(self, delta: float):
-        v_ = self.p0v.value() + delta
-        while v_ > 180.0:
-            v_ -= 360.0
-        while v_ < -180.0:
-            v_ += 360.0
-        self.p0v.setValue(v_)          # fires valueChanged -> live re-apply
+        # fires valueChanged -> live re-apply; wraps like the drag gesture
+        self.p0v.setValue(wrap_p0(self.p0v.value() + delta))
+
+    # ------------------------------------------------------- drag to phase
+    def phase_values(self) -> tuple[float, float]:
+        """(p0, p1) as the controls show them (degrees)."""
+        return (self.p0v.value(), self.p1v.value())
+
+    def set_phase(self, p0: float, p1: float, apply: bool = True):
+        """Write both phase controls (p0 wrapped to +-180, p1 clamped by the
+        spin range; the sliders follow through their valueChanged links) and,
+        with ``apply``, re-apply the chain at once through the same op-list
+        builder the sliders use. The 120 ms debounce the setValue calls just
+        armed is stopped, so a drag applies exactly once per event and an
+        Undo resync (``apply=False``) applies nothing."""
+        self.p0v.setValue(wrap_p0(p0))
+        self.p1v.setValue(float(p1))
+        self._live_timer.stop()
+        if apply:
+            self._emit([])
+
+    def sync_phase_from(self, ops):
+        """Mirror the LAST phase step of a recorded chain (both 0.0 when it
+        has none) into the controls, silently -- the Undo/Redo resync."""
+        p0 = p1 = 0.0
+        for step in ops or []:
+            if step.get("op") == "phase":
+                p0 = float(step.get("p0", 0.0))
+                p1 = float(step.get("p1", 0.0))
+        self.set_phase(p0, p1, apply=False)
 
     # ---------------------------------------------------------- display state
     def view_state(self) -> tuple[str, str]:

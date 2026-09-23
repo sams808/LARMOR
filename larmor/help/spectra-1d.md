@@ -76,6 +76,18 @@ onto whichever peak you want to hold. **Autophase** minimises the spectral
 entropy of the real part (the **ACME** criterion of Chen *et al.* 2002), finding
 p0 **and** p1 robustly even on crowded spectra.
 
+**Drag to phase (TopSpin gesture):** press *Drag to phase* in the panel (or
+**Ctrl+P**, *Process ▸ Drag to phase*) and drag on the spectrum — left/right
+turns p0 (0.25°/px), up/down turns p1 (1°/px, up = positive) about the pivot; a
+drag locks to whichever direction it starts in, **Shift** makes it fine (×0.1),
+**Ctrl+drag** (or the middle button) still pans, and **Esc** leaves the mode.
+Start the drag on empty canvas: the pivot, paddles, rulers, anchors and zones
+keep their own drags. Moving the pivot while phasing does not change the
+spectrum (p0 is re-expressed), and one Undo takes back a whole drag. *Hilbert
+first* is switched on automatically in pdata mode: without the reconstructed
+imaginary part a phase change would only scale the spectrum. While the FID is
+displayed (Ctrl+T) the gesture is suspended and a drag pans.
+
 ### Back to the FID (time ↔ frequency) and the imaginary channel
 
 **FID ⇄ spectrum** (*Process ▸ FID ⇄ spectrum*, **Ctrl+T**, the sidebar **FID**

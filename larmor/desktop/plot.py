@@ -10,6 +10,7 @@ from PySide6.QtGui import QFont
 
 from larmor import cellparse
 from larmor.desktop import theme
+from larmor.phasedrag import DragGesture
 
 #: fallback categorical palette (used before a theme is applied / in headless code)
 SITE_COLORS = theme.LIGHT_SERIES
@@ -77,7 +78,31 @@ class AnchoredViewBox(pg.ViewBox):
     mapped through the *viewbox* transform — which is wrong, so the axis zooms
     about its middle. Re-deriving the centre from the scene position fixes both:
     scroll on the x-axis at 100 ppm and it zooms about 100 ppm; likewise for y.
+
+    It is also where a TopSpin drag-to-phase gesture is intercepted: pyqtgraph
+    delivers a drag to the ViewBox only when no item (pivot, paddle, ruler,
+    anchor, zone) accepted it first, so routing a plain left-button canvas
+    drag to ``phase_drag_handler`` leaves every item-owned gesture, the axis
+    drags (axis=0/1), the middle/right buttons and Ctrl+left (pan) untouched.
     """
+
+    #: callable(MouseDragEvent) armed by SpectrumView.set_phase_drag_mode;
+    #: None = the ViewBox pans/zooms as usual
+    phase_drag_handler = None
+
+    def phase_drag_takes(self, ev, axis=None) -> bool:
+        """Does this drag belong to the phase gesture (left button on the
+        canvas, no Ctrl, a handler armed)?"""
+        return (self.phase_drag_handler is not None and axis is None
+                and ev.button() == Qt.LeftButton
+                and not (ev.modifiers() & Qt.ControlModifier))
+
+    def mouseDragEvent(self, ev, axis=None):
+        if self.phase_drag_takes(ev, axis):
+            ev.accept()
+            self.phase_drag_handler(ev)
+            return
+        super().mouseDragEvent(ev, axis)
 
     def wheelEvent(self, ev, axis=None):
         if axis in (0, 1):
@@ -113,6 +138,10 @@ class SpectrumView(pg.PlotWidget):
     #: (set_experiment) -- the workbench's hook to re-validate its display
     #: state (FID / imaginary channel) against the new data
     experiment_set = Signal()
+    #: drag-to-phase: cumulative (dp0, dp1) in degrees since button-down
+    phase_dragged = Signal(float, float)
+    phase_drag_released = Signal()            # the button came up
+    pivot_moved = Signal(float)               # new pivot fraction after a drag
 
     def __init__(self, parent=None):
         t = theme.active()
@@ -183,6 +212,9 @@ class SpectrumView(pg.PlotWidget):
         self._overlay_items: list[pg.PlotDataItem] = []
         # phase pivot (TopSpin-style): p1 rotates about this reference point
         self._pivot: pg.InfiniteLine | None = None
+        # drag-to-phase mode (set_phase_drag_mode) and the gesture in flight
+        self._phase_mode = False
+        self._pd_gesture: DragGesture | None = None
 
         # display domain: "freq" (ppm axis, every item) or "time" (the FID on
         # a non-inverted ms axis, every ppm item hidden). The real frequency
@@ -494,6 +526,11 @@ class SpectrumView(pg.PlotWidget):
     def show_phase_pivot(self, on: bool):
         """Show/hide the draggable p1 pivot. Defaults to the tallest peak so
         first-order phasing leaves that peak in phase (as TopSpin does)."""
+        if not on and self._phase_mode:
+            # the dock's visibilityChanged(False) must not remove the pivot
+            # mid-phasing: phase_pivot_frac() would fall back to 0.5 and p1
+            # would silently re-rotate about the centre at the next move
+            return
         if not on:
             if self._pivot is not None:
                 self.removeItem(self._pivot)
@@ -515,6 +552,8 @@ class SpectrumView(pg.PlotWidget):
             label="pivot", labelOpts={"color": pv, "position": 0.06})
         self.addItem(self._pivot)
         self._pivot.setVisible(self._domain == "freq")
+        self._pivot.sigPositionChangeFinished.connect(
+            lambda *_: self.pivot_moved.emit(self.phase_pivot_frac()))
 
     def phase_pivot_frac(self) -> float:
         """The pivot as a 0..1 fraction along the data (op_phase convention).
@@ -525,6 +564,50 @@ class SpectrumView(pg.PlotWidget):
             return 0.5
         idx = int(np.argmin(np.abs(np.asarray(x) - float(self._pivot.value()))))
         return idx / max(len(x) - 1, 1)
+
+    # ---------- drag to phase (TopSpin gesture) ----------
+    def set_phase_drag_mode(self, on: bool):
+        """Arm / release the drag-to-phase gesture: a left-button drag on empty
+        canvas is routed to the phasedrag arithmetic (horizontal = p0,
+        vertical = p1 about the pivot) instead of panning. The pivot is
+        created at once when data exists (the dock's visibility event never
+        fires offscreen or with a hidden parent) and survives a dock hide
+        while the mode is on (see show_phase_pivot)."""
+        self._phase_mode = bool(on)
+        self._pd_gesture = None
+        if on:
+            self.show_phase_pivot(True)
+        self._arm_phase_drag()
+
+    def phase_drag_active(self) -> bool:
+        return self._phase_mode
+
+    def _arm_phase_drag(self):
+        """The ViewBox takes canvas drags only while the mode is on AND the
+        frequency axis is shown -- phasing a displayed FID is meaningless, so
+        a left drag pans the FID as usual and the cursor says so."""
+        live = self._phase_mode and self._domain == "freq"
+        vb = self.getPlotItem().getViewBox()
+        vb.phase_drag_handler = self._phase_drag if live else None
+        if live:
+            self.setCursor(Qt.SizeAllCursor)
+        elif self._phase_mode or self.cursor().shape() == Qt.SizeAllCursor:
+            self.setCursor(Qt.ArrowCursor)
+
+    def _phase_drag(self, ev):
+        """One MouseDragEvent of the gesture (called by AnchoredViewBox).
+        Scene units are logical pixels in a pg.GraphicsView; scene y grows
+        downward, so a drag UP is +p1."""
+        if ev.isStart() or self._pd_gesture is None:
+            self._pd_gesture = DragGesture()
+        d = ev.scenePos() - ev.lastScenePos()
+        fine = bool(ev.modifiers() & Qt.ShiftModifier)
+        res = self._pd_gesture.move(float(d.x()), -float(d.y()), fine)
+        if res is not None:
+            self.phase_dragged.emit(*res)
+        if ev.isFinish():
+            self._pd_gesture = None
+            self.phase_drag_released.emit()
 
     # ---------- manual baseline ----------
     def set_baseline_mode(self, on: bool):
@@ -736,6 +819,10 @@ class SpectrumView(pg.PlotWidget):
             self._leave_time_domain()
         if x is not None and len(x):
             self.set_placeholder(None)          # real data arrived — hide the hint
+            if self._phase_mode:
+                # data arriving while drag-to-phase is armed: the dock is
+                # already visible, so nothing else would create the pivot
+                self.show_phase_pivot(True)     # no-op once it exists
         self._exp.setData(x, y)
         self.set_trace_label("experiment")
         self.experiment_set.emit()
@@ -767,6 +854,7 @@ class SpectrumView(pg.PlotWidget):
             th = theme.active()
             self._apply_axis_label({"color": th.axis, "font-size": "10pt"})
             self._set_freq_items_visible(False)
+            self._arm_phase_drag()          # no phasing of a FID: left drag pans
         self._exp.setData(t_ms, np.asarray(y, float))
         self.set_trace_label(label)
         if entering or self._fid_aq != aq:      # new AQ (zf / TDeff): refit
@@ -782,6 +870,7 @@ class SpectrumView(pg.PlotWidget):
         pi.invertX(True)
         self.set_axis_unit(self._axis_unit, self._axis_sfo_MHz)
         self._set_freq_items_visible(True)
+        self._arm_phase_drag()              # the gesture is back with the ppm axis
         if self._freq_ranges is not None:
             (x0, x1), (y0, y1) = self._freq_ranges
             pi.setXRange(min(x0, x1), max(x0, x1), padding=0)

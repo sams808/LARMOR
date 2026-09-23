@@ -322,6 +322,12 @@ class MainWindow(QMainWindow):
         self._fit_worker: FitWorker | None = None
         self._last_quant = None
         self._paddle_live = False   # true while a paddle is being dragged
+        # drag-to-phase (F2): a gesture in progress, the panel's p0/p1 when
+        # it began, and the pivot fraction the last apply used (so a pivot
+        # move while phasing can re-express p0 instead of jumping)
+        self._phase_live = False
+        self._phase_start = (0.0, 0.0)
+        self._phase_pivot_frac_last = 0.5
         self._last_model = None     # (x, total) of the latest simulation
         self._first_sim = False     # autoscale Y once the first model arrives
         # fit health (see _health_from_result / _health_live): the verdict on
@@ -363,6 +369,9 @@ class MainWindow(QMainWindow):
         self.view.exit_add_mode.connect(lambda: self._set_add_mode(None))
         self.view.paddle_moved.connect(self.on_paddle_moved)
         self.view.paddle_released.connect(self.on_paddle_released)
+        self.view.phase_dragged.connect(self.on_phase_dragged)
+        self.view.phase_drag_released.connect(self.on_phase_drag_released)
+        self.view.pivot_moved.connect(self._on_pivot_moved)
         self.view.file_dropped.connect(self.load_source)
         self.view.cursor_moved.connect(
             lambda x, y: self.pos_label.setText(
@@ -545,6 +554,10 @@ class MainWindow(QMainWindow):
                   self.edit_processing_steps)
         self._add(m_proc, "Autophase (ACME)",
                   lambda: self.apply_processing([{"op": "autophase"}], False))
+        # non-checkable: the panel's Drag-to-phase button is the single
+        # source of truth for the mode, this entry toggles it
+        self._add(m_proc, "&Drag to phase  (← → p0, ↑ ↓ p1 about the pivot)",
+                  self.start_phase_drag, "Ctrl+P")
         self._add(m_proc, "2-point background…  (pick two flat points)",
                   self.start_twopoint_bg)
         self._add(m_proc, "Baseline auto (order 3)",
@@ -1558,6 +1571,7 @@ class MainWindow(QMainWindow):
         self.proc_panel.twopoint_mode.connect(self._twopoint_mode)
         self.proc_panel.twopoint_apply.connect(self.apply_twopoint_bg)
         self.proc_panel.twopoint_clear.connect(self.view.clear_baseline)
+        self.proc_panel.phase_drag_mode.connect(self._phase_drag_mode)
         self.proc_panel.view_changed.connect(self._on_proc_view_changed)
         self.proc_dock.setWidget(self.proc_panel)
         self.addDockWidget(Qt.RightDockWidgetArea, self.proc_dock)
@@ -1835,6 +1849,7 @@ class MainWindow(QMainWindow):
     def _baseline_mode(self, on: bool):
         if on:
             self.proc_panel.btnTpPick.setChecked(False)   # not the 2-point picker
+            self.proc_panel.btnDrag.setChecked(False)     # nor drag-to-phase
         self.view.set_baseline_mode(on)
         self._set_add_mode(None)
         if on:
@@ -1857,6 +1872,8 @@ class MainWindow(QMainWindow):
     def _twopoint_mode(self, on: bool):
         """Pick two baseline points; subtract the straight line through them."""
         self.proc_panel.btnBlPick.setChecked(False)   # not the anchor baseline
+        if on:
+            self.proc_panel.btnDrag.setChecked(False)  # nor drag-to-phase
         self.view.set_baseline_mode(on)
         self._set_add_mode(None)
         if on:
@@ -3335,6 +3352,12 @@ class MainWindow(QMainWindow):
             self._proc_base = snap["base"]
             self.view.set_experiment(self.exp_ppm, self.exp_amp)
             self._update_exp_label()
+            # the p0/p1 controls follow the restored recipe (a drag-to-phase
+            # undo would otherwise leave the undone numbers in the panel and
+            # the next slider nudge would silently re-apply them); silent,
+            # and a no-op for calibrate / SR / 2-point snapshots
+            self.proc_panel.sync_phase_from(
+                self.recipe.get("processing") if self.recipe else None)
 
     def snapshot(self, with_axis=False):
         """Push an undo state. ``with_axis=True`` also captures the experiment
@@ -3384,6 +3407,7 @@ class MainWindow(QMainWindow):
                     and self.central_stack.currentWidget() is self.view):
                 self._dismiss_sideband_offer()   # the transient offer first
                 return
+            self.proc_panel.btnDrag.setChecked(False)   # leave drag-to-phase
             self._set_add_mode(None)
         super().keyPressEvent(ev)
 
@@ -4786,6 +4810,106 @@ class MainWindow(QMainWindow):
         # draw whichever projection the panel selects (last, so a FID /
         # channel hint replaces the generic status line)
         self._refresh_display()
+
+    # ------------------------------------------------------- drag to phase (F2)
+    def start_phase_drag(self):
+        """Process ▸ Drag to phase (Ctrl+P): reveal the Processing panel and
+        toggle its Drag-to-phase button -- the single source of truth for the
+        mode; its toggled signal runs _phase_drag_mode."""
+        self.proc_dock.show()
+        self.proc_dock.raise_()
+        self.proc_panel.btnDrag.setChecked(not self.proc_panel.btnDrag.isChecked())
+
+    def _phase_drag_mode(self, on: bool):
+        """Arm / release the TopSpin gesture on the plot (horizontal drag =
+        p0, vertical = p1 about the pivot line). Entering shows the dock (the
+        pivot and the p0/p1 numbers are the visible feedback), releases the
+        two baseline pickers and add mode, and ticks 'Hilbert first' in pdata
+        mode: the workbench spectrum is real-only (exp_amp = y.real and
+        from_processed zero-fills the imaginary part), so without the
+        reconstructed imaginary channel a phase step would merely scale the
+        spectrum by cos(p0). Hilbert is never unticked on exit."""
+        pp = self.proc_panel
+        if on:
+            self.proc_dock.show()
+            self.proc_dock.raise_()
+            pp.btnBlPick.setChecked(False)
+            pp.btnTpPick.setChecked(False)
+            self._set_add_mode(None)
+            hilb = ""
+            if not pp.rb_raw.isChecked() and not pp.chkHilbert.isChecked():
+                pp.arm_hilbert()            # silent: the first move applies it
+                hilb = (" · Hilbert first switched on (the workbench spectrum "
+                        "has no imaginary part)")
+            self.view.set_phase_drag_mode(True)
+            self._phase_pivot_frac_last = self.view.phase_pivot_frac()
+            self._phase_live = False
+            self.statusBar().showMessage(
+                "drag to phase: ← → p0 · ↑ ↓ p1 about the pivot · Shift = fine "
+                "· Ctrl+drag = pan · Esc to stop" + hilb)
+            return
+        self.view.set_phase_drag_mode(False)
+        # the pivot survives while the panel is open, goes with a closed panel
+        self.view.show_phase_pivot(not self.proc_dock.isHidden())
+        self._phase_live = False
+        p0, p1 = pp.phase_values()
+        self.statusBar().showMessage(
+            f"phase kept: p0 {p0:+.2f}°  p1 {p1:+.1f}° — stored in the recipe "
+            "as a phase step; Undo reverts each drag")
+
+    def on_phase_dragged(self, dp0: float, dp1: float):
+        """Cumulative gesture deltas from the view. One undo snapshot on the
+        FIRST move of a gesture (the paddle idiom), then the panel's p0/p1
+        follow the pointer and -- with 'live' ticked -- re-apply through the
+        same op-list builder the sliders use, so Hilbert / magnitude / SR and
+        the recipe record are identical to typing the numbers."""
+        if (self.recipe is None or not self.exp_ppm.size
+                or self.central_stack.currentWidget() is not self.view
+                or self.view.domain != "freq"):
+            return
+        pp = self.proc_panel
+        if not self._phase_live:
+            self.snapshot(with_axis=True)
+            self._phase_start = pp.phase_values()
+            self._phase_live = True
+        live = pp.chkLive.isChecked()
+        pp.set_phase(self._phase_start[0] + dp0, self._phase_start[1] + dp1,
+                     apply=live)
+        if live:
+            self._phase_pivot_frac_last = self.view.phase_pivot_frac()
+        p0, p1 = pp.phase_values()
+        # after set_phase, so it replaces apply_processing's generic line
+        self.statusBar().showMessage(
+            f"phase: p0 {p0:+.2f}°   p1 {p1:+.1f}°   "
+            "(Shift = fine · Ctrl+drag = pan · Esc to stop)")
+
+    def on_phase_drag_released(self):
+        pp = self.proc_panel
+        if self._phase_live and not pp.chkLive.isChecked():
+            pp.set_phase(*pp.phase_values())     # the one deferred apply
+            self._phase_pivot_frac_last = self.view.phase_pivot_frac()
+        self._phase_live = False
+        self._persist_session()
+
+    def _on_pivot_moved(self, new_frac: float):
+        """The pivot line was dragged. While phasing, p0 is re-expressed so
+        the spectrum on screen does not change (op_phase applies
+        p0 + p1*(idx - pivot_frac)) and the recipe records the new pivot with
+        the re-expressed p0; no undo entry -- dragging the pivot back is the
+        undo. With the mode off the pre-existing behaviour stays (the pivot
+        governs the next apply)."""
+        if not self.view.phase_drag_active():
+            self._phase_pivot_frac_last = new_frac
+            return
+        from larmor.phasedrag import compensate_p0
+
+        pp = self.proc_panel
+        p0, p1 = pp.phase_values()
+        old, self._phase_pivot_frac_last = self._phase_pivot_frac_last, new_frac
+        if p1 == 0.0:
+            return                              # the pivot is irrelevant
+        pp.set_phase(compensate_p0(p0, p1, old, new_frac), p1,
+                     apply=pp.chkLive.isChecked())
 
     # ------------------------------------------- display projections (F6)
     def _proc_spec_valid(self) -> bool:

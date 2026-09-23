@@ -64,10 +64,21 @@ A window $w(t)$ trades resolution for sensitivity (Lindon & Ferrige 1980):
 $$S_\text{corr}(\nu) = S(\nu)\,e^{i(\phi_0+\phi_1(\nu-\nu_\text{pivot})/\text{SW})}$$
 
 - **p0 / p1** — zero- and first-order phase; sliders, exact entry, **±90 / 180°**
-  quick steps, adjustable step size.
+  quick steps.
 - **Pivot** ($\nu_\text{pivot}$) — a draggable line (default: the tallest peak,
   shown while the Processing panel is open) about which p1 rotates, TopSpin-style,
   so the peak under it stays in phase.
+- **Drag to phase** — *Drag to phase* in the panel or *Process ▸ Drag to phase*
+  (**Ctrl+P**): a horizontal drag on the spectrum changes p0 (0.25° per pixel), a
+  vertical drag changes p1 (1° per pixel, up = positive) about the pivot; each
+  drag locks to the direction it starts in; **Shift** = fine (×0.1), **Ctrl+drag**
+  pans, **Esc** stops. One Undo reverts a whole drag. In pdata mode *Hilbert
+  first* is switched on automatically, since the displayed spectrum carries no
+  imaginary part. While the FID is displayed (Ctrl+T) the gesture is suspended
+  and a drag pans.
+- Moving the pivot while phasing re-expresses the zero order,
+  $\phi_0' = \phi_0 + \phi_1\,\Delta\nu_\text{pivot}/\text{SW}$, so the spectrum
+  on screen does not change; the recipe records the new pivot.
 - **Autophase (ACME)** — minimises the entropy of the real spectrum to find p0 and
   p1 automatically (Chen *et al.* 2002); a negative-area criterion is used for
   all-positive powder patterns (QCPMG).
