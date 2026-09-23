@@ -7,6 +7,7 @@ from __future__ import annotations
 
 _MODEL_PHRASE = {
     "gauss_lor": "Gauss/Lorentz lines",
+    "gl_norm": "area-normalised Gauss/Lorentz lines",
     "czjzek": "a Czjzek distribution of quadrupolar parameters",
     "czjzek_d": "a generalised (d-parameter) Czjzek distribution",
     "czjzek_corr": "a Czjzek distribution with a correlated (δiso, C_Q) "
@@ -90,6 +91,32 @@ def latex_table(recipe: dict, quant: dict | None = None,
     return "\n".join(lines)
 
 
+def _dft_clause(recipe: dict) -> str:
+    """One sentence on where the starting values came from when the sites
+    were seeded from computed (GIPAW) shielding tensors -- and, above all,
+    HOW the shieldings became shifts: the fitted line with its reference
+    compounds and uncertainties, or the single sigma_ref. Empty when the
+    recipe carries no ``provenance['dft_import']``."""
+    d = (recipe.get("provenance") or {}).get("dft_import")
+    if not d:
+        return ""
+    from larmor import dft
+    from larmor.shiftcal import ShiftCalibration
+
+    iso = d.get("isotope") or recipe.get("nucleus") or ""
+    calc = dft.MagresCalc.from_dict(d.get("calculation") or {})
+    calc_txt = calc.describe()
+    head = f" Starting values came from computed {iso} shielding tensors"
+    if calc_txt != "no calculation header":
+        head += f" ({calc_txt})"
+    cal_d = d.get("calibration")
+    if not cal_d:
+        return (head + "; the isotropic shieldings were used unconverted as "
+                "starting positions.")
+    cal = ShiftCalibration.from_dict(cal_d)
+    return head + "; " + cal.methods_clause()
+
+
 def methods_sentence(recipe: dict, error_method: str = "covariance") -> str:
     """A short, paper-ready methods sentence describing the fit."""
     sites = recipe.get("sites", [])
@@ -128,5 +155,5 @@ def methods_sentence(recipe: dict, error_method: str = "covariance") -> str:
         f"LARMOR (an open dmfit-successor built on mrsimulator and lmfit). "
         f"Isotropic chemical shifts, quadrupolar parameters and relative "
         f"populations (integrated over the fit window) are reported with "
-        f"uncertainties from {err_txt}." + czjzek_txt
+        f"uncertainties from {err_txt}." + czjzek_txt + _dft_clause(recipe)
     )

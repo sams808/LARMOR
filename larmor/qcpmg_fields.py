@@ -29,6 +29,12 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+__all__ = [
+    "DEFAULT_ETA", "FieldPoint", "InfiniteFieldResult", "WidthSplit",
+    "cq_from_slope", "dcg_at_field", "weighted_line", "infinite_field_diso",
+    "two_field_widths", "centre_of_gravity",
+]
+
 
 #: conventional assumed eta for the two-field extrapolation (Stebbins &
 #: Du 2002). The dialogs seed their spinboxes from THIS constant, so the
@@ -88,6 +94,38 @@ class InfiniteFieldResult:
         return self.intercept + self.slope * np.asarray(inv_nu2, float)
 
 
+def weighted_line(x, y, err) -> tuple[float, float, np.ndarray]:
+    """Weighted least-squares line y = slope·x + intercept with weights
+    1/err², in closed form. Returns ``(slope, intercept, cov)`` with ``cov``
+    the 2×2 parameter covariance ``[[var(slope), cov], [cov, var(intercept)]]``
+    propagated from ``err`` (unscaled -- the caller decides whether to
+    inflate it by the reduced χ²). Raises ValueError('degenerate abscissae')
+    when every x is the same.
+
+    This is the one weighted line in the package: the QCPMG two-field
+    extrapolation and the DFT shielding calibration (larmor.shiftcal) both
+    call it, so their statistics cannot drift apart.
+    """
+    x = np.asarray(x, float); y = np.asarray(y, float)
+    err = np.asarray(err, float)
+    w = 1.0 / err ** 2
+
+    # weighted linear fit y = a + b x  (a = intercept, b = slope)
+    sw = w.sum()
+    sx = (w * x).sum(); sy = (w * y).sum()
+    sxx = (w * x * x).sum(); sxy = (w * x * y).sum()
+    denom = sw * sxx - sx * sx
+    if denom == 0:
+        raise ValueError("degenerate abscissae")
+    b = (sw * sxy - sx * sy) / denom
+    a = (sy - b * sx) / sw
+    # parameter variances from the weighted fit
+    var_a = sxx / denom
+    var_b = sw / denom
+    cov_ab = -sx / denom
+    return float(b), float(a), np.array([[var_b, cov_ab], [cov_ab, var_a]])
+
+
 def infinite_field_diso(points: list[FieldPoint], spin: float,
                         eta: float = DEFAULT_ETA) -> InfiniteFieldResult:
     """Fit δcg = δiso + slope·(1/ν0²) across fields and return δiso, C_Q, P_Q.
@@ -100,20 +138,12 @@ def infinite_field_diso(points: list[FieldPoint], spin: float,
     x = np.array([1.0 / p.larmor_MHz ** 2 for p in points])   # 1/ν0²  (MHz⁻²)
     y = np.array([p.dcg_ppm for p in points])
     err = np.array([p.dcg_err_ppm or 1.0 for p in points])
-    w = 1.0 / err ** 2
-
-    # weighted linear fit y = a + b x  (a = δiso, b = slope)
-    sw = w.sum()
-    sx = (w * x).sum(); sy = (w * y).sum()
-    sxx = (w * x * x).sum(); sxy = (w * x * y).sum()
-    denom = sw * sxx - sx * sx
-    if denom == 0:
-        raise ValueError("the two fields are too close to extrapolate")
-    b = (sw * sxy - sx * sy) / denom
-    a = (sy - b * sx) / sw
-    # parameter variances from the weighted fit
-    var_a = sxx / denom
-    var_b = sw / denom
+    try:
+        b, a, cov = weighted_line(x, y, err)
+    except ValueError:
+        raise ValueError("the two fields are too close to extrapolate") from None
+    var_a = cov[1, 1]
+    var_b = cov[0, 0]
 
     cq = cq_from_slope(b, spin, eta)
     # dC_Q/db = C_Q / (2b) → σ_Cq = |C_Q/(2b)|·σ_b

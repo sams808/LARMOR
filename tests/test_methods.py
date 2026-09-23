@@ -58,3 +58,52 @@ def test_methods_sentence_states_the_czjzek_width_convention():
     plain = {"nucleus": "11B", "larmor_frequency_MHz": 160.0, "sites": [
         {"model": "gauss_lor", "label": "A", "params": {}}]}
     assert "P_Q" not in methods.methods_sentence(plain)
+
+
+def _f19_recipe():
+    return {"nucleus": "19F", "larmor_frequency_MHz": 564.27, "sites": [
+        {"model": "gl_norm", "label": "F5", "params": {}},
+        {"model": "gl_norm", "label": "F7", "params": {}}]}
+
+
+def test_methods_sentence_states_the_dft_shift_conversion():
+    """Sites seeded from GIPAW tensors: the sentence must say how the
+    shieldings became shifts -- the fitted line, its references and its
+    uncertainties -- or that a single sigma_ref was used."""
+    base = _f19_recipe()
+    before = methods.methods_sentence(base)
+    rec = dict(base)
+    rec["provenance"] = {"dft_import": {
+        "isotope": "19F",
+        "calculation": {"code": "QE-GIPAW", "version": "7.5", "xc": "PBE",
+                        "cutoff_wfc_Ry": 60.0, "cutoff_rho_Ry": 480.0},
+        "calibration": {"kind": "fit", "slope": -0.698, "intercept": 56.5,
+                        "cov": [[1.44e-4, -0.047], [-0.047, 15.2]],
+                        "n": 4, "dof": 2, "rmse_ppm": 0.9,
+                        "points": ["NaF", "CaF2", "cryolite", "sulphohalite"]}}}
+    s = methods.methods_sentence(rec)
+    assert s.startswith(before)                    # appended, nothing altered
+    assert "δ = a·σ + b" in s and "-0.698 ± 0.012" in s
+    assert "4 reference compounds" in s and "QE-GIPAW 7.5" in s
+    assert "NaF" in s and "sulphohalite" in s and "RMSE 0.9 ppm" in s
+    # two references: no RMSE claim, the honesty clause instead
+    rec["provenance"]["dft_import"]["calibration"].update(
+        {"n": 2, "dof": 0, "points": ["NaF", "CaF2"]})
+    s2 = methods.methods_sentence(rec)
+    assert "exact by construction" in s2 and "RMSE" not in s2
+    # sigma_ref
+    rec["provenance"]["dft_import"]["calibration"] = {
+        "kind": "sigma_ref", "slope": -1.0, "intercept": 560.0}
+    s3 = methods.methods_sentence(rec)
+    assert "σ_ref = 560.0 ppm" in s3 and "δ = σ_ref − σ" in s3
+    # no conversion recorded at all
+    rec["provenance"]["dft_import"]["calibration"] = None
+    assert "unconverted" in methods.methods_sentence(rec)
+    # a recipe without dft_import is byte-identical to before
+    assert methods.methods_sentence(_f19_recipe()) == before
+    assert methods.methods_sentence(dict(base, provenance={"referencing": {}})) == before
+
+
+def test_methods_phrase_for_gl_norm_is_not_the_raw_name():
+    s = methods.methods_sentence(_f19_recipe())
+    assert "area-normalised" in s and "gl_norm" not in s

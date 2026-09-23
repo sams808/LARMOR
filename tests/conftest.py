@@ -64,6 +64,14 @@ LAW_CA_11B = tuple(_D / f"2026-01/{s}/24" for s in (
     "01192026_SR31649_Base0Ca_SS_ALP", "01202026_SR31649_Base1Ca_SS_ALP",
     "01202026_SR31649_Base2Ca_SS_ALP", "01202026_SR31648_Base3Ca_SS_ALP",
     "01202026_SR31649_Base4Ca_SS_ALP"))
+# DFT tensor import: the QE-GIPAW 7.5 / PBE / 60-480 Ry magres files of the
+# two fluoride standards and their 19F MAS spectra (2026-03, 564.27 MHz;
+# the acqus MASR = 4200 is stale, the title says 35.714 kHz)
+_QE = _data("Desktop/WSU_work/Python/NEW/DFT/QE_work")
+CAF2_MAGRES = _QE / "CaF2/CaF2.nmr.magres"
+NAF_MAGRES = _QE / "NaF/NaF.nmr.magres"
+F19_STD_CAF2 = _D / "2026-03/03132026_SR31649_CaF2_SS_ALP/4"
+F19_STD_NAF = _D / "2026-03/03132026_SR31648_NaF_SS_ALP/4"
 
 #: the full manifest, so the summary can report what a MACHINE is missing
 #: (not only what this particular selection of tests happened to request)
@@ -76,7 +84,75 @@ ALL_DATASETS = {
     "MagLab 35Cl QCPMG set": MAGLAB_35CL,
     "81Br WCPMG set (Tutorial 7)": MAGLAB_81BR / "30",
     "LAW Ca 11B series (Tutorial 4)": LAW_CA_11B[0],
+    "CaF2 magres (GIPAW)": CAF2_MAGRES, "NaF magres (GIPAW)": NAF_MAGRES,
+    "19F CaF2 standard 2026-03": F19_STD_CAF2,
+    "19F NaF standard 2026-03": F19_STD_NAF,
 }
+
+
+# ------------------------------------------------- synthetic magres files
+def synthetic_magres(records: list[tuple[str, int, list[float]]], *,
+                     prefix: str = "test", code: str = "QE-GIPAW",
+                     version: str = "7.5", xc: str = "PBE",
+                     cutoff_Ry: float | None = 60.0,
+                     cutoff_rho_Ry: float | None = 480.0,
+                     pspots: tuple[str, ...] = ("Ca.pbe-spn-kjpaw_psl.1.0.0.UPF",
+                                                "F.pbe-n-kjpaw_psl.1.0.0.UPF"),
+                     kgrid: tuple[int, int, int] = (4, 4, 4),
+                     efg: list[tuple[str, int, list[float]]] = ()) -> str:
+    """A magres 1.0 text with a QE-GIPAW-style [calculation] header.
+    ``records`` are (element, index, 9 ms components); ``efg`` likewise."""
+    head = ["#$magres-abinitio-v1.0", "[calculation]", f"calc_code {code}"]
+    if version:
+        head.append(f"calc_code_version {version}")
+    head += [f"calc_prefix {prefix}", f"calc_xcfunctional {xc}"]
+    if cutoff_Ry is not None:
+        head.append(f"calc_cutoffenergy {cutoff_Ry:.2f} Ry")
+    if cutoff_rho_Ry is not None:
+        head.append(f"calc_cutoffenergy_rho {cutoff_rho_Ry:.2f} Ry")
+    head += [f"calc_pspot {p}" for p in pspots]
+    head.append("calc_kpoint_mp_grid " + " ".join(str(k) for k in kgrid))
+    head += ["[/calculation]", "[atoms]", "units lattice Angstrom",
+             "units atom Angstrom"]
+    head += [f"atom {el} {el} {i} 0.0 0.0 0.0" for el, i, _ in records]
+    head += ["[/atoms]", "[magres]", "units ms ppm"]
+    body = [f"ms {el} {i} " + " ".join(f"{v:.6f}" for v in vals)
+            for el, i, vals in records]
+    body += [f"efg {el} {i} " + " ".join(f"{v:.6f}" for v in vals)
+             for el, i, vals in efg]
+    return "\n".join(head + body + ["[/magres]", ""])
+
+
+def diag9(a: float, b: float, c: float) -> list[float]:
+    return [a, 0.0, 0.0, 0.0, b, 0.0, 0.0, 0.0, c]
+
+
+def caf2_like_records():
+    """Two Ca, eight F identical to 1e-3 ppm (CaF2's values) and one F
+    5 ppm away -- the grouping fixture."""
+    recs = [("Ca", 1, diag9(1153.8779, 1153.8779, 1153.8779)),
+            ("Ca", 2, diag9(1153.8690, 1153.8690, 1153.8688))]
+    for k in range(8):
+        d = 0.0006 * ((-1) ** k)
+        recs.append(("F", 3 + k, [232.9226, d, d, d, 232.9226, d, d, d,
+                                  232.9226]))
+    recs.append(("F", 11, diag9(237.9226, 237.9226, 237.9226)))
+    return recs
+
+
+def kogarkoite_like_records():
+    """Six PAIRS of F (twelve atoms) at distinct shieldings, pairwise equal
+    to 1e-4 ppm, plus two Na -- the multiplicity fixture."""
+    recs = [("Na", 1, diag9(520.0, 521.0, 522.0)),
+            ("Na", 2, diag9(520.0, 521.0, 522.0))]
+    sig = [250.0, 262.0, 275.0, 291.0, 304.0, 318.0]
+    idx = 3
+    for s in sig:
+        for rep in range(2):
+            eps = 1e-4 * rep
+            recs.append(("F", idx, diag9(s - 12.0 + eps, s + eps, s + 12.0 + eps)))
+            idx += 1
+    return recs
 
 
 def require(path: Path):
