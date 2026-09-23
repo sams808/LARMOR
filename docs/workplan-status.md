@@ -36,7 +36,26 @@ Workplan"; this file is the ground truth for progress.
   Still owed: a run on a machine with no development setup (a student's
   laptop), then a GitHub release carrying both files.
 - **Full suite**: at v0.14.0 (0de34c7), **1324 passed / 0 failed** in 20 min 39 s,
-  real-data layer complete (all 19 datasets present).
+  real-data layer complete (all 19 datasets present). v0.14.1 (faab8f9) adds
+  `larmor/selftest.py`, the quick overlays and their tests (scoped runs
+  green; the full suite was not re-run for it).
+- **0.14.1 (2026-09-23, same day)**: a student's frozen 0.14.0 opened spectra
+  but "fitting did not work". The fit path was verified in the exe's own
+  package set — console-less Python of `packaging/.buildenv`, then the frozen
+  exe itself — on synthetic and on a real 32k-point ²⁷Al spectrum (Gauss/
+  Lorentz 1.7 s, Czjzek 18 s with the kernel build), so the cause is on that
+  machine. Shipped for it: **`LARMOR.exe --selftest [spectrum]`** fits
+  through the core and through the window's own Fit path and writes
+  `%USERPROFILE%\LARMOR_selftest.log` (every step, timing, traceback, dialogs
+  the user may not have seen); the spec now collects every larmor / lmfit /
+  scipy.optimize / scipy.stats submodule and the dist-info metadata. Lesson
+  recorded in `packaging/README.md`: a build cannot replace `dist\LARMOR`
+  while a copy runs — PyInstaller ends with the OLD exe in place; check the
+  timestamp, or build with `--distpath dist_test` and wrap it with
+  `/DSourceDir=..\dist_test\LARMOR`. Also in 0.14.1, on Sam's request: quick
+  overlays in the main window (Shift + drop, File ▸ Overlay a spectrum…
+  Ctrl+Shift+A, Explorer right-click, View ▸ Overlays Ctrl+Shift+V / Clear
+  overlays, "match height" in the Datasets dock).
 
 ## Done — the workplan is closed
 
