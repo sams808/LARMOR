@@ -953,3 +953,91 @@ def test_dialog_label_shows_the_chi2_line(qapp):
     assert "#c0392b" in dlg.result.text()                 # misfit colour
     assert "scaled by sqrt(chi2/dof)" in dlg.result.text()
     dlg.close()
+
+
+# ---------------------------------------------------------------- fix 15
+def test_report_carries_per_field_provenance_and_checks_referencing():
+    from larmor.qcpmg_fields import (REF_TOLERANCE_PPM, reference_deviation_ppm,
+                                     referencing_checks, report_text)
+
+    lo = FieldPoint(NU_LO, -112.76, 1.28, magnitude=True, window=(-206.8, -35.4),
+                    window_mode="minima", source="LAW0Ca-3Cl_850_MHz.csv",
+                    lb_Hz=75.0, sr_hz=3982.9, referenced=True, rotor_Hz=16000.0)
+    hi = FieldPoint(NU_HI, -95.78, 0.51, magnitude=True, window=(-169.0, -34.0),
+                    window_mode="minima", source="LAW0Ca-3Cl_1p1GHz.csv",
+                    lb_Hz=51.0, sr_hz=263.6, referenced=True, rotor_Hz=20000.0)
+    res = infinite_field_diso([lo, hi], 1.5, 0.7)
+    txt = report_text({"LAW0Ca": res}, 1.5, 0.7, "35Cl")
+    assert "-206.8 ... -35.4 ppm" in txt and "magnitude (mc)" in txt
+    assert "LB 75 Hz" in txt and "SR +3982.9 Hz" in txt and "MAS 16000 Hz" in txt
+    assert "LAW0Ca-3Cl_850_MHz.csv" in txt and "LAW0Ca-3Cl_1p1GHz.csv" in txt
+    assert "not checked against a 1H reference" in txt
+    assert "unreferenced" not in txt
+    # SR = 0 (the SF = BF1 EXPNO): a hard warning
+    hi0 = FieldPoint(NU_HI, -95.78, 0.51, sr_hz=0.0)
+    lines = referencing_checks([lo, hi0])
+    assert any("unreferenced" in ln and "107.8110" in ln for ln in lines)
+    assert not any("unreferenced" in ln and "78.3540" in ln for ln in lines)
+    # +268 Hz: referenced, informational only
+    assert not any("!" in ln for ln in referencing_checks([FieldPoint(NU_HI, -95.0, 0.5, sr_hz=268.0)]))
+    # SF vs the session 1H reference: -0.043 ppm passes, -2.49 ppm fails
+    sf_h = 1100.35
+    from larmor.referencing import expected_sf_MHz
+    exp = expected_sf_MHz(sf_h, "35Cl")
+    good = FieldPoint(NU_HI, -95.0, 0.5, sr_hz=263.6, sf_MHz=exp * (1 - 0.043e-6))
+    bad = FieldPoint(NU_HI, -95.0, 0.5, sr_hz=263.6, sf_MHz=exp * (1 - 2.49e-6))
+    for pnt in (good, bad):
+        pnt.ref_dev_ppm = reference_deviation_ppm(pnt.sf_MHz, "35Cl", sf_h)
+    assert good.ref_dev_ppm == pytest.approx(-0.043, abs=1e-3)
+    assert bad.ref_dev_ppm == pytest.approx(-2.49, abs=1e-2)
+    assert abs(good.ref_dev_ppm) < REF_TOLERANCE_PPM < abs(bad.ref_dev_ppm)
+    lines = referencing_checks([good, bad])
+    assert not lines[0].startswith("!") and lines[1].startswith("!")
+    assert "-2.49 ppm" in lines[1]
+
+
+def test_fill_referencing_from_a_dataset_header_and_bruker_meta():
+    from larmor import qcpmg
+
+    x = np.linspace(-300.0, 100.0, 2001)
+    y = np.exp(-(((x + 105.0) / 25.0) ** 2))
+    m = qcpmg.measure_cg(x, y)
+    hdr = {"lb_Hz": 75.0, "sf_MHz": 78.3621718681, "sr_hz": 3982.87,
+           "referenced": True, "spectrum_mode": "magnitude(mc)"}
+    p = FieldPoint.from_measurement(78.354, m, magnitude=True, meta=hdr,
+                                    source="x.csv")
+    assert p.lb_Hz == 75.0 and p.sr_hz == pytest.approx(3982.87)
+    assert p.referenced is True and p.sf_MHz == pytest.approx(78.36217, abs=1e-5)
+    # a Bruker meta with SR 0 and no 'referenced' key derives False
+    q = FieldPoint.from_measurement(107.811, m, meta={"sf_MHz": 107.811292, "sr_hz": 0.0})
+    assert q.referenced is False
+    assert "SR +0.0 Hz" in q.provenance()
+
+
+def test_figure_export_writes_a_json_record_with_the_windows(tmp_path):
+    import json
+
+    import matplotlib
+    matplotlib.use("Agg")
+    from larmor import figures
+    from larmor.qcpmg_fields import point_provenance
+
+    pts = [FieldPoint(NU_LO, -112.76, 1.28, window=(-206.8, -35.4), window_mode="minima",
+                      magnitude=True, source="a.csv"),
+           FieldPoint(NU_HI, -95.78, 0.51, window=(-169.0, -34.0), window_mode="manual",
+                      magnitude=True, source="b.csv")]
+    spec = {"kind": "infinite_field", "style": "article", "nucleus": "35Cl",
+            "spin": 1.5, "eta": 0.7,
+            "samples": [{"label": "LAW0Ca",
+                         "points": [[p.larmor_MHz, p.dcg_ppm, p.dcg_err_ppm] for p in pts],
+                         "provenance": [point_provenance(p) for p in pts]}]}
+    written = figures.export(spec, tmp_path / "inf", formats=("png", "json"))
+    assert (tmp_path / "inf.json").exists() and (tmp_path / "inf.png").exists()
+    rec = json.loads((tmp_path / "inf.json").read_text(encoding="utf-8"))
+    prov = rec["samples"][0]["provenance"]
+    assert prov[0]["window"] == [-206.8, -35.4] and prov[1]["window_mode"] == "manual"
+    assert prov[0]["source"] == "a.csv" and prov[0]["magnitude"] is True
+    assert len(written) == 2
+    # render still ignores the extra key
+    fig = figures.render(spec)
+    assert len(fig.axes) == 1

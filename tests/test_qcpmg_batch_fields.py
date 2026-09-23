@@ -349,3 +349,56 @@ def test_identically_named_rows_are_fitted_separately(qapp, tmp_path):
     # the figure spec follows the same labels
     assert [s_["label"] for s_ in d._figure_spec()["samples"]] == list(d._results)
     d.close()
+
+
+# ---------------------------------------------------------------- fix 15
+def test_batch_report_records_each_cells_path_window_and_referencing(qapp, tmp_path,
+                                                                     monkeypatch):
+    """The exported record must let a reader reproduce and audit every
+    field: window, mode, LB, SR and the file it came from; an unreferenced
+    axis (SR 0) is flagged while a referenced one is not."""
+    from PySide6.QtWidgets import QFileDialog
+
+    from larmor.desktop.qcpmg_batch_dialog import QcpmgBatchFieldsDialog
+
+    def write(name, nu, centre, sr):
+        x = np.linspace(centre - 400, centre + 400, 3000)
+        y = np.exp(-((x - centre) / 40.0) ** 2)
+        p = tmp_path / name
+        spectra.write_csv(p, x, y, {"nucleus": "35Cl", "larmor_MHz": nu,
+                                    "spectrum_mode": "absorption", "lb_Hz": 75.0,
+                                    "sr_hz": sr, "referenced": abs(sr) > 0.5,
+                                    "qcpmg_rotor_Hz": 16000.0 if nu < 100 else 20000.0})
+        return str(p)
+
+    d = QcpmgBatchFieldsDialog(None, "35Cl")
+    d.nSamples.setValue(1)
+    lo = write("LAW0Ca-3Cl_850_MHz.csv", 78.3541, -112.8, 3982.9)
+    hi = write("LAW0Ca-3Cl_1p1GHz.csv", 107.811, -95.8, 0.0)
+    d._drop_files(0, 1, [lo, hi])
+    d.table.item(0, 0).setText("LAW0Ca")
+    d._compute()
+    out = tmp_path / "report.txt"
+    monkeypatch.setattr(QFileDialog, "getSaveFileName",
+                        staticmethod(lambda *a, **k: (str(out), "")))
+    d._export_report()
+    txt = out.read_text(encoding="utf-8")
+    for name in ("LAW0Ca-3Cl_850_MHz.csv", "LAW0Ca-3Cl_1p1GHz.csv"):
+        assert name in txt
+    for (r, c), cell in d.cells.items():
+        lo_w, hi_w = cell["window"]
+        assert f"window {lo_w:.1f} ... {hi_w:.1f} ppm" in txt
+    assert "LB 75 Hz" in txt and "SR +3982.9 Hz" in txt and "MAS 16000 Hz" in txt
+    assert "! 107.8110 MHz: SR = +0.0 Hz -- unreferenced" in txt
+    assert "! 78.3541 MHz" not in txt
+    # the figure sidecar carries the windows too
+    base = tmp_path / "fig"
+    monkeypatch.setattr(QFileDialog, "getSaveFileName",
+                        staticmethod(lambda *a, **k: (str(base), "")))
+    d._export_figures()
+    import json
+    rec = json.loads((tmp_path / "fig.json").read_text(encoding="utf-8"))
+    assert rec["samples"][0]["provenance"][0]["window"] == pytest.approx(
+        list(d.cells[(0, 1)]["window"]))
+    assert "LAW0Ca-3Cl_850_MHz.csv" in rec["samples"][0]["provenance"][0]["source"]
+    d.close()

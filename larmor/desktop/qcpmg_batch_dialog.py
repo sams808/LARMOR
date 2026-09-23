@@ -20,8 +20,8 @@ import pyqtgraph as pg
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFileDialog,
-    QHBoxLayout, QHeaderView, QLabel, QMessageBox, QPlainTextEdit, QSpinBox,
-    QSplitter, QTableWidget, QTableWidgetItem, QVBoxLayout,
+    QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMessageBox, QPlainTextEdit,
+    QSpinBox, QSplitter, QTableWidget, QTableWidgetItem, QVBoxLayout,
 )
 
 from larmor.desktop import theme
@@ -119,9 +119,14 @@ class QcpmgBatchFieldsDialog(QDialog):
             "the centreband alone (peak ± ν_r/2, valid only when it "
             "reproduces the whole-manifold CG)")
         self.winMode.currentIndexChanged.connect(self._mode_changed)
+        self.refSF = QLineEdit()
+        self.refSF.setPlaceholderText("optional")
+        self.refSF.setMaximumWidth(100)
+        self.refSF.setToolTip("the session's referenced 1H SF (MHz): each "
+                              "cell's SF is checked against it in the report")
         for w in ("samples", self.nSamples, "  fields", self.nFields,
                   "   ", self.lblNuc, "  spin I", self.spin, "  η", self.eta,
-                  "   window", self.winMode):
+                  "   window", self.winMode, "  1H ref SF", self.refSF):
             top.addWidget(QLabel(w) if isinstance(w, str) else w)
         top.addStretch(1)
         v.addLayout(top)
@@ -285,7 +290,7 @@ class QcpmgBatchFieldsDialog(QDialog):
                                   "comb": seed.comb, "seed_note": seed.note,
                                   "rotor_Hz": fs["rotor_Hz"],
                                   "rotor_note": fs.get("rotor_note", ""),
-                                  "mode": "minima"}
+                                  "mode": "minima", "meta": fs["meta"]}
         self._measure_cell(row, col)
 
     def _set_nucleus(self, nucleus: str):
@@ -452,8 +457,17 @@ class QcpmgBatchFieldsDialog(QDialog):
             out.append((name, FieldPoint.from_measurement(
                 d["larmor"], d["meas"], magnitude=d.get("magnitude"),
                 source=d.get("source", ""), rotor_Hz=d.get("rotor_Hz", 0.0),
-                label=name, dcg_ppm=float(d["cg"]), dcg_err_ppm=float(d["sigma"]))))
+                label=name, dcg_ppm=float(d["cg"]), dcg_err_ppm=float(d["sigma"]),
+                meta=d.get("meta"), ref_sf_h_MHz=self.ref_sf_h_MHz(),
+                nucleus=self._nucleus)))
         return out
+
+    def ref_sf_h_MHz(self) -> float | None:
+        try:
+            v = float(self.refSF.text())
+        except (AttributeError, ValueError):
+            return None
+        return v if v > 0 else None
 
     def _compute(self):
         from larmor.qcpmg_fields import (InfiniteFieldResult, fit_samples,
@@ -502,9 +516,11 @@ class QcpmgBatchFieldsDialog(QDialog):
                 continue
             if only is not None and name != only:
                 continue
+            from larmor.qcpmg_fields import point_provenance
             samples.append({"label": name,
                             "points": [[p.larmor_MHz, p.dcg_ppm, p.dcg_err_ppm]
-                                       for p in res.points]})
+                                       for p in res.points],
+                            "provenance": [point_provenance(p) for p in res.points]})
         return {"kind": "infinite_field", "style": "article",
                 "nucleus": self._nucleus, "spin": self.spin.value(),
                 "eta": self.eta.value(), "samples": samples}
@@ -538,15 +554,16 @@ class QcpmgBatchFieldsDialog(QDialog):
         remember_dir(FIGURE_DIR_KEY, path)
         base = Path(path).with_suffix("")
         written = []
+        fmts = ("png", "svg", "pdf", "json")
         try:
-            written += figures.export(self._figure_spec(), base)
+            written += figures.export(self._figure_spec(), base, formats=fmts)
             for name, res in self._results.items():
                 if not isinstance(res, InfiniteFieldResult):
                     continue
                 safe = "".join(ch if ch.isalnum() or ch in "-_" else "_"
                                for ch in name)[:40] or "sample"
                 written += figures.export(self._figure_spec(only=name),
-                                          f"{base}_{safe}")
+                                          f"{base}_{safe}", formats=fmts)
         except Exception as exc:                              # noqa: BLE001
             _log.exception("infinite-field figure export failed")
             self.msg.setText(f"figure export failed: {exc}")

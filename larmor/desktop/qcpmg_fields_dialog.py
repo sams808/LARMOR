@@ -13,13 +13,13 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
-    QHBoxLayout, QLabel, QPushButton, QTableWidget, QTableWidgetItem,
-    QVBoxLayout, QWidget,
+    QHBoxLayout, QLabel, QLineEdit, QPushButton, QTableWidget,
+    QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from larmor.qcpmg_fields import (
     ERR_FLOOR_PPM, FieldPoint, field_plausibility_warning, fmt_result_lines,
-    infinite_field_diso, read_field_spectrum,
+    infinite_field_diso, point_provenance, read_field_spectrum,
 )
 
 
@@ -88,6 +88,17 @@ class QcpmgFieldsDialog(QDialog):
         self.eta.setToolTip("η is not determined by two centres of gravity; "
                             "0.7 is the conventional choice (Stebbins & Du 2002)")
         top.addWidget(self.eta)
+        top.addSpacing(16)
+        top.addWidget(QLabel("1H reference SF (MHz)"))
+        self.refSF = QLineEdit()
+        self.refSF.setPlaceholderText("optional")
+        self.refSF.setMaximumWidth(110)
+        self.refSF.setToolTip(
+            "the referenced 1H SF of the session's adamantane / KBr reference "
+            "EXPNO on the same magnet: each dataset's SF is then checked "
+            "against the frequency this nucleus should have (IUPAC Xi), and "
+            "the report flags a field whose referencing is off")
+        top.addWidget(self.refSF)
         top.addStretch(1)
         v.addLayout(top)
 
@@ -293,7 +304,8 @@ class QcpmgFieldsDialog(QDialog):
                            "seed_note": seed.note if seed is not None else "",
                            "larmor": float(larmor_MHz or 0.0),
                            "rotor_Hz": float(rotor_Hz or 0.0),
-                           "mode": "manual" if window is not None else "minima"}
+                           "mode": "manual" if window is not None else "minima",
+                           "meta": dict(meta or {})}
         self._add_row(larmor_MHz)
         r = self.table.rowCount() - 1
         self.table.item(r, 0).setData(Qt.UserRole, ds_id)
@@ -475,7 +487,8 @@ class QcpmgFieldsDialog(QDialog):
         from larmor.qcpmg_fields import InfiniteFieldResult
         samples = [{"label": k,
                     "points": [[p.larmor_MHz, p.dcg_ppm, p.dcg_err_ppm]
-                               for p in r.points]}
+                               for p in r.points],
+                    "provenance": [point_provenance(p) for p in r.points]}
                    for k, r in self._result_map().items()
                    if isinstance(r, InfiniteFieldResult)]
         return {"kind": "infinite_field", "style": "article",
@@ -525,11 +538,13 @@ class QcpmgFieldsDialog(QDialog):
             return
         remember_dir(FIGURE_DIR_KEY, path)
         try:
-            written = figures.export(spec, Path(path).with_suffix(""))
+            written = figures.export(spec, Path(path).with_suffix(""),
+                                     formats=("png", "svg", "pdf", "json"))
         except Exception as exc:                              # noqa: BLE001
             self.result.setText(f"figure export failed: {exc}")
             return
-        self.result.setText(f"figure written — {Path(written[0]).stem}.png/.svg/.pdf")
+        self.result.setText(f"figure written — {Path(written[0]).stem}"
+                            ".png/.svg/.pdf + .json record")
 
     def _help(self):
         from larmor.desktop.help_dialog import show_help
@@ -613,10 +628,20 @@ class QcpmgFieldsDialog(QDialog):
                 pts.append(FieldPoint.from_measurement(
                     nu, ds["meas"], magnitude=ds.get("magnitude"),
                     source=ds.get("source", ""), rotor_Hz=ds.get("rotor_Hz", 0.0),
-                    ct_selective=sel, dcg_ppm=dcg, dcg_err_ppm=err))
+                    ct_selective=sel, dcg_ppm=dcg, dcg_err_ppm=err,
+                    meta=ds.get("meta"), ref_sf_h_MHz=self.ref_sf_h_MHz(),
+                    nucleus=self._nucleus))
             else:
                 pts.append(FieldPoint(nu, dcg, err, sel, source="manual"))
         return pts
+
+    def ref_sf_h_MHz(self) -> float | None:
+        """The optional session 1H reference SF typed by the user."""
+        try:
+            v = float(self.refSF.text())
+        except (AttributeError, ValueError):
+            return None
+        return v if v > 0 else None
 
     def _fields_fwhm(self):
         """(larmor, fwhm_ppm) for EVERY row that has both filled, sorted by

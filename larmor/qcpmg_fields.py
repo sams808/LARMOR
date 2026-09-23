@@ -94,6 +94,11 @@ class FieldPoint:
     flags: tuple = ()                 # quality flags of the measurement ('! ...')
     cg_sequence: str = ""             # 'CG(w, 1.5w, 2w, 3w) = ...' convergence record
     drift_ppm: float = float("nan")   # |CG(2w) - CG(w)|
+    lb_Hz: float | None = None        # processing line broadening
+    sf_MHz: float | None = None       # referenced spectrometer frequency (procs SF)
+    sr_hz: float | None = None        # spectral reference SF - BF1 (0 = unreferenced)
+    referenced: bool | None = None    # the ppm axis carries a reference
+    ref_dev_ppm: float | None = None  # SF vs a same-session 1H reference (ppm)
 
     @property
     def has_err(self) -> bool:
@@ -106,23 +111,120 @@ class FieldPoint:
                          source: str = "", rotor_Hz: float = 0.0,
                          ct_selective=None, label: str = "",
                          dcg_ppm: float | None = None,
-                         dcg_err_ppm: float | None = None) -> "FieldPoint":
+                         dcg_err_ppm: float | None = None,
+                         meta: dict | None = None,
+                         ref_sf_h_MHz: float | None = None,
+                         nucleus: str = "") -> "FieldPoint":
         """A point from a :class:`larmor.qcpmg.CgMeasurement`: the error is
         max(jitter sigma, convergence drift) floored at ERR_FLOOR_PPM, and
         window, mode, flags and the convergence sequence travel with it.
         ``dcg_ppm`` / ``dcg_err_ppm`` override the measured values when the
-        user edited the cells."""
+        user edited the cells. ``meta`` (a saved dataset's header or a
+        Bruker meta) supplies LB, SF, SR and the referenced flag;
+        ``ref_sf_h_MHz`` (the session's 1H reference SF) lets the SF be
+        checked against ``nucleus``'s expected frequency."""
         err = meas.sigma_ppm if dcg_err_ppm is None else dcg_err_ppm
         err = max(float(err), ERR_FLOOR_PPM) if np.isfinite(err) else 0.0
         conv = getattr(meas, "convergence", None)
-        return cls(float(larmor_MHz),
-                   float(meas.cg_ppm if dcg_ppm is None else dcg_ppm), err,
-                   ct_selective, label, magnitude=magnitude,
-                   window=tuple(meas.window), window_mode=meas.mode,
-                   source=source, rotor_Hz=float(rotor_Hz or 0.0),
-                   flags=tuple(meas.flags),
-                   cg_sequence=conv.sequence() if conv is not None else "",
-                   drift_ppm=float(meas.drift_ppm))
+        pt = cls(float(larmor_MHz),
+                 float(meas.cg_ppm if dcg_ppm is None else dcg_ppm), err,
+                 ct_selective, label, magnitude=magnitude,
+                 window=tuple(meas.window), window_mode=meas.mode,
+                 source=source, rotor_Hz=float(rotor_Hz or 0.0),
+                 flags=tuple(meas.flags),
+                 cg_sequence=conv.sequence() if conv is not None else "",
+                 drift_ppm=float(meas.drift_ppm))
+        pt.fill_referencing(meta, ref_sf_h_MHz, nucleus)
+        return pt
+
+    def fill_referencing(self, meta: dict | None, ref_sf_h_MHz: float | None = None,
+                         nucleus: str = "") -> None:
+        """LB, SF, SR and the referenced flag from ``meta``; the deviation
+        of SF from a session 1H reference when one is given."""
+        meta = meta or {}
+        for key, attr in (("lb_Hz", "lb_Hz"), ("qcpmg_lb_Hz", "lb_Hz"),
+                          ("sf_MHz", "sf_MHz"), ("sr_hz", "sr_hz")):
+            v = meta.get(key)
+            if v is not None and getattr(self, attr) is None:
+                try:
+                    setattr(self, attr, float(v))
+                except (TypeError, ValueError):
+                    pass
+        if meta.get("referenced") is not None:
+            self.referenced = bool(meta["referenced"])
+        elif self.sr_hz is not None:
+            from larmor.referencing import UNREFERENCED_HZ
+            self.referenced = abs(self.sr_hz) > UNREFERENCED_HZ
+        if ref_sf_h_MHz and self.sf_MHz and nucleus:
+            self.ref_dev_ppm = reference_deviation_ppm(self.sf_MHz, nucleus, ref_sf_h_MHz)
+
+    def provenance(self) -> str:
+        """One line: 'window -206.8 … -35.4 ppm (minima) · magnitude · LB 75 Hz
+        · SR +3982.9 Hz · MAS 16000 Hz · LAW0Ca-3Cl_850_MHz.csv'."""
+        bits = []
+        if self.window is not None:
+            lo, hi = min(self.window), max(self.window)
+            bits.append(f"window {lo:.1f} ... {hi:.1f} ppm"
+                        + (f" ({self.window_mode})" if self.window_mode else ""))
+        if self.magnitude is not None:
+            bits.append("magnitude (mc)" if self.magnitude else "absorption")
+        if self.lb_Hz is not None:
+            bits.append(f"LB {self.lb_Hz:.0f} Hz")
+        if self.sr_hz is not None:
+            bits.append(f"SR {self.sr_hz:+.1f} Hz")
+        if self.rotor_Hz:
+            bits.append(f"MAS {self.rotor_Hz:.0f} Hz")
+        if self.source:
+            bits.append(self.source)
+        return " · ".join(bits)
+
+
+#: |SF - expected| beyond this (ppm) against the session's 1H reference is a
+#: referencing error (-0.043 ppm on every referenced NMRFAM EXPNO passes,
+#: the SF = BF1 EXPNO's -2.49 ppm fails)
+REF_TOLERANCE_PPM = 0.5
+
+
+def reference_deviation_ppm(sf_MHz: float, nucleus: str, sf_h_MHz: float) -> float:
+    """(SF - expected)/expected in ppm, where expected is the frequency the
+    nucleus should have on the same magnet given the 1H reference SF
+    (larmor.referencing.expected_sf_MHz, IUPAC Xi ratios)."""
+    from larmor.referencing import expected_sf_MHz
+    exp = expected_sf_MHz(float(sf_h_MHz), nucleus)
+    return float((float(sf_MHz) - exp) / exp * 1e6)
+
+
+def referencing_checks(points) -> list[str]:
+    """Report lines for the per-field referencing: a hard warning for an
+    unreferenced axis (|SR| below UNREFERENCED_HZ) or an SF that deviates
+    from the session 1H reference by more than REF_TOLERANCE_PPM; an
+    informational line when SR is known but no 1H reference was given."""
+    from larmor.referencing import UNREFERENCED_HZ
+    out = []
+    for p in points:
+        if p.sr_hz is None and p.referenced is None:
+            continue
+        unref = (p.referenced is False) or (p.sr_hz is not None
+                                            and abs(p.sr_hz) <= UNREFERENCED_HZ)
+        if unref:
+            out.append(f"! {p.larmor_MHz:.4f} MHz: SR = "
+                       f"{(p.sr_hz if p.sr_hz is not None else 0.0):+.1f} Hz -- "
+                       "unreferenced ppm axis; a rigid offset enters delta_iso "
+                       "with the field's lever (x-1.1 low / x+2.1 high field)")
+        elif p.ref_dev_ppm is not None:
+            if abs(p.ref_dev_ppm) > REF_TOLERANCE_PPM:
+                out.append(f"! {p.larmor_MHz:.4f} MHz: SF deviates "
+                           f"{p.ref_dev_ppm:+.2f} ppm from the session 1H reference")
+            else:
+                out.append(f"referencing {p.larmor_MHz:.4f} MHz: SF within "
+                           f"{p.ref_dev_ppm:+.3f} ppm of the session 1H reference")
+        else:
+            out.append(f"referencing {p.larmor_MHz:.4f} MHz: SR {p.sr_hz:+.1f} Hz "
+                       "(not checked against a 1H reference -- enter the session's "
+                       "1H SF to check)")
+    return out
+
+
 
 
 @dataclass
@@ -572,6 +674,18 @@ def centre_of_gravity(ppm: np.ndarray, amp: np.ndarray,
                                          np.asarray(amp, float), window)[0])
 
 
+def point_provenance(p: FieldPoint) -> dict:
+    """A JSON-able record of one point for the figure spec sidecar."""
+    return {"larmor_MHz": p.larmor_MHz, "dcg_ppm": p.dcg_ppm,
+            "dcg_err_ppm": p.dcg_err_ppm,
+            "window": list(p.window) if p.window is not None else None,
+            "window_mode": p.window_mode, "magnitude": p.magnitude,
+            "source": p.source, "rotor_Hz": p.rotor_Hz, "lb_Hz": p.lb_Hz,
+            "sf_MHz": p.sf_MHz, "sr_hz": p.sr_hz, "referenced": p.referenced,
+            "ct_selective": p.ct_selective, "flags": list(p.flags),
+            "cg_sequence": p.cg_sequence}
+
+
 def spectrum_mode_from_meta(meta: dict) -> bool | None:
     """True (magnitude) / False (absorption) / None (unknown) from a spectrum's
     metadata: the ``spectrum_mode`` header a saved dataset carries, else the
@@ -636,6 +750,9 @@ def read_field_spectrum(path: str) -> dict:
         raise ValueError("no Larmor frequency in the file — save it from "
                          "the QCPMG dialog, which records one")
     rotor, rotor_note = rotor_rate_of(meta, ppm, amp, larmor)
+    if ref is not None and meta.get("sf_MHz") is not None and "referenced" not in meta:
+        from larmor.referencing import UNREFERENCED_HZ
+        meta["referenced"] = abs(float(meta.get("sr_hz", 0.0) or 0.0)) > UNREFERENCED_HZ
     return {"ppm": ppm, "amp": amp, "larmor": larmor, "nucleus": nucleus,
             "magnitude": spectrum_mode_from_meta(meta), "source": source,
             "meta": meta, "seed": qcpmg.seed_window(ppm, amp, meta),
@@ -778,10 +895,15 @@ def report_text(results: dict, spin: float, eta: float, nucleus: str = "",
                      else f"{'':7s}")
             lines.append(f"    {p.larmor_MHz:10.4f}  {p.dcg_ppm:11.2f}  "
                          f"{err}  {resid}  {mode_label(p.magnitude):10s}  {sel}")
+            prov = p.provenance()
+            if prov:
+                lines.append(f"                 {prov}")
             for fl in p.flags:
                 lines.append(f"                 {fl}")
             if p.cg_sequence:
                 lines.append(f"                 {p.cg_sequence}")
+        for ln in referencing_checks(res.points):
+            lines.append(f"    {ln}")
         if mixed_modes(res.points):
             lines.append("    ! NOT COMPARABLE: mixed magnitude/absorption dcg -- "
                          "reprocess both fields the same way")
