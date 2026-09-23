@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 from PyInstaller.utils.hooks import (
-    collect_data_files, collect_dynamic_libs, collect_submodules,
+    collect_data_files, collect_dynamic_libs, collect_submodules, copy_metadata,
 )
 
 block_cipher = None
@@ -36,6 +36,20 @@ hiddenimports += [
     "scipy.special._cdflib", "scipy._lib.messagestream",
     "pkg_resources.py2_warn",
 ]
+# every LARMOR module (the registry and the mixins import some of them by
+# name at run time), the whole of lmfit and the scipy subpackages the fit
+# path reaches lazily (least_squares, chi2 levels); a missing one surfaces
+# only when Fit is pressed, as "No module named ..." on the user's machine
+for pkg in ("larmor", "lmfit", "scipy.optimize", "scipy.stats", "scipy.special",
+            "scipy.linalg", "scipy.interpolate", "scipy.signal"):
+    hiddenimports += collect_submodules(pkg)
+# dist-info so importlib.metadata.version() works in the software stamp
+for dist in ("larmor", "lmfit", "mrsimulator", "numpy", "scipy", "asteval",
+             "uncertainties"):
+    try:
+        datas += copy_metadata(dist)
+    except Exception:                                   # noqa: BLE001
+        pass
 
 # --- LARMOR's own resources -------------------------------------------------
 datas += [(str(ROOT / "larmor" / "static"), "larmor/static")]

@@ -57,6 +57,9 @@ class _MenusMixin:
                   "Ctrl+F")
         self._add(m_file, "Open &Varian / Agilent…  (.fid folder)",
                   self.open_varian)
+        self._add(m_file, "O&verlay a spectrum…  (compare on top of the active one, "
+                          "keeps the fit; Shift + drop does the same)",
+                  self.add_overlay_dialog, "Ctrl+Shift+A")
         self.actWatch = self._add(
             m_file, "&Watch the source file  (auto-reload when it changes, "
                     "keep the fit)", self._toggle_watch, checkable=True)
@@ -238,6 +241,14 @@ class _MenusMixin:
                                   checkable=True, checked=True)
         self.actComp = self._add(m_view, "Components", self._toggle_comp,
                                  checkable=True, checked=True)
+        self.actOverlaysVisible = self._add(
+            m_view, "O&verlays  (the compared spectra)", self._toggle_overlays_visible,
+            "Ctrl+Shift+V", checkable=True, checked=True)
+        self.actOverlaysVisible.setToolTip(
+            "show or hide every compared spectrum at once; add one with "
+            "File > Overlay a spectrum, Shift + drop on the plot, or the "
+            "Explorer's right-click")
+        self._add(m_view, "Clear overlays", self.clear_overlays)
         self.actLabels = self._add(
             m_view, "Component &labels  (pin names on the plot)",
             self._toggle_labels, checkable=True,

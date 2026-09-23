@@ -177,6 +177,7 @@ class MainWindow(_MenusMixin, _ChromeMixin, _FilesMixin, _SessionMixin,
         self.view.phase_drag_released.connect(self.on_phase_drag_released)
         self.view.pivot_moved.connect(self._on_pivot_moved)
         self.view.file_dropped.connect(self.load_source)
+        self.view.files_dropped_overlay.connect(self.add_overlay_paths)
         self.view.cursor_moved.connect(
             lambda x, y: self.pos_label.setText(
                 f"x: {self._format_x(x)}   y: {y:.4g}"))

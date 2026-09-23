@@ -31,6 +31,7 @@ class DatasetsPanel(QScrollArea):
     offset_changed = Signal(float)         # global vertical stack offset
     color_changed = Signal(int, str)       # overlay i gets a new hex color
     compare_requested = Signal()           # acqus/procs of active + overlays
+    match_changed = Signal(bool)           # scale overlays to the active maximum
 
     def __init__(self):
         super().__init__()
@@ -61,7 +62,13 @@ class DatasetsPanel(QScrollArea):
         self.offset.setToolTip("shift each overlay up by this fraction for a "
                                "stacked look (0 = overlaid)")
         self.offset.valueChanged.connect(self.offset_changed)
-        off.addWidget(self.offset); off.addStretch(1)
+        off.addWidget(self.offset)
+        self.match = QCheckBox("match height")
+        self.match.setToolTip("scale each overlay so its maximum equals the active "
+                              "spectrum's -- compare shapes, not intensities "
+                              "(display only; nothing is written)")
+        self.match.toggled.connect(self.match_changed)
+        off.addWidget(self.match); off.addStretch(1)
         self._v.addLayout(off)
 
         self._rows = QVBoxLayout()

@@ -171,6 +171,7 @@ GOLDEN_MENU = (
     (('&File',), 'Open &recent', '', False, True),
     (('&File',), 'Open &FID…  (process before FT)', 'Ctrl+F', False, False),
     (('&File',), 'Open &Varian / Agilent…  (.fid folder)', '', False, False),
+    (('&File',), 'O&verlay a spectrum…  (compare on top of the active one, keeps the fit; Shift + drop does the same)', 'Ctrl+Shift+A', False, False),
     (('&File',), '&Watch the source file  (auto-reload when it changes, keep the fit)', '', True, False),
     (('&File',), 'Open pro&ject…  (spectra, 2D maps, figures, batch fits)', '', False, False),
     (('&File',), 'Save projec&t…  (whole session: spectra, 2D maps, figures, batch fits)', 'Ctrl+Alt+S', False, False),
@@ -255,6 +256,8 @@ GOLDEN_MENU = (
     ((), '&View', '', False, True),
     (('&View',), 'Residual', '', True, False),
     (('&View',), 'Components', '', True, False),
+    (('&View',), 'O&verlays  (the compared spectra)', 'Ctrl+Shift+V', True, False),
+    (('&View',), 'Clear overlays', '', False, False),
     (('&View',), 'Component &labels  (pin names on the plot)', '', True, False),
     (('&View',), 'Show paddles', '', True, False),
     (('&View',), 'Animate fits', '', True, False),
@@ -358,7 +361,7 @@ GOLDEN_MENU = (
     (('&Help',), 'More…', '', False, False),
 )
 
-SHORTCUTS = frozenset(['Ctrl+2', 'Ctrl+Alt+S', 'Ctrl+F', 'Ctrl+I', 'Ctrl+O', 'Ctrl+P', 'Ctrl+S', 'Ctrl+Shift+C', 'Ctrl+Shift+D', 'Ctrl+Shift+E', 'Ctrl+Shift+O', 'Ctrl+Shift+P', 'Ctrl+Shift+S', 'Ctrl+T', 'Ctrl+Y', 'Ctrl+Z', 'F5', 'F6', 'F7', 'F9'])
+SHORTCUTS = frozenset(['Ctrl+2', 'Ctrl+Alt+S', 'Ctrl+F', 'Ctrl+I', 'Ctrl+O', 'Ctrl+P', 'Ctrl+S', 'Ctrl+Shift+A', 'Ctrl+Shift+C', 'Ctrl+Shift+D', 'Ctrl+Shift+E', 'Ctrl+Shift+O', 'Ctrl+Shift+P', 'Ctrl+Shift+S', 'Ctrl+Shift+V', 'Ctrl+T', 'Ctrl+Y', 'Ctrl+Z', 'F5', 'F6', 'F7', 'F9'])
 TOOLBAR_ACTIONS = 29
 # QMenu count under the menu bar: 21
 

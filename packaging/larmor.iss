@@ -18,7 +18,11 @@
 #define MyAppPublisher "McCloy group, Washington State University"
 #define MyAppURL "https://github.com/sams808/LARMOR"
 #define MyAppExeName "LARMOR.exe"
-#define SourceDir "..\dist\LARMOR"
+#ifndef SourceDir
+  ; the PyInstaller folder to wrap; /DSourceDir=..\dist_test\LARMOR builds
+  ; from a side folder when dist\LARMOR is locked by a running instance
+  #define SourceDir "..\dist\LARMOR"
+#endif
 
 [Setup]
 AppId={{A5B3F6C2-7D41-4E0B-9F3A-2C6E8D1B4F70}

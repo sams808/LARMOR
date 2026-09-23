@@ -65,6 +65,7 @@ class _ChromeMixin:
         self.explorer.open_requested.connect(self._explorer_open)
         self.explorer.batch_requested.connect(self.run_batch_fit)
         self.explorer.inventory_requested.connect(self.open_session_inventory)
+        self.explorer.overlay_requested.connect(self.add_overlay_path)
         self.explorer_dock.setWidget(self.explorer)
         self.explorer_dock.setMinimumWidth(230)
         self.addDockWidget(Qt.LeftDockWidgetArea, self.explorer_dock)
@@ -100,6 +101,7 @@ class _ChromeMixin:
         self.datasets_panel.color_changed.connect(self.overlay_set_color)
         self.datasets_panel.offset_changed.connect(lambda _: self._refresh_overlays())
         self.datasets_panel.compare_requested.connect(self.compare_overlays)
+        self.datasets_panel.match_changed.connect(lambda _: self._refresh_overlays())
         self.datasets_dock.setWidget(self.datasets_panel)
         self.addDockWidget(Qt.LeftDockWidgetArea, self.datasets_dock)
         # stack the left docks as tabs so they share one footprint (kinder on

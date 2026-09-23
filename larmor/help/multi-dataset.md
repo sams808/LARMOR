@@ -23,6 +23,21 @@ marker with the differing parameter under its name. Promote an overlay to
 and the previous active demotes back to an overlay. The active spectrum is always
 the single object the 1D fitter works on, so overlays never disturb a fit.
 
+**Quick overlays, to check something against the spectrum on screen.** Three
+ways add a compared spectrum without leaving the main window, and none of
+them touches the active spectrum or its fit: **Shift + drop** one or several
+files onto the plot (a plain drop still *opens* the file), **File ▸ Overlay a
+spectrum…** (Ctrl + Shift + A), or right-click an EXPNO in the Explorer and
+choose **Overlay on the current spectrum**. **View ▸ Overlays** (Ctrl + Shift + V)
+hides and shows every compared spectrum at once without removing it — adding
+a new one turns the display back on — and **View ▸ Clear overlays** drops them
+all. In the Datasets dock, **match height** scales each overlay so its maximum
+equals the active spectrum's, so shapes compare when intensities do not
+(display only: the stored data, the fit and every export are unchanged);
+**stack offset** spreads them out instead. The status bar names what was
+overlaid; a file that cannot be read as a 1D spectrum is refused in the
+status bar, never with a dialog.
+
 **File ▸ Save project…** (Ctrl + Shift + P) captures the whole session as one
 reopenable `.larproj.json` file — every row of the **Workspaces** dock, in
 order: 1D spectra with their processing, fit *and overlays* (overlays by

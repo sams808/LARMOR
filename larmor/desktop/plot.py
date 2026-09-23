@@ -132,6 +132,9 @@ class SpectrumView(pg.PlotWidget):
     paddle_released = Signal(int)
     cursor_moved = Signal(float, float)       # live x/y for the status bar
     file_dropped = Signal(str)                # a data file dragged onto the plot
+    files_dropped_overlay = Signal(list)      # Shift + drop: overlay, keep the fit
+    #: View > Overlays off: the compared spectra stay listed but are not drawn
+    _overlays_hidden = False
     calibrate_picked = Signal(float)          # snapped peak ppm to reference
     measure_changed = Signal(float, float)    # two ppm cursors (ruler)
     #: a REAL frequency-domain spectrum was placed on the canvas
@@ -414,7 +417,13 @@ class SpectrumView(pg.PlotWidget):
     def dropEvent(self, ev):
         urls = ev.mimeData().urls()
         if urls:
-            self.file_dropped.emit(urls[0].toLocalFile())
+            paths = [u.toLocalFile() for u in urls if u.toLocalFile()]
+            if paths and (ev.modifiers() & Qt.ShiftModifier):
+                # Shift held: compare on top of the active spectrum, the
+                # fit stays; every dropped file becomes an overlay
+                self.files_dropped_overlay.emit(paths)
+            else:
+                self.file_dropped.emit(paths[0] if paths else urls[0].toLocalFile())
             ev.acceptProposedAction()
         else:
             super().dropEvent(ev)
@@ -1022,8 +1031,15 @@ class SpectrumView(pg.PlotWidget):
                              name=label, antialias=True)
             self._tune_curve(item)
             item.setZValue(-10)
-            item.setVisible(self._domain == "freq")
+            item.setVisible(self._domain == "freq" and not self._overlays_hidden)
             self._overlay_items.append(item)
+
+    def set_overlays_hidden(self, hidden: bool):
+        """View > Overlays: hide or show every compared spectrum at once
+        without removing it from the Datasets dock."""
+        self._overlays_hidden = bool(hidden)
+        for it in self._overlay_items:
+            it.setVisible(self._domain == "freq" and not self._overlays_hidden)
 
     # ---------- markers (legacy InfiniteLine API kept for tests) ----------
     def set_markers(self, positions: list[tuple[int, float, bool]]):

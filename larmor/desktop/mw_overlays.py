@@ -31,6 +31,52 @@ class _OverlaysMixin:
             return
         self._add_overlay(label, ppm, amp, path, info)
 
+    def add_overlay_path(self, path: str) -> bool:
+        """Overlay one more spectrum on the active one -- Shift + drop, the
+        Explorer's right-click, File > Overlay a spectrum... The active
+        spectrum and its fit stay exactly as they are; the new curve is
+        drawn behind them in its own colour and listed in the Datasets
+        dock (colour, offset, match height, remove, make active)."""
+        try:
+            label, ppm, amp, info = self._read_overlay_source(path)
+        except Exception as exc:                          # noqa: BLE001
+            self.statusBar().showMessage(
+                f"cannot overlay {Path(path).name}: {exc}")
+            return False
+        self._add_overlay(label, ppm, amp, path, info)
+        act = getattr(self, "actOverlaysVisible", None)
+        if act is not None and not act.isChecked():
+            act.setChecked(True)                          # an added overlay is meant to be seen
+            self.view.set_overlays_hidden(False)          # setChecked emits no triggered()
+        self.statusBar().showMessage(
+            f"overlaid {label} -- {len(self._overlays)} compared spectrum(s); "
+            "Datasets dock: colour, stack offset, match height, remove, make active")
+        return True
+
+    def add_overlay_paths(self, paths):
+        """Shift + drop of several files: every one becomes an overlay."""
+        n = sum(1 for p in paths if self.add_overlay_path(p))
+        if len(paths) > 1:
+            self.statusBar().showMessage(
+                f"overlaid {n} of {len(paths)} dropped spectra -- "
+                f"{len(self._overlays)} compared spectrum(s)")
+        return n
+
+    def clear_overlays(self):
+        n = len(self._overlays)
+        self._overlays.clear()
+        self._refresh_overlays()
+        self.statusBar().showMessage(
+            f"removed {n} overlay(s)" if n else "no overlays to remove")
+
+    def _toggle_overlays_visible(self, on: bool):
+        """View > Overlays (Ctrl+Shift+V): hide or show the compared spectra
+        without losing them."""
+        self.view.set_overlays_hidden(not on)
+        if self._overlays:
+            self.statusBar().showMessage(
+                f"{len(self._overlays)} overlay(s) " + ("shown" if on else "hidden"))
+
     def compare_overlays(self):
         """Datasets ▸ Compare acquisition…: acqus / procs / auditp of the
         active spectrum and every overlay with a source, in the shared
@@ -172,10 +218,21 @@ class _OverlaysMixin:
         if self.exp_amp.size:
             span = float(np.nanmax(self.exp_amp) - np.nanmin(self.exp_amp)) or 1.0
         step = self.datasets_panel.offset.value() * span
+        # 'match height': every overlay scaled so its maximum equals the
+        # active spectrum's -- shapes compare, intensities do not (display
+        # only; the stored arrays and any export are untouched)
+        match = getattr(self.datasets_panel, "match", None)
+        match = bool(match is not None and match.isChecked() and self.exp_amp.size)
+        peak = float(np.nanmax(self.exp_amp)) if match else 0.0
         drawn = []
         for k, ov in enumerate(self._overlays):
             if ov.get("visible", True):
-                drawn.append((ov["ppm"], ov["amp"] + step * (k + 1),
+                amp = np.asarray(ov["amp"], float)
+                if match and peak > 0 and amp.size:
+                    m = float(np.nanmax(amp))
+                    if m > 0:
+                        amp = amp * (peak / m)
+                drawn.append((ov["ppm"], amp + step * (k + 1),
                               ov["color"], ov["label"]))
         self.view.set_overlays(drawn)
         label, detail = "", ""

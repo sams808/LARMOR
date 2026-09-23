@@ -27,6 +27,16 @@ Manuals and tutorials are inside the app: Help > Manuals, Help > Tutorials.
 If the window does not appear: a file LARMOR_crash.log is written in your
 user folder (C:\Users\<you>\). Send it with your report.
 
+If the window opens but Fit does nothing: open a command prompt in the
+LARMOR folder (Shift + right-click > "Open PowerShell window here") and run
+
+    .\LARMOR.exe --selftest
+
+It fits a test spectrum the way the Fit button does and writes
+C:\Users\<you>\LARMOR_selftest.log with every step and any error.
+Send that file with your report (add your own spectrum's path after
+--selftest to test on your data).
+
 Updating: run the new setup (it replaces the old version in place) or delete
 the old LARMOR folder and unzip the new archive. Your saved recipes, projects
 and figures live wherever you saved them, not in the program folder.

@@ -70,6 +70,7 @@ class ExplorerPanel(QWidget):
     open_requested = Signal(str)        # openable data path
     batch_requested = Signal(list)      # openable paths for a batch fit
     inventory_requested = Signal(str)   # a month or sample folder -> Session inventory
+    overlay_requested = Signal(str)     # an EXPNO -> overlay on the active spectrum
 
     def __init__(self):
         super().__init__()
@@ -244,6 +245,8 @@ class ExplorerPanel(QWidget):
         m = QMenu(self)
         if (Path(path) / "acqus").exists():          # an EXPNO: it has a story
             m.addAction("Dataset info…", lambda: self._dataset_info(path))
+            m.addAction("Overlay on the current spectrum  (compare, keeps the fit)",
+                        lambda: self.overlay_requested.emit(path))
             m.addSeparator()
         else:                                        # a month or sample folder
             m.addAction("Session inventory…  (production picks for every sample)",

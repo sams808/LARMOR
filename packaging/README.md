@@ -68,6 +68,25 @@ dist/LARMOR-<version>-win64.zip`) is the place to publish both once a run on a
 machine without a development setup has confirmed them. The build is not
 code-signed, so SmartScreen warns on the first launch.
 
+## Self-test on a user's machine
+
+`LARMOR.exe --selftest` (or `--selftest <path to a 1r / EXPNO / recipe>`)
+fits a Gauss/Lorentz and a Czjzek line on a synthetic ²⁷Al spectrum (or on
+the given file) twice — through the Qt-free core and through the window's
+own Fit path (add a line, run the FitWorker thread, wait) — and appends every
+step, timing and traceback to `%USERPROFILE%\LARMOR_selftest.log`, exit code
+0/1. It is the diagnostic for "the app opens but Fit does nothing": the log
+says which stage fails and why (a module missing from the bundle, a thread
+that never finishes, a dialog the user did not see). `python -m
+larmor.selftest` runs the same from a development install; the frozen
+0.14.1 build passes it on the build machine (core fits 0.1 s / 23 s, desktop
+fits 1 s / 10 s).
+
+A build cannot overwrite `dist\LARMOR\` while a copy of it is running
+(`PermissionError` on `LARMOR.exe` and the build silently ends with the OLD
+exe in place — check the timestamp). Close the app, or build to a side folder
+with `--distpath dist_test` and wrap that with `/DSourceDir=..\dist_test\LARMOR`.
+
 ## First run
 
 - Kernel caches (the one-time Czjzek simulation per field/spin rate) are held

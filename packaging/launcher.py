@@ -33,6 +33,14 @@ def _crash_log(exc_type, exc, tb):
 
 def main() -> int:
     sys.excepthook = _crash_log
+    if "--selftest" in sys.argv[1:]:
+        # `LARMOR.exe --selftest`: fit a synthetic spectrum through the core
+        # and through the window, write ~/LARMOR_selftest.log, exit 0/1 --
+        # the diagnostic for "the app opens but Fit does nothing"
+        from larmor.selftest import run, spectrum_arg
+
+        args = [a for a in sys.argv[1:] if a != "--selftest"]
+        return run(gui="--no-gui" not in args, spectrum=spectrum_arg(args))
     from larmor.desktop.app import main as desktop_main
 
     return desktop_main()
