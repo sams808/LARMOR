@@ -34,6 +34,25 @@ def _load_any(path: str, replay: bool = True):
     return load_any(path, replay=replay)
 
 
+def keep_fit_prompt(existing_nucleus, incoming_nucleus) -> tuple[str, bool]:
+    """Text and default answer of the "Keep fit parameters?" question.
+
+    Keeping the open lines for a new spectrum is the dmfit habit for the SAME
+    nucleus (a composition series). Across nuclei it puts, say, 27Al Czjzek
+    sites on a 31P spectrum -- the prompt used to default to Yes and swap
+    the nucleus silently -- so the default flips to No and the text says why.
+    """
+    a = str(existing_nucleus or "").strip()
+    b = str(incoming_nucleus or "").strip()
+    if not a or not b or a == b:
+        return ("A fit is already open. Keep the current lines and fit them "
+                "against the new spectrum?\n\n"
+                "Yes = keep the lines · No = start empty", True)
+    return (f"A fit is already open, but it is a {a} model and this spectrum "
+            f"is {b}. Keeping the lines would fit {a} sites to {b} data.\n\n"
+            "No = start empty (recommended) · Yes = keep the lines anyway", False)
+
+
 def _nmrdata_to_data2d(data):
     """Convert a frequency-domain 2D NMRData into a twod.Data2D for display."""
     from larmor.twod import Data2D
@@ -353,12 +372,12 @@ class _FilesMixin:
         existing = self.recipe.get("sites") if self.recipe else None
         incoming = recipe.get("sites")
         if keep_fit is None and existing and not incoming:
+            text, default_yes = keep_fit_prompt(self.recipe.get("nucleus"),
+                                                recipe.get("nucleus"))
             btn = QMessageBox.question(
-                self, "Keep fit parameters?",
-                "A fit is already open. Keep the current lines and fit them "
-                "against the new spectrum?\n\n"
-                "Yes = keep the lines · No = start empty",
-                QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+                self, "Keep fit parameters?", text,
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes if default_yes else QMessageBox.No)
             keep_fit = btn == QMessageBox.Yes
         if keep_fit and existing and not incoming:
             recipe["sites"] = existing

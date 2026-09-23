@@ -143,8 +143,10 @@ it) before treating any integral as quantitative.
   delay (the quantitativity conditions of §6 above);
 - per site: δiso, FWHM, population with **uncertainties** (and how they
   were obtained: covariance / MC / χ² profile);
-- for Czjzek sites: **σ and/or P_Q = √5·σ, with the convention stated** —
-  see *Lineshapes ▸ Czjzek width conventions* (dmfit's displayed CQ is 4σ);
+- for Czjzek sites: **σ and/or √⟨P_Q²⟩ = 2√5·σ, with the convention stated**
+  (σ is the width LARMOR stores and fits, half of Czjzek's own σ_Cz; dmfit's
+  sCZ_CQ = 2σ and its displayed CQ = 4σ) — see *Lineshapes ▸ Czjzek width
+  conventions*;
 - the parameter ranges used in the restricted fit (one sentence);
 - the **Report dock's "Copy methods"** sentence includes the essentials
   automatically.

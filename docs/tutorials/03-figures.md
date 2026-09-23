@@ -21,7 +21,8 @@ Load your data, then open **Plotting > Plotting studio…** (or
 and its fit if there is one). The **Template** dropdown offers named starting
 points — a stacked series, a deconvolution grid, a composition trend, and so
 on — each pre-filling the layout so you only add your traces. Edit, click
-**Preview**, then **Export…** (png + svg + pdf at 600 dpi, ready for the
+**Preview**, then **Export…** (one file in the format you pick — PNG at print
+resolution, or SVG / PDF as vectors; `figures.export()` below writes all three at once — ready for the
 journal). **Save spec…** and **Load spec…** round-trip the JSON. A figure
 changed in the studio also stays in the **Workspaces** dock when the studio
 closes (Enter or double-click reopens it) and is saved with **File > Save

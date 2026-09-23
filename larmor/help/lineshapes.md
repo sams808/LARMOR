@@ -225,13 +225,14 @@ excited and a known spin rate; large C_Q pushes satellites out of range.
 ### Quad CT + CSA — `quad_csa`
 
 A single site carrying **both** a second-order quadrupolar interaction *and* a
-shielding anisotropy, with their relative orientation. Both tensors are simulated
-together (mrsimulator).
+shielding anisotropy. Both tensors are simulated together (mrsimulator) with
+**coincident principal axes**: the model carries no Euler angles, so a site
+whose EFG and shielding tensors are tilted against each other is approximated.
 
 **Use it for** nuclei where neither interaction is negligible (e.g. ⁵¹V, ⁷¹Ga,
 some ⁸⁷Rb / ²⁷Al at high field). **Limitations:** more parameters (C_Q, η_Q, ζ,
-η_CS and their relative orientation) — needs multi-field or high-quality data to
-avoid correlations.
+η_CS) — needs multi-field or high-quality data to avoid correlations; the
+coincident-axes assumption is stated, not fitted.
 
 ---
 
