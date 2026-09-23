@@ -23,9 +23,11 @@ def _calc(**kw) -> dft.MagresCalc:
     return dft.MagresCalc(**base)
 
 
-def test_weighted_line_matches_infinite_field_diso_bit_for_bit():
-    """The closed form was factored out of infinite_field_diso: same
-    arithmetic order, so the QCPMG two-field numbers are unchanged."""
+def test_weighted_line_matches_infinite_field_diso():
+    """The closed form shares its algebra with infinite_field_diso (which
+    adds the sigma policy and the chi2 scaling inline): slope, intercept and
+    the unscaled sigma(delta_iso) agree to rounding wherever the QCPMG fit
+    propagates an error at all (a two-point unweighted fit reports NaN)."""
     I, diso, cq, eta = 1.5, -50.0, 3.0, 0.7
     sets = [
         [FieldPoint(n, dcg_at_field(diso, cq, n, I, eta)) for n in (58.726, 81.599)],
@@ -39,9 +41,14 @@ def test_weighted_line_matches_infinite_field_diso_bit_for_bit():
         y = np.array([p.dcg_ppm for p in pts])
         err = np.array([p.dcg_err_ppm or 1.0 for p in pts])
         slope, intercept, cov = weighted_line(x, y, err)
-        assert slope == res.slope and intercept == res.intercept
-        assert float(np.sqrt(cov[1, 1])) == res.delta_iso_err_ppm
+        assert slope == pytest.approx(res.slope, rel=1e-9)
+        assert intercept == pytest.approx(res.intercept, rel=1e-9)
+        if np.isfinite(res.delta_iso_err_ppm):
+            assert float(np.sqrt(cov[1, 1])) == pytest.approx(
+                res.delta_iso_err_ppm, rel=1e-9)
         assert cov[0, 1] == cov[1, 0]
+    # the last set propagates its sigmas: the QCPMG fit must not report NaN
+    assert np.isfinite(infinite_field_diso(sets[-1], spin=I, eta=eta).delta_iso_err_ppm)
     with pytest.raises(ValueError, match="degenerate"):
         weighted_line([1.0, 1.0], [0.0, 1.0], [1.0, 1.0])
 

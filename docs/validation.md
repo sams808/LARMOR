@@ -228,9 +228,31 @@ $\delta_\text{iso}=57.8\pm0.5$ ppm, $C_Q=4.16$ MHz — within error. In the
 large-$C_Q$ limit only the CT is excited at both fields, so selective and
 non-selective points lie on the same line (Baasner 2014). *(b)* Sandland
 Eq. 2. The CT linewidth separates into a quadrupolar part
-$W_q\propto 1/\nu_0^2$ (narrows at high field) and a field-independent
-chemical-shift-distribution part $W_\text{csd}$; two fields determine the
-split (here recovered as $W_\text{csd}=8.0$ ppm).
+$W_q\propto 1/\nu_0^2$ (narrows at high field) and a field-independent part
+$W_\text{csd}$ — everything constant in ppm, the shift distribution *and*
+the CSA; two or more fields determine the split (here recovered as
+$W_\text{csd}=8.0$ ppm on Gaussian-convolved lines, the case Eq. 2 is exact
+for; on a pure CT pattern it returns a spurious 10–17 ppm, which the tool
+gates).
+
+**Distribution case (regression `tests/test_qcpmg_fields.py`,
+`test_manifold_and_centreband_modes_on_simulated_patterns`).** A $^{35}$Cl
+Czjzek glass (200 mrsimulator sites drawn at $\sigma = 1.0$ MHz,
+$\delta_\text{iso} = -70$ ppm, 10 ppm Gaussian) simulated under MAS at the
+tutorial's fields and rates, 78.354 MHz / 16 kHz and 107.811 MHz / 20 kHz.
+The whole-manifold centre of gravity at the two fields extrapolates to
+$\delta_\text{iso} = -69.99$ ppm and $P_Q = 4.310$ MHz against the drawn
+sample's $\sqrt{\langle P_Q^2\rangle} = 4.306$ MHz (the first-moment
+theorem: the slope of a distribution measures the rms $P_Q$, not a single
+$C_Q$; asserted within 1 ppm and 3 %). The first-minima window on the same
+spectra is wider than $\nu_r$ at both fields, drifts by 11 ppm at 78 MHz
+when doubled (flagged *CG not converged*) and extrapolates to
+$-81.3$ ppm with a slope that is not significantly negative. The centreband
+window is refused for the glass (29 % of the intensity outside
+$\pm\nu_r/2$ at 78 MHz) and accepted for a single crystalline site
+($C_Q = 3$ MHz, where it reproduces Eq. 1 to 0.06 ppm). Static, the full-axis
+centroids of the same glass recover $\delta_\text{iso}$ within 1 ppm and the
+rms $P_Q$ within 3 %.
 
 ### 5.6 Analytic lineshapes <a name="fig6"></a>
 
@@ -456,7 +478,8 @@ the coadded sum echo rather than the spikelet comb.
 **Two-field $\delta_\text{iso}$ / width** (`qcpmg_fields.py`, validated in
 [Fig. 5](#fig5)): Sandland Eq. 1 gives $\delta_\text{iso}$ and $C_Q$ from
 $\delta_\text{cg}$ vs $1/\nu_0^2$; Eq. 2 splits the width into
-$W_q\propto 1/\nu_0^2$ and a field-independent $W_\text{csd}$. The
+$W_q\propto 1/\nu_0^2$ and a field-independent $W_\text{csd}$ (shift
+distribution + CSA) over two or more fields. The
 forward/inverse round-trip is exact and the propagated errors reproduce the
 Baasner 2014 uncertainties (±~12 ppm $\delta_\text{iso}$, ±~0.3 MHz $C_Q$
 for a two-field pair). Selective and non-selective fields combine validly in
@@ -533,8 +556,9 @@ field, so all centroids lie on a common line; the isotropic shift and
 quadrupolar coupling were obtained by extrapolating $\delta_\text{cg}$
 versus $1/\nu_0^2$ to infinite field (Sandland et al. 2004, Eq. 1), assuming
 η = [0.7]. The central-transition linewidth was separated into quadrupolar
-($\propto 1/\nu_0^2$) and field-independent chemical-shift-distribution
-contributions (Sandland Eq. 2)."*
+($\propto 1/\nu_0^2$) and field-independent contributions (Sandland Eq. 2);
+the latter contains the distribution of isotropic shifts and the
+chemical-shift anisotropy."*
 
 ---
 
@@ -552,8 +576,11 @@ contributions (Sandland Eq. 2)."*
    $\delta_\text{iso}$ is the chemical shift and $C_Q/P_Q$ the quadrupolar
    product.
 4. **Two-field QCPMG** — state the assumed η and that all fields are in the
-   large-$C_Q$ (CT-only) limit; the reported ± errors already reflect the
-   two-field, unknown-η uncertainty.
+   large-$C_Q$ (CT-only) limit. The ± on $\delta_\text{iso}$, $P_Q$ and $C_Q$
+   propagate the δcg uncertainties only; at the assumed η = 0.7 the η
+   assumption adds a separate systematic of +7.9 % (η = 0) / −6.6 % (η = 1)
+   on $C_Q$ and nothing on $P_Q$ — quote $P_Q$ ± or give $C_Q$ as its range
+   over η; do not fold the range into the ±.
 5. **CSA** — extract CSA with `csa_mas`, never `sidebands`; confirm the ζ
    sign convention.
 6. **dmfit interop** — LARMOR's own fits and reported numbers are independent

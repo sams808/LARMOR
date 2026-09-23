@@ -1110,15 +1110,47 @@ class QcpmgDialog(QDialog):
             "LARMOR spectrum (*.csv)")
         if not path:
             return
-        title = (self.meta.get("title", "") or "").splitlines()
-        spectra.write_csv(path, self._ppm, self._spec, {
+        spectra.write_csv(path, self._ppm, self._spec, self.dataset_meta())
+        self.res.setText(f"dataset written — {Path(path).name}")
+
+    def dataset_meta(self) -> dict:
+        """The header of a saved sum-echo dataset.
+
+        ``spin_rate_Hz`` stays 0: a sum-echo spectrum has no sideband
+        manifold for the workbench to MODEL (the loader maps that key onto
+        Recipe.spin_rate_Hz). The rotor rate the train was acquired at is
+        carried under ``qcpmg_rotor_Hz`` (with ``mas_uncertain`` from the
+        acqus/title cross-check) so the multi-field tools can place the
+        sidebands and judge the window. Mode, LB, referencing (SF, SR) and
+        the source EXPNO are recorded for the report's provenance line."""
+        from larmor import qcpmg
+        mag = self.magMode.isChecked()
+        sr = self.meta.get("sr_hz")
+        referenced = bool(qcpmg.carrier_ppm(self.meta)[1]) if self.meta else False
+        if sr is not None:
+            from larmor.referencing import UNREFERENCED_HZ
+            referenced = referenced and abs(float(sr)) > UNREFERENCED_HZ
+        meta = {
             "nucleus": self.meta.get("nucleus", ""),
             "larmor_MHz": self.meta.get("larmor_MHz", 0.0),
             "spin_rate_Hz": 0.0,
-            "sample": (title[0] if title else "")
+            "sample": qcpmg.sample_name(self.meta.get("title", ""))
             + f" · QCPMG sum echo (LB {self.lb.value():,.0f} Hz"
-            + (", magnitude)" if self.magMode.isChecked() else ")")})
-        self.res.setText(f"dataset written — {Path(path).name}")
+            + (", magnitude)" if mag else ")"),
+            "qcpmg_rotor_Hz": float(self.meta.get("spin_rate_Hz", 0.0) or 0.0),
+            "mas_uncertain": bool(self.meta.get("mas_uncertain", False)),
+            "spectrum_mode": "magnitude(mc)" if mag else "absorption",
+            "lb_Hz": float(self.lb.value()),
+            "carrier_ppm": float(self._carrier),
+            "referenced": referenced,
+            "source": str(self.source or self.meta.get("expno", "")),
+            "title": str(self.meta.get("title", "") or ""),
+        }
+        if self.meta.get("sf_MHz") is not None:
+            meta["sf_MHz"] = float(self.meta["sf_MHz"])
+        if sr is not None:
+            meta["sr_hz"] = float(sr)
+        return meta
 
     def _send_infinite(self):
         """Hand this spectrum, with its measured window, to the shared
@@ -1135,13 +1167,20 @@ class QcpmgDialog(QDialog):
                              "unphased spectrum is meaningless")
             return
         from larmor.desktop.qcpmg_fields_dialog import shared_fields_dialog
-        dlg = shared_fields_dialog(self.parent(),
-                                   self.meta.get("nucleus", ""))
-        dlg.add_dataset_spectrum(
+        nuc = str(self.meta.get("nucleus", "") or "")
+        dlg = shared_fields_dialog(self.parent(), nuc)
+        row = dlg.add_dataset_spectrum(
             float(self.meta.get("larmor_MHz", 0.0) or 0.0),
             self._ppm, self._spec, window=self.region.getRegion(),
-            magnitude=mag)
+            magnitude=mag, nucleus=nuc,
+            source=f"sum-echo {self.source or self.meta.get('expno', '')}"
+                   f" (LB {self.lb.value():,.0f} Hz)",
+            rotor_Hz=float(self.meta.get("spin_rate_Hz", 0.0) or 0.0))
         dlg.show(); dlg.raise_(); dlg.activateWindow()
+        if row < 0:
+            self.res.setText(f"not sent: the infinite-field dialog holds "
+                             f"{dlg._nucleus} rows and this spectrum is {nuc}")
+            return
         self.res.setText("sent to infinite-field δiso — process the other "
                          "field's dataset and send it too, then Compute there")
 
@@ -1381,10 +1420,14 @@ class QcpmgDialog(QDialog):
             + " (QCPMG)",
             "nucleus": self.meta.get("nucleus", ""),
             "larmor_MHz": self.meta.get("larmor_MHz", 0.0),
-            # a QCPMG sum-echo spectrum has no MAS sideband manifold to model;
-            # forwarding a stale acqus MASR would silently add sidebands
+            # spin_rate_Hz is what the workbench MODELS: a sum-echo spectrum
+            # keeps its sidebands (they are in the data), but the fit models
+            # them only when asked, so the recipe rate stays 0 here; the
+            # acquisition's rotor rate travels under its own key for the
+            # multi-field tools (window / sideband checks)
             "spin_rate_Hz": 0.0,
             "mas_uncertain": False,
+            "qcpmg_rotor_Hz": float(self.meta.get("spin_rate_Hz", 0.0) or 0.0),
             "qcpmg_period_pts": self.period.value(),
             "qcpmg_split_offset": self.offset.value(),
             "qcpmg_echo_top": self.top.value(),

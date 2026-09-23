@@ -191,3 +191,84 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
         tr.write_sep("-", "LARMOR real-data layer: complete "
                           f"(all {len(ALL_DATASETS)} datasets present)",
                      green=True)
+
+
+
+# --------------------------------------------------------------------------
+# Simulated 35Cl central-transition patterns for the QCPMG multi-field tests
+# (direct mrsimulator: every site carries the same CT area, so the whole-
+# manifold centre of gravity obeys the first-moment theorem exactly).
+
+def simulate_ct_single(nucleus: str, larmor_MHz: float, rotor_Hz: float,
+                       cq_MHz: float, eta: float, delta_iso_ppm: float,
+                       span_ppm=(-600.0, 400.0), npts: int = 8000,
+                       shift_fwhm_ppm: float = 3.0, n_ssb: int = 8):
+    """(ppm, amp) of one crystalline site's CT pattern (quad_ct's own
+    mrsimulator route, ``larmor.models._singlesite.simulate_single_site``),
+    shifted to ``delta_iso_ppm`` and Gaussian-broadened."""
+    import numpy as np
+    from larmor.models._singlesite import simulate_single_site
+
+    xs, ys = simulate_single_site(
+        nucleus, int(round(larmor_MHz * 1000)), int(round(rotor_Hz)),
+        int(round(cq_MHz * 1000)), int(round(eta * 1000)), 0, 0, True, n_ssb,
+        float(span_ppm[0]), float(span_ppm[1]), int(npts))
+    x = np.asarray(xs, float) + delta_iso_ppm
+    y = np.asarray(ys, float)
+    return x, _gauss_broaden(x, y, shift_fwhm_ppm)
+
+
+def simulate_ct_czjzek(nucleus: str, larmor_MHz: float, rotor_Hz: float,
+                       sigma_MHz: float, delta_iso_ppm: float, n: int = 200,
+                       seed: int = 7, span_ppm=(-3000.0, 2000.0),
+                       npts: int = 16384, shift_fwhm_ppm: float = 10.0,
+                       n_ssb: int = 16):
+    """(ppm, amp, rms_PQ_of_sample) for a Czjzek distribution of ``n`` sites
+    (mrsimulator's CzjzekDistribution in LARMOR's sigma convention), each
+    at ``delta_iso_ppm``; the returned rms P_Q is that of the DRAWN sample,
+    which is what the first-moment theorem predicts for this spectrum."""
+    import numpy as np
+    from mrsimulator import Simulator, Site, SpinSystem
+    from mrsimulator.method import SpectralDimension
+    from mrsimulator.method.lib import BlochDecayCTSpectrum
+    from mrsimulator.models import CzjzekDistribution
+    from mrsimulator.spin_system.isotope import Isotope
+
+    state = np.random.get_state()
+    try:
+        np.random.seed(seed)
+        cq, eta = CzjzekDistribution(sigma=sigma_MHz).rvs(size=n)
+    finally:
+        np.random.set_state(state)
+    b0 = larmor_MHz / abs(Isotope(symbol=nucleus).gyromagnetic_ratio)
+    systems = [SpinSystem(sites=[Site(
+        isotope=nucleus, isotropic_chemical_shift=delta_iso_ppm,
+        quadrupolar={"Cq": float(abs(c)) * 1e6, "eta": float(e)})])
+        for c, e in zip(cq, eta)]
+    method = BlochDecayCTSpectrum(
+        channels=[nucleus], magnetic_flux_density=b0, rotor_frequency=rotor_Hz,
+        spectral_dimensions=[SpectralDimension(
+            count=npts, spectral_width=(span_ppm[1] - span_ppm[0]) * larmor_MHz,
+            reference_offset=0.5 * (span_ppm[0] + span_ppm[1]) * larmor_MHz)])
+    sim = Simulator(spin_systems=systems, methods=[method])
+    sim.config.number_of_sidebands = n_ssb
+    sim.run()
+    ds = sim.methods[0].simulation
+    x = np.asarray(ds.x[0].coordinates.value, float)
+    y = np.asarray(ds.y[0].components[0].real, float)
+    order = np.argsort(x)
+    x, y = x[order], y[order]
+    y = _gauss_broaden(x, y, shift_fwhm_ppm)
+    rms = float(np.sqrt(np.mean(cq ** 2 * (1.0 + eta ** 2 / 3.0))))
+    return x, y / y.max(), rms
+
+
+def _gauss_broaden(x, y, fwhm_ppm: float):
+    import numpy as np
+    if fwhm_ppm <= 0:
+        return y
+    dx = float(abs(x[1] - x[0]))
+    s = fwhm_ppm / 2.3548 / dx
+    k = np.arange(-int(5 * s), int(5 * s) + 1)
+    g = np.exp(-0.5 * (k / s) ** 2)
+    return np.convolve(y, g / g.sum(), "same")

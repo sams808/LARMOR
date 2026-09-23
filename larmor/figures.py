@@ -1128,7 +1128,25 @@ def export(spec: dict, out_base: str | Path,
     saved = []
     for fmt in formats:
         target = out_base.with_suffix("." + fmt)
-        fig.savefig(target, format=fmt, dpi=dpi, bbox_inches="tight")
+        if fmt == "json":
+            # the spec itself, as a sidecar: the record of what was drawn
+            # (for infinite_field: every point with its window, mode, source)
+            import json
+            target.write_text(json.dumps(spec, indent=1, default=_json_default),
+                              encoding="utf-8")
+        else:
+            fig.savefig(target, format=fmt, dpi=dpi, bbox_inches="tight")
         saved.append(str(target))
     plt.close(fig)
     return saved
+
+
+def _json_default(o):
+    """numpy scalars / arrays and tuples inside a figure spec."""
+    if isinstance(o, np.ndarray):
+        return o.tolist()
+    if isinstance(o, (np.floating, np.integer)):
+        return o.item()
+    if isinstance(o, (set, tuple)):
+        return list(o)
+    return str(o)

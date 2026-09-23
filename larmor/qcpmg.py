@@ -31,7 +31,8 @@ Reference: `QCPMG processing in ssNake` (2019) and Larsen et al.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -200,6 +201,25 @@ def magnitude_spectrum(spec: np.ndarray, *, subtract_floor: bool = True,
     return m
 
 
+_DATE_RE = re.compile(r"^\s*\d{1,4}[/.-]\d{1,2}[/.-]\d{2,4}\s*")
+_SAMPLE_RE = re.compile(r"sample|rotor|LAW", re.IGNORECASE)
+
+
+def sample_name(title: str) -> str:
+    """The sample line of a Bruker title: the first line naming a sample
+    (/sample|rotor|LAW/i) with a leading date token stripped, else the first
+    non-empty line. MagLab titles open with a date ('12/09/2025') and put
+    'Sample LAW3CL0CA' on line 2, so title[0] alone labelled every dataset
+    with the day it was measured."""
+    lines = [ln.strip() for ln in str(title or "").splitlines() if ln.strip()]
+    if not lines:
+        return ""
+    for ln in lines:
+        if _SAMPLE_RE.search(ln):
+            return _DATE_RE.sub("", ln).strip() or ln
+    return _DATE_RE.sub("", lines[0]).strip() or lines[0]
+
+
 def carrier_ppm(meta: dict) -> tuple[float, bool]:
     """Transmitter offset in ppm, correctly referenced, and whether it is.
 
@@ -269,6 +289,112 @@ def cg_window(ppm: np.ndarray, y: np.ndarray, *, rel_floor: float = 0.05
     return float(max(x[lo_i], x[hi_i])), float(min(x[lo_i], x[hi_i]))
 
 
+#: a spectrum whose positive part repeats at a lag shorter than this many
+#: points is not a comb (adjacent-sample noise correlation)
+COMB_MIN_PERIOD_PTS = 4
+#: autocorrelation modulation depth (first minimum to the following maximum)
+#: that separates a spikelet comb from a smooth band with noise
+COMB_MIN_DEPTH = 0.2
+#: a comb needs at least this many spikelets inside the envelope's window
+COMB_MIN_SPIKELETS = 5
+
+
+def detect_comb(ppm: np.ndarray, y: np.ndarray) -> tuple[int, float, float]:
+    """(period_pts, period_ppm, depth) of a spikelet comb in a SPECTRUM, or
+    (0, 0.0, depth) when the trace is a smooth band.
+
+    The positive part of the trace is autocorrelated; a comb gives a deep
+    modulation -- the correlation falls to a minimum between spikelets and
+    rises again at one spikelet spacing (0.96 at 56 points = 6.8 ppm on a
+    real 35Cl QCPMG 1r). Noise on a smooth band rises immediately (lag 2-3)
+    with a depth of ~0.01, which is why the first MINIMUM is located before
+    the following maximum and a depth of at least ``COMB_MIN_DEPTH`` is
+    required.
+    """
+    ppm = np.asarray(ppm, float); y = np.asarray(y, float)
+    n = y.size
+    if n < 64:
+        return 0, 0.0, 0.0
+    order = np.argsort(ppm)
+    x, v = ppm[order], y[order]
+    v = np.clip(v - float(np.median(v)), 0.0, None)
+    if not np.any(v > 0):
+        return 0, 0.0, 0.0
+    ac = np.correlate(v, v, "full")[n - 1:]
+    if ac[0] <= 0:
+        return 0, 0.0, 0.0
+    ac = ac / ac[0]
+    half = n // 2
+    d = np.diff(ac[:half])
+    # the first local minimum after the central lobe (first sign change)
+    mins = np.where((d[:-1] < 0) & (d[1:] >= 0))[0] + 1
+    if mins.size == 0:
+        return 0, 0.0, 0.0
+    i_min = int(mins[0])
+    k = i_min + int(np.argmax(ac[i_min:half]))
+    depth = float(ac[k] - ac[i_min])
+    dx = float(np.median(np.diff(x))) if n > 1 else 0.0
+    if k < COMB_MIN_PERIOD_PTS or depth < COMB_MIN_DEPTH:
+        return 0, 0.0, depth
+    return int(k), float(k * dx), depth
+
+
+@dataclass
+class WindowSeed:
+    """A proposed centre-of-gravity window and how it was found."""
+
+    hi_ppm: float
+    lo_ppm: float
+    comb: bool = False            # the trace is a spikelet comb
+    period_ppm: float = 0.0       # spikelet spacing (ppm) when it is
+    n_spikelets: int = 0          # spikelets inside the seeded window
+    note: str = ""
+
+    @property
+    def window(self) -> tuple[float, float]:
+        return (self.lo_ppm, self.hi_ppm)
+
+
+def seed_window(ppm: np.ndarray, y: np.ndarray, meta: dict | None = None
+                ) -> WindowSeed:
+    """The window to propose for a δ_CG measurement: :func:`cg_window` on the
+    trace itself, or -- when the trace is a spikelet COMB (a TopSpin 1r of a
+    QCPMG EXPNO) -- on its envelope.
+
+    The first-minima walk of :func:`cg_window` stops at the first gap of a
+    comb, so on a QCPMG 1r it returns ONE spikelet (measured: (-139.9, -73.2)
+    and δcg -105.1 on a real 35Cl 1r whose sum-echo window is (-206.8, -35.4)
+    and δcg -112.8 -- 7.7 ppm, 8.6 ppm on δiso through the low-field lever).
+    The comb is detected from the DATA (:func:`detect_comb`); a max-filter
+    over one spikelet period gives the envelope, whose first-minima window
+    spans the band ((-208.1, -38.8) on that dataset, δcg -114.1). The
+    pulse-program name in ``meta`` only sharpens the wording.
+    """
+    ppm = np.asarray(ppm, float); y = np.asarray(y, float)
+    hi, lo = cg_window(ppm, y)
+    k, period_ppm, _depth = detect_comb(ppm, y)
+    if k <= 0:
+        return WindowSeed(hi, lo)
+    from scipy.ndimage import maximum_filter1d
+    order = np.argsort(ppm)
+    x, v = ppm[order], y[order]
+    env = maximum_filter1d(v, size=int(k), mode="nearest")
+    ehi, elo = cg_window(x, env)
+    if not (np.isfinite(ehi) and np.isfinite(elo)) or ehi <= elo:
+        return WindowSeed(hi, lo)
+    n_spk = int(round((ehi - elo) / period_ppm)) if period_ppm > 0 else 0
+    if n_spk < COMB_MIN_SPIKELETS:
+        return WindowSeed(hi, lo)
+    pp = str((meta or {}).get("pulse_program", "") or "").lower()
+    what = ("a QCPMG spikelet spectrum" if "cpmg" in pp
+            else "a spikelet comb")
+    note = (f"this is {what} (spacing {period_ppm:.1f} ppm, {n_spk} spikelets "
+            "in the band): the window was seeded from its envelope -- prefer "
+            "the sum-echo dataset (Tools > QCPMG, Save as dataset / -> "
+            "infinite-field)")
+    return WindowSeed(float(ehi), float(elo), True, float(period_ppm), n_spk, note)
+
+
 def centre_of_gravity(ppm: np.ndarray, y: np.ndarray,
                       window: tuple[float, float] | None = None, *,
                       jitter_frac: float = 0.10
@@ -336,6 +462,329 @@ def fwhm_hz(ppm: np.ndarray, y: np.ndarray, sfo_MHz: float,
     # sigma already flags a badly placed one.
     return abs(float(ppm[above[-1]] - ppm[above[0]])) * (sfo_MHz or 0.0)
 
+
+
+
+def second_moment_ppm(ppm: np.ndarray, y: np.ndarray,
+                      window: tuple[float, float] | None = None) -> float:
+    """Intensity-weighted standard deviation (ppm) of the band inside
+    ``window`` about its centre of gravity -- the second moment. Variances
+    add exactly under convolution, so a second-moment split across fields
+    (larmor.qcpmg_fields.second_moment_split) separates the quadrupolar and
+    field-independent contributions without the near-Gaussian assumption of
+    the FWHM split. Window-sensitive: the window must contain the whole CT
+    band and exclude spinning sidebands (fixed in Hz). NaN when the window
+    holds no usable intensity."""
+    ppm = np.asarray(ppm, float); y = np.asarray(y, float)
+    if window is not None:
+        m = (ppm >= min(window)) & (ppm <= max(window))
+        ppm, y = ppm[m], y[m]
+    if ppm.size < 3:
+        return float("nan")
+    den = float(y.sum())
+    if abs(den) <= 1e-3 * float(np.abs(y).sum()):
+        return float("nan")
+    cg = float((ppm * y).sum() / den)
+    var = float(((ppm - cg) ** 2 * y).sum() / den)
+    return float(np.sqrt(var)) if var > 0 else float("nan")
+
+
+# --------------------------------------------------------------------------
+# Window quality: convergence (fix: the first-minima window cuts the tails
+# of a distribution-broadened pattern) and MAS sideband awareness (fix: the
+# window straddles the sideband manifold one-sidedly).
+
+#: window-width factors at which the centre of gravity is re-measured
+CONVERGENCE_FACTORS = (0.5, 1.0, 1.5, 2.0, 3.0)
+#: |CG(2w) - CG(w)| beyond max(2 sigma, this) means the window cuts the pattern
+CONVERGENCE_MIN_DRIFT_PPM = 5.0
+#: jitter sigma above which stage 6 says 'the window is sensitive'
+SLOPPY_SIGMA_PPM = 8.0
+
+
+@dataclass
+class CgConvergence:
+    """δ_CG as a function of window width, both edges moved together and
+    each edge moved alone -- how much the value depends on where the
+    window was cut."""
+
+    factors: tuple                  # CONVERGENCE_FACTORS
+    cg_ppm: tuple                   # CG with both edges at factor f
+    cg_lo_ppm: tuple                # only the LOW edge extended
+    cg_hi_ppm: tuple                # only the HIGH edge extended
+    drift_ppm: float                # |CG(2w) - CG(w)|
+    drift_lo_ppm: float             # |CG_lo(2w) - CG(w)|
+    drift_hi_ppm: float             # |CG_hi(2w) - CG(w)|
+    floor: float                    # median of the out-of-window trace, subtracted
+    floor_frac: float               # floor / peak height (a raw magnitude pedestal)
+
+    def sequence(self) -> str:
+        """'CG(w, 1.5w, 2w, 3w) = -112.8, -114.9, -115.0, -119.8'."""
+        pick = [(f, c) for f, c in zip(self.factors, self.cg_ppm) if f >= 1.0]
+        names = ", ".join(("w" if f == 1.0 else f"{f:g}w") for f, _ in pick)
+        vals = ", ".join((f"{c:.1f}" if np.isfinite(c) else "--") for _, c in pick)
+        return f"CG({names}) = {vals}"
+
+
+def cg_convergence(ppm: np.ndarray, y: np.ndarray, window: tuple[float, float],
+                   factors: tuple = CONVERGENCE_FACTORS) -> CgConvergence:
+    """Re-measure the SIGNED centre of gravity with the window scaled about
+    its centre by each factor, and with each edge extended alone.
+
+    The trace is floor-corrected first: the median of the OUT-of-window
+    points is subtracted. A raw magnitude trace carries a positive
+    rectified-noise pedestal, and a widening window on such a trace would
+    drift towards the window centre and look 'converged' for the wrong
+    reason (the pedestal's own CG is the window centre); ``floor_frac``
+    reports how large that pedestal was.
+
+    The jitter sigma of :func:`centre_of_gravity` is a LOCAL sensitivity
+    (edges moved by 10 %); it does not see a tail that is cut. Measured on
+    LAW4Ca at 78 MHz the CG drifted -80.2 -> -52.4 ppm from 0.5w to 2w
+    while the jitter sigma was 14.5 ppm.
+    """
+    ppm = np.asarray(ppm, float); y = np.asarray(y, float)
+    lo, hi = float(min(window)), float(max(window))
+    if not (np.isfinite(lo) and np.isfinite(hi)) or hi <= lo:
+        nan = float("nan")
+        n = len(factors)
+        return CgConvergence(tuple(factors), (nan,) * n, (nan,) * n, (nan,) * n,
+                             nan, nan, nan, 0.0, 0.0)
+    out = (ppm < lo) | (ppm > hi)
+    floor = float(np.median(y[out])) if out.sum() >= 8 else 0.0
+    yc = y - floor
+    peak = float(np.max(np.abs(yc))) if yc.size else 0.0
+    mid, half = 0.5 * (lo + hi), 0.5 * (hi - lo)
+    x0, x1 = float(ppm.min()), float(ppm.max())
+
+    def cg(a: float, b: float) -> float:
+        a, b = max(a, x0), min(b, x1)
+        m = (ppm >= a) & (ppm <= b)
+        w = yc[m]
+        if w.size < 3:
+            return float("nan")
+        den = float(w.sum())
+        if abs(den) <= 1e-3 * float(np.abs(w).sum()):
+            return float("nan")
+        return float((ppm[m] * w).sum() / den)
+
+    both = tuple(cg(mid - f * half, mid + f * half) for f in factors)
+    lo_only = tuple(cg(mid - f * half, hi) for f in factors)
+    hi_only = tuple(cg(lo, mid + f * half) for f in factors)
+    ref = cg(lo, hi)
+
+    def at(seq, f):
+        return seq[factors.index(f)] if f in factors else float("nan")
+
+    def drift(seq):
+        v = at(seq, 2.0)
+        return abs(v - ref) if np.isfinite(v) and np.isfinite(ref) else float("nan")
+
+    return CgConvergence(tuple(factors), both, lo_only, hi_only,
+                         drift(both), drift(lo_only), drift(hi_only),
+                         floor, (abs(floor) / peak if peak > 0 else 0.0))
+
+
+def sideband_ticks(ppm: np.ndarray, y: np.ndarray, window: tuple[float, float],
+                   rotor_Hz: float, larmor_MHz: float, k_max: int = 3
+                   ) -> tuple[float, list[float]]:
+    """(peak_ppm, [peak ± k·ν_r/ν0 ...]) -- where the spinning sidebands of
+    the tallest peak inside ``window`` fall. Empty when the rate is unknown."""
+    ppm = np.asarray(ppm, float); y = np.asarray(y, float)
+    if not (rotor_Hz and rotor_Hz > 0 and larmor_MHz and larmor_MHz > 0):
+        return float("nan"), []
+    lo, hi = float(min(window)), float(max(window))
+    m = (ppm >= lo) & (ppm <= hi)
+    if m.sum() < 3:
+        return float("nan"), []
+    peak = float(ppm[m][int(np.argmax(y[m]))])
+    step = float(rotor_Hz) / float(larmor_MHz)
+    ticks = [peak + k * step for k in range(-k_max, k_max + 1) if k != 0]
+    ticks = [t for t in ticks if ppm.min() <= t <= ppm.max()]
+    return peak, ticks
+
+
+def one_sided_sideband(window: tuple[float, float], peak_ppm: float,
+                       rotor_Hz: float, larmor_MHz: float) -> bool:
+    """True when exactly ONE of peak ± ν_r/ν0 lies inside the window: the
+    window caught the centreband plus a sideband on one side only, which
+    biases the centre of gravity by a sideband's worth of lever."""
+    if not (np.isfinite(peak_ppm) and rotor_Hz and rotor_Hz > 0 and larmor_MHz):
+        return False
+    lo, hi = float(min(window)), float(max(window))
+    step = float(rotor_Hz) / float(larmor_MHz)
+    inside = [lo <= peak_ppm + s * step <= hi for s in (-1, 1)]
+    return sum(inside) == 1
+
+
+#: a centreband-only window is valid when at most this fraction of the
+#: (floor-subtracted, positive) intensity lies outside peak +- nu_r/2:
+#: simulated single site C_Q 3 MHz at 16/20 kHz 6 % / 2 %, LAW0Ca magnitude
+#: data 17 % / 14 % (rectified-noise excess over a 2000 ppm axis), a
+#: sigma = 1 MHz Czjzek glass 29 % at 16 kHz
+CENTREBAND_MAX_OUTSIDE = 0.20
+
+#: floors (fraction of the peak) at which the whole-manifold CG is repeated;
+#: their spread is the manifold sigma
+MANIFOLD_FLOORS = (0.05, 0.02, 0.01, 0.0)
+
+
+def manifold_cg(ppm: np.ndarray, y: np.ndarray) -> tuple[float, float, dict]:
+    """Centre of gravity of the WHOLE sideband manifold: the edge-noise
+    median is subtracted (:func:`noise_floor`), the full axis is integrated,
+    and the CG is repeated with the trace cut at 5 / 2 / 1 / 0 % of the peak;
+    ``(cg_at_0, sigma = spread over the floors, {floor: cg})``.
+
+    This is the Maricq-Waugh first moment: for a distribution of sites it is
+    exact PROVIDED the whole pattern is integrated (simulated Czjzek glass:
+    δiso -70.00 and P_Q 4.436 vs rms P_Q 4.439), where a first-minima window
+    catching one sideband is off by ~18 ppm. Rectified noise pulls a
+    full-axis CG towards the axis centre, so prefer an absorption sum-echo
+    spectrum here.
+    """
+    ppm = np.asarray(ppm, float); y = np.asarray(y, float)
+    yc = y - noise_floor(y)
+    peak = float(np.max(yc)) if yc.size else 0.0
+    cgs = {}
+    for fl in MANIFOLD_FLOORS:
+        w = np.where(yc >= fl * peak, yc, 0.0) if fl > 0 else yc
+        den = float(w.sum())
+        cgs[fl] = float((ppm * w).sum() / den) if den > 0 else float("nan")
+    vals = [v for v in cgs.values() if np.isfinite(v)]
+    sigma = float(np.max(vals) - np.min(vals)) / 2.0 if len(vals) > 1 else 0.0
+    return cgs.get(0.0, float("nan")), sigma, cgs
+
+
+def centreband_window(ppm: np.ndarray, y: np.ndarray, rotor_Hz: float,
+                      larmor_MHz: float) -> tuple[tuple[float, float], str]:
+    """(window, note): peak ± ν_r/(2ν0), valid ONLY for a pattern narrower
+    than the sideband spacing (measured FWHM < 0.5 ν_r). For a wider or
+    distribution-broadened pattern the centreband carries a P_Q-dependent
+    fraction of each site and its CG is biased (simulated glass: -89.1 vs
+    -70 true) -- the note then says so and the window is refused (NaN)."""
+    ppm = np.asarray(ppm, float); y = np.asarray(y, float)
+    if not (rotor_Hz and rotor_Hz > 0 and larmor_MHz and larmor_MHz > 0):
+        return (float("nan"), float("nan")), "no rotor rate: centreband window undefined"
+    step = float(rotor_Hz) / float(larmor_MHz)
+    yc = y - noise_floor(y)
+    peak = float(ppm[int(np.argmax(yc))])
+    win = (peak - 0.5 * step, peak + 0.5 * step)
+    fw = fwhm_hz(ppm, yc, 1.0, win)                     # ppm (sfo = 1)
+    if fw >= 0.5 * step:
+        return ((float("nan"), float("nan")),
+                f"centreband window refused: FWHM {fw:.0f} ppm is not < 0.5 nu_r "
+                f"({0.5 * step:.0f} ppm) -- the pattern spans several sidebands; "
+                "use the whole manifold")
+    # the centreband of a distribution-broadened pattern can be narrow while
+    # the sidebands carry a P_Q-dependent share of every site: require the
+    # centreband to hold at least (1 - CENTREBAND_MAX_OUTSIDE) of the
+    # floor-subtracted intensity of the whole trace
+    pos = np.clip(yc, 0.0, None)
+    tot = float(pos.sum())
+    inside = (ppm >= win[0]) & (ppm <= win[1])
+    outside = 1.0 - float(pos[inside].sum()) / tot if tot > 0 else 1.0
+    if outside > CENTREBAND_MAX_OUTSIDE:
+        return ((float("nan"), float("nan")),
+                f"centreband window refused: {100 * outside:.0f} % of the intensity "
+                f"lies outside peak +- nu_r/2 (limit {100 * CENTREBAND_MAX_OUTSIDE:.0f} %)"
+                " -- the centreband weights each site by its centreband fraction; "
+                "use the whole manifold")
+    return win, ""
+
+
+@dataclass
+class CgMeasurement:
+    """One field's δ_CG measurement with everything the fit and the report
+    need to judge it."""
+
+    cg_ppm: float
+    sigma_ppm: float                 # max(jitter sigma, convergence drift)
+    jitter_ppm: float
+    drift_ppm: float
+    window: tuple[float, float]      # (lo, hi)
+    mode: str                        # minima | manual | manifold | centreband
+    fwhm_ppm: float
+    flags: list = field(default_factory=list)
+    ticks_ppm: list = field(default_factory=list)
+    peak_ppm: float = float("nan")
+    convergence: CgConvergence | None = None
+    manifold_cgs: dict | None = None
+    note: str = ""
+
+    @property
+    def flagged(self) -> bool:
+        return bool(self.flags)
+
+
+def measure_cg(ppm: np.ndarray, y: np.ndarray, window=None, *,
+               mode: str = "minima", rotor_Hz: float = 0.0,
+               larmor_MHz: float = 0.0, magnitude: bool | None = None,
+               jitter_frac: float = 0.10) -> CgMeasurement:
+    """The ONE measurement both multi-field dialogs use for a field.
+
+    ``mode``: 'minima' (first-minima window, seeded or given), 'manual'
+    (the given window, as dragged), 'manifold' (whole sideband manifold,
+    needs nothing but the trace) or 'centreband' (peak ± ν_r/2ν0, gated on
+    FWHM < 0.5 ν_r). The sigma is max(jitter sigma, |CG(2w) - CG(w)|) so a
+    window that cuts the pattern cannot report a tight error, and the flags
+    are the quality checks the report prints: '! window sensitive',
+    '! CG not converged -- window cuts the pattern', '! window catches one
+    sideband only', '! magnitude + whole manifold'.
+    """
+    ppm = np.asarray(ppm, float); y = np.asarray(y, float)
+    flags: list[str] = []
+    note = ""
+    if mode == "manifold":
+        cg, sig, cgs = manifold_cg(ppm, y)
+        lo, hi = float(ppm.min()), float(ppm.max())
+        fw = fwhm_hz(ppm, y, 1.0, None)
+        if magnitude:
+            flags.append("! magnitude + whole manifold: rectified noise pulls a "
+                         "full-axis CG towards the axis centre -- prefer the "
+                         "absorption sum echo")
+        if sig > SLOPPY_SIGMA_PPM:
+            flags.append("! window sensitive")
+        return CgMeasurement(cg, max(sig, 0.0), sig, 0.0, (lo, hi), "manifold", fw,
+                             flags, [], float("nan"), None, cgs, note)
+    if mode == "centreband":
+        win, why = centreband_window(ppm, y, rotor_Hz, larmor_MHz)
+        if why:
+            raise ValueError(why)
+        lo, hi = win
+    elif window is not None:
+        lo, hi = float(min(window)), float(max(window))
+    else:
+        hi, lo = cg_window(ppm, y)
+        if not (np.isfinite(hi) and np.isfinite(lo)) or hi <= lo:
+            span = float(ppm.max() - ppm.min())
+            mid = float(ppm.min()) + span / 2.0
+            lo, hi = mid - span / 6.0, mid + span / 6.0
+    cg, jit = centre_of_gravity(ppm, y, (hi, lo), jitter_frac=jitter_frac)
+    fw = fwhm_hz(ppm, y, 1.0, (hi, lo))
+    conv = cg_convergence(ppm, y, (lo, hi))
+    drift = conv.drift_ppm if np.isfinite(conv.drift_ppm) else 0.0
+    sigma = max(jit, drift) if np.isfinite(jit) else drift
+    if np.isfinite(jit) and jit > SLOPPY_SIGMA_PPM:
+        flags.append("! window sensitive")
+    if np.isfinite(cg) and drift > max(2.0 * (jit if np.isfinite(jit) else 0.0),
+                                       CONVERGENCE_MIN_DRIFT_PPM):
+        flags.append("! CG not converged -- window cuts the pattern")
+    if conv.floor_frac > 0.02:
+        flags.append(f"! out-of-window floor {100 * conv.floor_frac:.0f} % of the peak "
+                     "(tails or sidebands outside the window, or a magnitude "
+                     "pedestal) -- subtracted before the convergence check")
+    peak, ticks = sideband_ticks(ppm, y, (lo, hi), rotor_Hz, larmor_MHz)
+    if ticks and one_sided_sideband((lo, hi), peak, rotor_Hz, larmor_MHz):
+        flags.append("! window catches one sideband only")
+    if rotor_Hz and rotor_Hz > 0 and larmor_MHz and mode != "centreband":
+        step = float(rotor_Hz) / float(larmor_MHz)
+        if (hi - lo) > step:
+            note = (f"window ({hi - lo:.0f} ppm) is wider than nu_r ({step:.0f} "
+                    "ppm): the pattern spans sidebands -- consider the whole "
+                    "manifold")
+    return CgMeasurement(cg, sigma, jit, drift, (lo, hi),
+                         "manual" if window is not None and mode != "centreband" else mode,
+                         fw, flags, ticks, peak, conv, None, note)
 
 def overlay_pair(y_a: np.ndarray, y_b: np.ndarray, mode: str = "max"
                  ) -> tuple[np.ndarray, np.ndarray]:

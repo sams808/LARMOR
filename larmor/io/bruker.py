@@ -225,6 +225,10 @@ def _read_1r(ref: BrukerRef) -> NMRData:
     # spectral reference SR = SF - BF1 (Hz)
     meta["sr_hz"] = (float(procs.get("SF", 0.0))
                      - float(acqus.get("BF1", 0.0))) * 1e6
+    # how THIS procno was processed: PH_mod 2 = mc (magnitude), 1 = pk
+    # (phased), 0 = no phase correction; the 1r of a magnitude-calculated
+    # dataset is |spectrum| and must be treated as such downstream
+    meta.update(_procs_mode(procs))
     ax = Axis(meta["nucleus"], "ppm", ppm[order],
               obs_MHz=float(procs.get("SF", 0.0)), sw_Hz=meta.get("sw_Hz", 0.0))
     return NMRData(ndim=1, domain="freq", data=np.asarray(real, float)[order],
@@ -490,6 +494,17 @@ def _num_list(v) -> list[float]:
         return []
 
 
+def _procs_mode(procs: dict) -> dict:
+    """{'ph_mod', 'mc2'} from a procs dict (0 when absent)."""
+    out = {}
+    for key, name in (("PH_mod", "ph_mod"), ("MC2", "mc2")):
+        try:
+            out[name] = int(procs.get(key, 0) or 0)
+        except (TypeError, ValueError):
+            out[name] = 0
+    return out
+
+
 def _read_procs_ref(expno: Path) -> dict:
     """{'sf_MHz', 'sr_hz'} from pdata/1/procs -- the *referenced* spectrometer
     frequency. Returns {} when procs is missing (a freshly acquired dataset),
@@ -522,7 +537,7 @@ def _read_procs_ref(expno: Path) -> dict:
             sr = (sf - bf1) * 1e6
     except Exception:
         pass
-    return {"sf_MHz": sf, "sr_hz": sr}
+    return {"sf_MHz": sf, "sr_hz": sr, **_procs_mode(procs)}
 
 
 def read_acqus_meta(expno: str | Path) -> dict:

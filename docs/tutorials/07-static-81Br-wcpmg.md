@@ -284,28 +284,54 @@ determine η). The ⁸¹Br series exists at one field only, so the
 demonstration uses a ³⁵Cl chloride glass measured at 78.354 MHz
 (`<NMR>/MagLab/DATA/35Cl_2025-12/1`) and at 107.811 MHz
 (`<NMR>/NMRFAM/DATA/2026-06_35Cl/06102026_RS40175_LAW3Cl0Ca_SS_ALP/3`); both
-are MAS-QCPMG trains, which is fine — the extrapolation concerns the
-central-transition centroid.
+are MAS-QCPMG trains (16 kHz and 20 kHz — the NMRFAM `acqus` still says
+`MASR = 5000`, a stale controller value the title and `CNST31` correct, and
+LARMOR flags the conflict). MAS is fine for the extrapolation only when the
+window is a genuine centreband narrower than ν_r, as it is for this 0 Ca
+glass (171 and 135 ppm windows against sideband spacings of 204 and 186
+ppm), or when the window is the **whole sideband manifold**. For the
+distribution-broadened 2–4 Ca glasses the pattern is wider than ν_r, the
+first-minima window is one-sided (it catches the centreband plus one
+sideband, with opposite sign at the two fields) and δiso shifts by tens of
+ppm; the batch grid flags those cells and offers the whole-manifold window.
 
 **From the processing dialog.** Run each EXPNO's `fid` through §2–§7 and
 press **→ infinite-field δiso…** in stage 6. The first press opens *QCPMG —
-infinite-field δiso (2+ fields)* with one row (field, δcg ± σ, FWHM); the
-second adds the other row; the window stays open and accumulates. On the
-two EXPNOs the automatic processing gives δCG = −113.1 ± 1.5 ppm at 78.354 MHz
-and −92.1 ± 1.1 ppm at 107.811 MHz (on the higher-field train the T₂ fit does
-not converge — `T₂ fit did not converge — no matched filter offered` — so its
-sum is unweighted). **Compute δiso** then reads
+infinite-field δiso (2+ fields)* and adds that field's row (field, δcg ± σ,
+FWHM) below two empty rows kept for typed entries; the second adds the other
+row; the window stays open and accumulates. On the two EXPNOs the automatic
+processing (matched LB 75 Hz on the 78 MHz train; on the higher-field train
+the T₂ fit does not converge — `T₂ fit did not converge — no matched filter
+offered` — so its sum is unweighted) and the automatic first-minima windows
+give stage-6 readings of δCG = −113.1 ± 1.5 ppm and −92.1 ± 1.1 ppm. The
+rows the dialog fills read δCG = −113.08 ± 2.7 ppm at 78.354 MHz and
+δCG = −92.07 ± 1.1 ppm at 107.811 MHz: the ± of a dataset row is the larger
+of the jitter σ and the drift of δCG when the window is doubled (2.7 ppm at
+78 MHz — the row's tooltip lists CG(w, 1.5w, 2w, 3w) = −113.0, −115.4,
+−115.7, −120.8), so it is never smaller than what the window placement can
+do. **Compute δiso** then reads
 
 ```
-δiso = -68.5 ± 2.8 ppm  (intercept, 1/ν₀²→0)   ·   C_Q = 3.07 ± 0.13 MHz   ·   P_Q = 3.31 MHz   (η = 0.7 assumed)
+δiso = -68.55 +- 3.82 ppm  (intercept, 1/ν₀²→0)   ·   P_Q = 3.307 +- 0.229 MHz (η-independent)   ·   C_Q = 3.066 +- 0.213 MHz   (η = 0.7 assumed; 2.864-3.307 over η 0-1)
 ```
-<!-- measured v0.12.1, 2026-09-22: both EXPNOs through the stage-1…6 functions as above, then qcpmg_fields.infinite_field_diso on the two (ν₀, δCG ± σ) points with spin 1.5, η 0.7 -->
+<!-- measured 2026-09-23 (wip/QF): both EXPNOs through the stage 1…6 functions as above, sent with the stage-6 button, the dialog's cells as quoted; the headline is fmt_result_lines on those cells -->
+
+together with a warning that the 78 MHz centre of gravity drifts 2.7 ppm
+when its window is doubled — 13 % of the 21 ppm separation between the two
+fields, i.e. the window uncertainty is a sizeable part of the lever the
+slope is built from. The whole-manifold window is no remedy here: the
+107.8 MHz sweep integrated in full is dominated by noise (σ 27 ppm), and
+for this narrow pattern the first-minima centreband window is the right
+one. P_Q carries the η-free uncertainty; C_Q needs the assumed η and its
+range over η = 0–1 is a systematic the ± does not contain.
 
 Rows can also be typed in (**＋ Add field**), taken from the open workspace
 (**δcg from open spectrum (visible range)**) or read from saved datasets
-(**Add from datasets…**). **Split W_q / W_csd** separates the two FWHM values
-into a quadrupolar width and a field-independent shift-distribution width;
-**Export report…** and **Export figure…** write the record.
+(**Add from datasets…**). **Split W_q / W_csd** separates the FWHM values of
+all the fields entered into a quadrupolar width and a field-independent
+width (shift distribution *and* CSA — an upper bound on shift disorder);
+**Export report…** and **Export figure…** write the record (the figure with
+a `.json` sidecar listing every point's window, mode and source).
 
 **A whole series at once.** **Tools > QCPMG: batch infinite-field δiso…**
 opens *QCPMG — batch infinite-field δiso*: set the grid to five samples and
@@ -313,36 +339,64 @@ two fields and drop the ten `.csv` files written earlier with **Save as
 dataset…** onto the cells (`<NMR>/MagLab/DATA/LAW{0-4}Ca-3Cl_850_MHz.csv` —
 the `850` in these file names is a misnomer, the header's `larmor_MHz =
 78.354` is authoritative — and
-`<NMR>/NMRFAM/DATA/2026-06_35Cl/LAW{0-4}Ca-3Cl_1p1GHz.csv`). Each cell is
-measured like stage 6; **Compute all** reports `5 of 5 samples extrapolated`
+`<NMR>/NMRFAM/DATA/2026-06_35Cl/LAW{0-4}Ca-3Cl_1p1GHz.csv`). The row names
+are prefilled from the file stems (`LAW0Ca-3Cl` …); each cell is measured
+with the same functions and the automatic first-minima window (every
+dataset here is a magnitude spectrum, which the cells show as *(mc)* and
+the report states). **Compute all** reports `5 of 5 samples extrapolated`
 and **Export report…** writes, for the first sample:
 
 ```
 --- LAW0Ca-3Cl --------------------------------------------------
-    nu0 (MHz)      dcg (ppm)   +- err   CT-selective
-       78.3541      -112.76     1.28
-      107.8113       -95.78     0.51
-    delta_iso      =   -76.76 +- 1.79 ppm
-    C_Q            =    2.757 +- 0.112 MHz   (eta = 0.7 assumed)
-    P_Q            =    2.974 MHz
-    slope          = -221047 ppm.MHz^2
+    nu0 (MHz)      dcg (ppm)   +- err    resid   mode        CT-selective (declared)
+       78.3541      -112.76     2.25     0.00  magnitude   ?
+                 window -206.8 ... -35.4 ppm (minima) · magnitude (mc) · dataset LAW0Ca-3Cl_850_MHz.csv
+                 CG(w, 1.5w, 2w, 3w) = -112.7, -114.9, -115.0, -119.8
+      107.8113       -95.78     0.51     0.00  magnitude   ?
+                 window -168.7 ... -33.7 ppm (minima) · magnitude (mc) · dataset LAW0Ca-3Cl_1p1GHz.csv
+                 CG(w, 1.5w, 2w, 3w) = -95.7, -96.0, -95.8, -97.9
+    all points measured on magnitude (mc) spectra -- dcg is the |spectrum| centroid, not the absorption one;
+    rectified noise pulls it toward the window centre, growing with window width and 1/(S/N); compare with the
+    phased spectrum on the same window before quoting P_Q to better than a few %
+    delta_iso      = -76.77 +- 2.74 ppm
+    P_Q            = 2.973 +- 0.202 MHz (eta-independent)
+    C_Q            = 2.756 +- 0.187 MHz   (eta = 0.7 assumed; 2.575-2.973 over eta 0-1)
+    slope          = -220953 +- 30021 ppm.MHz^2
+    chi2/dof       = exact (2 points, no redundancy)
+    ! CG drift 2.2 ppm at 78.354 MHz is 13 % of the 17.0 ppm separation between the fields -- the window cuts the pattern
+    width split over 2 fields (78.4, 107.8 MHz; FWHM, Sandland Eq. 2)
     W_q            =     48.2 ppm (low field) / 25.5 ppm (high field)
-    W_csd          =     34.7 ppm (field-independent)
+    W_csd          =     34.7 ppm (field-independent: shift distribution + CSA)
 ```
-<!-- measured v0.12.1, 2026-09-22: the ten CSVs through qcpmg.cg_window / centre_of_gravity / fwhm_hz and qcpmg_fields.fit_samples + report_text, spin 1.5, η 0.7 -->
+<!-- measured 2026-09-23 (wip/QF): the ten CSVs through the batch grid (read_field_spectrum / measure_cg / fit_samples / report_text), spin 1.5, η 0.7; the two dcg rows are the grid's cells, which the grid fits as printed -->
 
 followed by the other four samples and a summary table; δiso runs from
-−76.8 ± 1.8 ppm (0 Ca) to +63.7 ± 24.7 ppm (4 Ca) across the series, with
-C_Q from 2.76 to 5.51 MHz.
+-76.8 ± 2.7 ppm (0 Ca) to +63.7 ± 25.9 ppm (4 Ca) across the series, with
+P_Q from 2.97 to 5.95 MHz and C_Q from 2.76 to 5.51 MHz at η = 0.7. The
+1–4 Ca cells carry flags the 0 Ca cells do not: the 1 Ca window at 78 MHz
+cuts the pattern (δCG drifts 8 ppm when it is doubled), the 2–4 Ca windows
+are wider than the 204 ppm sideband spacing and *sensitive* (σ 9–16 ppm),
+and the 4 Ca window at 78 MHz *catches one sideband only* — the
+whole-manifold window mode is made for those cells, on the absorption sum
+echo rather than these magnitude datasets.
 
-Compare the two routes on the same 0 Ca sample: −68.5 ± 2.8 ppm from the
-freshly processed EXPNOs against −76.8 ± 1.8 ppm from the saved magnitude
-datasets, whose higher-field δcg is −95.8 instead of −92.1 ppm. The lever
+Compare the two routes on the same 0 Ca sample: −68.6 ± 3.8 ppm from the
+freshly processed EXPNOs against -76.8 ± 2.7 ppm from the saved magnitude
+datasets, whose higher-field δcg is −95.8 instead of −92.1 ppm. That
+3.7 ppm difference comes from a different EXPNO (2 against 3), line
+broadening and window, not from the processing mode — the rectified-noise
+mechanism of a magnitude spectrum predicts +0.2 ppm at this S/N. The lever
 arm from 1/107.8² to zero is short, so a 4 ppm difference in one centre of
-gravity moves the intercept by about 8 ppm. Process both fields the same
-way (both phased, or both magnitude — the dialog warns when they are
-mixed), place the windows deliberately, and quote the δCG sensitivities:
-they, not the fit's ± from the line, set the real uncertainty of δiso.
+gravity moves the intercept by about 8 ppm. The fit's ± is only the
+propagation of the two δCG uncertainties (window jitter and convergence
+drift); window placement, processing mode / EXPNO / LB and the assumed η
+add systematic errors it does not contain — the −68.6 against −76.8 gap is
+about 2σ, amplified 2.1× by the short lever arm — and a two-point line has
+no degrees of freedom to reveal them. Process both fields the same way
+(both phased, or both magnitude — the dialog and the report say *NOT
+COMPARABLE* when they are mixed), place the windows deliberately, and read
+the flags and the CG(w, 1.5w, 2w, 3w) sequence in the report before quoting
+a number.
 
 ## 13. Save
 

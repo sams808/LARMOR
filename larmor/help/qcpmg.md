@@ -224,6 +224,37 @@ hand. Read σ as a **quality flag**: a few ppm means the window is well
 defined; tens of ppm means the edges are running down a tail and should be
 placed by hand (the dialog says so).
 
+**Under MAS the first-minima window is safe only when the pattern is
+narrower than the rotor rate.** A QCPMG train acquired while spinning keeps
+its spinning sidebands in the sum-echo spectrum (at ±ν_r/ν₀ — 204 ppm at
+16 kHz and 78 MHz). For a pattern narrower than ν_r the first minima bracket
+a genuine centreband and the window is fine. For a distribution-broadened
+pattern wider than ν_r the "first minimum" is a valley *between* sidebands:
+the window catches the centreband plus one sideband on one side only, with
+opposite sign at the two fields, and δ_CG moves by tens of ppm (a simulated
+35Cl Czjzek glass: −129.7 ppm with the first-minima window against −145.6
+for the whole manifold at 78 MHz). The multi-field tools (§4) know the rotor
+rate of a saved dataset, tick the sideband positions on the supervision plot
+and flag *window catches one sideband only*; use the **whole manifold**
+window there.
+
+**Static patterns with structure.** On a static second-order pattern with
+little shift disorder (C_Q ≳ 4.5 MHz for ³⁵Cl at these fields) the
+first-minima walk stops at the dip between the two horns and the automatic
+window catches **one horn** — δcg is then off by tens of ppm and the
+extrapolation with it (simulated C_Q 5.5 MHz: −22 to −47 ppm on δiso),
+although a full-range window recovers it to 0.01 ppm. For a static pattern
+place the window by hand across the whole pattern, down to the noise on
+both sides; the convergence flag below catches the one-horn window.
+
+**The window must reach the noise on both sides.** The jitter σ is a local
+sensitivity: it does not see a tail that the window cuts. The tools also
+re-measure δ_CG with the window at 1.5×, 2× and 3× its width (each edge
+alone as well) and report the drift |CG(2w) − CG(w)|; the quoted ± is the
+larger of σ and that drift, and *CG not converged — window cuts the pattern*
+is flagged when the drift exceeds max(2σ, 5 ppm). The out-of-window median
+is subtracted first, so a raw magnitude pedestal cannot fake convergence.
+
 ---
 
 **→ infinite-field δiso…** (stage 6) sends this dataset's (field, δ_CG,
@@ -287,13 +318,70 @@ $$\delta_\text{cg} = \delta_\text{iso} - \frac{10^6}{40}\,\frac{C_Q^2(3+\eta^2)}
 
 so a plot of δcg (ppm) vs $1/\nu_0^2$ is a straight line: the **intercept is
 δiso**, and the **slope gives $C_Q$** (with an assumed η, conventionally 0.7 —
-two centres of gravity cannot determine η).
+two centres of gravity cannot determine η). The slope must be **negative**:
+the second-order shift lowers δcg more at the lower field. A slope that is
+positive, or negative but within 2σ of zero, cannot come from Eq. (1) — the
+two δcg are then not the same observable (different processing mode, window
+or referencing) — and the tool reports only a 2σ **upper bound** on $C_Q$
+instead of a value, together with the slope and its σ.
 
 **Tools ▸ QCPMG: infinite-field δiso** opens the extrapolation. Enter each
 field's Larmor frequency and its δcg (type it, or **grab it from the open
-spectrum's visible range** — zoom to the CT band first), tick whether that field
-was CT-selective, set η, and **Compute**. It plots δcg vs $1/\nu_0^2$ with the
+spectrum's visible range** — zoom to the CT band first), set η, and
+**Compute**. It reports δiso ± σ, $P_Q$ ± σ (η-independent: $C_Q^2(3+\eta^2)
+= 3P_Q^2$, so the slope needs no η) and $C_Q$ ± σ at the assumed η together
+with its range over η = 0–1 (+7.9 % / −6.6 % about η = 0.7) — a systematic
+kept out of the ±. The *CT-selective (declared)* box starts **unknown** and
+is not read from the data: selectivity is the operator's judgement (ν_rf
+against ν_Q), recorded for provenance only — it does not enter the fit. It plots δcg vs $1/\nu_0^2$ with the
 fit line and reports δiso, $C_Q$, and $P_Q$ with propagated uncertainties.
+
+**Add from datasets…** expects the **sum-echo dataset** written by *Save as
+dataset…* (its header carries the Larmor frequency, the nucleus, the
+processing mode and the rotor rate under `qcpmg_rotor_Hz` — the recipe's
+`spin_rate_Hz` stays 0 because a sum-echo spectrum is not re-modelled with
+sidebands). A TopSpin `1r` of a QCPMG EXPNO can be opened too, but it
+is a **spikelet comb**: the first-minima window would stop at the first
+spikelet gap (measured: δcg −105.1 ppm against −112.8 ppm from the sum echo
+of the same EXPNO, 8.6 ppm on δiso through the low-field lever). The comb is
+detected from the data, the window is seeded from the envelope over one
+spikelet period, and the row is flagged — process the `fid` in *Tools ▸
+QCPMG* and use *Save as dataset…* / *→ infinite-field δiso…* instead. A
+`1r` processed with `mc` (procs `PH_mod = 2`) is recorded as magnitude.
+
+**Window modes (MAS data).** Each dataset row or batch cell has a window
+mode: *first minima / dragged band* (the default — supervise it), *whole
+manifold* and *centreband*. When the rotor rate is known the supervision
+plot ticks the sideband positions of the tallest peak and flags a window
+that catches **one sideband only**. The **whole manifold** integrates the
+full axis with the edge-noise floor subtracted and repeats the centre of
+gravity with the trace cut at 5 / 2 / 1 / 0 % of the peak (their spread is
+its σ): by the first-moment theorem it is exact for any distribution of
+sites *provided the whole sideband manifold is in the spectrum*. Rectified
+noise pulls a full-axis centroid towards the axis centre, so use it on the
+absorption sum echo; the report flags *magnitude + whole manifold*. The
+**centreband** window (peak ± ν_r/2) is accepted only when it holds ≥ 80 %
+of the intensity and its FWHM is below ν_r/2 — a pattern narrower than
+ν_r — and is refused with the measured fraction otherwise, because for a
+distribution it weights every site by its centreband share, which falls
+with P_Q (simulated glass: −89.1 ppm against −70 true).
+
+**Convergence.** Every measurement re-integrates the window at 1.5×, 2× and
+3× its width and quotes ± = max(jitter σ, |CG(2w) − CG(w)|); the report
+prints the sequence CG(w, 1.5w, 2w, 3w) per field and flags *CG not
+converged — window cuts the pattern* (drift beyond max(2σ, 5 ppm) or 10 %
+of the separation between the two fields' δcg). On the tutorial's LAW4Ca
+dataset at 78 MHz the sequence runs −73.4, −68.1, −57.3, −40.1 ppm while
+the jitter σ was 14.5 ppm.
+
+**What the slope measures for a distribution.** For a Czjzek (or any)
+distribution of sites the slope gives $\sqrt{\langle P_Q^2\rangle}$ — in
+LARMOR's σ convention $2\sqrt{5}\,\sigma$ (= $\sqrt{5}\,\sigma_\text{Cz}$ in
+the d'Espinose convention), `larmor.czjzek_dist.rms_pq` — not a single
+$C_Q$. Because $C_Q^2(3+\eta^2) = 3P_Q^2$ the slope needs no η at all; only
+the $C_Q$ line does. The window must reach the noise on **both** sides: a
+wide-window $P_Q$ is a lower bound when the tail runs into the noise (a
+Czjzek lineshape fit recovers the tail weight).
 
 > **Selective vs non-selective pulses.** Equation (1) is the shift of the
 > *central-transition* centre of gravity. In the **large-$C_Q$ limit**
@@ -305,15 +393,29 @@ fit line and reports δiso, $C_Q$, and $P_Q$ with propagated uncertainties.
 > field. The CT-selective flag is recorded for provenance; it does not change
 > Eq. (1) in this limit.
 
-**Two-field width split (Sandland Eq. 2).** Fill the **FWHM (ppm)** column at
-both fields and press **Split W_q / W_csd**: it separates the CT linewidth into a
-**quadrupolar** part $W_q \propto 1/\nu_0^2$ (broader at low field) and a
-**chemical-shift-distribution** part $W_\text{csd}$ (field-independent in ppm),
+**Width split (Sandland Eq. 2).** Fill the **FWHM (ppm)** column at two or
+more fields and press **Split W_q / W_csd**: it separates the CT linewidth
+into a **quadrupolar** part $W_q \propto 1/\nu_0^2$ (broader at low field) and
+a **field-independent** part $W_\text{csd}$ (constant in ppm),
 
-$$\text{FWHM}_1^2 = W_q^2 + W_\text{csd}^2, \qquad \text{FWHM}_2^2 = W_q^2\left(\frac{\nu_1}{\nu_2}\right)^4 + W_\text{csd}^2$$
+$$\text{FWHM}_i^2 = W_q^2\left(\frac{\nu_\text{ref}}{\nu_i}\right)^4 + W_\text{csd}^2$$
 
-so $W_\text{csd}$ reports the intrinsic shift disorder of the site independent of
-the quadrupolar broadening.
+fitted over every field entered (the two-field case is the closed form).
+$W_\text{csd}$ collects **everything constant in ppm** — the distribution of
+isotropic shifts *and* the chemical-shift anisotropy — so it is an upper
+bound on shift disorder unless the CSA is known to be small; δcg itself is
+CSA-invariant, so δiso, $C_Q$ and $P_Q$ are unaffected. Eq. 2 assumes
+near-Gaussian, disorder-broadened lines: on a pure second-order CT pattern
+it returns a spurious $W_\text{csd}$ of 10–17 ppm (static) and a CSA span
+comparable to $W_q$ inflates both widths, so the tool flags a split whose
+FWHM ratio follows $(\nu_\text{lo}/\nu_\text{hi})^2$ within 15 % or whose
+$W_\text{csd}$ is below $0.3\,W_q$. A processing line broadening is removed
+in quadrature when it is known. The same separation on the **second
+moment** (`qcpmg.second_moment_ppm`, `qcpmg_fields.second_moment_split`)
+needs no Gaussian assumption — variances add exactly under convolution —
+and is reported as a Gaussian-equivalent FWHM; it is window-sensitive
+(the window must hold the whole band and exclude spinning sidebands, which
+are fixed in Hz).
 
 ---
 
@@ -326,18 +428,23 @@ the cells** (the `.csv` files stage 5 writes with *Save as dataset…*), or
 double-click a cell to browse. Dropping several files at once fills a row
 from that column onwards.
 
-Each cell is measured exactly as the single-sample dialog does it — δcg over
-an automatic window — and the column header learns its field from the files
-themselves, warning if the frequencies in one column disagree. **Select any
+Each cell is measured with the same functions and the same automatic window
+the single-sample dialog proposes for *Add from datasets…* (the stage-6 send
+instead uses the band placed there, so supervise each batch cell), and the
+column header learns its field from the files themselves, warning if the
+frequencies in one column disagree. A cell whose jitter σ exceeds 8 ppm, whose
+centre of gravity drifts as the window widens, or whose window catches one
+sideband only shows a **!** flag in the cell and in the report. **Select any
 cell** to see its spectrum with a draggable band and supervise that one
 measurement; the fit is invalidated whenever you move a window, so a stale
 result can never be exported.
 
 **Compute all** extrapolates every sample. Then:
 
-- **Export report…** writes a plain-text record: every input point, every
-  fitted δiso, C_Q and P_Q with uncertainties, the W_q/W_csd split where two
-  fields allow it, and the assumptions (η, spin) spelled out. A sample that
+- **Export report…** writes a plain-text record: every input point with its
+  window, mode and source, δiso ± σ, P_Q ± σ (η-independent) and C_Q ± σ at
+  the assumed η with its range over η = 0–1, the W_q/W_csd split over all
+  the fields that carry a FWHM, and the assumptions (η, spin) spelled out. A sample that
   could not be fitted is listed as such rather than silently dropped.
 - **Export figures…** writes the **merged** figure — every sample on one
   δcg vs 1/ν₀² axes, each with its extrapolation and a starred intercept —
