@@ -31,6 +31,41 @@ def test_diff_handles_missing_site():
     assert all(r["delta"] is None for r in site1)
 
 
+def test_site_family_round_trips_empty_is_omitted_and_unknown_site_keys_are_noted():
+    """SiteModel.family (N3): written only when set, so an untagged recipe
+    stays byte-compatible with readers that predate the field; a site key
+    from a NEWER LARMOR is dropped with one note instead of a TypeError."""
+    from larmor.recipe import RECIPE_VERSION, Param, Recipe, SiteModel
+
+    tagged = Recipe(nucleus="11B", sites=[
+        SiteModel(model="gauss_lor", label="A", family="BO4",
+                  params={"amplitude": Param(1.0)}),
+        SiteModel(model="gauss_lor", label="B", params={"amplitude": Param(1.0)})])
+    d = tagged.to_dict()
+    assert d["sites"][0]["family"] == "BO4"
+    assert "family" not in d["sites"][1]                  # empty -> omitted
+    assert d["larmor_recipe_version"] == RECIPE_VERSION == 1
+    back = Recipe.from_dict(d)
+    assert [s.family for s in back.sites] == ["BO4", ""]
+    assert back.notes == []
+    # an old site dict (no 'family' at all) loads as untagged
+    old = {"sites": [{"model": "gauss_lor", "label": "A",
+                      "params": {"amplitude": {"value": 1.0}}}]}
+    assert Recipe.from_dict(old).sites[0].family == ""
+    # a site carrying a key this version does not know: dropped, one note
+    newer = {"sites": [{"model": "gauss_lor", "label": "A", "colour": "#f00",
+                        "params": {"amplitude": {"value": 1.0}}},
+                       {"model": "gauss_lor", "label": "B", "colour": "#0f0",
+                        "params": {"amplitude": {"value": 1.0}}}]}
+    r = Recipe.from_dict(newer)
+    assert len(r.sites) == 2 and not hasattr(r.sites[0], "colour")
+    notes = [n for n in r.notes if "unknown site fields" in n]
+    assert len(notes) == 1 and "colour" in notes[0]
+    # positional construction (model, label, params) still works: family is last
+    s = SiteModel("gauss_lor", "x", {"amplitude": Param(2.0)})
+    assert s.family == "" and s.params["amplitude"].value == 2.0
+
+
 def test_recipe_migrations_run_and_are_noted(monkeypatch):
     """D4: larmor_recipe_version is READ on load -- a recipe at an older
     schema version is passed through the _MIGRATIONS chain, each hop noted.

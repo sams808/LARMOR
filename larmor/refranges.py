@@ -55,16 +55,22 @@ REF_RANGES: dict[str, list[dict]] = {
     "27Al": [
         # δiso: Edén §5.2 "typically observed ... in aluminosilicate
         # glasses"; P_Q: min–max across the glass systems of his Table 4
+        # "family": the structural species the band names outright -- seeds
+        # the site's family tag (larmor.families) when a line is dropped in
+        # the band or labelled from the literature. Only 27Al and 11B bands
+        # carry one: 17O's NBO band overlaps both BO bands and 29Si/31P
+        # bands cannot name a Qn.
         {"label": "Al[4]", "lo_ppm": 60.0, "hi_ppm": 75.0,
          "quad": "P_Q 5.9–10.9 MHz (system-dependent, Table 4)",
-         "note": "AlO4; δ[4] depends mainly on n_Al/n_Si", "ref": "eden2023"},
+         "note": "AlO4; δ[4] depends mainly on n_Al/n_Si", "ref": "eden2023",
+         "family": "Al(IV)"},
         {"label": "Al[5]", "lo_ppm": 35.0, "hi_ppm": 40.0,
          "quad": "P_Q 5.3–10.3 MHz (Table 4)",
          "note": "AlO5 (Table 4 spans reach 33–44 ppm across systems)",
-         "ref": "eden2023"},
+         "ref": "eden2023", "family": "Al(V)"},
         {"label": "Al[6]", "lo_ppm": 0.0, "hi_ppm": 12.0,
          "quad": "P_Q 4.0–8.4 MHz (Table 4)",
-         "note": "AlO6", "ref": "eden2023"},
+         "note": "AlO6", "ref": "eden2023", "family": "Al(VI)"},
     ],
     "11B": [
         # §5.2: BO4 "resonates around 0 ppm", BO3 separated by 15–20 ppm;
@@ -72,10 +78,11 @@ REF_RANGES: dict[str, list[dict]] = {
         {"label": "B[3] (BO3)", "lo_ppm": 10.0, "hi_ppm": 20.0,
          "quad": "C_Q 2.4–2.8 MHz; η ≈ 0 (0 or 3 NBO) / 0.4–0.8 (1–2 NBO)",
          "note": "trigonal boron; 2nd-order quadrupolar lineshape",
-         "ref": "eden2023"},
+         "ref": "eden2023", "family": "BO3"},
         {"label": "B[4] (BO4)", "lo_ppm": -3.0, "hi_ppm": 3.0,
          "quad": "C_Q 0.2–0.8 MHz (typ. 0.3–0.5) — near-Gaussian peak",
-         "note": "tetrahedral boron, ≈0 ppm", "ref": "eden2023"},
+         "note": "tetrahedral boron, ≈0 ppm", "ref": "eden2023",
+         "family": "BO4"},
     ],
     "29Si": [
         # §5.2/§5.3: Q4(SiO2) ≈ −110 ppm, +7–12 ppm per Qn→Qn−1;
@@ -261,6 +268,14 @@ def assign(nucleus: str | None, ppm: float) -> dict | None:
         if abs(near["ppm"] - x) <= POSITION_TOLERANCE_PPM:
             return {**near, "kind": "position"}
     return None
+
+
+def family_for(nucleus: str | None, ppm: float) -> str:
+    """The structural family (larmor.families preset) the literature band at
+    ``ppm`` names -- 'Al(IV)' / 'Al(V)' / 'Al(VI)' for 27Al, 'BO3' / 'BO4'
+    for 11B -- or '' when the nucleus has no band there or the band does not
+    name a species (17O, 29Si, 31P, …)."""
+    return str((assign(nucleus, ppm) or {}).get("family", "") or "")
 
 
 def citation_for(entry: dict) -> str:

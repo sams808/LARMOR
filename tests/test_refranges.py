@@ -132,6 +132,30 @@ def test_label_lines_from_literature_in_the_app():
         win.close()
 
 
+def test_ranges_carry_families_only_where_the_band_names_one():
+    """N3: the 27Al and 11B bands name a structural species, so they seed a
+    site's family tag; 17O (overlapping BO/NBO bands), 29Si and 31P (a band
+    cannot name a Qn) carry none."""
+    assert refranges.family_for("27Al", 65.0) == "Al(IV)"
+    assert refranges.family_for("27Al", 37.0) == "Al(V)"
+    assert refranges.family_for("27Al", 5.0) == "Al(VI)"
+    assert refranges.family_for("11B", 15.0) == "BO3"
+    assert refranges.family_for("11B", 0.5) == "BO4"
+    assert refranges.family_for("29Si", -90.0) == ""
+    assert refranges.family_for("17O", 50.0) == ""
+    assert refranges.family_for("31P", 0.0) == ""
+    assert refranges.family_for("7Li", 0.0) == "" and refranges.family_for(None, 1.0) == ""
+    assert refranges.family_for("27Al", 200.0) == ""          # outside every band
+    for nuc, entries in refranges.REF_RANGES.items():
+        for r in entries:
+            assert ("family" in r) == (nuc in ("27Al", "11B")), (nuc, r["label"])
+    # every seeded family is a preset of its nucleus
+    from larmor import families
+    for nuc in ("27Al", "11B"):
+        for r in refranges.REF_RANGES[nuc]:
+            assert r["family"] in families.presets_for(nuc)
+
+
 def test_ranges_for_normalizes_and_defaults_empty():
     assert refranges.ranges_for("27Al")
     assert refranges.ranges_for(" 27Al ")          # stray whitespace tolerated

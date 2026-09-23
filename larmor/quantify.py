@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from larmor import families
 from larmor.engine import make_context, simulate_site
 from larmor.recipe import Recipe
 
@@ -51,25 +52,64 @@ def _tail_outside_pct(y: np.ndarray, x: np.ndarray, lo: float, hi: float):
     return float(np.clip(100.0 * (1.0 - inside / full), 0.0, 100.0))
 
 
+def _integrate(recipe: Recipe, window_ppm):
+    """Simulate every site and integrate it over the window: ``(ctx, hi, lo,
+    [y per site], integrals)`` -- the one loop quantify() and
+    site_integrals() share, so the Report and the Monte-Carlo worker
+    integrate identically."""
+    ctx = make_context(recipe)
+    window = window_ppm or recipe.fit_window_ppm or \
+        (float(ctx.x_ppm.max()), float(ctx.x_ppm.min()))
+    hi, lo = max(window), min(window)
+    sel = (ctx.x_ppm >= lo) & (ctx.x_ppm <= hi)
+    ys = [simulate_site(site, ctx) for site in recipe.sites]
+    integrals = np.asarray([float(np.trapezoid(y[sel], ctx.x_ppm[sel]))
+                            for y in ys], float)
+    return ctx, hi, lo, ys, integrals
+
+
+def site_integrals(recipe: Recipe, window_ppm: tuple[float, float] | None = None
+                   ) -> tuple[np.ndarray, tuple[float, float]]:
+    """Per-site window integrals (signed, same trapezoid as quantify()) and
+    the ``(hi, lo)`` window actually integrated -- what a Monte-Carlo trial
+    records so family sums can be re-integrated per trial (larmor.families).
+    """
+    _ctx, hi, lo, _ys, integrals = _integrate(recipe, window_ppm)
+    return integrals, (hi, lo)
+
+
+def _same_window(a, b) -> bool:
+    """Two (hi, lo) windows agree to 1e-6 of their span (float view ranges)."""
+    if a is None or b is None or len(a) != 2 or len(b) != 2:
+        return False
+    tol = 1e-6 * max(1.0, abs(float(b[0]) - float(b[1])))
+    return (abs(max(a) - max(b)) <= tol) and (abs(min(a) - min(b)) <= tol)
+
+
 def quantify(recipe: Recipe, window_ppm: tuple[float, float] | None = None,
-             ) -> dict:
+             *, uvars: dict | None = None, mc=None) -> dict:
     """Integrate every site over the window. Returns a JSON-friendly table.
 
     Each row also carries ``tail_outside_pct``: the share of the line's
     simulated |area| that lies outside the window, measured on the
     simulation axis (``axis_ppm``) — a lower bound when the line extends
     beyond that axis; None for the background models.
+
+    Sites carrying a ``family`` tag are additionally summed into families
+    with the named ratios of the nucleus (``families`` / ``ratios`` /
+    ``untagged`` / ``family_basis`` / ``family_note``, see larmor.families).
+    ``uvars`` (``fit.amplitude_uvars`` of the fit that produced these values)
+    selects the covariance basis; ``mc`` (a ``MonteCarloResult`` carrying
+    ``site_integrals`` over THIS window) the Monte-Carlo basis; otherwise
+    the family block is flagged ``independent``. The per-site rows are
+    identical whatever the basis. An untagged recipe adds empty lists.
     """
-    ctx = make_context(recipe)
-    window = window_ppm or recipe.fit_window_ppm or \
-        (float(ctx.x_ppm.max()), float(ctx.x_ppm.min()))
-    hi, lo = max(window), min(window)
-    sel = (ctx.x_ppm >= lo) & (ctx.x_ppm <= hi)
+    ctx, hi, lo, ys, integrals = _integrate(recipe, window_ppm)
 
     rows = []
     for i, site in enumerate(recipe.sites):
-        y = simulate_site(site, ctx)
-        integral = float(np.trapezoid(y[sel], ctx.x_ppm[sel]))
+        y = ys[i]
+        integral = float(integrals[i])
         tail = (None if site.model in _NO_TAIL_MODELS
                 else _tail_outside_pct(y, ctx.x_ppm, lo, hi))
         amp = site.params["amplitude"]
@@ -101,6 +141,26 @@ def quantify(recipe: Recipe, window_ppm: tuple[float, float] | None = None,
             100.0 * r["integral_err"] / total
             if r["integral_err"] is not None else None)
 
+    # ---- family sums and named ratios (only when a line is tagged)
+    samples = None
+    fam_note_extra = ""
+    if mc is not None:
+        mc_ints = getattr(mc, "site_integrals", None)
+        mc_win = getattr(mc, "window_ppm", None)
+        if mc_ints is not None and _same_window(mc_win, (hi, lo)):
+            samples = mc_ints
+        elif mc_ints is not None and mc_win is not None:
+            fam_note_extra = (f"Monte-Carlo integrals not used: they cover "
+                              f"{max(mc_win):g}..{min(mc_win):g} ppm, the "
+                              f"table {hi:g}..{lo:g} ppm")
+    fam = families.summarize(
+        integrals, [s.params["amplitude"].value for s in recipe.sites],
+        [getattr(s, "family", "") for s in recipe.sites], recipe.nucleus,
+        sigma=[r["integral_err"] for r in rows], uvars=uvars, samples=samples)
+    fam_note = fam["note"]
+    if fam_note_extra and fam["families"]:
+        fam_note = fam_note_extra + ("; " + fam_note if fam_note else "")
+
     return {
         "window_ppm": [hi, lo],
         "axis_ppm": [float(ctx.x_ppm.max()), float(ctx.x_ppm.min())],
@@ -108,6 +168,11 @@ def quantify(recipe: Recipe, window_ppm: tuple[float, float] | None = None,
         "note": "fraction errors are first-order (amplitude covariance only; "
                 "lineshape-parameter covariance neglected); tail_outside_pct "
                 "is a lower bound measured on the simulation axis",
+        "families": fam["families"],
+        "ratios": fam["ratios"],
+        "untagged": fam["untagged"],
+        "family_basis": fam["basis"],
+        "family_note": fam_note,
     }
 
 

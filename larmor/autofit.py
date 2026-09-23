@@ -311,6 +311,13 @@ class MonteCarloResult:
     noise: float                    # σ of the synthetic noise (data units)
     seed: int
     params: list[MCParam] = field(default_factory=list)
+    #: per-trial window integrals of EVERY site (n_ok x n_sites, draw order),
+    #: re-integrated on each refit so family sums / ratios take their error
+    #: from the spread of per-trial sums (larmor.families); None when a
+    #: trial's integration failed
+    site_integrals: np.ndarray | None = None
+    #: the (hi, lo) ppm window those integrals were taken over
+    window_ppm: tuple | None = None
 
     @property
     def summary(self) -> str:
@@ -328,9 +335,13 @@ class MonteCarloResult:
 
 def _mc_trial_worker(item):
     """One Monte-Carlo trial: refit the model against ONE synthetic noisy
-    spectrum, return the fitted value of every tracked free parameter.
-    Module-level (not a closure) so it can be pickled and sent to a worker
-    process -- see larmor/parallel.py."""
+    spectrum, return ``(fitted value of every tracked free parameter, the
+    per-site window integrals of the refit or None)``. The integrals feed the
+    Monte-Carlo basis of the family sums (larmor.families): amplitude is the
+    PEAK HEIGHT for most models, so summing per-trial amplitudes would be
+    wrong -- every trial is re-integrated instead. Module-level (not a
+    closure) so it can be pickled and sent to a worker process -- see
+    larmor/parallel.py."""
     base_json, exp_ppm, synth_amp, window_ppm, tracked = item
     trial = Recipe.from_dict(json.loads(base_json))
     try:
@@ -341,8 +352,14 @@ def _mc_trial_worker(item):
                   compute_errorbars=False)
     except Exception:
         return None
-    return {(i, pn): float(trial.sites[i].params[pn].value)
-            for i, pn, _ in tracked}
+    values = {(i, pn): float(trial.sites[i].params[pn].value)
+              for i, pn, _ in tracked}
+    try:
+        from larmor.quantify import site_integrals
+        integrals = [float(v) for v in site_integrals(trial, window_ppm)[0]]
+    except Exception:
+        integrals = None            # disables the basis, not the run
+    return values, integrals
 
 
 def monte_carlo_errors(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
@@ -428,12 +445,31 @@ def monte_carlo_errors(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
                        should_stop=should_stop, on_result=_cb,
                        use_processes=parallel, executor=executor)
     n_ok = 0
+    integral_rows: list = []
     for r in raw:
         if r is None:
             continue
-        for key, val in r.items():
+        values, ints = r
+        for key, val in values.items():
             collected[key].append(val)
+        integral_rows.append(ints)
         n_ok += 1
+    # per-trial site integrals, stacked in draw order (parallel_map returns
+    # item order) when every ok trial has them; the window is whatever the
+    # trials integrated -- the fit's own (hi, lo), resolved exactly as the
+    # worker's site_integrals() did
+    site_ints = None
+    if integral_rows and all(x is not None for x in integral_rows):
+        try:
+            site_ints = np.asarray(integral_rows, float)
+        except ValueError:
+            site_ints = None
+    mc_window = None
+    try:
+        from larmor.quantify import site_integrals as _site_integrals
+        mc_window = _site_integrals(best, window_ppm)[1]
+    except Exception:
+        site_ints = None
 
     # 5. per-parameter statistics (mean ± sqrt(var), matching dmfit/pydmfit)
     params = []
@@ -448,4 +484,5 @@ def monte_carlo_errors(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
                               best=best_vals[(i, pn)], mean=mean, std=std,
                               values=vals))
     return MonteCarloResult(trials=n_trials, n_ok=n_ok, noise=sigma, seed=seed,
-                            params=params)
+                            params=params, site_integrals=site_ints,
+                            window_ppm=mc_window)
