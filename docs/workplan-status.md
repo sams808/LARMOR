@@ -22,13 +22,15 @@ Workplan"; this file is the ground truth for progress.
   `LARMOR_TEST_DATA` (default `C:\Users\samso`); the CaAlGlass fxmla files
   live in `Desktop\larmor_tests\`; the ⁸¹Br static set is
   `Desktop\WSU_work\NMR\MagLab\DATA\81Br_2026-08\{30..34}`.
-- **Installer**: `dist/LARMOR/` was built from the pip venv at
-  `packaging/.buildenv` (python.org 3.11 — never the conda env; reasons in
-  `packaging/README.md`) **before** the main-window split. It must be rebuilt
-  and smoke-run again (the new `desktop/mw_*.py` and `workers.py` modules are
-  module-level imports of `app.py`, so PyInstaller's analysis should collect
-  them, but this has not been checked). Still owed: verification on a machine
-  with no development setup, and publishing a release.
+- **Installer**: `dist/LARMOR/` (350 MB) rebuilt at 0.13.0 from the pip venv
+  at `packaging/.buildenv` (python.org 3.11 — never the conda env; reasons in
+  `packaging/README.md`) and smoke-run offscreen for 40 s with empty crash
+  logs; the archive viewer confirms every `desktop/mw_*.py`, `workers.py` and
+  the new core modules are in the bundle. The first rebuild caught a
+  start-up crash present in every frozen build since 62bbd6b
+  (`faulthandler.enable()` with no stderr; fixed in 099c09f/510f342). Still
+  owed: verification on a machine with no development setup, and publishing
+  a release (zip `dist/LARMOR/` or wrap it with Inno Setup).
 
 ## Done — the workplan is closed
 
@@ -110,8 +112,9 @@ Beyond the workplan, from Sam's requests and from what the work uncovered:
 
 ## Remaining
 
-1. **E7** — rebuild `dist/LARMOR/` from `packaging/.buildenv` after the split,
-   smoke-run it, verify on a machine with no development setup, publish the
+1. **E7** — `dist/LARMOR/` is rebuilt and smoke-run at 0.13.0; verify it on a
+   machine with no development setup (a student's laptop: unzip, double-click
+   `LARMOR.exe`, open a Bruker folder, fit, save a recipe), then publish the
    release.
 2. Follow-ups noted during the session, none blocking:
    - `_update_sn` re-runs sideband detection and rebuilds the literature
