@@ -93,6 +93,15 @@ the pinned value. Parameters at bounds after a constrained fit mean the
 constraints, the starting model, and the data disagree somewhere — revisit
 one of them.
 
+The caveat travels into every table you export from this fit. The pinned
+value is marked ‡ in the LaTeX table and the batch report, and the footnote
+names the bound (`lower bound 1.2`); the parameter CSV's `at_bound` column
+reads `min` or `max` for it. Deliberate constraints are marked too — a held
+value †, a linked value § with its expression — so a table never presents a
+held value as a fitted one, and a reader can tell at a glance which numbers
+the data set and which you did. The status is read from the recipe itself,
+so a refit that no longer pins clears both the note and the marker.
+
 The opposite failure is quieter. Refit with a deliberately wrong ratio,
 `0.5 * s0.amplitude`: on this dataset the RMSD barely moves and nothing
 finishes at a bound — the undetermined AlO₆ site simply absorbs the error by

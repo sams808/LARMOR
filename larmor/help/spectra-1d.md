@@ -231,7 +231,7 @@ flag, not the quality of the fit — LARMOR does not grade a fit.
 | `structured residual` | Wald–Wolfowitz runs test with $\vert z\vert > 3$, or lag-1 autocorrelation above 0.4 | the residual trace |
 | `unphysical ×n` | η or the Gauss/Lorentz mix outside [0, 1], a width ≤ 0, a negative amplitude, δiso outside the fit window | the offending cell of the Fit-Parameters table |
 | `degenerate ×n: a↔b (r)` | a parameter pair with $\vert r\vert \geq 0.95$ in the covariance | Parameter correlations |
-| `at bounds: …` | a parameter that finished pinned at a min/max bound | its cell |
+| `at bounds: …` | a parameter that finished pinned at a min/max bound | its cell; the value is marked ‡ in every export |
 | `no error bars (no covariance)` | the fit returned no covariance matrix | Errors Analysis (χ² profile) |
 | `population ±≥100 %: …` | a population whose relative error reaches 100 % (see *Fitting glasses for publication* §5) | the Report |
 | `frozen: …` | a site the fit held because its centre lies outside the window | its δiso cell |
@@ -360,7 +360,18 @@ spinning-sideband detection on load** turns the automatic offer off.
   for slides and papers.
 - **File ▸ Save fit as** — `txt` / `csv` / `json` / **dmfit `.fxmla`**; writes the
   data, model, residual and every component (the dmfit export round-trips the
-  Czjzek σ ↔ `sCZ_CQ = 2σ` relation).
+  Czjzek σ ↔ `sCZ_CQ = 2σ` relation). The `csv` parameter table lists, per
+  parameter, `min`, `max`, `link`, `vary` and `at_bound` (`min` / `max` when a
+  free value sits at its bound, blank otherwise), so a held or pinned value
+  is never mistaken for a fitted one.
+- The Report dock's **Copy LaTeX** table and the **Publication bundle…**'s
+  `table.tex` mark every held value † (printed without its `± 0.00`), every
+  value that finished at a bound ‡ and every linked value §, with one
+  footnote line naming each bound and each expression. The status is read
+  from the recipe itself (`vary`, `expr`, value against bound), so it is
+  right for a saved fit reopened years later and clears itself on the next
+  edit — nothing to switch on. The status bar reports the count
+  (`marked: 1 fixed · 2 at a bound`).
 - **File ▸ Save spectrum as** — a reopenable CSV with a metadata header.
 
 ---

@@ -149,10 +149,16 @@ runs anywhere.
   (with `points`) and press **Compute errors**; the three estimators are
   those of Tutorial 6, applied to every spectrum. **Export CSV…** writes one
   row per parameter with the columns `scope, site, label, param, value,
-  stderr, sigma_pct, ci68_lo, ci68_hi, error_method, model, source_path`,
-  plus a `population_pct` row per site and spectrum.
+  stderr, sigma_pct, ci68_lo, ci68_hi, error_method, model, source_path,
+  vary, min, max, expr, at_bound`, plus a `population_pct` row per site and
+  spectrum. The last five are the row's status: a shared row reads
+  `vary = False` because the batch holds it, a released row carries its
+  ± window in `min` / `max`, and `at_bound` reads `min` or `max` when the
+  value stopped at that edge — the same cell shows ‡ in the results table,
+  with the remedy in its tooltip.
 - **Save table…** writes `batch_table.csv` (shared values once, then the
-  per-spectrum amplitudes, released parameters and populations); the
+  per-spectrum amplitudes, released parameters and populations, with the
+  same `vary, min, max, expr, at_bound` columns); the
   checkbox `also save individual fits (.recipe.json) next to the CSV` is on
   by default. **Save individual fits…** writes one recipe per spectrum.
 - **Publication bundle…** writes the whole batch to a folder you choose: the
@@ -217,7 +223,7 @@ larmor batchfit s0.csv s1.csv s2.csv --model model.recipe.json -o out
 batch fit: 3 spectra, 3 shared parameters · mean RMSD 0.1735
 wrote 3 recipe(s) + batch_table.csv to out
 ```
-<!-- measured v0.12.1, 2026-09-22: the three commands of this section, run in a scratch folder -->
+<!-- measured v0.13.0 (N5 worktree), 2026-09-23: the four commands of this section, run in a scratch folder; transcripts unchanged from v0.12.1, at_bound column read from out_rel/batch_table.csv -->
 
 Adding `--curves` writes the publication bundle next to the recipes and the
 table:
@@ -254,7 +260,11 @@ wrote 3 recipe(s) + batch_table.csv to out_rel
 ```
 
 All three positions end at 12.6 ppm — exactly 12 × 1.05, the edge of the
-released range — and the RMSD barely improves. That is the at-the-edge
+released range — and the RMSD barely improves. The table says so in words:
+`out_rel/batch_table.csv` reads `max` in its `at_bound` column for all
+three position rows, with the released window `11.4` / `12.6` in `min` /
+`max` (the shared width and `gl` rows read `vary = False`, held by the
+batch). That is the at-the-edge
 signal of §5: the model is wrong for the whole series, not just drifting.
 The sequential fit, which lets every spectrum find its own position, is the
 right tool here:

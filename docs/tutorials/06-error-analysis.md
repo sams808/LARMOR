@@ -293,7 +293,9 @@ it agrees with the profile.
   from the parameters it depends on, in all three estimators.
 - A parameter that finishes at a bound is reported with the flag of §2 and a
   note in the recipe; every error on that fit is conditional on the pinned
-  value. Loosen the bound or fix the parameter deliberately, then refit.
+  value, and every exported table marks the value with ‡ (fixed values †,
+  linked values §) with a footnote naming the bound. Loosen the bound or fix
+  the parameter deliberately, then refit.
 - **Decomposition > Report (quantify)** (F6) integrates each site over the
   window and reports populations `± error`; those errors are first-order
   propagation of the amplitude covariance and inherit its limitations.

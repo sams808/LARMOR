@@ -148,5 +148,12 @@ it) before treating any integral as quantitative.
   sCZ_CQ = 2σ and its displayed CQ = 4σ) — see *Lineshapes ▸ Czjzek width
   conventions*;
 - the parameter ranges used in the restricted fit (one sentence);
+- which parameters were **held fixed, linked, or finished at a bound** — the
+  question Edén (2023, §8) expects a referee to ask of every deconvolution
+  table. Every table LARMOR writes marks them († fixed, ‡ at a bound,
+  § linked) with a footnote naming the bound or the expression, and the
+  CSVs carry `vary` / `min` / `max` / `expr` / `at_bound` columns, so the
+  answer is in the SI by default. A ‡ on a restricted-range fit means the
+  range, not the data, set that value: widen it or state it;
 - the **Report dock's "Copy methods"** sentence includes the essentials
   automatically.

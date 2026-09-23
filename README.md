@@ -71,7 +71,8 @@ to drift between samples; components can be excluded per sample. A sequential fi
 walks a composition or temperature series, each spectrum starting from its
 neighbour's result. Multi-field datasets can be fit simultaneously, which is often
 the only way to separate Cq from δiso. Results export to a long-format CSV with
-errors and populations.
+errors and populations, and with each value's status — fixed, linked or
+finished at a bound — so a table never presents a held value as a fitted one.
 
 **2D and MQMAS.** Interactive 2D fitting (click to place a site, the fitted model
 drawn as contours over the data), hypercomplex phasing, shearing, and contour
