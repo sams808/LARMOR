@@ -1,0 +1,34 @@
+LARMOR for Windows (64-bit)
+===========================
+
+No Python, no conda. Two ways to get it, same program either way.
+
+Setup (recommended): run LARMOR-<version>-setup.exe. It installs for your
+own account (no administrator rights needed), adds LARMOR to the Start menu
+and, if you tick the box, to the Desktop, and registers an uninstaller under
+Settings > Apps. If Windows SmartScreen shows "unknown publisher", choose
+"More info" > "Run anyway" - the build is not code-signed.
+
+Zip: unzip LARMOR-<version>-win64.zip anywhere you have write access and
+double-click LARMOR.exe. Keep the folder intact: LARMOR.exe needs the
+_internal folder next to it. Right-click LARMOR.exe > "Send to" >
+"Desktop (create shortcut)" for a shortcut.
+
+The first start takes 10-30 seconds while Windows unpacks the libraries;
+later starts are faster.
+
+Opening data: File > Open, or drag a Bruker folder (an EXPNO such as
+.../2026-01/01192026_SR31649_Base0Ca_SS_ALP/24, or its pdata/1/1r), a Varian
+folder, a dmfit .fxmla, or a saved .recipe.json onto the window. The
+instrument folders are never modified.
+
+Manuals and tutorials are inside the app: Help > Manuals, Help > Tutorials.
+
+If the window does not appear: a file LARMOR_crash.log is written in your
+user folder (C:\Users\<you>\). Send it with your report.
+
+Updating: run the new setup (it replaces the old version in place) or delete
+the old LARMOR folder and unzip the new archive. Your saved recipes, projects
+and figures live wherever you saved them, not in the program folder.
+
+Source and documentation: https://github.com/sams808/LARMOR

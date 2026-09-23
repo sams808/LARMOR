@@ -22,13 +22,19 @@ Workplan"; this file is the ground truth for progress.
   Real test data roots at `LARMOR_TEST_DATA` (default `C:\Users\samso`).
 - **Installer**: `dist/LARMOR/` (351 MB) rebuilt at 0.14.0 on 2026-09-23
   from the pip venv at `packaging/.buildenv` (python.org 3.11 — never the
-  conda env; reasons in `packaging/README.md`) and zipped as
-  `dist/LARMOR-0.14.0-win64.zip` (154 MB, 1950 files) with a plain-language
-  `INSTALL.txt` next to `LARMOR.exe`. Smoke-run offscreen for 45 s (and the
-  unzipped copy for 30 s) with an empty crash log; the archive viewer lists
-  every new module of the batch, the 13 manuals and the 7 tutorials. Still
-  owed: verification on a machine with no development setup (a student's
-  laptop), then a GitHub release carrying the zip.
+  conda env; reasons in `packaging/README.md`), then wrapped two ways by
+  `packaging/build.bat`: **`dist/LARMOR-0.14.0-setup.exe`** (102 MB, Inno
+  Setup 6.7.3 from `packaging/larmor.iss`; per-user install without
+  administrator rights, Start-menu entry, optional desktop icon, uninstaller
+  under Settings ▸ Apps) and `dist/LARMOR-0.14.0-win64.zip` (154 MB, unzip
+  and run), both with a plain-language `INSTALL.txt` next to `LARMOR.exe`.
+  Verified: the exe smoke-run offscreen 45 s with an empty crash log; the
+  archive viewer lists every new module, the 13 manuals and the 7 tutorials;
+  the setup installed silently into a scratch folder in 31 s (1952 files),
+  the installed app ran 30 s, the uninstall registration read "LARMOR
+  0.14.0", and the silent uninstall left no folder and no registry key.
+  Still owed: a run on a machine with no development setup (a student's
+  laptop), then a GitHub release carrying both files.
 - **Full suite**: at v0.14.0 (0de34c7), **1324 passed / 0 failed** in 20 min 39 s,
   real-data layer complete (all 19 datasets present).
 
@@ -206,10 +212,11 @@ Open observations from the batch (not fixed; for Sam):
 
 ## Remaining
 
-1. **E7** — `dist/LARMOR-0.14.0-win64.zip` is built and smoke-run; verify it
-   on a machine with no development setup (a student's laptop: unzip,
-   double-click `LARMOR.exe`, open a Bruker folder, fit, save a recipe), then
-   publish a GitHub release carrying the zip (`gh release create v0.14.0
+1. **E7** — `dist/LARMOR-0.14.0-setup.exe` and the zip are built and tested
+   on the build machine; run the setup on a machine with no development
+   setup (a student's laptop: install, open a Bruker folder, fit, save a
+   recipe, uninstall), then publish a GitHub release carrying both
+   (`gh release create v0.14.0 dist/LARMOR-0.14.0-setup.exe
    dist/LARMOR-0.14.0-win64.zip`).
 2. The open observations of the next-ten batch above (kernel-window CG bias
    of the Czjzek model, REDOR S(S+1), the frozen-site marker).

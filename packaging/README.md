@@ -36,15 +36,37 @@ dist/LARMOR/LARMOR.exe`) and check that every new module is present.
 
 ## Distribute
 
-Copy a plain-language `INSTALL.txt` next to `LARMOR.exe` (unzip anywhere,
-double-click, first start 10–30 s, where the crash log is, SmartScreen
-"Run anyway") and zip the folder as `dist/LARMOR-<version>-win64.zip`
-(~154 MB compressed). Recipients need no Python: unzip and double-click.
-Check the archive once by extracting it elsewhere and launching that copy.
-Inno Setup / NSIS would add a Start-menu entry; neither is installed on the
-build machine, so the zip is the distribution. A GitHub release
-(`gh release create v<version> dist/LARMOR-<version>-win64.zip`) is the place
-to publish it once a clean-machine run has confirmed it.
+`packaging/build.bat` runs the whole chain (reinstall into the venv,
+PyInstaller, `INSTALL.txt`, Inno Setup, zip) and leaves two files in `dist/`:
+
+- **`LARMOR-<version>-setup.exe`** (~100 MB) — the installer for people
+  without Python. Built by Inno Setup 6 from `packaging/larmor.iss`; the
+  version is passed on the command line (`/DMyAppVersion=…`), never stored in
+  the script. Installs per user by default (`PrivilegesRequired=lowest`, into
+  `%LOCALAPPDATA%\Programs\LARMOR`, no administrator rights), offers the
+  all-users install when the account can elevate, adds a Start-menu entry,
+  an optional desktop icon and an uninstaller under Settings ▸ Apps; the
+  wizard shows `INSTALL.txt` and the MIT licence. Inno Setup itself comes
+  from `winget install --id JRSoftware.InnoSetup -e --scope user`
+  (installed 2026-09-23, 6.7.3, `%LOCALAPPDATA%\Programs\Inno Setup 6`).
+- **`LARMOR-<version>-win64.zip`** (~154 MB) — the same folder for people who
+  prefer no installer: unzip anywhere, double-click `LARMOR.exe`.
+
+Both carry `packaging/INSTALL.txt` next to the exe (first start 10–30 s,
+SmartScreen "Run anyway", where the crash log is, how to update).
+
+Test the installer once per build, silently:
+
+```
+dist\LARMOR-<v>-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CURRENTUSER /NOICONS /DIR="%TEMP%\larmor_test"
+set QT_QPA_PLATFORM=offscreen && "%TEMP%\larmor_test\LARMOR.exe"        (must stay alive; crash log empty)
+"%TEMP%\larmor_test\unins000.exe" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART  (folder and HKCU uninstall key gone)
+```
+
+A GitHub release (`gh release create v<version> dist/LARMOR-<version>-setup.exe
+dist/LARMOR-<version>-win64.zip`) is the place to publish both once a run on a
+machine without a development setup has confirmed them. The build is not
+code-signed, so SmartScreen warns on the first launch.
 
 ## First run
 
