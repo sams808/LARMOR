@@ -464,6 +464,31 @@ def fwhm_hz(ppm: np.ndarray, y: np.ndarray, sfo_MHz: float,
 
 
 
+
+def second_moment_ppm(ppm: np.ndarray, y: np.ndarray,
+                      window: tuple[float, float] | None = None) -> float:
+    """Intensity-weighted standard deviation (ppm) of the band inside
+    ``window`` about its centre of gravity -- the second moment. Variances
+    add exactly under convolution, so a second-moment split across fields
+    (larmor.qcpmg_fields.second_moment_split) separates the quadrupolar and
+    field-independent contributions without the near-Gaussian assumption of
+    the FWHM split. Window-sensitive: the window must contain the whole CT
+    band and exclude spinning sidebands (fixed in Hz). NaN when the window
+    holds no usable intensity."""
+    ppm = np.asarray(ppm, float); y = np.asarray(y, float)
+    if window is not None:
+        m = (ppm >= min(window)) & (ppm <= max(window))
+        ppm, y = ppm[m], y[m]
+    if ppm.size < 3:
+        return float("nan")
+    den = float(y.sum())
+    if abs(den) <= 1e-3 * float(np.abs(y).sum()):
+        return float("nan")
+    cg = float((ppm * y).sum() / den)
+    var = float(((ppm - cg) ** 2 * y).sum() / den)
+    return float(np.sqrt(var)) if var > 0 else float("nan")
+
+
 # --------------------------------------------------------------------------
 # Window quality: convergence (fix: the first-minima window cuts the tails
 # of a distribution-broadened pattern) and MAS sideband awareness (fix: the

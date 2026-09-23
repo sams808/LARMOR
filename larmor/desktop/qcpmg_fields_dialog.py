@@ -153,8 +153,9 @@ class QcpmgFieldsDialog(QDialog):
         v.addWidget(self.result)
 
         self.wresult = QLabel(
-            "Two-field linewidth split (Sandland Eq. 2): also fill FWHM (ppm) "
-            "at both fields, then 'Split W_q / W_csd'.")
+            "Linewidth split (Sandland Eq. 2): also fill FWHM (ppm) at two or "
+            "more fields, then 'Split W_q / W_csd' (W_csd = everything "
+            "field-independent in ppm: shift distribution + CSA).")
         self.wresult.setStyleSheet(f"color:{theme.active().text_dim};")
         self.wresult.setWordWrap(True)
         self.wresult.setTextFormat(Qt.RichText)
@@ -485,7 +486,7 @@ class QcpmgFieldsDialog(QDialog):
         from PySide6.QtWidgets import QFileDialog
         from larmor.desktop.paths import (FIGURE_DIR_KEY, remember_dir,
                                           remembered_dir)
-        from larmor.qcpmg_fields import report_text, two_field_widths
+        from larmor.qcpmg_fields import multi_field_widths, report_text
         results = self._result_map()
         if not results:
             self.result.setText("need δcg at ≥ 2 fields before a report")
@@ -493,8 +494,7 @@ class QcpmgFieldsDialog(QDialog):
         widths = {}
         fw = self._fields_fwhm()
         if len(fw) >= 2:
-            widths = {k: two_field_widths(fw[0][0], fw[0][1], fw[1][0], fw[1][1])
-                      for k in results}
+            widths = {k: multi_field_widths(fw) for k in results}
         start = remembered_dir(FIGURE_DIR_KEY)
         seed = str(Path(start) / "infinite_field_report.txt") if start             else "infinite_field_report.txt"
         path, _ = QFileDialog.getSaveFileName(
@@ -619,33 +619,37 @@ class QcpmgFieldsDialog(QDialog):
         return pts
 
     def _fields_fwhm(self):
-        """(larmor, fwhm_ppm) for rows that have both filled — for Eq. 2."""
+        """(larmor, fwhm_ppm) for EVERY row that has both filled, sorted by
+        Larmor frequency — all fields enter the width split."""
         out = []
         for r in range(self.table.rowCount()):
             try:
                 nu = float(self.table.item(r, 0).text())
                 fw = float(self.table.item(r, 3).text())
-                out.append((nu, fw))
             except (AttributeError, ValueError):
                 continue
-        return out
+            if np.isfinite(nu) and np.isfinite(fw) and nu > 0 and fw > 0:
+                out.append((nu, fw))
+        return sorted(out)
 
     def _compute_widths(self):
-        from larmor.qcpmg_fields import two_field_widths
+        from larmor.qcpmg_fields import multi_field_widths
         fw = self._fields_fwhm()
         if len(fw) < 2:
-            self.wresult.setText("enter the FWHM (ppm) at two fields")
+            self.wresult.setText("enter the FWHM (ppm) at two or more fields")
             return
-        (n1, f1), (n2, f2) = fw[0], fw[1]
-        ws = two_field_widths(n1, f1, n2, f2)
+        ws = multi_field_widths(fw)
         if not ws.ok:
             self.wresult.setText("⚠ " + ws.note)
             return
-        self.wresult.setText(
-            f"quadrupolar width W_q = {ws.wq_lo_ppm:.1f} ppm (at {min(n1,n2):.0f} "
-            f"MHz) / {ws.wq_hi_ppm:.1f} ppm (at {max(n1,n2):.0f} MHz)  ·  "
-            f"chemical-shift-distribution width W_csd = <b>{ws.wcsd_ppm:.1f} "
-            f"ppm</b> (field-independent)")
+        lo, hi = ws.fields_MHz[0], ws.fields_MHz[-1]
+        text = (f"width split over {ws.n_fields} fields: quadrupolar width W_q = "
+                f"{ws.wq_lo_ppm:.1f} ppm (at {lo:.0f} MHz) / {ws.wq_hi_ppm:.1f} ppm "
+                f"(at {hi:.0f} MHz)  ·  field-independent width W_csd = "
+                f"<b>{ws.wcsd_ppm:.1f} ppm</b> (shift distribution + CSA)")
+        if ws.gate:
+            text += f"<br><span style='color:#c0392b'>⚠ {ws.gate}</span>"
+        self.wresult.setText(text)
 
     def _compute(self):
         pts = self._points()

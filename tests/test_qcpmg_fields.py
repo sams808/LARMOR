@@ -748,3 +748,142 @@ def test_ct_selective_box_starts_unknown(qapp):
     assert rows["58.7000"] == "no" and rows["78.3540"] == "?" and rows["107.8110"] == "yes"
     assert "(declared)" in d.table.horizontalHeaderItem(4).text()
     d.close()
+
+
+# ---------------------------------------------------------------- fix 12
+def test_multi_field_widths_uses_every_field():
+    """The dialogs passed only the first two FWHM rows to the split with
+    3+ fields loaded; the third field was silently ignored."""
+    from larmor.qcpmg_fields import multi_field_widths, two_field_widths
+
+    nus = (58.726, 78.354, 107.811)
+    wq_ref, wcsd = 60.0, 20.0
+    f = [np.hypot(wq_ref * (nus[0] / n) ** 2, wcsd) for n in nus]
+    rng = np.random.default_rng(0)
+    pts = [(n, fi * (1 + 0.02 * rng.standard_normal())) for n, fi in zip(nus, f)]
+    ws = multi_field_widths(pts)
+    assert ws.ok and ws.n_fields == 3 and ws.fields_MHz == pytest.approx(nus)
+    assert ws.wcsd_ppm == pytest.approx(wcsd, abs=1.0)
+    assert ws.wq_lo_ppm == pytest.approx(wq_ref, rel=0.05)
+    assert np.isfinite(ws.chi2) and len(ws.residuals_ppm2) == 3
+    # perturbing the THIRD field changes the answer (it is no longer ignored)
+    pts2 = list(pts); pts2[2] = (pts2[2][0], pts2[2][1] * 1.3)
+    ws2 = multi_field_widths(pts2)
+    assert ws2.wcsd_ppm != pytest.approx(ws.wcsd_ppm, abs=0.5)
+    # the row order of the input is irrelevant (sorted by field inside)
+    assert multi_field_widths(pts[::-1]).wcsd_ppm == pytest.approx(ws.wcsd_ppm)
+    # n == 2 equals the closed form exactly
+    n1, n2, wq1 = 58.726, 81.599, 60.0
+    f1, f2 = np.hypot(wq1, wcsd), np.hypot(wq1 * (n1 / n2) ** 2, wcsd)
+    a = two_field_widths(n1, f1, n2, f2); b = multi_field_widths([(n1, f1), (n2, f2)])
+    assert a.wcsd_ppm == pytest.approx(b.wcsd_ppm, abs=1e-9)
+    assert a.wq_lo_ppm == pytest.approx(wq1, abs=1e-9) and a.ok
+    # a negative fitted intercept: ok False, never NaN
+    bad = multi_field_widths([(n1, 20.0), (n2, 60.0)])
+    assert not bad.ok and np.isfinite(bad.wcsd_ppm) and np.isfinite(bad.wq_lo_ppm)
+    bad3 = multi_field_widths([(58.726, 100.0), (78.354, 95.0), (107.811, 99.0)])
+    assert np.isfinite(bad3.wcsd_ppm) and np.isfinite(bad3.wq_lo_ppm)
+    # sigma on every point -> 1/sigma^2 weights and parameter errors
+    wpts = [(n, fi, 0.5) for n, fi in pts]
+    ww = multi_field_widths(wpts)
+    assert ww.weighted and np.isfinite(ww.wcsd_err_ppm) and ww.wcsd_err_ppm > 0
+    # a processing LB is removed in quadrature (in ppm) at each field
+    lb = 300.0
+    pts_lb = [(n, np.hypot(fi, lb / n)) for n, fi in zip(nus, f)]
+    assert multi_field_widths(pts_lb, lb_Hz=lb).wcsd_ppm == pytest.approx(wcsd, abs=1e-6)
+
+
+def test_width_split_gate_flags_the_pure_quadrupolar_regime():
+    from larmor.qcpmg_fields import multi_field_widths
+
+    n1, n2 = 78.354, 107.811
+    wq = 100.0
+    pure = multi_field_widths([(n1, wq), (n2, wq * (n1 / n2) ** 2 * 1.02)])
+    assert pure.gate and "not resolved" in pure.gate
+    small = multi_field_widths([(n1, np.hypot(wq, 15.0)), (n2, np.hypot(wq * (n1 / n2) ** 2, 15.0))])
+    assert small.ok and small.wcsd_ppm == pytest.approx(15.0, abs=1e-6)
+    # W_csd = 0.15 W_q: for two fields the ratio gate always covers the
+    # 0.3 W_q regime (c = 0.3 a gives a 10 % ratio deviation), so either gate
+    # may speak -- what matters is that one does, with the right W_csd
+    assert small.gate and ("0.3 W_q" in small.gate or "not resolved" in small.gate)
+    mid = multi_field_widths([(n1, np.hypot(wq, 28.0)), (n2, np.hypot(wq * (n1 / n2) ** 2, 28.0))])
+    assert mid.ok and mid.gate and mid.wcsd_ppm == pytest.approx(28.0, abs=1e-6)
+    fine = multi_field_widths([(n1, np.hypot(wq, 60.0)), (n2, np.hypot(wq * (n1 / n2) ** 2, 60.0))])
+    assert fine.ok and fine.gate == ""
+
+
+def test_report_labels_wcsd_as_shift_distribution_plus_csa():
+    from larmor.qcpmg_fields import multi_field_widths, report_text
+
+    pts = [FieldPoint(NU_LO, -113.1, 1.5), FieldPoint(NU_HI, -92.1, 1.1)]
+    res = infinite_field_diso(pts, 1.5, 0.7)
+    ws = multi_field_widths([(NU_LO, 59.4), (NU_HI, 43.0)])
+    txt = report_text({"s": res}, 1.5, 0.7, "35Cl", {"s": ws})
+    assert "W_csd" in txt and "CSA" in txt.split("W_csd", 1)[1].splitlines()[0]
+    assert "width split over 2 fields" in txt
+
+
+def test_second_moment_split_recovers_an_injected_shift_distribution():
+    """Variances add under convolution, so the second-moment split needs no
+    Gaussian assumption: a 30 ppm Gaussian shift distribution injected on a
+    static CT pattern at two fields comes back within 1 ppm, where the FWHM
+    split on the same pure-CT pattern returns a spurious W_csd and trips
+    the gate."""
+    from larmor import qcpmg
+    from larmor.qcpmg_fields import multi_field_widths, second_moment_split
+    from tests.conftest import simulate_ct_single
+
+    fields = (78.354, 107.811)
+    sm, fw = [], []
+    for nu in fields:
+        x, y = simulate_ct_single("35Cl", nu, 0.0, 3.0, 0.7, -50.0,
+                                  span_ppm=(-700.0, 400.0), npts=11000,
+                                  shift_fwhm_ppm=30.0)
+        win = (float(x.min()), float(x.max()))
+        sm.append((nu, qcpmg.second_moment_ppm(x, y, win)))
+        hi, lo = qcpmg.cg_window(x, y)
+        fw.append((nu, qcpmg.fwhm_hz(x, y, 1.0, (hi, lo))))
+    ws = second_moment_split(sm)
+    assert ws.ok and ws.kind == "second_moment"
+    assert ws.wcsd_ppm == pytest.approx(30.0, abs=1.0)
+    # the pure-CT FWHM split: shift_fwhm 0.3 -> a spurious W_csd, gated
+    fw0 = []
+    for nu in fields:
+        x, y = simulate_ct_single("35Cl", nu, 0.0, 3.0, 0.7, -50.0,
+                                  span_ppm=(-700.0, 400.0), npts=11000,
+                                  shift_fwhm_ppm=0.3)
+        hi, lo = qcpmg.cg_window(x, y)
+        fw0.append((nu, qcpmg.fwhm_hz(x, y, 1.0, (hi, lo))))
+    spurious = multi_field_widths(fw0)
+    assert spurious.wcsd_ppm > 3.0                    # not the injected 0.3
+    assert spurious.gate != ""
+    sm0 = []
+    for nu in fields:
+        x, y = simulate_ct_single("35Cl", nu, 0.0, 3.0, 0.7, -50.0,
+                                  span_ppm=(-700.0, 400.0), npts=11000,
+                                  shift_fwhm_ppm=0.3)
+        sm0.append((nu, qcpmg.second_moment_ppm(x, y, (float(x.min()), float(x.max())))))
+    assert second_moment_split(sm0).wcsd_ppm < 3.0
+
+
+def test_fields_dialog_width_split_takes_all_rows_sorted(qapp):
+    from PySide6.QtWidgets import QTableWidgetItem
+
+    from larmor.desktop.qcpmg_fields_dialog import QcpmgFieldsDialog
+
+    dlg = QcpmgFieldsDialog(None, "35Cl", None)
+    nus = (107.811, 58.726, 78.354)                     # unsorted on purpose
+    wq_ref, wcsd = 60.0, 20.0
+    for r, n in enumerate(nus):
+        if r >= dlg.table.rowCount():
+            dlg._add_row()
+        dlg.table.setItem(r, 0, QTableWidgetItem(f"{n}"))
+        dlg.table.setItem(r, 1, QTableWidgetItem("-100"))
+        dlg.table.setItem(r, 3, QTableWidgetItem(
+            f"{np.hypot(wq_ref * (58.726 / n) ** 2, wcsd):.4f}"))
+    assert [n for n, _ in dlg._fields_fwhm()] == sorted(nus)
+    dlg._compute_widths()
+    assert "csd" in dlg.wresult.text().lower()          # existing assertion
+    assert "3 fields" in dlg.wresult.text() and "CSA" in dlg.wresult.text()
+    assert "20.0 ppm" in dlg.wresult.text()
+    dlg.close()

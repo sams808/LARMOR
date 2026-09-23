@@ -311,8 +311,9 @@ sum is unweighted). **Compute δiso** then reads
 
 Rows can also be typed in (**＋ Add field**), taken from the open workspace
 (**δcg from open spectrum (visible range)**) or read from saved datasets
-(**Add from datasets…**). **Split W_q / W_csd** separates the two FWHM values
-into a quadrupolar width and a field-independent shift-distribution width;
+(**Add from datasets…**). **Split W_q / W_csd** separates the FWHM values of
+all the fields entered into a quadrupolar width and a field-independent
+width (shift distribution *and* CSA — an upper bound on shift disorder);
 **Export report…** and **Export figure…** write the record.
 
 **A whole series at once.** **Tools > QCPMG: batch infinite-field δiso…**

@@ -427,7 +427,7 @@ class QcpmgBatchFieldsDialog(QDialog):
 
     def _compute(self):
         from larmor.qcpmg_fields import (InfiniteFieldResult, fit_samples,
-                                         report_text, two_field_widths)
+                                         multi_field_widths, report_text)
         rows = self._rows()
         if len(rows) < 2:
             self.msg.setText("load at least two fields for one sample first")
@@ -436,12 +436,13 @@ class QcpmgBatchFieldsDialog(QDialog):
                                     eta=self.eta.value())
         widths = {}
         for name in self._results:
-            fw = [(d["larmor"], d["fwhm"]) for (r, c), d in sorted(self.cells.items())
-                  if (self.table.item(r, 0).text() if self.table.item(r, 0)
-                      else f"sample {r + 1}") == name and d.get("fwhm")]
+            fw = sorted((d["larmor"], d["fwhm"]) for (r, c), d in self.cells.items()
+                        if (self.table.item(r, 0).text() if self.table.item(r, 0)
+                            else f"sample {r + 1}") == name
+                        and d.get("fwhm") is not None and np.isfinite(d["fwhm"])
+                        and d["fwhm"] > 0)
             if len(fw) >= 2:
-                widths[name] = two_field_widths(fw[0][0], fw[0][1],
-                                                fw[1][0], fw[1][1])
+                widths[name] = multi_field_widths(fw)      # every field
         self._widths = widths
         self.report.setPlainText(report_text(
             self._results, self.spin.value(), self.eta.value(),

@@ -381,15 +381,29 @@ Czjzek lineshape fit recovers the tail weight).
 > field. The CT-selective flag is recorded for provenance; it does not change
 > Eq. (1) in this limit.
 
-**Two-field width split (Sandland Eq. 2).** Fill the **FWHM (ppm)** column at
-both fields and press **Split W_q / W_csd**: it separates the CT linewidth into a
-**quadrupolar** part $W_q \propto 1/\nu_0^2$ (broader at low field) and a
-**chemical-shift-distribution** part $W_\text{csd}$ (field-independent in ppm),
+**Width split (Sandland Eq. 2).** Fill the **FWHM (ppm)** column at two or
+more fields and press **Split W_q / W_csd**: it separates the CT linewidth
+into a **quadrupolar** part $W_q \propto 1/\nu_0^2$ (broader at low field) and
+a **field-independent** part $W_\text{csd}$ (constant in ppm),
 
-$$\text{FWHM}_1^2 = W_q^2 + W_\text{csd}^2, \qquad \text{FWHM}_2^2 = W_q^2\left(\frac{\nu_1}{\nu_2}\right)^4 + W_\text{csd}^2$$
+$$\text{FWHM}_i^2 = W_q^2\left(\frac{\nu_\text{ref}}{\nu_i}\right)^4 + W_\text{csd}^2$$
 
-so $W_\text{csd}$ reports the intrinsic shift disorder of the site independent of
-the quadrupolar broadening.
+fitted over every field entered (the two-field case is the closed form).
+$W_\text{csd}$ collects **everything constant in ppm** — the distribution of
+isotropic shifts *and* the chemical-shift anisotropy — so it is an upper
+bound on shift disorder unless the CSA is known to be small; δcg itself is
+CSA-invariant, so δiso, $C_Q$ and $P_Q$ are unaffected. Eq. 2 assumes
+near-Gaussian, disorder-broadened lines: on a pure second-order CT pattern
+it returns a spurious $W_\text{csd}$ of 10–17 ppm (static) and a CSA span
+comparable to $W_q$ inflates both widths, so the tool flags a split whose
+FWHM ratio follows $(\nu_\text{lo}/\nu_\text{hi})^2$ within 15 % or whose
+$W_\text{csd}$ is below $0.3\,W_q$. A processing line broadening is removed
+in quadrature when it is known. The same separation on the **second
+moment** (`qcpmg.second_moment_ppm`, `qcpmg_fields.second_moment_split`)
+needs no Gaussian assumption — variances add exactly under convolution —
+and is reported as a Gaussian-equivalent FWHM; it is window-sensitive
+(the window must hold the whole band and exclude spinning sidebands, which
+are fixed in Hz).
 
 ---
 
@@ -416,8 +430,8 @@ result can never be exported.
 **Compute all** extrapolates every sample. Then:
 
 - **Export report…** writes a plain-text record: every input point, every
-  fitted δiso, C_Q and P_Q with uncertainties, the W_q/W_csd split where two
-  fields allow it, and the assumptions (η, spin) spelled out. A sample that
+  fitted δiso, C_Q and P_Q with uncertainties, the W_q/W_csd split over all
+  the fields that carry a FWHM, and the assumptions (η, spin) spelled out. A sample that
   could not be fitted is listed as such rather than silently dropped.
 - **Export figures…** writes the **merged** figure — every sample on one
   δcg vs 1/ν₀² axes, each with its extrapolation and a starred intercept —

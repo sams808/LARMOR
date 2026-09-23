@@ -335,43 +335,176 @@ def field_plausibility_warning(nu_MHz: float, nucleus: str) -> str:
             + hint)
 
 
+#: Gaussian FWHM / sigma
+GAUSS_FWHM_PER_SIGMA = 2.3548200450309493
+
+
 @dataclass
 class WidthSplit:
-    wq_lo_ppm: float          # quadrupolar width at the LOWER field (ppm)
-    wq_hi_ppm: float          # quadrupolar width at the higher field (ppm)
-    wcsd_ppm: float           # chemical-shift-distribution width (field-independent)
+    wq_lo_ppm: float          # quadrupolar width at the LOWEST field (ppm)
+    wq_hi_ppm: float          # quadrupolar width at the highest field (ppm)
+    #: FIELD-INDEPENDENT width (ppm): everything constant in ppm -- the
+    #: distribution of isotropic shifts AND the chemical-shift anisotropy --
+    #: so an upper bound on shift disorder unless the CSA is known small.
+    #: (The name keeps the token 'csd' for API stability.)
+    wcsd_ppm: float
     ok: bool                  # False when the split is unphysical (see note)
     note: str = ""
+    n_fields: int = 2
+    fields_MHz: tuple = ()
+    chi2: float = float("nan")          # sum w (FWHM_i^2 - model)^2
+    residuals_ppm2: tuple = ()          # FWHM_i^2 - model_i (ppm^2)
+    weighted: bool = False              # 1/sigma^2 weights were used
+    wq_err_ppm: float = float("nan")    # at the lowest field
+    wcsd_err_ppm: float = float("nan")
+    gate: str = ""                      # non-empty in the spurious regime
+    kind: str = "fwhm"                  # 'fwhm' (Sandland Eq. 2) | 'second_moment'
+
+    @property
+    def label(self) -> str:
+        return ("W_csd" if self.kind == "fwhm" else
+                "W_csd (Gaussian-equivalent FWHM = 2.3548 sigma_csd)")
+
+
+#: |FWHM_hi/FWHM_lo / (nu_lo/nu_hi)^2 - 1| below this: the widths scale as a
+#: pure quadrupolar pattern and W_csd is not resolved
+WIDTH_GATE_PURE_QUAD = 0.15
+#: W_csd below this fraction of W_q(low field) is in the regime where the
+#: quadrature model returns spurious values (10-17 ppm on a pure CT pattern)
+WIDTH_GATE_CSD_FRACTION = 0.30
+
+
+def _width_split(points, nu_ref, lb_Hz, kind: str) -> WidthSplit:
+    """Shared solver for the FWHM and second-moment splits.
+
+    ``points``: (nu_MHz, width_ppm[, sigma_width_ppm]); the model is
+    width_i^2 = Wq_ref^2 (nu_ref/nu_i)^4 + Wcsd^2, linear in the two
+    squares. n == 2 is solved exactly (the Sandland closed form); n > 2 by
+    least squares (1/(2 W sigma)^2 weights when every point has a sigma),
+    with scipy's nnls when the unconstrained solution goes negative. A
+    processing line broadening ``lb_Hz`` (one value or one per point) is
+    removed in quadrature, in ppm, at each field first.
+    """
+    pts = []
+    for i, p in enumerate(points):
+        nu, w = float(p[0]), float(p[1])
+        sig = float(p[2]) if len(p) > 2 and p[2] is not None else float("nan")
+        lb = 0.0
+        if lb_Hz is not None:
+            lb = float(lb_Hz[i] if isinstance(lb_Hz, (list, tuple)) else lb_Hz)
+        pts.append((nu, w, sig, lb))
+    if len(pts) < 2:
+        return WidthSplit(0, 0, 0, False, "need the width at two or more fields",
+                          n_fields=len(pts), kind=kind)
+    pts.sort(key=lambda t: t[0])
+    nus = np.array([t[0] for t in pts]); ws = np.array([t[1] for t in pts])
+    sigs = np.array([t[2] for t in pts]); lbs = np.array([t[3] for t in pts])
+    if not np.all(nus > 0) or not np.all(np.isfinite(ws)):
+        return WidthSplit(0, 0, 0, False, "widths or fields are not finite",
+                          n_fields=len(pts), fields_MHz=tuple(nus), kind=kind)
+    nu_ref = float(nu_ref) if nu_ref else float(nus[0])
+    w2 = ws ** 2 - (lbs / nus) ** 2                    # LB removed in quadrature
+    x = (nu_ref / nus) ** 4
+    if np.ptp(x) < 1e-9 * max(1.0, float(np.max(x))):
+        return WidthSplit(0, 0, 0, False, "the fields are too close",
+                          n_fields=len(pts), fields_MHz=tuple(nus), kind=kind)
+    weighted = bool(np.all(np.isfinite(sigs) & (sigs > 0)))
+    wts = 1.0 / (2.0 * ws * sigs) ** 2 if weighted else np.ones(ws.size)
+    A = np.column_stack([x, np.ones_like(x)])
+    sw = np.sqrt(wts)
+    sol, *_ = np.linalg.lstsq(A * sw[:, None], w2 * sw, rcond=None)
+    a, c = float(sol[0]), float(sol[1])                # Wq_ref^2, Wcsd^2
+    ok = a >= 0.0 and c >= 0.0
+    if not ok and ws.size > 2:
+        from scipy.optimize import nnls
+        sol_nn, _ = nnls(A * sw[:, None], w2 * sw)
+        a, c = float(sol_nn[0]), float(sol_nn[1])
+    a, c = max(a, 0.0), max(c, 0.0)
+    model = a * x + c
+    resid = w2 - model
+    chi2 = float((wts * resid ** 2).sum())
+    # parameter errors from the (weighted) normal equations
+    try:
+        cov = np.linalg.inv((A * wts[:, None]).T @ A)
+        if not weighted and ws.size > 2:
+            cov = cov * chi2 / (ws.size - 2)
+        var_a, var_c = max(float(cov[0, 0]), 0.0), max(float(cov[1, 1]), 0.0)
+    except np.linalg.LinAlgError:
+        var_a = var_c = float("nan")
+    wq = float(np.sqrt(a)); wcsd = float(np.sqrt(c))
+    wq_err = float(np.sqrt(var_a) / (2 * wq)) if wq > 0 and (weighted or ws.size > 2) else float("nan")
+    wcsd_err = float(np.sqrt(var_c) / (2 * wcsd)) if wcsd > 0 and (weighted or ws.size > 2) else float("nan")
+    wq_hi = wq * (nu_ref / float(nus[-1])) ** 2
+    note = "" if ok else (
+        "widths do not separate: the higher-field line is broader than the "
+        "quadrupolar model allows — check the FWHM values or the CT band.")
+    gate = ""
+    ratio = float(ws[-1] / ws[0]) if ws[0] > 0 else float("nan")
+    pure = (float(nus[0]) / float(nus[-1])) ** 2
+    if np.isfinite(ratio) and abs(ratio / pure - 1.0) < WIDTH_GATE_PURE_QUAD:
+        gate = (f"widths scale as a pure quadrupolar pattern (FWHM ratio {ratio:.3f} "
+                f"vs (nu_lo/nu_hi)^2 = {pure:.3f}): W_csd is not resolved")
+    elif ok and wq > 0 and wcsd < WIDTH_GATE_CSD_FRACTION * wq:
+        gate = (f"W_csd = {wcsd:.1f} ppm is below 0.3 W_q ({wq:.1f} ppm): in this "
+                "regime the quadrature model returns spurious W_csd (10-17 ppm on "
+                "a pure CT pattern) -- treat it as an upper bound")
+    return WidthSplit(wq, wq_hi, wcsd, ok, note, n_fields=int(ws.size),
+                      fields_MHz=tuple(float(v) for v in nus), chi2=chi2,
+                      residuals_ppm2=tuple(float(v) for v in resid),
+                      weighted=weighted, wq_err_ppm=wq_err, wcsd_err_ppm=wcsd_err,
+                      gate=gate, kind=kind)
+
+
+def multi_field_widths(points, nu_ref: float | None = None,
+                       lb_Hz=None) -> WidthSplit:
+    """Separate the CT linewidth into a quadrupolar part W_q (∝ 1/ν0²,
+    broader at low field) and a FIELD-INDEPENDENT part W_csd (constant in
+    ppm: the distribution of isotropic shifts AND the chemical-shift
+    anisotropy) from the FWHM measured at two or more fields (Sandland et
+    al. 2004, Eq. 2, generalised to N fields):
+
+        FWHM_i² = W_q,ref² (ν_ref/ν_i)⁴ + W_csd²
+
+    ``points``: (nu_MHz, fwhm_ppm[, sigma_fwhm_ppm]). Eq. 2 is exact only for
+    Gaussian-convolved lines: a pure second-order CT pattern returns a
+    non-zero W_csd (10-17 ppm static) and a CSA span comparable to W_q
+    inflates both -- the ``gate`` field says when the split is in that
+    regime. Prefer :func:`second_moment_split` where the whole band is
+    measurable.
+    """
+    return _width_split(points, nu_ref, lb_Hz, "fwhm")
+
+
+def second_moment_split(points, nu_ref: float | None = None) -> WidthSplit:
+    """The same separation on the SECOND MOMENT (intensity-weighted standard
+    deviation, :func:`larmor.qcpmg.second_moment_ppm`) instead of the FWHM:
+
+        σ_i² = σ_q,ref² (ν_ref/ν_i)⁴ + σ_csd²
+
+    Variances add exactly under convolution, so this split needs no
+    Gaussian assumption (injected 0 / 0.3 / 30 / 60 ppm shift distributions
+    come back as 0.1 / 0.3 / 30.0 / 60.0 on static CT patterns). It is
+    window-sensitive -- the window must hold the whole CT band and exclude
+    spinning sidebands, which are fixed in Hz. The result is reported as the
+    Gaussian-EQUIVALENT FWHM = 2.3548 σ, labelled as such.
+    ``points``: (nu_MHz, sigma_ppm[, err_ppm]).
+    """
+    pts = [(p[0], GAUSS_FWHM_PER_SIGMA * float(p[1]),
+            (GAUSS_FWHM_PER_SIGMA * float(p[2]) if len(p) > 2 and p[2] is not None
+             else None)) for p in points]
+    return _width_split(pts, nu_ref, None, "second_moment")
 
 
 def two_field_widths(nu1_MHz: float, fwhm1_ppm: float,
                      nu2_MHz: float, fwhm2_ppm: float) -> WidthSplit:
-    """Separate the CT linewidth into a quadrupolar part W_q (∝ 1/ν0², broader at
-    low field) and a chemical-shift-distribution part W_csd (field-independent in
-    ppm) from the FWHM measured at two fields (Sandland et al. 2004, Eq. 2).
-
-    In ppm, W_q ∝ 1/ν0² and W_csd is constant, so with the lower field = 1:
+    """Two-field closed form of :func:`multi_field_widths` (Sandland Eq. 2):
+    with the lower field = 1,
         FWHM1² = W_q1² + W_csd²
         FWHM2² = W_q1²·(ν1/ν2)⁴ + W_csd²
     → W_q1² = (FWHM1² − FWHM2²)/(1 − (ν1/ν2)⁴),  W_csd² = FWHM1² − W_q1².
-    (Sandland writes it in Hz; the ppm form here is equivalent.)
+    Field order does not matter; an unphysical split is flagged ok=False.
     """
-    # order so field 1 is the lower field
-    if nu1_MHz > nu2_MHz:
-        nu1_MHz, fwhm1_ppm, nu2_MHz, fwhm2_ppm = nu2_MHz, fwhm2_ppm, nu1_MHz, fwhm1_ppm
-    r = (nu1_MHz / nu2_MHz) ** 4
-    if abs(1.0 - r) < 1e-9:
-        return WidthSplit(0, 0, 0, False, "the two fields are too close")
-    wq1_sq = (fwhm1_ppm ** 2 - fwhm2_ppm ** 2) / (1.0 - r)
-    wcsd_sq = fwhm1_ppm ** 2 - wq1_sq
-    ok = wq1_sq >= 0 and wcsd_sq >= 0
-    note = ("" if ok else
-            "widths do not separate: the higher-field line is broader than the "
-            "quadrupolar model allows — check the FWHM values or the CT band.")
-    wq1 = float(np.sqrt(max(wq1_sq, 0.0)))
-    wcsd = float(np.sqrt(max(wcsd_sq, 0.0)))
-    wq2 = wq1 * (nu1_MHz / nu2_MHz) ** 2         # W_q at the higher field
-    return WidthSplit(wq1, wq2, wcsd, ok, note)
+    return multi_field_widths([(nu1_MHz, fwhm1_ppm), (nu2_MHz, fwhm2_ppm)])
 
 
 def centre_of_gravity(ppm: np.ndarray, amp: np.ndarray,
@@ -604,10 +737,21 @@ def report_text(results: dict, spin: float, eta: float, nucleus: str = "",
                 lines.append(f"    ! {part}")
         w = (widths or {}).get(sample)
         if w is not None and getattr(w, "ok", False):
+            fields = ", ".join(f"{f:.1f}" for f in w.fields_MHz)
+            what = ("FWHM, Sandland Eq. 2" if w.kind == "fwhm"
+                    else "second moment, Gaussian-equivalent FWHM = 2.3548 sigma")
+            lines.append(f"    width split over {w.n_fields} fields ({fields} MHz; {what}"
+                         + ("; 1/sigma^2 weights" if w.weighted else "") + ")")
             lines.append(f"    W_q            = {w.wq_lo_ppm:8.1f} ppm (low field)"
-                         f" / {w.wq_hi_ppm:.1f} ppm (high field)")
+                         f" / {w.wq_hi_ppm:.1f} ppm (high field)"
+                         + (f"   +- {w.wq_err_ppm:.1f} (low)" if np.isfinite(w.wq_err_ppm) else ""))
             lines.append(f"    W_csd          = {w.wcsd_ppm:8.1f} ppm "
-                         f"(field-independent)")
+                         f"(field-independent: shift distribution + CSA)"
+                         + (f"   +- {w.wcsd_err_ppm:.1f}" if np.isfinite(w.wcsd_err_ppm) else ""))
+            if w.n_fields > 2 and np.isfinite(w.chi2):
+                lines.append(f"    width chi2     = {w.chi2:.3g} over {w.n_fields - 2} dof")
+            if w.gate:
+                lines.append(f"    ! {w.gate}")
         elif w is not None and getattr(w, "note", ""):
             lines.append(f"    width split    : {w.note}")
         lines.append("")
