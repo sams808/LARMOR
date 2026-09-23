@@ -238,6 +238,15 @@ rate of a saved dataset, tick the sideband positions on the supervision plot
 and flag *window catches one sideband only*; use the **whole manifold**
 window there.
 
+**Static patterns with structure.** On a static second-order pattern with
+little shift disorder (C_Q ≳ 4.5 MHz for ³⁵Cl at these fields) the
+first-minima walk stops at the dip between the two horns and the automatic
+window catches **one horn** — δcg is then off by tens of ppm and the
+extrapolation with it (simulated C_Q 5.5 MHz: −22 to −47 ppm on δiso),
+although a full-range window recovers it to 0.01 ppm. For a static pattern
+place the window by hand across the whole pattern, down to the noise on
+both sides; the convergence flag below catches the one-horn window.
+
 **The window must reach the noise on both sides.** The jitter σ is a local
 sensitivity: it does not see a tail that the window cuts. The tools also
 re-measure δ_CG with the window at 1.5×, 2× and 3× its width (each edge
