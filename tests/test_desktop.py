@@ -1195,7 +1195,7 @@ def test_kernel_warm_worker_spin_gate_and_dedup(win, qapp, tmp_path,
     pre-build; spin-1/2 nuclei and repeat loads of the same dataset do not.
     (The build itself is exercised via the engine tests; here the worker is
     stubbed so the test stays fast.)"""
-    import larmor.desktop.app as appmod
+    import larmor.desktop.mw_files as fmod      # the module _warm_kernel reads
 
     started = []
 
@@ -1207,7 +1207,7 @@ def test_kernel_warm_worker_spin_gate_and_dedup(win, qapp, tmp_path,
         def isRunning(self):
             return False
 
-    monkeypatch.setattr(appmod, "KernelWarmWorker", FakeWorker)
+    monkeypatch.setattr(fmod, "KernelWarmWorker", FakeWorker)
     monkeypatch.delenv("LARMOR_NO_KERNEL_WARM", raising=False)
 
     data = tmp_path / "sample.csv"

@@ -12,8 +12,20 @@ rendering figures — and every engine has unit tests that run headless in
 seconds. The desktop layer (`larmor/desktop/`, PySide6 + pyqtgraph) is a GUI
 over that core and holds no physics of its own. If you are adding a
 capability, put the logic in the core with tests first and wire the dialog to
-it afterwards. The main window, `desktop/app.py`, is the largest module by far
-(~4.6k lines); it is stable but is the place to tread most carefully.
+it afterwards. The main window is a facade: `desktop/app.py` (~387 lines)
+holds `MainWindow.__init__`, the two Qt event overrides and `main()`, and every
+other method is defined on one of eleven mixins in `desktop/mw_*.py`, each
+owning one group of window state — `mw_menus` (menu bar, toolbar, sidebar and
+the menu-state setters), `mw_chrome` (docks, status bar, progress bar, view
+operations), `mw_files` (open, load, navigate, save), `mw_session`
+(workspaces, project bundle, session file), `mw_overlays`, `mw_editing` (undo,
+adding and restructuring sites, paddles), `mw_sidebands`, `mw_fitting`
+(simulate, fit, fit health, exports), `mw_processing`, `mw_cofit`, `mw_tools`
+(dialog launchers) — with the QThreads in `desktop/workers.py`. A new window
+method belongs in the mixin that owns its state, never in `app.py`; mixins
+define no `__init__`, no `Signal` and no Qt event override, never import
+`larmor.desktop.app`, and keep pairwise-disjoint method names —
+`tests/test_app_split.py` enforces all of it and freezes the menu tree.
 
 ## Module map
 
