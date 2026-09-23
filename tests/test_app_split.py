@@ -426,7 +426,6 @@ def test_public_surface_unchanged():
     assert not missing, missing
 
 
-@pytest.mark.xfail(strict=True, reason="tightened when the last block (menus) moves")
 def test_facade_holds_only_construction_and_qt_overrides():
     from larmor.desktop.app import MainWindow
 
