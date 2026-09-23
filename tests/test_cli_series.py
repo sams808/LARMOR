@@ -60,3 +60,61 @@ def test_cli_seqfit_needs_model(tmp_path):
     # no model available without --model
     rc = cli.main(["seqfit", *paths, "-o", str(tmp_path / "x")])
     assert rc == 1
+
+
+def test_cli_batchfit_and_seqfit_curves_flag_write_bundle_files(tmp_path, capsys):
+    """--curves adds the publication bundle (curves, manifest.csv, README.txt)
+    next to the recipes/table the CLI already writes, reusing their stems;
+    the CLI table now carries the dialog's 8 columns (model, source_path)."""
+    import csv
+    from larmor import batchfit
+
+    paths, model = _make_series(tmp_path)
+    out = tmp_path / "bout"
+    rc = cli.main(["batchfit", *paths, "--model", model, "-o", str(out), "--curves"])
+    assert rc == 0
+    printed = capsys.readouterr().out
+    assert "wrote 3 recipe(s) + batch_table.csv to" in printed
+    assert f"wrote 3 curve file(s) + manifest.csv + README.txt to {out}" in printed
+
+    with open(out / "batch_table.csv", newline="", encoding="utf-8") as f:
+        rows = list(csv.reader(f))
+    assert rows[0] == batchfit.SHARED_HEADER
+    per = [r for r in rows[1:] if r[0] != "shared"]
+    assert per and all(r[7] in paths for r in per)          # source_path filled
+    assert all(r[6] == "gauss_lor" for r in per)
+    recipes = sorted(p.name for p in out.glob("*.recipe.json"))
+    assert recipes == [f"s{k}_batch.recipe.json" for k in range(3)]   # written once
+    for k in range(3):
+        assert Recipe.load(out / f"s{k}_batch.recipe.json").source_path == paths[k]
+
+    with open(out / "manifest.csv", newline="", encoding="utf-8") as f:
+        man = list(csv.DictReader(f))
+    assert len(man) == 3
+    assert [m["recipe_file"] for m in man] == [f"s{k}_batch.recipe.json" for k in range(3)]
+    assert [m["curves_file"] for m in man] == [f"s{k}_batch_curves.csv" for k in range(3)]
+    assert [m["source_path"] for m in man] == paths
+    assert all((out / m["curves_file"]).is_file() for m in man)
+    assert all(m["source_kind"] == "csv" and len(m["source_sha256"]) == 64 for m in man)
+    assert all(m["note"] == "" and float(m["rmsd"]) > 0 for m in man)
+    assert (out / "README.txt").is_file()
+
+    # without --curves nothing of the bundle appears
+    out2 = tmp_path / "plain"
+    assert cli.main(["batchfit", *paths, "--model", model, "-o", str(out2)]) == 0
+    assert not (out2 / "manifest.csv").exists()
+    assert not list(out2.glob("*_curves.csv")) and not (out2 / "README.txt").exists()
+
+    sout = tmp_path / "sout"
+    rc = cli.main(["seqfit", *paths, "--model", model, "--passes", "1",
+                   "-o", str(sout), "--curves"])
+    assert rc == 0
+    assert (sout / "seq_table.csv").is_file() and (sout / "manifest.csv").is_file()
+    assert (sout / "README.txt").is_file()
+    assert sorted(p.name for p in sout.glob("*_seq_curves.csv")) == \
+        [f"s{k}_seq_curves.csv" for k in range(3)]
+    assert len(list(sout.glob("*.recipe.json"))) == 3
+    with open(sout / "manifest.csv", newline="", encoding="utf-8") as f:
+        sman = list(csv.DictReader(f))
+    assert [m["recipe_file"] for m in sman] == [f"s{k}_seq.recipe.json" for k in range(3)]
+    assert "sequential" in (sout / "README.txt").read_text(encoding="utf-8")

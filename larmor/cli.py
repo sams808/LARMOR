@@ -3,6 +3,8 @@
     larmor info PATH                     identify + summarize a data source
     larmor import PATH -o recipe.json    convert a dmfit .fxmla to a recipe
     larmor fit recipe.json [-o out.json] [--plot out.png]
+    larmor batchfit SPECTRA... --model m.recipe.json [-o out] [--curves]
+    larmor seqfit SPECTRA... --model m.recipe.json [-o out] [--curves]
 """
 from __future__ import annotations
 
@@ -319,6 +321,10 @@ def _series_entries(spectra, model_path, window_arg):
             "larmor_frequency_MHz": rec.get("larmor_frequency_MHz", 0.0),
             "spin_rate_Hz": rec.get("spin_rate_Hz", 0.0),
             "sample": rec.get("sample") or Path(p).stem,
+            # load_any fills both for Bruker / csv / fxmla sources; the saved
+            # recipes and the publication bundle then reopen with their data
+            "source_path": rec.get("source_path") or str(p),
+            "source_kind": rec.get("source_kind", ""),
             "fit_window_ppm": win,
             "sites": copy.deepcopy(model_sites)})
         entries.append((r, ppm, amp, win))
@@ -361,9 +367,27 @@ def cmd_batchfit(args: argparse.Namespace) -> int:
     res = batchfit.batch_fit(entries, release=release,
                              release_frac=args.release_frac, tol=args.tol)
     print(res.summary)
-    _write_recipes_and_table(res.recipes, args.outdir,
-                             batchfit.shared_table(res), "batch")
+    stems = _write_recipes_and_table(res.recipes, args.outdir,
+                                     batchfit.shared_table(res), "batch")
+    if getattr(args, "curves", False):
+        _write_curves_bundle(res, entries, args.outdir, "batch", stems, args.spectra)
     return 0
+
+
+def _write_curves_bundle(res, entries, outdir, tag, stems, spectra):
+    """``--curves``: the publication bundle (per-spectrum curves, manifest.csv,
+    README.txt) next to the recipes and table already written, reusing their
+    stems so curves and recipes pair by name and no recipe is written twice."""
+    from larmor.io import bundle
+
+    out = bundle.write_bundle(res, [(e[1], e[2], e[3]) for e in entries],
+                              outdir or ".", kind=tag, names=stems,
+                              source_paths=[str(p) for p in spectra],
+                              write_recipes=False, write_tables=False)
+    print(f"wrote {len(entries)} curve file(s) + manifest.csv + README.txt to "
+          f"{Path(outdir or '.')}")
+    for w in out.warnings:
+        print(f"  warning: {w}", file=sys.stderr)
 
 
 def cmd_seqfit(args: argparse.Namespace) -> int:
@@ -381,11 +405,14 @@ def cmd_seqfit(args: argparse.Namespace) -> int:
         tol=args.tol, progress=prog if args.verbose else None)
     print(res.summary)
     # sequential fits are independent per spectrum → tabulate every parameter
-    rows = batchfit.shared_table(batchfit.BatchFitResult(
+    wrapped = batchfit.BatchFitResult(
         recipes=res.recipes, labels=res.labels, rmsd=res.rmsd,
         per_dataset=res.per_dataset, shared=(),
-        released=batchfit.all_but_amplitude(res.recipes)))
-    _write_recipes_and_table(res.recipes, args.outdir, rows, "seq")
+        released=batchfit.all_but_amplitude(res.recipes))
+    stems = _write_recipes_and_table(res.recipes, args.outdir,
+                                     batchfit.shared_table(wrapped), "seq")
+    if getattr(args, "curves", False):
+        _write_curves_bundle(wrapped, entries, args.outdir, "seq", stems, args.spectra)
     return 0
 
 
@@ -477,6 +504,10 @@ def main(argv: list[str] | None = None) -> int:
     p_bf.add_argument("--tol", type=float, default=None,
                       help="completion threshold: %% change in stdev (0=full)")
     p_bf.add_argument("-o", "--outdir", help="output folder (default: .)")
+    p_bf.add_argument("--curves", action="store_true",
+                      help="also write <name>_curves.csv per spectrum (experiment "
+                           "as fitted, model, residual, components), manifest.csv "
+                           "and README.txt -- the publication bundle")
     p_bf.set_defaults(func=cmd_batchfit)
 
     p_sf = sub.add_parser("seqfit", help="sequential forward-backward fit of a "
@@ -493,6 +524,10 @@ def main(argv: list[str] | None = None) -> int:
     p_sf.add_argument("-v", "--verbose", action="store_true",
                       help="print each spectrum's RMSD as it fits")
     p_sf.add_argument("-o", "--outdir", help="output folder (default: .)")
+    p_sf.add_argument("--curves", action="store_true",
+                      help="also write <name>_curves.csv per spectrum (experiment "
+                           "as fitted, model, residual, components), manifest.csv "
+                           "and README.txt -- the publication bundle")
     p_sf.set_defaults(func=cmd_seqfit)
 
     p_app = sub.add_parser("app", help="launch the interactive web app")
