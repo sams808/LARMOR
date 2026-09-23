@@ -211,24 +211,35 @@ class BatchTable:
     rows: list[dict]                   # each: sample, site, label, model, cells{header:(v,e)}, pop
     notes: list[str] = field(default_factory=list)
     error_method: str = "covariance"
+    #: named ratios of tagged fits (N3): {sample, name, description, value,
+    #: err, basis} per defined ratio; written to ratios.csv + the report
+    ratios: list[dict] = field(default_factory=list)
 
 
 def _errors_for(entry: FitEntry, method: str, n_mc: int, seed: int,
                 progress=None) -> tuple[Recipe, dict, dict]:
     """Return (fitted recipe, {(site,param):err}, quant table). Always does one
     covariance fit (best fit + populations); for 'montecarlo' the parameter
-    errors are replaced by the bootstrap σ."""
+    errors are replaced by the bootstrap σ. The quant table's family block
+    (N3) takes the matching basis: the amplitude covariance of that fit, or
+    the per-trial integrals of the Monte-Carlo run."""
     rec = Recipe.from_dict(entry.recipe)
-    fitmod.fit(rec, entry.ppm, entry.amp, window_ppm=entry.window)
+    fr = fitmod.fit(rec, entry.ppm, entry.amp, window_ppm=entry.window)
     errors = {(i, pn): p.stderr
               for i, s in enumerate(rec.sites) for pn, p in s.params.items()}
+    mc = None
     if method == "montecarlo":
         mc = autofit.monte_carlo_errors(
             rec, entry.ppm, entry.amp, window_ppm=entry.window,
             n_trials=n_mc, seed=seed, progress=progress, parallel=True)
         for mp in mc.params:
             errors[(mp.site, mp.param)] = mp.std
-    quant = quantmod.quantify(rec, window_ppm=entry.window)
+    if mc is not None:
+        quant = quantmod.quantify(rec, window_ppm=entry.window, mc=mc)
+    else:
+        quant = quantmod.quantify(
+            rec, window_ppm=entry.window,
+            uvars=fitmod.amplitude_uvars(fr.lmfit_result, rec))
     return rec, errors, quant
 
 
@@ -238,6 +249,7 @@ def build_table(entries: list[FitEntry], error_method: str = "covariance",
     """Refit every entry, compute errors + populations, and assemble the table."""
     rows: list[dict] = []
     headers: list[str] = []
+    ratios: list[dict] = []
     for k, e in enumerate(entries):
         if should_stop is not None and should_stop():
             break
@@ -273,11 +285,29 @@ def build_table(entries: list[FitEntry], error_method: str = "covariance",
                 "constraints": paramstatus.site_constraints(rec, i),
                 "names": names,
             })
+        # Σ family rows (N3): one per tagged family, empty parameter cells,
+        # the population its summed fraction with the propagated error; the
+        # defined named ratios go to table.ratios (ratios.csv / report)
+        basis = quant.get("family_basis", "")
+        for j, fam in enumerate(quant.get("families") or []):
+            rows.append({
+                "sample": e.sample, "site": f"f{j}",
+                "label": f"Σ {fam['family']}", "model": "family",
+                "cells": {},
+                "pop": (fam.get("fraction_pct"), fam.get("fraction_err_pct")),
+                "flags": {}, "pop_flag": None, "constraints": {}, "names": {},
+            })
+        for rt in quant.get("ratios") or []:
+            if rt.get("defined") and rt.get("value") is not None:
+                ratios.append({"sample": e.sample, "name": rt["name"],
+                               "description": rt.get("description", ""),
+                               "value": rt["value"], "err": rt.get("err"),
+                               "basis": basis})
         if progress:
             progress(k + 1, len(entries))
     notes = homogeneity(entries)
     return BatchTable(headers=headers, rows=rows, notes=notes,
-                      error_method=error_method)
+                      error_method=error_method, ratios=ratios)
 
 
 # --------------------------------------------------------------------------
@@ -366,6 +396,24 @@ def write_csv(t: BatchTable, path: Path) -> None:
                 flags.append(st.csv_flag if st is not None else "")
             w.writerow([r["sample"], r["site"], r["label"], r["model"],
                         *vals, *errs, *flags])
+
+
+def _n_sites(t: BatchTable) -> int:
+    """Real fitted sites: the Σ family rows (model 'family') do not count."""
+    return sum(1 for r in t.rows if r.get("model") != "family")
+
+
+def write_ratios_csv(t: BatchTable, path: Path) -> None:
+    """``ratios.csv`` -- one row per (sample, named ratio) with the error
+    basis it was propagated on (N3)."""
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["sample", "name", "description", "value", "err", "basis"])
+        for r in t.ratios:
+            w.writerow([r["sample"], r["name"], r.get("description", ""),
+                        "" if r.get("value") is None else f"{r['value']:.6g}",
+                        "" if r.get("err") is None else f"{r['err']:.6g}",
+                        r.get("basis", "")])
 
 
 def write_latex(t: BatchTable, path: Path) -> None:
@@ -498,6 +546,8 @@ def run_batch(paths, outdir, *, error_method: str = "covariance", n_mc: int = 20
 
     if "csv" in formats:
         p = outdir / "table.csv"; write_csv(table, p); files.append(str(p))
+        if table.ratios:
+            p = outdir / "ratios.csv"; write_ratios_csv(table, p); files.append(str(p))
     if "latex" in formats:
         p = outdir / "table.tex"; write_latex(table, p); files.append(str(p))
     if "markdown" in formats:
@@ -505,7 +555,7 @@ def run_batch(paths, outdir, *, error_method: str = "covariance", n_mc: int = 20
         _write_report(p, entries, table, plot_links, warnings)
         files.append(str(p))
 
-    n_sites = len(table.rows)
+    n_sites = _n_sites(table)
     return BatchResult(outdir=str(outdir), files=files, n_fits=len(entries),
                        n_sites=n_sites, error_method=error_method,
                        warnings=warnings + table.notes)
@@ -550,7 +600,7 @@ def _write_report(path: Path, entries, table: BatchTable, plot_links, warnings):
     lines = [
         "# LARMOR batch fit report",
         "",
-        f"*{len(entries)} fits · {len(table.rows)} sites · generated "
+        f"*{len(entries)} fits · {_n_sites(table)} sites · generated "
         f"{date.today().isoformat()}*",
         "",
         "## Fits", "",
@@ -574,7 +624,21 @@ def _write_report(path: Path, entries, table: BatchTable, plot_links, warnings):
                         + " — the bound or expression of each is listed under "
                           "*Constraints* below and in the `… flag` columns of "
                           "`table.csv`.")
+    if _n_sites(table) != len(table.rows):
+        errors_para += (" Family rows (Σ) sum their lines; their errors "
+                        "propagate the amplitude covariance (covariance "
+                        "method) or are the spread of per-trial sums "
+                        "(Monte-Carlo), never a quadrature of independent "
+                        "errors.")
     lines += ["## Table", "", _markdown_table(table), "", errors_para, ""]
+    if table.ratios:
+        lines += ["## Named ratios", "",
+                  "| Sample | Ratio | Definition | Value | Error basis |",
+                  "|---|---|---|---|---|"]
+        for r in table.ratios:
+            lines.append(f"| {r['sample']} | {r['name']} | {r.get('description', '')} "
+                         f"| {_fmt(r.get('value'), r.get('err'))} | {r.get('basis', '')} |")
+        lines += ["", "`ratios.csv` holds the same rows.", ""]
     constraints = _constraint_lines(table)
     if constraints:
         lines += ["## Constraints", "",

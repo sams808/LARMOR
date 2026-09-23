@@ -25,12 +25,14 @@ batch dialog, the CLI and :mod:`larmor.io.bundle`.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 import numpy as np
 
 from larmor import fit as fitmod
 from larmor import paramstatus
+from larmor.families import GROUP_PARAMS
 from larmor.recipe import Recipe
 
 
@@ -249,6 +251,39 @@ def _free_params(rec: Recipe):
             if p.vary and not getattr(p, "expr", None)]
 
 
+def _family_errors(rec: Recipe, *, uvars=None, mc=None) -> dict:
+    """``{(-1, 'family:NAME'): ParamError, (-1, 'ratio:NAME'): ParamError}``
+    for one fitted spectrum -- the family populations and defined ratios of
+    ``larmor.quantify`` with their PROPAGATED error: the amplitude
+    covariance (``uvars`` from fit.amplitude_uvars) or the spread of the
+    per-trial sums (``mc``). Empty when neither basis came out (the tables
+    then fall back to the flagged independent estimate), so a stored entry
+    is always an exact propagated number. Site -1 and a 'kind:name' param
+    round-trip through the existing per-spectrum JSON unchanged."""
+    from larmor.quantify import quantify
+
+    try:
+        q = quantify(rec, uvars=uvars, mc=mc)
+    except Exception:
+        return {}
+    if q.get("family_basis") not in ("covariance", "montecarlo"):
+        return {}
+    out: dict = {}
+    for fam in q.get("families") or []:
+        name, v, se = fam["family"], fam["fraction_pct"], fam["fraction_err_pct"]
+        pct = abs(se / v) * 100.0 if (se is not None and v) else None
+        out[(-1, f"family:{name}")] = ParamError(
+            -1, f"family:{name}", f"family.{name}", float(v), se, (None, None), pct)
+    for rt in q.get("ratios") or []:
+        if not rt.get("defined") or rt.get("value") is None:
+            continue
+        name, v, se = rt["name"], rt["value"], rt["err"]
+        pct = abs(se / v) * 100.0 if (se is not None and v) else None
+        out[(-1, f"ratio:{name}")] = ParamError(
+            -1, f"ratio:{name}", f"ratio.{name}", float(v), se, (None, None), pct)
+    return out
+
+
 def _snapshot_covariance(result: BatchFitResult) -> list[dict]:
     """Capture the least-squares covariance stderr currently on the recipes,
     so it survives a later Monte-Carlo/profile pass overwriting Param.stderr.
@@ -319,19 +354,28 @@ def batch_error_analysis(result: BatchFitResult, data: list[tuple], *,
 
     if method == "covariance":
         n = len(result.recipes)
+        fam_rows: list[dict] = []
         for k, rec in enumerate(result.recipes):
             if should_stop is not None and should_stop():
                 break
+            fam: dict = {}
             if k < len(data):
                 ppm, amp, window = data[k]
                 try:
-                    fitmod.fit(rec, np.asarray(ppm, float), np.asarray(amp, float),
-                              window_ppm=window, compute_errorbars=True)
+                    fr = fitmod.fit(rec, np.asarray(ppm, float), np.asarray(amp, float),
+                                    window_ppm=window, compute_errorbars=True)
+                    # family sums / ratios over the amplitude covariance (N3)
+                    fam = _family_errors(
+                        rec, uvars=fitmod.amplitude_uvars(fr.lmfit_result, rec))
                 except Exception:
                     pass                     # keep whatever stderr it already had
+            fam_rows.append(fam)
             if progress:
                 progress(k + 1, n, 0, 1)
         result.error_detail["covariance"] = _snapshot_covariance(result)
+        for k, fam in enumerate(fam_rows):
+            if fam and k < len(result.error_detail["covariance"]):
+                result.error_detail["covariance"][k].update(fam)
         result.error_method = "covariance"
         return result
 
@@ -365,6 +409,8 @@ def batch_error_analysis(result: BatchFitResult, data: list[tuple], *,
                     rows[(mp.site, mp.param)] = ParamError(
                         mp.site, mp.param, mp.label, mp.best, mp.std, (None, None),
                         mp.pct)
+                # family sums / ratios from the per-trial integrals (N3)
+                rows.update(_family_errors(rec, mc=mc))
             elif method == "profile":
                 free = _free_params(rec)
                 for j, (i, pn) in enumerate(free):
@@ -457,13 +503,14 @@ def error_table(result: BatchFitResult, method: str | None = None) -> list[dict]
                                  "index": k, **_status_fields(site.model, pn, p)})
         rows.extend(_population_rows(rec, result.labels[k], method,
                                      {i: d.get((i, "amplitude")) for i in range(len(rec.sites))},
-                                     index=k))
+                                     index=k, detail=d))
     return rows
 
 
 def _population_rows(rec: Recipe, scope: str, method: str | None,
                      amp_errors: dict | None = None,
-                     index: int | None = None) -> list[dict]:
+                     index: int | None = None,
+                     detail: dict | None = None) -> list[dict]:
     """Integrated population % rows (one per site) for a single fitted
     recipe, via ``larmor.quantify`` -- the same integral-over-the-window
     computation the Report tool (F6) and Batch fit report use. Excluded
@@ -476,7 +523,16 @@ def _population_rows(rec: Recipe, scope: str, method: str | None,
     (``rec.sample``) may collide and the on-screen table keys its rows by
     position. Never raises: a model missing a
     param quantify() needs (e.g. an external "spectrum" background site)
-    just means no population rows for this spectrum, not a failed export."""
+    just means no population rows for this spectrum, not a failed export.
+
+    Sites tagged with a ``family`` (N3) add one ``family_pct`` row per
+    family (site id ``f<j>``, label = the family) and one ``ratio`` row per
+    defined named ratio (``r<j>``, label = the ratio name) in the SAME
+    schema; their stderr is the exact propagated value stored by
+    batch_error_analysis in ``detail`` (``(-1, 'family:NAME')`` /
+    ``(-1, 'ratio:NAME')``) when present, else quantify's own (flagged
+    independent) estimate. A family whose every member is excluded in this
+    spectrum is omitted, like the excluded sites."""
     from copy import deepcopy
     from larmor.quantify import quantify
 
@@ -508,6 +564,34 @@ def _population_rows(rec: Recipe, scope: str, method: str | None,
             entry.update(sigma_pct=None, ci68_lo=None, ci68_hi=None,
                         error_method=method)
         rows.append(entry)
+
+    detail = detail or {}
+
+    def _group_row(site_id: str, label: str, param: str, value, stderr) -> dict:
+        entry = {"scope": scope, "site": site_id, "label": label, "param": param,
+                 "value": value, "stderr": stderr, "model": "",
+                 "source_path": rec.source_path or "", "index": index,
+                 **_NO_STATUS}
+        if method is not None:
+            entry.update(sigma_pct=None, ci68_lo=None, ci68_hi=None,
+                         error_method=method)
+        return entry
+
+    for j, fam in enumerate(q.get("families") or []):
+        members = [i for i in (fam.get("sites") or []) if i < len(rec.sites)]
+        if not members or all(is_zeroed_out(rec.sites[i].params.get("amplitude"))
+                              for i in members):
+            continue                # every member excluded here: no cell
+        pe = detail.get((-1, f"family:{fam['family']}"))
+        stderr = pe.stderr if pe is not None else fam.get("fraction_err_pct")
+        rows.append(_group_row(f"f{j}", fam["family"], "family_pct",
+                               fam["fraction_pct"], stderr))
+    for j, rt in enumerate(q.get("ratios") or []):
+        if not rt.get("defined") or rt.get("value") is None:
+            continue
+        pe = detail.get((-1, f"ratio:{rt['name']}"))
+        stderr = pe.stderr if pe is not None else rt.get("err")
+        rows.append(_group_row(f"r{j}", rt["name"], "ratio", rt["value"], stderr))
     return rows
 
 
@@ -616,7 +700,10 @@ def pivot_by_spectrum(rows: list[dict], n_spectra: int
     whose site is excluded simply has no cell for that column (blank on
     screen, not 0). Shared rows (``index`` None) never become columns -- they
     are identical for every spectrum and stay in the status line / the CSV's
-    shared section. Pure Python, Qt-free."""
+    shared section. Family rows (site ``f<j>``, param ``family_pct``) and
+    ratio rows (``r<j>``, ``ratio``) come AFTER every site column, families
+    before ratios -- their index is the family/ratio position, not a site.
+    Pure Python, Qt-free."""
     columns: list[tuple[int, str, str]] = []
     seen: set[tuple[int, str, str]] = set()
     cells: dict[tuple[int, tuple], dict] = {}
@@ -624,16 +711,19 @@ def pivot_by_spectrum(rows: list[dict], n_spectra: int
         k = row.get("index")
         if not isinstance(k, int) or not 0 <= k < n_spectra:
             continue
-        try:
-            site_idx = int(str(row["site"])[1:])
-        except (KeyError, ValueError):
+        m = re.fullmatch(r"([sfr])(\d+)", str(row.get("site", "")))
+        if m is None:
             continue
+        site_idx = int(m.group(2))
         col = (site_idx, row["label"], row["param"])
         if col not in seen:
             seen.add(col)
             columns.append(col)
         cells[(k, col)] = row
-    columns.sort(key=lambda c: c[0])          # stable: first-seen order within a site
+    # stable: first-seen order within a site; the group columns trail
+    rank = {"family_pct": 1, "ratio": 2}
+    columns.sort(key=lambda c: (rank.get(c[2], 0) if c[2] in GROUP_PARAMS else 0,
+                                c[0]))
     return columns, cells
 
 

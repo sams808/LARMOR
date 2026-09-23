@@ -113,11 +113,16 @@ def recipe_from_csv_rows(shared_rows: list[dict], scope_rows: list[dict],
     shell -- exactly what render_batch_grid needs to draw experiment+fit
     together like any other saved fit.
     """
+    # derived rows -- batchfit's population_pct per site and, once lines are
+    # tagged, the family_pct (f<j>) / ratio (r<j>) group rows -- are never
+    # a site's fittable Param set, nor a site at all
+    from larmor.families import DERIVED_PARAMS
+
     # a site only belongs to THIS scope if it has at least one row of its
     # own -- a site that appears only under "shared" (e.g. deliberately
     # excluded/zeroed for this sample, or simply not part of this scope's
     # ladder) has no per-spectrum data to reconstruct from HERE.
-    present_sites = {r["site"] for r in scope_rows if r.get("param") != "population_pct"}
+    present_sites = {r["site"] for r in scope_rows if r.get("param") not in DERIVED_PARAMS}
     # ...but it must NOT be dropped from the reconstructed Recipe entirely:
     # every OTHER scope's site list still includes it (a real saved fit
     # keeps an excluded site too, zeroed rather than deleted -- see
@@ -133,15 +138,15 @@ def recipe_from_csv_rows(shared_rows: list[dict], scope_rows: list[dict],
     # like a real saved fit -- and let render_batch_grid's existing
     # is_zeroed_out check (already there for real fits) hide it for this
     # one panel exactly as it does today.
-    shared_sites = {r["site"] for r in shared_rows if r.get("param") != "population_pct"}
+    shared_sites = {r["site"] for r in shared_rows if r.get("param") not in DERIVED_PARAMS}
     excluded_sites = shared_sites - present_sites
     all_sites = present_sites | excluded_sites
 
     by_site: dict[str, dict] = {}
     for r in list(shared_rows) + list(scope_rows):
-        # a derived, non-model value (batchfit's population-% export column)
-        # -- never part of a site's fittable Param set
-        if r.get("param") == "population_pct":
+        # a derived, non-model value (batchfit's population-% export column,
+        # a family sum or a ratio) -- never part of a site's fittable Param set
+        if r.get("param") in DERIVED_PARAMS:
             continue
         if r["site"] not in all_sites:
             continue

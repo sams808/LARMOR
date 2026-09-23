@@ -116,6 +116,7 @@ class _ChromeMixin:
         self.lines_table = LinesTable()
         self.lines_table.edited.connect(self.on_params_changed)
         self.lines_table.constraint_edited.connect(self.on_structure_changed)
+        self.lines_table.family_edited.connect(self.on_family_changed)
         self.lines_table.structure.connect(self.on_site_structure)
         self.lines_table.compute.connect(self.request_simulation)
         self.lines_table.fit.connect(self.run_fit)

@@ -275,6 +275,39 @@ def test_recipe_from_csv_rows_zeroes_rather_than_drops_an_excluded_site():
         rec.sites[1].params.get("amplitude"))            # present, but inert
 
 
+def test_recipe_from_csv_rows_ignores_family_and_ratio_rows():
+    """N3: the family_pct (f<j>) and ratio (r<j>) group rows a tagged batch
+    writes are derived values with an empty model -- never a phantom site,
+    never a Param, and never a reason to reject the CSV."""
+    shared = [{"scope": "shared", "site": "s0", "label": "A", "param": "gl",
+              "value": "1", "stderr": "", "model": "gauss_lor"}]
+    scope_rows = [
+        {"scope": "g0", "site": "s0", "label": "A",
+         "param": "isotropic_chemical_shift_ppm", "value": "10.0", "stderr": "",
+         "model": "gauss_lor"},
+        {"scope": "g0", "site": "s0", "label": "A", "param": "shift_fwhm_ppm",
+         "value": "5.0", "stderr": "", "model": "gauss_lor"},
+        {"scope": "g0", "site": "s0", "label": "A", "param": "amplitude",
+         "value": "100.0", "stderr": "", "model": "gauss_lor"},
+        {"scope": "g0", "site": "s0", "label": "A", "param": "population_pct",
+         "value": "100.0", "stderr": "", "model": "gauss_lor"},
+        {"scope": "g0", "site": "f0", "label": "BO4", "param": "family_pct",
+         "value": "100.0", "stderr": "1.2", "model": ""},
+        {"scope": "g0", "site": "r0", "label": "N4", "param": "ratio",
+         "value": "1.0", "stderr": "0.01", "model": ""},
+    ]
+    rec = series_grid.recipe_from_csv_rows(shared, scope_rows)
+    assert len(rec.sites) == 1 and rec.sites[0].label == "A"
+    assert "family_pct" not in rec.sites[0].params
+    assert "ratio" not in rec.sites[0].params
+    assert "population_pct" not in rec.sites[0].params
+    assert rec.sites[0].params["amplitude"].value == 100.0
+    # the group rows alone (no site row of their own) are not a scope either
+    only_groups = [r for r in scope_rows if r["site"] in ("f0", "r0")]
+    empty = series_grid.recipe_from_csv_rows(shared, only_groups)
+    assert [s.label for s in empty.sites] == ["A"]        # the shared placeholder only
+
+
 def test_recipe_from_csv_rows_ignores_population_pct_rows():
     """population_pct (batchfit's derived integrated-population column) is
     not a model parameter -- it must not be treated as one, or fed into the

@@ -24,6 +24,12 @@ from larmor.desktop.plot import site_color
 #: sidebar), persisted in QSettings.
 _SCROLL_NUDGE = False
 
+#: tooltip of the family column (larmor.families)
+_FAMILY_TIP = ("structural family for grouped populations (BO3/BO4, Al(IV)…, "
+               "Qn, or any text); double-click to type, right-click for the "
+               "presets. Lines sharing a family are summed in the Report "
+               "(F6), which also derives the named ratios (N4, ⟨CN⟩, ⟨n⟩).")
+
 
 def set_scroll_nudge(on: bool) -> None:
     global _SCROLL_NUDGE
@@ -408,6 +414,7 @@ class LinesTable(QWidget):
     compute = Signal()
     fit = Signal()
     constraint_edited = Signal()
+    family_edited = Signal()     # a family tag changed -> Report (F6) block
 
     def __init__(self):
         super().__init__()
@@ -461,6 +468,7 @@ class LinesTable(QWidget):
         self.hint.setWordWrap(True)
         v.addWidget(self.hint)
         self._recipe: dict | None = None
+        self._family_col = -1        # set by rebuild: the LAST column
 
     # ------------------------------------------------------------------
     def eventFilter(self, obj, ev):
@@ -499,13 +507,17 @@ class LinesTable(QWidget):
                     known.add(k)
                     used.append((k, _auto_header(s.get("model", ""), k)))
         self._used_keys = [k for k, _ in used]
-        t.setColumnCount(2 + len(used))
+        # the family tag (larmor.families) is the LAST column, so every
+        # parameter column keeps its 2 + index position
+        self._family_col = 2 + len(used)
+        t.setColumnCount(2 + len(used) + 1)
         # the Czjzek width column is headed by whichever convention the user
         # chose to display (View ▸ Czjzek width display) — never a bare
         # ambiguous "Cq" for a distribution parameter
         headers = [CZJZEK_DISPLAYS[czjzek_display_mode()][0] + "\n(MHz)"
                    if key == "sigma_Cq_MHz" else h for key, h in used]
-        t.setHorizontalHeaderLabels(["line", "model"] + headers)
+        t.setHorizontalHeaderLabels(["line", "model"] + headers + ["family"])
+        t.horizontalHeaderItem(self._family_col).setToolTip(_FAMILY_TIP)
         t.setRowCount(len(sites))
         larmor = (recipe or {}).get("larmor_frequency_MHz", 0.0)
         spin = _spin_of((recipe or {}).get("nucleus"))
@@ -542,6 +554,13 @@ class LinesTable(QWidget):
                     blank.setFlags(Qt.NoItemFlags)
                     blank.setBackground(QColor(theme.active().alt_base))
                     t.setItem(i, c, blank)
+            # editable family tag: double-click to type, right-click ▸ Family
+            fam_text = str(site.get("family") or "").strip()
+            fam = QTableWidgetItem(fam_text)
+            fam.setToolTip(_FAMILY_TIP)
+            if not fam_text:
+                fam.setForeground(QColor(theme.active().text_dim))
+            t.setItem(i, self._family_col, fam)
         hh = t.horizontalHeader()
         hh.setSectionResizeMode(QHeaderView.Interactive)
         hh.setDefaultSectionSize(130)
@@ -570,6 +589,19 @@ class LinesTable(QWidget):
                 if "·" in txt:
                     txt = txt.split("·", 1)[1]
                 self._recipe["sites"][i]["label"] = txt.strip()
+        elif self._recipe and item.column() == self._family_col:
+            i = item.row()
+            if i < len(self._recipe["sites"]):
+                site = self._recipe["sites"][i]
+                new = item.text().strip()
+                # only a real change emits (itemChanged may be connected
+                # more than once across rebuilds; a no-op edit stays silent)
+                if new != str(site.get("family") or "").strip():
+                    if new:
+                        site["family"] = new
+                    else:
+                        site.pop("family", None)
+                    self.family_edited.emit()
 
     def set_chi2(self, text: str):
         self.chi2.setText(text)
@@ -614,6 +646,11 @@ class LinesTable(QWidget):
     def _build_menu(self, row: int, key: str | None) -> QMenu:
         site = self._recipe["sites"][row]
         menu = QMenu(self)
+        # the family tag lives beside the amplitude (it groups populations)
+        # and on the row itself (letter / model / family cells)
+        if key is None or key == "amplitude":
+            menu.addMenu(self._family_menu(row, menu))
+            menu.addSeparator()
         if key and key in site["params"]:
             p = site["params"][key]
             others = len(self._recipe["sites"]) > 1
@@ -669,6 +706,77 @@ class LinesTable(QWidget):
         for a in (a_vis, a_up, a_down, a_dup, a_del):
             menu.addAction(a)
         return menu
+
+    # ------------------------------------------------------------ families
+    def _family_menu(self, row: int, parent: QMenu) -> QMenu:
+        """Family ▸ the nucleus presets (larmor.families) plus every tag
+        already used in this recipe, Other… (free text) and None."""
+        from larmor import families
+
+        site = self._recipe["sites"][row]
+        current = str(site.get("family") or "").strip()
+        names = families.presets_for((self._recipe or {}).get("nucleus", ""))
+        for s in self._recipe["sites"]:
+            f = str(s.get("family") or "").strip()
+            if f and f not in names:
+                names.append(f)
+        sub = QMenu("Family", parent)
+        sub.setToolTipsVisible(True)
+        for name in names:
+            a = QAction(name, sub)
+            a.setCheckable(True)
+            a.setChecked(name == current)
+            a.setToolTip(f"tag this line as {name}: lines sharing a family are "
+                         "summed in the Report (F6)")
+            a.triggered.connect(lambda _=False, r=row, n=name: self._set_family(r, n))
+            sub.addAction(a)
+        if names:
+            sub.addSeparator()
+        a_other = QAction("Other…", sub)
+        a_other.setToolTip("type any family name (free text)")
+        a_other.triggered.connect(lambda _=False, r=row: self._family_other(r))
+        sub.addAction(a_other)
+        a_none = QAction("None", sub)
+        a_none.setEnabled(bool(current))
+        a_none.setToolTip("untag this line: counted in the total, in no family")
+        a_none.triggered.connect(lambda _=False, r=row: self._set_family(r, ""))
+        sub.addAction(a_none)
+        return sub
+
+    def _family_other(self, row: int):
+        site = self._recipe["sites"][row]
+        text, ok = QInputDialog.getText(
+            self, "Family", "structural family for this line (free text, e.g. "
+            "BO4, Al(V), Q3, bonded):", text=str(site.get("family") or ""))
+        if ok:
+            self._set_family(row, text)
+
+    def _set_family(self, row: int, name: str):
+        """Write ``site['family']`` (popped when empty), refresh the cell and
+        tell the window (family_edited -> Report). No undo snapshot, like a
+        rename typed in the letter cell."""
+        if not self._recipe or row >= len(self._recipe["sites"]):
+            return
+        site = self._recipe["sites"][row]
+        name = str(name or "").strip()
+        if name:
+            site["family"] = name
+        else:
+            site.pop("family", None)
+        t = self.table
+        if 0 <= self._family_col < t.columnCount() and row < t.rowCount():
+            t.blockSignals(True)
+            it = t.item(row, self._family_col)
+            if it is None:
+                it = QTableWidgetItem(name)
+                it.setToolTip(_FAMILY_TIP)
+                t.setItem(row, self._family_col, it)
+            else:
+                it.setText(name)
+            it.setForeground(QColor(theme.active().text_dim if not name
+                                    else theme.active().text))
+            t.blockSignals(False)
+        self.family_edited.emit()
 
     def _preset_position(self, row: int, p: dict):
         from larmor.desktop.dialogs import LinkPositionDialog
