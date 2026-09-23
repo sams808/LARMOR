@@ -136,3 +136,14 @@ def test_bad_constraint_is_diagnosed():
     assert any("at a bound" in n for n in recipe.notes)
     # covariance retry with pinned boundary params should recover error bars
     assert result.lmfit_result.errorbars
+
+    # the note describes THIS fit: exactly one after the capped fit, none
+    # after a refit of the same recipe with the cap lifted (the fit prunes
+    # its own note before rewriting it, instead of accumulating stale ones)
+    from larmor.paramstatus import AT_BOUND_NOTE_PREFIX
+    assert sum(n.startswith(AT_BOUND_NOTE_PREFIX) for n in recipe.notes) == 1
+    recipe.sites[0].params["amplitude"].max = 2.0 * true_amp
+    result2 = fitmod.fit(recipe, x, y)
+    assert result2.at_bounds == []
+    assert not any(n.startswith(AT_BOUND_NOTE_PREFIX) for n in recipe.notes)
+    assert recipe.sites[0].params["amplitude"].value == pytest.approx(true_amp, rel=1e-3)

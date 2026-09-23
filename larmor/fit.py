@@ -16,6 +16,7 @@ import numpy as np
 import lmfit
 
 from larmor import models as model_registry
+from larmor.paramstatus import AT_BOUND_NOTE_PREFIX, bound_side, effective_bounds
 from larmor.engine import (grid_restrictable, make_context, simulate_site,
                            site_width_margin)
 from larmor.recipe import Recipe
@@ -142,17 +143,12 @@ def _make_params(recipe: Recipe) -> lmfit.Parameters:
     # pass 1: every parameter exists as a plain value, so that pass-2
     # expressions can reference any of them regardless of site order
     for i, site in enumerate(recipe.sites):
-        try:
-            pdefs = {pd.name: pd for pd in model_registry.get(site.model).params}
-        except Exception:
-            pdefs = {}
         for pname, p in site.params.items():
             # fall back to the MODEL's physical bounds when the recipe omits them,
             # so e.g. a width can never be fitted negative even if an old recipe
-            # saved it with min=None (a released width otherwise blows up)
-            pd = pdefs.get(pname)
-            pmin = p.min if p.min is not None else (pd.min if pd else None)
-            pmax = p.max if p.max is not None else (pd.max if pd else None)
+            # saved it with min=None (a released width otherwise blows up).
+            # paramstatus owns the rule so every table resolves the same bound
+            pmin, pmax = effective_bounds(site.model, pname, p)
             # bounds are meaningless for a FIXED parameter (lmfit never moves
             # it) but lmfit's own Parameter still validates min != max
             # unconditionally -- widen to unbounded rather than crash on a
@@ -345,9 +341,9 @@ def fit(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
         for n, p in res.params.items():
             if not p.vary:
                 continue
-            span = max(1.0, abs(p.value))
-            if (np.isfinite(p.min) and (p.value - p.min) < 1e-3 * span) or \
-               (np.isfinite(p.max) and (p.max - p.value) < 1e-3 * span):
+            # paramstatus.bound_side: 1e-3 * max(1, |value|), the one rule the
+            # tables' ‡ marker shares (lmfit's ±inf bounds never match)
+            if bound_side(p.value, p.min, p.max) is not None:
                 names.append(n)
         return names
 
@@ -396,8 +392,11 @@ def fit(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
         note = f"sites frozen (center outside fit window {hi}..{lo} ppm): " + ", ".join(frozen)
         if note not in recipe.notes:
             recipe.notes.append(note)
+    # the at-bound note describes THIS fit: drop the previous fit's (a refit
+    # that no longer pins clears it, one that pins differently replaces it)
+    recipe.notes = [n for n in recipe.notes if not n.startswith(AT_BOUND_NOTE_PREFIX)]
     if at_bounds:
-        note = ("parameters finished at a bound (check constraints/starting "
+        note = (AT_BOUND_NOTE_PREFIX + " (check constraints/starting "
                 "model; uncertainties are conditional on them): " + ", ".join(at_bounds))
         if note not in recipe.notes:
             recipe.notes.append(note)
