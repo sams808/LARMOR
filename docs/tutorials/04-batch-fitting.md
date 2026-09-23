@@ -44,20 +44,28 @@ EXPNO: <NMR>\NMRFAM\DATA\2026-01\01192026_SR31649_Base0Ca_SS_ALP\24
 nucleus: 11B   SFO1: 192.4307 MHz
 pulse program: zg   TD: 7988   SW: 100000 Hz
 MASR (acqus): 4200.0 Hz
+MAS (booking sidecar): 35714 Hz
 title: 11B with short tip angle
-CONFLICT: MAS rate: acqus says 4200 Hz but the title says 35714 Hz -- confirm before fitting
+CONFLICT: MAS rate: acqus says 4200 Hz but the title says 35714 Hz and the booking sidecar agrees -- acqus outvoted, using 35714 Hz
 ```
-<!-- measured v0.12.1, 2026-09-22: `larmor info` on the EXPNO (the first line echoes the path as given) -->
+<!-- measured v0.13.0 (N9 worktree), 2026-09-23: `larmor info` on the EXPNO (the first line echoes the path as given) -->
 
-The acqus file records a 4.2 kHz spinning rate while the third line of the
-operator's title says `MASR 35.714 kHz`. The two disagree by far more than
-2 %, so LARMOR prints the `CONFLICT` line and, when the spectrum is opened in
-the app, resolves the rate to the *higher* of the two sources and flags it:
-the indicator at the bottom right reads `⚠ MAS 35714 Hz — check!` until the
-rate is confirmed in **Process > Experiment parameters…**. The MAS rate
-enters every quadrupolar lineshape, so confirm it before fitting — here the
-title is right, the probe was spinning at 35.7 kHz. All five EXPNOs of the
-series carry the same acquisition and the same conflict.
+The acqus file records a 4.2 kHz spinning rate — a leftover of that
+spectrometer's rotor controller, the same 4200 Hz in almost every NMRFAM
+EXPNO — while the third line of the operator's title says `MASR 35.714 kHz`
+and the NMRFAM booking sidecar (`experiment_addenda.xml`, written when the
+instrument was reserved) says 35.714 kHz too. Two independent sources agree,
+so LARMOR settles the rate at 35 714 Hz, prints the `CONFLICT` line with
+acqus reported as *outvoted*, and shows no red indicator when the spectrum
+is opened in the app. All five EXPNOs of the series carry the same
+acquisition and the same outcome. The MAS rate enters every quadrupolar
+lineshape, so it is worth the glance: the case where the indicator *does*
+appear is a three-way disagreement, such as the 2026-05 ³¹P series where
+the title says 20 kHz and the booking 22 kHz — there the highest is taken,
+`⚠ MAS 22000 Hz — check!` appears, and **Process > Experiment parameters…**
+lists the sources side by side; confirming once with *Remember for this
+session* covers every EXPNO of that session, rotor and nucleus with the same
+three source values.
 
 ## 3. Build the shared model on the first glass
 
@@ -81,8 +89,9 @@ larmor desktop
    three lines stay, and the nucleus, Larmor frequency and spin rate are
    taken from the new EXPNO. (The alternative route is **Decomposition >
    Apply recipe > Browse for recipe…** after opening the EXPNO first.)
-3. Confirm the 35 714 Hz rate in **Process > Experiment parameters…**; the
-   red indicator clears.
+3. Open **Process > Experiment parameters…** to see the three sources side
+   by side (acqus 4 200 Hz outvoted by the title and the booking sidecar at
+   35 714 Hz); nothing to confirm here, the rate is already settled.
 4. **Fit** (F5), then read the results strip (`RMSD … · χ²ᵣ …`, with the
    flags described in Tutorial 6, §2) and the `± error` column.
 5. **File > Save recipe** (Ctrl+S) as `base0Ca_11B.recipe.json` next to the

@@ -149,8 +149,13 @@ the preview into a working spectrum).
 Type a spectral-reference **SR** (Hz), or **Process ▸ Calibrate**, click a peak
 (it snaps to the local maximum), and set its known ppm — LARMOR reports the
 resulting SR. Double-click the **experiment strip** to edit nucleus / field /
-νrot / SR, or copy the SR from another spectrum. All referencing is a rigid ppm
-shift of the axis; the raw data is untouched.
+νrot / SR, or copy the SR from another spectrum. For a spectrum read from an
+EXPNO the same dialog shows where νrot came from — `acqus` MASR, the title, the
+NMRFAM booking sidecar `experiment_addenda.xml`, or a rate measured from the
+spinning sidebands — with a **Use** button per source, and **Remember for this
+session** applies the confirmed rate to the session's other spectra with the
+same source values (see *Getting started*, MAS-rate check). All referencing is
+a rigid ppm shift of the axis; the raw data is untouched.
 
 **Referencing audit (Tools ▸ Referencing audit…).** Checks a whole session at
 once. Point it at one month folder of the data tree (`…/DATA/2026-05`): it lists
