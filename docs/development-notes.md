@@ -18,10 +18,10 @@ an open successor to dmfit. The physics comes from mrsimulator, the
 optimisation from lmfit; LARMOR adds ingestion, the interactive UI, batch and
 series workflows, uncertainties, and reproducible figures.
 
-**Size.** 140 Python modules, ~43k lines under `larmor/`: 67 modules / ~17.9k
-lines of Qt-free core, 60 modules / ~23.9k lines of desktop, plus
-`larmor/xfact/` (13 modules, an easter egg). Tests: 89 files, ~1000 collected
-(counts as of 0.13.0).
+**Size.** 156 Python modules, ~58.5k lines under `larmor/`: 78 modules / ~28.3k
+lines of Qt-free core, 65 modules / ~29.3k lines of desktop, plus
+`larmor/xfact/` (13 modules, an easter egg). Tests: 107 files, 1324 collected
+(counts as of 0.14.0).
 
 **The split.** Everything outside `larmor/desktop/` and `larmor/xfact/` is
 Qt-free — `tests/test_core_qt_free.py` imports every core module and fails if
@@ -59,7 +59,7 @@ lives in eleven `desktop/mw_*.py` mixin modules of 207–920 lines each plus
 
 ```
 larmor desktop                     # the app
-pytest -q                          # the suite: ~1000 tests, ~15 min with the real data
+pytest -q                          # the suite: ~1300 tests, ~15 min with the real data
 pytest tests/test_qcpmg.py -q      # one file
 python -m pyflakes larmor tests    # the linter; must print nothing
 ```
