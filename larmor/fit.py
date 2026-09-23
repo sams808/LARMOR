@@ -19,6 +19,7 @@ from larmor import models as model_registry
 from larmor.paramstatus import AT_BOUND_NOTE_PREFIX, bound_side, effective_bounds
 from larmor.engine import (grid_restrictable, make_context, simulate_site,
                            site_width_margin)
+from larmor.provenance import software_stamp
 from larmor.recipe import Recipe
 
 # user-facing constraint syntax: s<index>.<recipe param name>, e.g.
@@ -388,6 +389,9 @@ def fit(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
 
     recipe.fit_window_ppm = (hi, lo)
     recipe.fit_rmsd = rmsd
+    # the software that produced THIS fit -- every fitting path (workbench
+    # worker, batch, sequential, batch report, CLI, autofit) funnels here
+    recipe.software = software_stamp()
     if frozen:
         note = f"sites frozen (center outside fit window {hi}..{lo} ppm): " + ", ".join(frozen)
         if note not in recipe.notes:

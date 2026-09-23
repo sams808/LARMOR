@@ -2,7 +2,9 @@
 
 This is the file format both Guided and Expert modes share. It references the
 source data by path + SHA-256 rather than embedding it (the core fix over
-dmfit's .fxmla, which inlines the full spectrum into every saved fit).
+dmfit's .fxmla, which inlines the full spectrum into every saved fit),
+together with the acquisition block read from the instrument files and the
+software that produced the fit.
 """
 from __future__ import annotations
 
@@ -137,6 +139,16 @@ class Recipe:
     #: wideline fit carries its processing method. Previously the dialog
     #: emitted 21 keys, the workbench kept 5, and the rest vanished.
     provenance: dict = field(default_factory=dict)
+    #: the flat acquisition / processing record read from acqus, pdata/<procno>/
+    #: procs, the title, uxnmr.info and the booking sidecar by
+    #: ``larmor.acquisition.read_block`` at load (keys: acquisition.BLOCK_KEYS,
+    #: JSON scalars); {} for CSV / dmfit / Varian sources and 2D recipes.
+    #: Additive: RECIPE_VERSION stays 1 and older readers drop it with a note.
+    acquisition: dict = field(default_factory=dict)
+    #: the software that produced the fit (``larmor.provenance.software_stamp``,
+    #: written by ``fit.fit``): LARMOR version + git commit, mrsimulator, lmfit,
+    #: numpy, scipy, nmrglue, python, platform, the fitting time.
+    software: dict = field(default_factory=dict)
 
     # ---------- serialization ----------
     def to_dict(self) -> dict:

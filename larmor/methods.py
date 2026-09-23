@@ -1,9 +1,10 @@
-"""Copy-ready outputs: a LaTeX results table and a short methods sentence from a
-finished fit — the last mile from "a fit on screen" to "text in a manuscript".
+"""Copy-ready outputs: a LaTeX results table, a short methods sentence and the
+full Experimental paragraph from a finished fit — the last mile from "a fit
+on screen" to "text in a manuscript".
 
 Also supplies the software block (``software_versions``) that exports record
-next to their numbers -- the series publication bundle's README today, recipe
-provenance later.
+next to their numbers -- the series publication bundle's README and, through
+``larmor.provenance.software_stamp``, every fitted recipe.
 
 Qt-free and testable; the desktop layer just puts the strings on the clipboard.
 """
@@ -149,8 +150,12 @@ def _dft_clause(recipe: dict) -> str:
     return head + "; " + cal.methods_clause()
 
 
-def methods_sentence(recipe: dict, error_method: str = "covariance") -> str:
-    """A short, paper-ready methods sentence describing the fit."""
+def methods_sentence(recipe: dict, error_method: str = "covariance",
+                     software: dict | None = None) -> str:
+    """A short, paper-ready methods sentence describing the fit. With
+    ``software`` (a recipe's ``software`` block or ``provenance.
+    software_stamp()``) the LARMOR clause names the versions; the default
+    keeps the version-free wording."""
     sites = recipe.get("sites", [])
     nucleus = recipe.get("nucleus", "") or "the"
     field = recipe.get("larmor_frequency_MHz", 0.0) or 0.0
@@ -182,14 +187,55 @@ def methods_sentence(recipe: dict, error_method: str = "covariance") -> str:
             "(= √5·σ_Cz); for comparison, dmfit's displayed CQ for the same "
             "fit corresponds to 4σ (2 × sCZ_CQ)."
         )
+    larmor_txt = "LARMOR (an open dmfit-successor built on mrsimulator and lmfit)"
+    if software:
+        v = software.get("larmor") or ""
+        commit = str(software.get("git_commit") or "")[:7]
+        mrs = software.get("mrsimulator") or ""
+        lm = software.get("lmfit") or ""
+        larmor_txt = (f"LARMOR{' ' + v if v else ''}{', commit ' + commit if commit else ''}"
+                      f" (an open dmfit-successor built on mrsimulator{' ' + mrs if mrs else ''}"
+                      f" and lmfit{' ' + lm if lm else ''})")
     return (
         f"The {nucleus} MAS NMR spectra{field_txt} were deconvoluted into "
         f"{len(sites)} site{'s' if len(sites) != 1 else ''} using {model_txt} in "
-        f"LARMOR (an open dmfit-successor built on mrsimulator and lmfit). "
+        f"{larmor_txt}. "
         f"Isotropic chemical shifts, quadrupolar parameters and relative "
         f"populations (integrated over the fit window) are reported with "
         f"uncertainties from {err_txt}." + czjzek_txt + _dft_clause(recipe)
     )
+
+
+def methods_paragraph(recipe: dict, error_method: str = "covariance", *,
+                      block: dict | None = None,
+                      referencing_text: str | None = None) -> str:
+    """The full Experimental paragraph of one fit: the acquisition and
+    processing sentences from the recipe's acquisition block (``larmor.
+    acquisition.sentences`` -- spectrometer and field, probe, the confirmed
+    MAS rate or a bracketed candidate list, pulse program, P1 and the flip
+    angle when the title supports one, PLW1, D1, NS, SW/TD, referencing with
+    evidence or a bracket, TopSpin processing then the recipe's own steps)
+    followed by :func:`methods_sentence` naming the software versions. For a
+    CSV / dmfit / Varian source (no block) the paragraph is the fit sentence
+    alone. ``block`` overrides the stored / re-read block;
+    ``referencing_text`` overrides the evidence search."""
+    from larmor import acquisition, provenance
+
+    recipe = recipe or {}
+    if block is None:
+        block = acquisition.block_for_recipe(recipe)
+    sents: list[str] = []
+    if block:
+        if referencing_text is None:
+            referencing_text = acquisition.referencing_evidence([block], recipe=recipe)
+        sents = acquisition.sentences(
+            block, spin_rate_Hz=recipe.get("spin_rate_Hz"),
+            mas_uncertain=recipe.get("mas_uncertain"),
+            mas_rate=(recipe.get("provenance") or {}).get("mas_rate"),
+            sr_hz=recipe.get("sr_hz"), referencing_text=referencing_text,
+            larmor_ops=recipe.get("processing"))
+    software = recipe.get("software") or provenance.software_stamp()
+    return " ".join(sents + [methods_sentence(recipe, error_method, software=software)])
 
 
 # ---------------------------------------------------------------- software
