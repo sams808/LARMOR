@@ -161,7 +161,13 @@ then `ift` (a re-apodized 1r or CSV: `hilbert, ift, em, ft`) replays from the
 processed data. *File ▸ Open FID* records the chain behind the spectrum it hands
 over (window, zero-fill, `ft`, then the typed phase or `autophase`), and a raw
 `fid` opened directly records its preview chain. The FID / spectrum display and
-the display channel are view state, not recipe content.
+the display channel are view state, not recipe content. A batch reprocessed
+from its fids (*Multi-dataset*, §6) records the common chain — `tdeff` (TopSpin's
+TDeff halved: it counts real points, the fid is complex), the window, `zf` to
+SI, `ft` with the spectrum's own referencing offset, then the spectrum's own
+`phase` (p0 = −PHC0, p1 = PHC1, pivot at the high-frequency end) or
+`autophase` — on every recipe with `processing_from_raw` and the EXPNO as
+source, replayed from the instrument fid on reopen.
 
 ---
 

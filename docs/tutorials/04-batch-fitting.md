@@ -56,8 +56,30 @@ the app, resolves the rate to the *higher* of the two sources and flags it:
 the indicator at the bottom right reads `⚠ MAS 35714 Hz — check!` until the
 rate is confirmed in **Process > Experiment parameters…**. The MAS rate
 enters every quadrupolar lineshape, so confirm it before fitting — here the
-title is right, the probe was spinning at 35.7 kHz. All five EXPNOs of the
-series carry the same acquisition and the same conflict.
+title is right, the probe was spinning at 35.7 kHz. The five EXPNOs share
+the pulse program, NS = 256 and the conflict, but not their processing or
+their recycle delay:
+
+```
+larmor compare <NMR>/NMRFAM/DATA/2026-01/01192026_SR31649_Base0Ca_SS_ALP/24 <NMR>/NMRFAM/DATA/2026-01/01202026_SR31649_Base1Ca_SS_ALP/24 <NMR>/NMRFAM/DATA/2026-01/01202026_SR31649_Base2Ca_SS_ALP/24 <NMR>/NMRFAM/DATA/2026-01/01202026_SR31648_Base3Ca_SS_ALP/24 <NMR>/NMRFAM/DATA/2026-01/01202026_SR31649_Base4Ca_SS_ALP/24
+```
+
+```
+⚠ processed differently: LB 0 / 100 Hz (EM) · acquired differently: D1 varies 12.5–36 s — populations from one shared model are not strictly comparable
+group        key  label    level  majority  01192026_SR31649_Base0Ca_SS_ALP  01202026_SR31649_Base1Ca_SS_ALP  01202026_SR31649_Base2Ca_SS_ALP  01202026_SR31648_Base3Ca_SS_ALP  01202026_SR31649_Base4Ca_SS_ALP
+processing   LB   LB (Hz)  check  100       0 *                              0 *                              100                              100                              100
+acquisition  D1   D1 (s)   check  12.5      12.5                             14                               18                               29                               36
+* differs from the series majority
+```
+<!-- measured v0.13.0, 2026-09-23: `larmor compare` on the five EXPNO 24 folders -->
+
+Base0Ca and Base1Ca were processed with LB = 0 Hz and the other three with a
+100 Hz exponential window — the majority, but the worse choice for glasses
+(*Glass fitting*, §2) — and the recycle delay runs from 12.5 to 36 s. The
+Batch fit dialog shows the same in an amber line under the panels;
+**Reprocess all from fid…** with the window set to none (or GM, the glass
+rule) removes the LB difference for every member, while the D1 difference
+cannot be reprocessed away and is recorded as a note in each saved fit.
 
 ## 3. Build the shared model on the first glass
 
@@ -110,7 +132,10 @@ Report (quantify)** (F6).
    scale; **Fit baseline…** estimates and subtracts a baseline from every
    spectrum (**Reset** restores the raw data); **Save setup…** /
    **Load setup…** keep the release set and baseline choice for the next
-   series.
+   series. Under the panels, the amber comparability line says how the five
+   differ (LB and D1, as §2 measured); **Details…** opens the parameter table
+   and **Reprocess all from fid…** rebuilds all five from their fids with one
+   window and TDeff before fitting.
 4. **Fit**. Every lineshape parameter is held at the model value and each
    spectrum's amplitudes are fitted; the status line then reads
    `batch fit: 5 spectra, N shared parameters · mean RMSD …` and each panel
