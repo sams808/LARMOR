@@ -45,7 +45,7 @@ lives in eleven `desktop/mw_*.py` mixin modules of 207–920 lines each plus
 | Simulation | `models/` (the registry), `engine.py` (Czjzek kernel + `simulate`), `twod.py` (MQMAS), `estimate.py` (starting values measured from data) |
 | Fitting | `fit.py`, `batchfit.py`, `seqfit.py`, `multifit.py`, `autofit.py`, `parallel.py` |
 | Interpretation | `quantify.py` (populations, the tail outside the window, the window containing every tail), `sanity.py`, `identifiability.py`, `diagnostics.py`, `quantitativity.py` (acquisition facts, the sibling-T1 search and the recycle-delay / flip-angle judgement feeding `fithealth`; its readers are `satrec.read_ct1t2`, `scan.find_sibling_t1` and `bruker.read_acqus_meta`), `fithealth.py` (one verdict from the previous five, rendered by the desktop strip), `chi2map.py`, `czjzek_dist.py`, `convert.py`, `nuclei.py`, `refranges.py`, `dft.py` (magres → sites, the `[calculation]` header, equivalent-atom grouping, the `_SEED_KEYS` partition), `shiftcal.py` (σ → δ calibration line with covariance) |
-| Output | `figures.py` (spec-driven renderers), `methods.py` (auto-written Methods text), `series_grid.py` |
+| Output | `figures.py` (spec-driven renderers), `methods.py` (auto-written Methods text), `paramstatus.py` (derived fixed / linked / at-bound status of every parameter and the † ‡ § marker vocabulary every table shares), `series_grid.py` |
 | Desktop shell | `desktop/app.py` is the `MainWindow` facade (construction, the two Qt event overrides, `main()`); every other method is defined on one mixin in `desktop/mw_*.py` — `mw_menus`, `mw_chrome`, `mw_files`, `mw_session`, `mw_overlays`, `mw_editing`, `mw_sidebands`, `mw_fitting`, `mw_processing`, `mw_cofit`, `mw_tools` — and the QThreads are in `desktop/workers.py`. The layout and its rules are in §11 |
 
 **Data flow.** `loader.load_any(path)` → `(ppm, amp, recipe, meta, warnings)`
@@ -140,6 +140,7 @@ every consumer produces plausible, wrong numbers.
 | Axis | IUPAC δ, increasing to the left | `figures.py`, plot widgets |
 | Processing replay source | raw fid only when a time-domain op precedes the first `ift` (`processing.chain_start_domain`, `loader.apply_processing`); the Processing panel emits the ABSOLUTE chain from its widgets, so it is synced from `recipe["processing"]` (`ProcessingPanel.sync_from_ops`, unrepresentable frequency-domain steps carried) before a forced re-apply | `processing.py`, `loader.py`, `desktop/panels.py` |
 | MAS rate | three candidates — acqus `MASR` > 0, the title `MASR?\s*[=:]?\s*N\s*(k?Hz)` (unit mandatory, `0 kHz` = static declaration, outside 1–150 kHz re-read in the other unit and marked *repaired*, never settling alone), the NMRFAM sidecar `experiment_addenda.xml` `<magic_angle_spinning_rate>` in **kHz** (its `false` flag is informational, never static evidence: 214 of 684 files, incl. spinning MQMAS) — any two within 2 % settle the rate (the non-repaired title supplies the number, else the booking, else acqus), all disagreeing → `max()` + `mas_uncertain`; the confirmation store matches on (session month folder, rotor ID, nucleus) **and** the exact source triplet, because one 2026-05 rotor was booked at 20 and 22 kHz under a constant 20 kHz title; `recipe.provenance["mas_rate"]` carries the outcome, no schema bump | `masrate.py`, `io/bruker.py` (`_resolve_mas`, `_meta_1d`, `_conflicts`), `loader.py`, `desktop/dialogs.py` (`ExperimentDialog`) |
+| Parameter status († fixed · ‡ at a bound · § linked) | **DERIVED, never stored**: linked = `expr` set; fixed = `vary` False; at a bound = a FREE value within `AT_BOUND_REL_TOL` = 1e-3·max(1, \|v\|) of an *effective* bound (recipe min/max, else the registry `ParamDef.min/max` — the same fallback `fit._make_params` applies), tested by the one `paramstatus.bound_side` that `fit._at_bounds` also calls, so fit and tables cannot disagree; no `Param`/`Recipe` field and no `RECIPE_VERSION` bump (`Param(**p)` raises on unknown keys in every released LARMOR), hence retroactive on saved recipes and self-clearing on edit. Verified read-only on the 32 PBi Final2 recipes: derived at-bound set == the fit's own note in 32/32 (504 free, 246 of them at a bound; 190 fixed; 0 linked). fit() prunes its previous `parameters finished at a bound` note before rewriting it. CSV vocabulary is words (`vary` True/False, `at_bound` min/max/'', `<col> flag` fixed/linked/at_min/at_max/''), glyphs only on screen / LaTeX / Markdown | `paramstatus.py`, `fit._at_bounds` / `_make_params`, `methods.latex_table`, `io/export.export_csv_params`, `batch.py`, `batchfit._status_fields`, `tests/test_paramstatus.py` |
 
 The Czjzek factor of two is the single most dangerous number in the project:
 a value copied from dmfit and stored without dividing by two makes every
@@ -406,6 +407,22 @@ Ordered by how likely they are to mislead someone.
     reopened project restores a 2D map's fit parameters but not its model
     overlay — the MQMAS kernel build takes seconds and is memory-cached
     only, so the notes box says to run Fit.
+17. ~~**Held values exported as `1.00 ± 0.00`; at-bound and linked status
+    reached no export.**~~ **fixed with N5** (`paramstatus.py`): every
+    table marks † fixed (printed without its error), ‡ finished at a bound
+    (its stderr is None after the covariance retry, so the glyph is its
+    explanation), § linked, with a footnote naming the bound or the
+    expression; the CSVs carry `vary` / `at_bound` (single fit),
+    `<col> flag` (batch report) or `vary, min, max, expr, at_bound` (batch
+    dialog, CLI). Two accepted divergences from the fit's own `at_bounds`
+    list, both documented rather than special-cased: (a) a **frozen site**
+    (`fit.py` sets `vary=False` and amplitude 0 on the lmfit side only, so
+    the recipe Param stays free at 0 with registry min 0) derives as ‡ at
+    min 0 while `result.at_bounds` omits it — the `sites frozen` note and
+    the strip's frozen chip cover it; (b) a value typed exactly on its bound
+    before any fit, or a bound widened after the fit without refitting, is
+    marked from the recipe's literal state (the same staleness stderr
+    already has; `edited since fit` covers the interactive case).
 
 Genuinely open work is in `docs/roadmap.md`. The largest structural item left
 is that there is no CI — so every "suite green" claim is one machine, one

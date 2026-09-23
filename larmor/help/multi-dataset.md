@@ -125,11 +125,18 @@ pass, so you never hand-copy numbers.
 3. **Pick a folder and Generate.** It writes:
    - **`table.csv`** — every site's δ_iso, C_Q (or σ, with the derived
      `C_Q = 2σ` and `√⟨P_Q²⟩`), η, width and **population % — each with its
-     error** — one row per site, machine-readable.
-   - **`table.tex`** — the same table as a LaTeX `tabular` for direct inclusion.
-   - **`report.md`** — a Markdown report: the table, the nucleus/field summary,
-     the error method, and a **per-fit overlay** (experiment + model +
-     components + residual).
+     error** — one row per site, machine-readable. A `… flag` column beside
+     each value reads `fixed`, `linked`, `at_min` or `at_max` (blank for a
+     free value), so a filter finds every held or pinned number.
+   - **`table.tex`** — the same table as a LaTeX `tabular` for direct inclusion;
+     cells are marked † (held fixed), ‡ (finished at a bound — the value
+     shown IS the bound) and § (linked), with one legend row.
+   - **`report.md`** — a Markdown report: the table (same markers), the
+     nucleus/field summary, the error method, a **per-fit overlay**
+     (experiment + model + components + residual), and a *Constraints*
+     section listing, per sample, the fixed parameters, the at-bound ones
+     with their bound and the linked ones with their expression — the
+     paragraph a referee asks for.
    - **`figures/*.png`** — the individual overlays.
 
 The columns are model-aware (Czjzek sites report σ and the field-independent
@@ -232,7 +239,12 @@ synthetic series from the command line.
    every spectrum. **Export CSV…** writes one row per fitted parameter — value,
    error, %-error, and (for the χ² profile) the 1σ interval — tagged with the
    selected method (it computes that method first if you have not yet). Switching
-   the menu never loses a method you already computed.
+   the menu never loses a method you already computed. Both this CSV and
+   **Save table…** end with `vary`, `min`, `max`, `expr`, `at_bound`: a shared
+   row reads `vary = False` because the batch holds it, and a released value
+   that stopped at the edge of its ± range reads `min` / `max` there — the
+   same cell shows ‡ in the table under the grid, with the remedy in its
+   tooltip (widen the release %, or fit the series sequentially).
    Monte-Carlo and χ² profile are each hundreds to thousands of independent
    refits (every trial, or every scan point of every released parameter of
    every spectrum), so both run across all of your CPU cores (one left free
@@ -249,7 +261,8 @@ synthetic series from the command line.
    errors from the last error-calculation you ran. **Save table…**
    writes a `batch_table.csv` of the shared and per-spectrum values — the
    same numbers as the on-screen table, in long form and with the shared
-   parameters — **plus each site's integrated population %** (a
+   parameters, each row with its `vary` / `min` / `max` / `expr` /
+   `at_bound` status — **plus each site's integrated population %** (a
    `population_pct` row per site,
    same integral-over-the-window quantification as Report/§5) — the exact
    column the Plotting studio's species-distribution chart wants, without a

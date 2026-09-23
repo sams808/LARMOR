@@ -90,10 +90,35 @@ def test_export_text_columns(tmp_path):
 
 def test_export_csv_params(tmp_path):
     csv = export.export_csv_params(_recipe(), tmp_path / "o.csv")
-    assert csv.splitlines()[0] == "line,model,parameter,value,stderr,min,max,link"
+    assert csv.splitlines()[0] == \
+        "line,model,parameter,value,stderr,min,max,link,vary,at_bound"
     # components are lettered A, B…
     assert any(row.startswith("A,czjzek,") for row in csv.splitlines())
     assert any(row.startswith("B,gauss_lor,") for row in csv.splitlines())
+
+
+def test_export_csv_params_marks_vary_and_at_bound(tmp_path):
+    """The two appended columns (link kept in place for positional readers):
+    a held value reads vary False, a free value sitting at its bound reads
+    min / max, a linked value keeps its expression in link; the # RMSD
+    comment stays last."""
+    r = _recipe()
+    a, b = r.sites
+    a.params["shift_fwhm_ppm"] = Param(4.0, min=4.0)                  # at its floor
+    b.params["amplitude"] = Param(100.0, expr="0.1 * s0.amplitude")   # linked
+    r.fit_rmsd = 0.0123
+    csv = export.export_csv_params(r, tmp_path / "o.csv")
+    lines = csv.splitlines()
+    assert lines[-1] == "# RMSD,0.0123"
+    row = {(ln.split(",")[0], ln.split(",")[2]): ln for ln in lines[1:-1]}
+    assert row[("B", "gl")].endswith(",False,")
+    assert row[("A", "shift_fwhm_ppm")].endswith(",4,,,True,min")
+    assert row[("B", "amplitude")].split(",")[7] == "0.1 * s0.amplitude"
+    assert row[("B", "amplitude")].endswith(",True,")
+    assert row[("A", "isotropic_chemical_shift_ppm")].endswith(",True,")
+    # the amplitude with an explicit min=0 far from 1000 is free
+    assert row[("A", "amplitude")].endswith(",1000,,0,,,True,")
+    assert all(len(ln.split(",")) == 10 for ln in lines[1:-1])
 
 
 def test_export_fxmla_roundtrips_through_our_parser(tmp_path):

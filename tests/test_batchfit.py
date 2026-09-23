@@ -494,6 +494,57 @@ def test_shared_and_error_table_omit_excluded_sites_and_add_population_pct():
     assert all(v is not None and v >= 0 for v in mc_pop.values())
 
 
+def test_tables_carry_vary_bounds_and_at_bound_for_released_and_shared_rows():
+    """N5: every parameter row carries vary / min / max / expr / at_bound from
+    the SAME Param its value comes from. A released position that stopped at
+    the edge of its ±frac window reads 'min' / 'max' (the ‡ the dialog and
+    the CSVs show), shared rows read vary False because the batch holds them,
+    population rows carry the keys empty -- and error_table agrees."""
+    entries = _entries()
+    for rec, *_ in entries:                 # the master sits ON the g0 truth
+        rec.sites[0].params["isotropic_chemical_shift_ppm"].value = 15.0
+    res = batchfit.batch_fit(entries, release=("isotropic_chemical_shift_ppm",),
+                             release_frac=0.005)          # ±0.075 ppm window
+    rows = batchfit.shared_table(res)
+
+    def pick(scope, site, param):
+        hits = [r for r in rows if (r["scope"], r["site"], r["param"]) == (scope, site, param)]
+        assert len(hits) == 1, (scope, site, param, len(hits))
+        return hits[0]
+
+    # truths 15.0 / 15.3 / 14.7 against a [14.925, 15.075] window
+    for k, side in enumerate(["", "max", "min"]):
+        pos = pick(f"g{k}", "s0", "isotropic_chemical_shift_ppm")
+        assert pos["vary"] is True and pos["expr"] == ""
+        assert pos["min"] == pytest.approx(15.0 * 0.995)
+        assert pos["max"] == pytest.approx(15.0 * 1.005)
+        assert pos["at_bound"] == side, (k, pos)
+        amp = pick(f"g{k}", "s0", "amplitude")
+        assert amp["vary"] is True and amp["min"] == 0.0 and amp["max"] is None
+        assert amp["at_bound"] == "" and amp["expr"] == ""
+        pop = pick(f"g{k}", "s0", "population_pct")
+        assert pop["vary"] is None and pop["min"] is None and pop["max"] is None
+        assert pop["expr"] == "" and pop["at_bound"] == ""
+    width = pick("shared", "s0", "shift_fwhm_ppm")
+    assert width["vary"] is False and width["at_bound"] == ""
+    assert width["min"] == 0.1 and width["max"] is None and width["expr"] == ""
+    gl = pick("shared", "s0", "gl")
+    assert gl["vary"] is False and gl["at_bound"] == ""
+
+    # error_table rows carry identical status fields for the same row
+    status = ("vary", "min", "max", "expr", "at_bound")
+    emap = {(r["scope"], r["site"], r["param"]): r
+            for r in batchfit.error_table(res, "covariance")}
+    for r in rows:
+        e = emap[(r["scope"], r["site"], r["param"])]
+        assert all(e[k] == r[k] for k in status), (r["param"], e, r)
+
+    # the wide (on-screen) view exposes the side per cell
+    col = (0, "A", "isotropic_chemical_shift_ppm")
+    _cols, cells = batchfit.pivot_by_spectrum(rows, 3)
+    assert [cells[(k, col)]["at_bound"] for k in range(3)] == ["", "max", "min"]
+
+
 def test_batch_fit_should_stop_gives_every_entry_a_result():
     """A Stop mid-batch must not misalign indices: every entry (fit or not)
     gets a recipe/rmsd/label/per_dataset entry, in order, so the dialog's
@@ -536,7 +587,7 @@ def test_table_rows_carry_the_spectrum_index_even_with_duplicate_labels():
     assert res.labels == ["same"] * 3                  # the collision is real
 
     base_keys = {"scope", "site", "label", "param", "value", "stderr",
-                 "model", "source_path"}
+                 "model", "source_path", "vary", "min", "max", "expr", "at_bound"}
     err_keys = {"error_method", "sigma_pct", "ci68_lo", "ci68_hi"}
     for rows, extra in ((batchfit.shared_table(res), set()),
                         (batchfit.error_table(res, "covariance"), err_keys)):
@@ -593,11 +644,13 @@ def test_write_shared_and_error_csv_match_the_dialog_headers(tmp_path):
         0.0, vary=False, min=0.0, max=0.0)
     res = batchfit.batch_fit(entries)
 
+    status = ["vary", "min", "max", "expr", "at_bound"]       # N5, appended
     assert batchfit.SHARED_HEADER == ["scope", "site", "label", "param", "value",
-                                      "stderr", "model", "source_path"]
+                                      "stderr", "model", "source_path", *status]
     assert batchfit.ERROR_HEADER == ["scope", "site", "label", "param", "value",
                                      "stderr", "error_method", "sigma_pct",
-                                     "ci68_lo", "ci68_hi", "model", "source_path"]
+                                     "ci68_lo", "ci68_hi", "model", "source_path",
+                                     *status]
 
     p = tmp_path / "batch_table.csv"
     assert batchfit.write_shared_csv(res, p) == str(p)
@@ -618,7 +671,7 @@ def test_write_shared_and_error_csv_match_the_dialog_headers(tmp_path):
     batchfit.write_error_csv(res, pe, "covariance")
     with open(pe, newline="", encoding="utf-8") as f:
         erows = list(csv.reader(f))
-    assert erows[0] == batchfit.ERROR_HEADER and len(erows[0]) == 12
+    assert erows[0] == batchfit.ERROR_HEADER and len(erows[0]) == 17
     assert len(erows) - 1 == len(batchfit.error_table(res, method="covariance"))
     assert all(r[6] == "covariance" for r in erows[1:])
     assert not any(r[0] == "g1" and r[1] == "s1" for r in erows[1:])

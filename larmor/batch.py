@@ -23,6 +23,7 @@ import numpy as np
 
 from larmor import autofit
 from larmor import fit as fitmod
+from larmor import paramstatus
 from larmor import quantify as quantmod
 from larmor.recipe import Recipe
 
@@ -140,15 +141,20 @@ def _p(site, name):
     return p["value"] if p else None
 
 
-def _site_columns(site: dict, errors: dict) -> list[tuple[str, float, float | None]]:
-    """Ordered (header, value, error) for one site. `errors` maps param name ->
-    error (covariance stderr or MC σ). Derived quantities propagate the error."""
+def _site_cells(site: dict, errors: dict
+                ) -> list[tuple[str, float, float | None, str]]:
+    """Ordered (header, value, error, source parameter) for one site. `errors`
+    maps param name -> error (covariance stderr or MC σ). Derived quantities
+    propagate the error and point at the parameter they derive from (the
+    Czjzek 2σ and √⟨P_Q²⟩ columns at ``sigma_Cq_MHz``), so a status marker
+    on the source reaches every column made from it."""
     P = site.get("params", {})
-    out: list[tuple[str, float, float | None]] = []
+    out: list[tuple[str, float, float | None, str]] = []
 
     pos = _p(site, "isotropic_chemical_shift_ppm")
     if pos is not None:
-        out.append(("δiso (ppm)", pos, errors.get("isotropic_chemical_shift_ppm")))
+        out.append(("δiso (ppm)", pos, errors.get("isotropic_chemical_shift_ppm"),
+                    "isotropic_chemical_shift_ppm"))
 
     if "sigma_Cq_MHz" in P:                       # Czjzek family
         s = P["sigma_Cq_MHz"]["value"]
@@ -158,34 +164,41 @@ def _site_columns(site: dict, errors: dict) -> list[tuple[str, float, float | No
         # √⟨P_Q²⟩ = 2√d·σ is linear in σ so the error propagates by the same
         # factor (σ_Cz = sCZ_CQ = 2σ is the Czjzek-paper width, not the mode)
         d = float((P.get("czjzek_d") or {}).get("value", 5.0))
-        out.append(("σ (MHz)", s, se))
-        out.append(("sCZ_CQ=2σ (MHz)", 2.0 * s, (2.0 * se) if se else None))
+        out.append(("σ (MHz)", s, se, "sigma_Cq_MHz"))
+        out.append(("sCZ_CQ=2σ (MHz)", 2.0 * s, (2.0 * se) if se else None,
+                    "sigma_Cq_MHz"))
         out.append(("√⟨P_Q²⟩ (MHz)", rms_pq(s, d),
-                    rms_pq(se, d) if se else None))
+                    rms_pq(se, d) if se else None, "sigma_Cq_MHz"))
     if "Cq_MHz" in P:                             # discrete / amorphous
-        out.append(("C_Q (MHz)", P["Cq_MHz"]["value"], errors.get("Cq_MHz")))
+        out.append(("C_Q (MHz)", P["Cq_MHz"]["value"], errors.get("Cq_MHz"), "Cq_MHz"))
     for ek in ("eta", "etaQ", "eta_q"):
         if ek in P:
-            out.append(("η", P[ek]["value"], errors.get(ek)))
+            out.append(("η", P[ek]["value"], errors.get(ek), ek))
             break
     if "eps" in P:
-        out.append(("ε", P["eps"]["value"], errors.get("eps")))
+        out.append(("ε", P["eps"]["value"], errors.get("eps"), "eps"))
     if "Cq_fwhm_MHz" in P:
         out.append(("ΔC_Q (MHz)", P["Cq_fwhm_MHz"]["value"],
-                    errors.get("Cq_fwhm_MHz")))
+                    errors.get("Cq_fwhm_MHz"), "Cq_fwhm_MHz"))
     for wk, wl in (("shift_fwhm_ppm", "dCS/FWHM (ppm)"),
                    ("gauss_fwhm_ppm", "Gauss FWHM (ppm)"),
                    ("lorentz_fwhm_ppm", "Lorentz FWHM (ppm)")):
         if wk in P:
-            out.append((wl, P[wk]["value"], errors.get(wk)))
+            out.append((wl, P[wk]["value"], errors.get(wk), wk))
     # general-d / correlated Czjzek and two-site exchange
     for ek, el in (("czjzek_d", "d (Czjzek)"),
                    ("shift_slope_ppm_per_MHz", "dδ/dC_Q (ppm/MHz)"),
                    ("split_ppm", "Δδ (ppm)"), ("pop_a", "p_A"),
                    ("k_ex_hz", "k_ex (s⁻¹)")):
         if ek in P:
-            out.append((el, P[ek]["value"], errors.get(ek)))
+            out.append((el, P[ek]["value"], errors.get(ek), ek))
     return out
+
+
+def _site_columns(site: dict, errors: dict) -> list[tuple[str, float, float | None]]:
+    """Ordered (header, value, error) for one site -- ``_site_cells`` without
+    the source-parameter column (the 3-tuple contract callers rely on)."""
+    return [(h, v, e) for h, v, e, _src in _site_cells(site, errors)]
 
 
 # --------------------------------------------------------------------------
@@ -232,16 +245,30 @@ def build_table(entries: list[FitEntry], error_method: str = "covariance",
                      "params": {pn: {"value": p.value, "stderr": p.stderr}
                                 for pn, p in s.params.items()}}
             perr = {pn: errors.get((i, pn)) for pn in sdict["params"]}
-            cells = {h: (v, err) for h, v, err in _site_columns(sdict, perr)}
+            site_cells = _site_cells(sdict, perr)
+            cells = {h: (v, err) for h, v, err, _src in site_cells}
             for h in cells:
                 if h not in headers:
                     headers.append(h)
             qr = qrows.get(f"s{i}", {})
+            # † fixed · ‡ at a bound · § linked, derived from the refitted
+            # recipe's own Params (paramstatus): one status per column from
+            # the parameter it comes from, the population's from the amplitude
+            flags = {h: paramstatus.param_status(s.model, src, s.params[src])
+                     for h, _v, _e, src in site_cells}
+            names: dict[str, str] = {}
+            for h, _v, _e, src in site_cells:
+                names.setdefault(src, h)
             rows.append({
                 "sample": e.sample, "site": f"s{i}",
                 "label": s.label or s.model, "model": s.model,
                 "cells": cells,
                 "pop": (qr.get("fraction_pct"), qr.get("fraction_err_pct")),
+                "flags": flags,
+                "pop_flag": paramstatus.param_status(s.model, "amplitude",
+                                                     s.params.get("amplitude")),
+                "constraints": paramstatus.site_constraints(rec, i),
+                "names": names,
             })
         if progress:
             progress(k + 1, len(entries))
@@ -269,11 +296,51 @@ def _all_columns(t: BatchTable) -> list[str]:
     return t.headers + ["pop (%)"]
 
 
+def _flag(row: dict, h: str):
+    """The non-free ParamStatus of a cell (the population's is the
+    amplitude's), or None. Rows built before N5 carry no flags."""
+    st = row.get("pop_flag") if h == "pop (%)" else (row.get("flags") or {}).get(h)
+    return st if (st is not None and st.kind != "free") else None
+
+
+def _marked_kinds(t: BatchTable) -> set[str]:
+    return {st.kind for r in t.rows for h in _all_columns(t)
+            for st in [_flag(r, h)] if st is not None}
+
+
+_LEGEND_WORD = {"fixed": "held fixed", "at_bound": "finished at a bound",
+                "linked": "linked"}
+
+
+def _legend(kinds: set[str], style: str = "text") -> str:
+    """'† held fixed · ‡ finished at a bound · § linked' for the kinds
+    present (LaTeX glyphs for style 'latex')."""
+    glyph = ({"fixed": r"$\dagger$", "at_bound": r"$\ddagger$", "linked": r"$\S$"}
+             if style == "latex" else paramstatus.MARK)
+    return " · ".join(f"{glyph[k]} {_LEGEND_WORD[k]}"
+                      for k in ("fixed", "at_bound", "linked") if k in kinds)
+
+
 def _cell_text(row: dict, h: str) -> str:
+    """``value ± err`` plus the status glyph -- the one path CSV-free
+    renderings (LaTeX, Markdown) share; the CSV writes numbers unmarked and
+    carries the status in its own ``<col> flag`` column."""
     if h == "pop (%)":
-        return _fmt(*row["pop"])
-    v, e = row["cells"].get(h, (None, None))
-    return _fmt(v, e)
+        txt = _fmt(*row["pop"])
+    else:
+        v, e = row["cells"].get(h, (None, None))
+        txt = _fmt(v, e)
+    st = _flag(row, h)
+    if txt and st is not None:
+        txt += " " + st.marker
+    return txt
+
+
+def _latex_cell(txt: str) -> str:
+    txt = txt.replace("±", r"$\pm$")
+    for k in ("fixed", "at_bound", "linked"):
+        txt = txt.replace(" " + paramstatus.MARK[k], paramstatus.LATEX[k])
+    return txt
 
 
 def write_csv(t: BatchTable, path: Path) -> None:
@@ -281,9 +348,10 @@ def write_csv(t: BatchTable, path: Path) -> None:
     with open(path, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(["sample", "site", "label", "model", *cols,
-                    *[c + " err" for c in cols]])
+                    *[c + " err" for c in cols],
+                    *[c + " flag" for c in cols]])
         for r in t.rows:
-            vals, errs = [], []
+            vals, errs, flags = [], [], []
             for h in cols:
                 if h == "pop (%)":
                     v, e = r["pop"]
@@ -291,8 +359,10 @@ def write_csv(t: BatchTable, path: Path) -> None:
                     v, e = r["cells"].get(h, (None, None))
                 vals.append("" if v is None else f"{v:.6g}")
                 errs.append("" if e is None else f"{e:.6g}")
+                st = _flag(r, h)
+                flags.append(st.csv_flag if st is not None else "")
             w.writerow([r["sample"], r["site"], r["label"], r["model"],
-                        *vals, *errs])
+                        *vals, *errs, *flags])
 
 
 def write_latex(t: BatchTable, path: Path) -> None:
@@ -308,10 +378,16 @@ def write_latex(t: BatchTable, path: Path) -> None:
                                               for c in cols]) + r" \\"
     lines += [header, r"\hline"]
     for r in t.rows:
-        cells = [_cell_text(r, h).replace("±", r"$\pm$") for h in cols]
+        cells = [_latex_cell(_cell_text(r, h)) for h in cols]
         lines.append(" & ".join([r["sample"].replace("_", r"\_"),
                                  r["label"].replace("_", r"\_")] + cells) + r" \\")
-    lines += [r"\hline", r"\end{tabular}", r"\end{table}", ""]
+    lines.append(r"\hline")
+    marked = _marked_kinds(t)
+    if marked:      # one generic legend row; the detail is in table.csv / report.md
+        lines.append(r"\multicolumn{" + str(2 + len(cols)) + r"}{l}{\footnotesize "
+                     + _legend(marked, "latex")
+                     + r" --- bounds and expressions in table.csv and report.md} \\")
+    lines += [r"\end{tabular}", r"\end{table}", ""]
     path.write_text("\n".join(lines), encoding="utf-8")
 
 
@@ -432,6 +508,36 @@ def run_batch(paths, outdir, *, error_method: str = "covariance", n_mc: int = 20
                        warnings=warnings + table.notes)
 
 
+def _constraint_lines(table: BatchTable) -> list[str]:
+    """One Markdown bullet per sample -- ``**glassA** — fixed: gl (BO3) ·
+    at a bound: dCS/FWHM (ppm) (BO3) lower bound 8 · linked: —`` -- from the
+    rows' derived ``constraints`` (paramstatus.site_constraints); samples
+    with nothing to declare are left out, so an unconstrained batch has no
+    section."""
+    per_sample: dict[str, list[dict]] = {}
+    for r in table.rows:
+        per_sample.setdefault(r["sample"], []).append(r)
+    out = []
+    for sample, rows in per_sample.items():
+        fixed, at_bound, linked = [], [], []
+        for r in rows:
+            c = r.get("constraints") or {}
+            names = r.get("names") or {}
+            lab = r["label"]
+            fixed += [f"{names.get(pn, pn)} ({lab})" for pn in c.get("fixed", [])]
+            at_bound += [f"{names.get(pn, pn)} ({lab}) "
+                         f"{'lower' if side == 'min' else 'upper'} bound {bound:.4g}"
+                         for pn, side, bound in c.get("at_bound", [])]
+            linked += [f"{names.get(pn, pn)} ({lab}) = {expr}"
+                       for pn, expr in c.get("linked", [])]
+        if not (fixed or at_bound or linked):
+            continue
+        out.append(f"- **{sample}** — fixed: {', '.join(fixed) or '—'} · "
+                   f"at a bound: {', '.join(at_bound) or '—'} · "
+                   f"linked: {', '.join(linked) or '—'}")
+    return out
+
+
 def _write_report(path: Path, entries, table: BatchTable, plot_links, warnings):
     from datetime import date
 
@@ -456,10 +562,22 @@ def _write_report(path: Path, entries, table: BatchTable, plot_links, warnings):
         lines.append(f"> {n}")
     if table.notes:
         lines.append("")
-    lines += ["## Table", "", _markdown_table(table), "",
-              "Errors are ± one standard error. Population % is the integrated "
-              "area over the fit window (first-order amplitude error). "
-              "`table.csv` / `table.tex` hold the same data.", ""]
+    errors_para = ("Errors are ± one standard error. Population % is the integrated "
+                   "area over the fit window (first-order amplitude error). "
+                   "`table.csv` / `table.tex` hold the same data.")
+    marked = _marked_kinds(table)
+    if marked:
+        errors_para += (" Marked values: " + _legend(marked, "text")
+                        + " — the bound or expression of each is listed under "
+                          "*Constraints* below and in the `… flag` columns of "
+                          "`table.csv`.")
+    lines += ["## Table", "", _markdown_table(table), "", errors_para, ""]
+    constraints = _constraint_lines(table)
+    if constraints:
+        lines += ["## Constraints", "",
+                  "Per sample: parameters held fixed, parameters that finished "
+                  "at a bound (the value shown IS the bound), and linked "
+                  "parameters with their expression.", ""] + constraints + [""]
     if plot_links:
         lines += ["## Fits (overlays)", ""]
         for e in entries:
