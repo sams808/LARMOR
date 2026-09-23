@@ -118,3 +118,76 @@ def test_cli_batchfit_and_seqfit_curves_flag_write_bundle_files(tmp_path, capsys
         sman = list(csv.DictReader(f))
     assert [m["recipe_file"] for m in sman] == [f"s{k}_seq.recipe.json" for k in range(3)]
     assert "sequential" in (sout / "README.txt").read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------------- larmor compare
+def _fake_expno_dir(tmp_path, sample, expno, nuc="11B", lb=0, ns=256):
+    """acqus + pdata/1/procs only (no 1r, no fid): what a spectrometer folder
+    holds before anything is processed -- `larmor compare` must read it."""
+    e = tmp_path / sample / str(expno)
+    head = ["##TITLE= Parameter file, TopSpin 4.1", "##JCAMPDX= 5.0",
+            "##DATATYPE= Parameter Values", "##ORIGIN= Bruker BioSpin GmbH",
+            "##OWNER= nmr"]
+    d = ["0"] * 64
+    d[1] = "12.5"
+    acq = head + [f"##$NUC1= <{nuc}>", "##$PULPROG= <zg>", f"##$NS= {ns}", "##$TD= 7988",
+                  "##$RG= 194.07", "##$SW_h= 100000", "##$SFO1= 192.430693",
+                  "##$BF1= 192.430693", "##$O1= 0", "##$DATE= 1768800000",
+                  "##$PROBHD= <Z1 3.2mm>", "##$D= (0..63)", " ".join(d), "##END="]
+    e.mkdir(parents=True)
+    (e / "acqus").write_text("\n".join(acq) + "\n", encoding="utf-8")
+    pd = e / "pdata" / "1"
+    pd.mkdir(parents=True)
+    prc = head + ["##$WDW= 1", f"##$LB= {lb}", "##$GB= 0", "##$SSB= 0", "##$TDeff= 1024",
+                  "##$SI= 32768", "##$FCOR= 1", "##$PH_mod= 1", "##$PHC0= -160",
+                  "##$PHC1= 29.9", "##$ABSG= 0", "##$BC_mod= 0", "##$FT_mod= 6",
+                  "##$SF= 192.431528", "##END="]
+    (pd / "procs").write_text("\n".join(prc) + "\n", encoding="utf-8")
+    return str(e)
+
+
+def test_cli_compare_prints_differences_and_writes_csv(tmp_path, capsys):
+    import csv
+
+    a = _fake_expno_dir(tmp_path, "A_SS", 24, lb=0)
+    b = _fake_expno_dir(tmp_path, "B_SS", 24, lb=100)
+    out = tmp_path / "cmp.csv"
+    rc = cli.main(["compare", a, b, "--csv", str(out)])
+    printed = capsys.readouterr().out
+    assert rc == 0
+    assert "LB" in printed and "100" in printed and "PHC0" not in printed
+    assert "processed differently" in printed and f"wrote {out}" in printed
+    with open(out, newline="", encoding="utf-8") as f:
+        rows = list(csv.reader(f))
+    assert rows[0] == ["group", "key", "label", "level", "majority", "A_SS", "B_SS"]
+    assert ["processing", "LB", "LB (Hz)", "check", "0", "0", "100"] in rows
+
+    rc = cli.main(["compare", a, b, "--all"])
+    assert rc == 0 and "NS" in capsys.readouterr().out
+
+    # a CSV spectrum has no acqus: one Bruker spectrum is too few
+    paths, _ = _make_series(tmp_path)
+    rc = cli.main(["compare", a, paths[0]])
+    err = capsys.readouterr().err
+    assert rc == 1 and "need two or more Bruker spectra" in err
+
+    # mixed nuclei: exit 2 and batch.homogeneity's wording
+    al = _fake_expno_dir(tmp_path, "C_SS", 27, nuc="27Al")
+    rc = cli.main(["compare", a, al])
+    assert rc == 2 and "mixed nuclei" in capsys.readouterr().out
+
+
+def test_series_entries_warns_on_a_differing_series(tmp_path, capsys):
+    from conftest import LAW_CA_11B, require
+
+    paths, model = _make_series(tmp_path)
+    entries, err = cli._series_entries(paths, model, None)
+    assert err is None and len(entries) == 3
+    assert "warning:" not in capsys.readouterr().err        # CSVs: nothing to compare
+
+    require(LAW_CA_11B[0])
+    real = [str(e / "pdata" / "1" / "1r") for e in LAW_CA_11B]
+    entries, err = cli._series_entries(real, None, None)
+    assert entries is None and err.startswith("no model")
+    stderr = capsys.readouterr().err
+    assert "warning:" in stderr and "LB 0 / 100 Hz" in stderr and "D1 varies" in stderr

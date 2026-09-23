@@ -5,12 +5,25 @@
     larmor fit recipe.json [-o out.json] [--plot out.png]
     larmor batchfit SPECTRA... --model m.recipe.json [-o out] [--curves]
     larmor seqfit SPECTRA... --model m.recipe.json [-o out] [--curves]
+    larmor compare SPECTRA... [--all] [--csv out.csv]
 """
 from __future__ import annotations
 
 import argparse
 import sys
 from pathlib import Path
+
+
+def _say(text: str, file=None) -> None:
+    """print() that survives a console codec without the report's glyphs
+    (a Windows cp1252 terminal cannot encode the warning sign or the
+    en dash): unencodable characters degrade to '?' instead of a crash."""
+    f = file if file is not None else sys.stdout
+    try:
+        print(text, file=f)
+    except UnicodeEncodeError:
+        enc = getattr(f, "encoding", None) or "utf-8"
+        print(text.encode(enc, "replace").decode(enc, "replace"), file=f)
 
 
 def cmd_info(args: argparse.Namespace) -> int:
@@ -91,6 +104,33 @@ def cmd_srcheck(args: argparse.Namespace) -> int:
         log = R.append_log(rows, root, ada_ppm=args.ada, tol_ppm=args.tol, action="export")
         print(f"wrote {args.csv} and {txt}; old/new values appended to {log}")
     return 0
+
+
+def cmd_compare(args: argparse.Namespace) -> int:
+    """Comparability of a series: acqus / procs / auditp of every spectrum
+    against the series majority (see larmor.comparability). Exit 0; 1 when
+    fewer than two Bruker spectra are readable; 2 when the series mixes
+    nuclei or fields (a shared model is meaningless)."""
+    from larmor import comparability as C
+
+    paths = [str(p) for p in args.paths]
+    params = [C.read_params(p) for p in paths]
+    labels = [p.sample if p is not None else Path(q).name
+              for p, q in zip(params, paths)]
+    if len(set(labels)) < len(labels):        # two EXPNOs of one sample
+        labels = [f"{lab}/{Path(p.expno).name}" if p is not None else lab
+                  for lab, p in zip(labels, params)]
+    cmp = C.compare(params, labels)
+    if cmp.level == "none":
+        print(f"need two or more Bruker spectra (EXPNO / pdata / 1r): "
+              f"{cmp.n_bruker} of {len(paths)} readable", file=sys.stderr)
+        return 1
+    _say(cmp.summary())
+    _say(cmp.to_text(only_differences=not args.all))
+    if args.csv:
+        cmp.to_csv(args.csv)
+        _say(f"wrote {args.csv}")
+    return 2 if cmp.level == "bad" else 0
 
 
 def cmd_import(args: argparse.Namespace) -> int:
@@ -310,6 +350,15 @@ def _series_entries(spectra, model_path, window_arg):
         loaded.append((np.asarray(ppm, float), np.asarray(amp, float), rec, p))
         if model_sites is None and rec.get("sites"):
             model_sites = rec["sites"]
+    # one line when the series was not acquired / processed alike (CSV and
+    # fxmla series have no acqus/procs to compare: nothing printed)
+    from larmor import comparability
+
+    cmp = comparability.compare(
+        [comparability.read_params(p) for p in spectra],
+        [rec.get("sample") or Path(p).stem for _ppm, _amp, rec, p in loaded])
+    if cmp.any_flagged:
+        _say("warning: " + cmp.summary(), file=sys.stderr)
     if not model_sites:
         return None, "no model — pass --model recipe.json (or a spectrum with a fit)"
     if window_arg:
@@ -436,6 +485,16 @@ def main(argv: list[str] | None = None) -> int:
     p_sc.add_argument("--all", action="store_true", help="list every EXPNO, not "
                       "only the flagged ones")
     p_sc.set_defaults(func=cmd_srcheck)
+
+    p_cmp = sub.add_parser("compare", help="compare acquisition (acqus) and "
+                           "processing (procs) parameters of several spectra; "
+                           "flags what differs from the majority")
+    p_cmp.add_argument("paths", nargs="+", help="two or more spectra (EXPNO / "
+                                                "pdata/N / 1r)")
+    p_cmp.add_argument("--all", action="store_true",
+                       help="list every parameter, not only the differences")
+    p_cmp.add_argument("--csv", help="write the full parameter table here")
+    p_cmp.set_defaults(func=cmd_compare)
 
     p_imp = sub.add_parser("import", help="convert a dmfit .fxmla to a LARMOR recipe")
     p_imp.add_argument("path")
