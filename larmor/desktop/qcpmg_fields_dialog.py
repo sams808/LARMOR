@@ -45,7 +45,9 @@ class QcpmgFieldsDialog(QDialog):
                             | Qt.WindowMinimizeButtonHint
                             | Qt.WindowMaximizeButtonHint)
         self.setModal(False)
-        self._nucleus = nucleus or "35Cl"
+        # an empty nucleus stays empty (spin defaults to 3/2, the label says
+        # so) rather than being silently relabelled 35Cl
+        self._nucleus = nucleus or ""
         self._current = current            # (larmor_MHz, ppm, amp) of the open spectrum
         v = QVBoxLayout(self)
 
@@ -61,7 +63,10 @@ class QcpmgFieldsDialog(QDialog):
         v.addWidget(intro)
 
         top = QHBoxLayout()
-        top.addWidget(QLabel(f"nucleus <b>{self._nucleus}</b>  ·  spin I ="))
+        self.lblNuc = QLabel()
+        self._set_nucleus(self._nucleus, spin=False)
+        top.addWidget(self.lblNuc)
+        top.addWidget(QLabel("  ·  spin I ="))
         self.spin = QDoubleSpinBox(); self.spin.setDecimals(1)
         self.spin.setRange(1.5, 4.5); self.spin.setSingleStep(1.0)
         self.spin.setValue(_spin_of(self._nucleus))
@@ -184,13 +189,51 @@ class QcpmgFieldsDialog(QDialog):
             QMessageBox.warning(self, "Some datasets were skipped",
                                 "\n".join(errors))
 
+    def _set_nucleus(self, nucleus: str, spin: bool = True):
+        self._nucleus = nucleus or ""
+        self.lblNuc.setText(f"nucleus <b>{self._nucleus or '—'}</b>")
+        if spin:
+            self.spin.setValue(_spin_of(self._nucleus))
+
+    def has_data_rows(self) -> bool:
+        """True once any row holds a δcg (typed or from a dataset); a seeded
+        field alone does not count."""
+        for r in range(self.table.rowCount()):
+            it = self.table.item(r, 1)
+            if (it is not None and it.text().strip()) or self._row_ds_id(r) is not None:
+                return True
+        return False
+
+    def accept_nucleus(self, nucleus: str) -> bool:
+        """Reconcile an incoming spectrum's nucleus with the dialog's. An
+        empty or equal nucleus is fine; a different one is adopted while the
+        table is still empty (label + spin follow) and REFUSED once rows are
+        present -- a 35Cl row fitted with the 27Al spin would double C_Q
+        with no sign of it. Returns False on refusal (a warning is shown)."""
+        nucleus = (nucleus or "").strip()
+        if not nucleus or nucleus == self._nucleus:
+            return True
+        if not self._nucleus or not self.has_data_rows():
+            self._set_nucleus(nucleus)
+            return True
+        self.wresult.setText(
+            f"<span style='color:#c0392b'>⚠ this dialog holds {self._nucleus} "
+            f"rows; a {nucleus} spectrum was not added -- remove the rows "
+            "(or open a new dialog) before extrapolating another "
+            "nucleus.</span>")
+        return False
+
     def add_dataset_spectrum(self, larmor_MHz: float, ppm, amp,
-                             window=None, magnitude: bool = False) -> int:
+                             window=None, magnitude: bool = False,
+                             nucleus: str = "") -> int:
         """Add one field's spectrum: δcg ± σ and FWHM are computed over the
         given window (or an automatic one) and written into a new row; the
         spectrum stays attached so selecting the row shows it for
-        supervision."""
+        supervision. Returns the row, or -1 when the spectrum's ``nucleus``
+        is not this dialog's (see :meth:`accept_nucleus`)."""
         from larmor import qcpmg
+        if not self.accept_nucleus(nucleus):
+            return -1
         ppm = np.asarray(ppm, float); amp = np.asarray(amp, float)
         if window is not None:
             lo, hi = float(min(window)), float(max(window))
@@ -514,7 +557,11 @@ def shared_fields_dialog(parent=None, nucleus: str = "",
             _shared = None
     if _shared is None:
         _shared = QcpmgFieldsDialog(parent, nucleus, current)
-    elif current is not None:
-        _shared._current = current
-        _shared.b_cur.setEnabled(True)
+    else:
+        # a different nucleus is adopted while the table is empty; with rows
+        # present the dialog keeps its nucleus and shows a warning
+        _shared.accept_nucleus(nucleus)
+        if current is not None:
+            _shared._current = current
+            _shared.b_cur.setEnabled(True)
     return _shared

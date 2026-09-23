@@ -112,3 +112,48 @@ def test_batch_figure_spec_has_one_entry_per_sample(qapp, tmp_path):
     fig = figures.render(merged)          # and it actually draws
     assert len(fig.axes) == 1
     d.close()
+
+
+# ---------------------------------------------------------------- fix 5
+def test_batch_grid_checks_the_files_nucleus(qapp, tmp_path, monkeypatch):
+    """A 35Cl CSV dropped on a 27Al grid used to be fitted with I = 5/2 (C_Q
+    2x too large, report titled 27Al). The file's nucleus is now read from
+    load_any's recipe and a mismatch is refused into the error list."""
+    from PySide6.QtWidgets import QMessageBox
+
+    from larmor.desktop.qcpmg_batch_dialog import (QcpmgBatchFieldsDialog,
+                                                   _spin_of)
+
+    assert _spin_of("27Al") == 2.5 and _spin_of("35Cl") == 1.5
+    assert _spin_of("93Nb") == 4.5 and _spin_of("bogus") == 1.5
+
+    d = QcpmgBatchFieldsDialog(None, "27Al")
+    assert d.spin.value() == 2.5
+    p = _write(tmp_path, "cl.csv", 78.3541, -120.0)          # nucleus 35Cl
+    with pytest.raises(ValueError) as ei:
+        d._load_cell(0, 1, p)
+    assert "35Cl" in str(ei.value) and "27Al" in str(ei.value)
+    shown = []
+    monkeypatch.setattr(QMessageBox, "warning",
+                        staticmethod(lambda *a, **k: shown.append(a[2])))
+    d._drop_files(0, 1, [p])
+    assert shown and "35Cl" in shown[0] and "27Al" in shown[0]
+    assert not d.cells and d.spin.value() == 2.5                 # unchanged
+    d.close()
+
+    # an anonymous grid adopts the first file's nucleus, then holds it
+    d = QcpmgBatchFieldsDialog(None, "")
+    d._load_cell(0, 1, p)
+    assert d._nucleus == "35Cl" and d.spin.value() == 1.5
+    assert "35Cl" in d.lblNuc.text()
+    x = np.linspace(-400, 400, 3000)
+    spectra.write_csv(tmp_path / "al.csv", x, np.exp(-(x / 40.0) ** 2),
+                      {"nucleus": "27Al", "larmor_MHz": 130.3})
+    with pytest.raises(ValueError, match="27Al"):
+        d._load_cell(0, 2, str(tmp_path / "al.csv"))
+    d._load_cell(0, 2, _write(tmp_path, "cl2.csv", 107.811, -100.0))
+    d._compute()
+    res = d._results[list(d._results)[0]]
+    from larmor.qcpmg_fields import cq_from_slope
+    assert res.cq_MHz == pytest.approx(cq_from_slope(res.slope, 1.5, 0.7))
+    d.close()

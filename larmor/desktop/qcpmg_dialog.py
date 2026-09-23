@@ -1135,13 +1135,17 @@ class QcpmgDialog(QDialog):
                              "unphased spectrum is meaningless")
             return
         from larmor.desktop.qcpmg_fields_dialog import shared_fields_dialog
-        dlg = shared_fields_dialog(self.parent(),
-                                   self.meta.get("nucleus", ""))
-        dlg.add_dataset_spectrum(
+        nuc = str(self.meta.get("nucleus", "") or "")
+        dlg = shared_fields_dialog(self.parent(), nuc)
+        row = dlg.add_dataset_spectrum(
             float(self.meta.get("larmor_MHz", 0.0) or 0.0),
             self._ppm, self._spec, window=self.region.getRegion(),
-            magnitude=mag)
+            magnitude=mag, nucleus=nuc)
         dlg.show(); dlg.raise_(); dlg.activateWindow()
+        if row < 0:
+            self.res.setText(f"not sent: the infinite-field dialog holds "
+                             f"{dlg._nucleus} rows and this spectrum is {nuc}")
+            return
         self.res.setText("sent to infinite-field δiso — process the other "
                          "field's dataset and send it too, then Compute there")
 

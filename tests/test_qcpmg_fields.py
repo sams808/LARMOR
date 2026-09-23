@@ -288,3 +288,36 @@ def test_fields_dialog_warns_on_an_implausible_field(qapp):
     dlg._compute()
     assert "not propagated" in dlg.result.text()
     dlg.close()
+
+
+# ---------------------------------------------------------------- fix 5
+def test_shared_dialog_reconciles_the_nucleus(qapp):
+    """The shared dialog kept the FIRST nucleus it was created with: a 35Cl
+    send into a dialog opened for 27Al was fitted at I = 5/2. An empty
+    table adopts the new nucleus; a table with rows keeps its own and warns."""
+    from larmor.desktop import qcpmg_fields_dialog as qfd
+
+    qfd._shared = None
+    try:
+        assert qfd.QcpmgFieldsDialog(None, "27Al").spin.value() == 2.5
+        d = qfd.shared_fields_dialog(None, "27Al")
+        assert d._nucleus == "27Al" and d.spin.value() == 2.5
+        x = np.linspace(-300.0, 100.0, 2001)
+        cur = (78.354, x, np.exp(-(((x + 105.0) / 25.0) ** 2)))
+        d2 = qfd.shared_fields_dialog(None, "35Cl", cur)
+        assert d2 is d and d._nucleus == "35Cl" and d.spin.value() == 1.5
+        assert "35Cl" in d.lblNuc.text()
+        # a dataset row is present -> a different nucleus is refused
+        r = d.add_dataset_spectrum(78.354, x, cur[2], nucleus="35Cl")
+        assert r >= 0
+        r2 = d.add_dataset_spectrum(130.3, x, cur[2], nucleus="27Al")
+        assert r2 == -1 and "27Al" in d.wresult.text()
+        assert d._nucleus == "35Cl" and d.spin.value() == 1.5
+        qfd.shared_fields_dialog(None, "27Al")
+        assert d._nucleus == "35Cl"                       # unchanged
+        # an anonymous dialog is not silently relabelled 35Cl
+        e = qfd.QcpmgFieldsDialog(None, "")
+        assert e._nucleus == "" and "—" in e.lblNuc.text()
+        e.close(); d.close()
+    finally:
+        qfd._shared = None

@@ -249,34 +249,41 @@ class QcpmgBatchFieldsDialog(QDialog):
         from larmor import qcpmg
         from larmor.loader import load_any
 
-        ppm, amp, _recipe, meta, _warn = load_any(path)
+        # load_any's recipe dict carries the Larmor frequency and the nucleus
+        # for EVERY source (csv header, Bruker acqus); its 4th element is a
+        # one-line text summary, never a dict
+        ppm, amp, recipe, _summary, _warn = load_any(path)
         ppm = np.asarray(ppm, float); amp = np.asarray(amp, float)
-        larmor = 0.0
-        for key in ("larmor_MHz", "larmor_frequency_MHz"):
-            if isinstance(meta, dict) and meta.get(key):
-                larmor = float(meta[key]); break
-        if not larmor:                     # a bare csv: read the header LARMOR
-            from larmor.io import spectra
-            try:
-                _, _, m2 = spectra.read_csv(path)
-                larmor = float(m2.get("larmor_MHz", 0.0) or 0.0)
-                self._nucleus = self._nucleus or str(m2.get("nucleus", ""))
-            except Exception:                                 # noqa: BLE001
-                pass
+        larmor = float(recipe.get("larmor_frequency_MHz") or 0.0)
+        file_nuc = str(recipe.get("nucleus") or "").strip()
         if not larmor:
             raise ValueError("no Larmor frequency in the file — save it from "
                              "the QCPMG dialog, which records one")
+        # the file's nucleus must be the grid's: a 35Cl spectrum in a 27Al
+        # grid would be fitted with I = 5/2 and C_Q would come out 2x too
+        # large with no sign of it
+        if file_nuc:
+            if not self._nucleus:
+                self._set_nucleus(file_nuc)
+            elif file_nuc != self._nucleus:
+                raise ValueError(f"{Path(path).name} is {file_nuc}, the grid "
+                                 f"is {self._nucleus}")
         hi, lo = qcpmg.cg_window(ppm, amp)
         if not (np.isfinite(hi) and np.isfinite(lo)) or hi <= lo:
             span = float(ppm.max() - ppm.min())
             mid = float(ppm.min()) + span / 2.0
             lo, hi = mid - span / 6.0, mid + span / 6.0
         self.cells[(row, col)] = {"path": path, "ppm": ppm, "amp": amp,
-                                  "larmor": larmor, "window": (lo, hi)}
+                                  "larmor": larmor, "window": (lo, hi),
+                                  "nucleus": file_nuc}
         self._measure_cell(row, col)
-        if self._nucleus:
-            self.lblNuc.setText(f"nucleus <b>{self._nucleus}</b>")
-            self.spin.setValue(_spin_of(self._nucleus))
+
+    def _set_nucleus(self, nucleus: str):
+        """Adopt the nucleus (label + spin) -- from the first file loaded
+        into an anonymous grid."""
+        self._nucleus = nucleus
+        self.lblNuc.setText(f"nucleus <b>{self._nucleus or '—'}</b>")
+        self.spin.setValue(_spin_of(self._nucleus))
 
     def _measure_cell(self, row: int, col: int):
         from larmor import qcpmg
