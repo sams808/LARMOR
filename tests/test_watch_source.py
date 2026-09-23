@@ -54,7 +54,10 @@ def test_watch_reloads_on_change_and_keeps_the_fit(qapp, tmp_path):
 
         _write_csv(data, 3.0)                      # the spectrometer rewrote it
         win._watched_changed()                     # (the OS signal, delivered)
-        QTest.qWait(900)                           # debounce + reload
+        for _ in range(100):                       # debounce + reload; poll,
+            QTest.qWait(100)                       # a busy machine is slow
+            if np.max(win.exp_amp) > 2.0:
+                break
         assert np.max(win.exp_amp) == pytest.approx(3.0, rel=1e-2)
         assert len(win.recipe["sites"]) == 1       # keep_fit honoured
         assert win._watch_path == str(data)        # re-armed after the reload
