@@ -105,6 +105,13 @@ class Data2D:
         return self._like(np.flip(self.z, ax), flip(self.ri), flip(self.ir),
                           flip(self.ii))
 
+    def shifted(self, d2: float, d1: float) -> "Data2D":
+        """Relabel the axes (calibrate): F2 moves by ``d2`` ppm, F1 by ``d1``.
+        The intensities (all quadrants) are shared, not copied."""
+        return Data2D(self.f2_ppm + d2, self.f1_ppm + d1, self.z, self.nucleus,
+                      self.larmor_MHz, self.spin_rate_Hz, self.source,
+                      list(self.notes), self.ri, self.ir, self.ii)
+
     def symmetrized(self) -> "Data2D":
         """Symmetrize about the F1=F2 diagonal (dmfit 2D 'Symmetric'): average z
         with its transpose on a common square grid. Useful to clean MQMAS
@@ -265,6 +272,46 @@ def shear(data: Data2D, factor: float, ref_ppm: float = 0.0) -> Data2D:
                data.spin_rate_Hz, data.source, list(data.notes))
     d.notes.append(f"sheared by {factor:g} about {ref_ppm:g} ppm")
     return d
+
+
+def replay_ops(data: Data2D, ops: list[dict]) -> Data2D:
+    """Re-apply a recorded list of 2D processing operations to a freshly
+    loaded map -- the contour view's op log, saved in a project bundle instead
+    of the processed arrays. Each entry is ``{"op": name, ...}``:
+
+    * ``phase``: ``axis``, ``p0``, ``p1``, ``pivot`` (ppm or None) -> :meth:`Data2D.phased`
+    * ``shear``: ``factor`` (and optional ``ref_ppm``) -> :func:`shear`
+    * ``transpose`` / ``rev_f2`` / ``rev_f1`` / ``symmetrize`` -> the Data2D methods
+    * ``shift``: ``d2``, ``d1`` -> :meth:`Data2D.shifted` (calibrate)
+
+    A thin dispatcher over the same pure functions the view calls live, so the
+    replay is identical by construction (hypercomplex phasing included). An
+    unknown op raises ``ValueError`` naming it rather than silently returning a
+    map that differs from what was saved. Empty ``ops`` returns ``data``."""
+    for step in ops:
+        step = dict(step)
+        name = step.pop("op", None)
+        if name == "phase":
+            data = data.phased(step.get("axis", "f2"), float(step.get("p0", 0.0)),
+                               float(step.get("p1", 0.0)), step.get("pivot"))
+        elif name == "shear":
+            data = shear(data, float(step["factor"]),
+                         float(step.get("ref_ppm", 0.0)))
+        elif name == "transpose":
+            data = data.transposed()
+        elif name == "rev_f2":
+            data = data.reversed_axis("f2")
+        elif name == "rev_f1":
+            data = data.reversed_axis("f1")
+        elif name == "symmetrize":
+            data = data.symmetrized()
+        elif name == "shift":
+            data = data.shifted(float(step.get("d2", 0.0)),
+                                float(step.get("d1", 0.0)))
+        else:
+            raise ValueError(f"unknown 2D operation {name!r} in the recorded "
+                             "op list")
+    return data
 
 
 # --------------------------------------------------------------------------

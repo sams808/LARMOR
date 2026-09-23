@@ -18,8 +18,28 @@ RECIPE_VERSION = 1
 #: until it reaches RECIPE_VERSION; each step appends a note. Recipes from
 #: other people's machines are now in circulation, so the day the schema
 #: changes, the hook must already exist -- the version field was previously
-#: written and then discarded on load.
+#: written and then discarded on load. The project bundle's table
+#: (larmor.project._MIGRATIONS, v1 -> v2) runs through the same
+#: run_migrations loop, so both formats share one tested migration path.
 _MIGRATIONS: dict = {}
+
+
+def run_migrations(d: dict, version: int, migrations: dict, target: int,
+                   label: str = "recipe") -> tuple[dict, list[str]]:
+    """Walk ``d`` from schema ``version`` towards ``target`` through
+    ``migrations`` ({from_version: transform}), one hop at a time, noting each
+    hop. Stops at the first missing hop (nothing to do for it) exactly as the
+    recipe loader always has. Returns ``(migrated dict, notes)``."""
+    notes: list[str] = []
+    v = version
+    while v < target:
+        step = migrations.get(v)
+        if step is None:
+            break                        # nothing to do for this hop
+        d = step(d)
+        notes.append(f"{label} migrated from schema v{v} to v{v + 1}")
+        v += 1
+    return d, notes
 
 
 @dataclass
@@ -133,15 +153,8 @@ class Recipe:
         version = d.pop("larmor_recipe_version", None)
         migration_notes: list[str] = []
         if isinstance(version, int) and version < RECIPE_VERSION:
-            v = version
-            while v < RECIPE_VERSION:
-                step = _MIGRATIONS.get(v)
-                if step is None:
-                    break                        # nothing to do for this hop
-                d = step(d)
-                migration_notes.append(
-                    f"recipe migrated from schema v{v} to v{v + 1}")
-                v += 1
+            d, migration_notes = run_migrations(d, version, _MIGRATIONS,
+                                                RECIPE_VERSION)
         sites = []
         for s in d.pop("sites", []):
             s = dict(s)   # never mutate the caller's dicts

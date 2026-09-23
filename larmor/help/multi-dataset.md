@@ -18,12 +18,21 @@ colour with per-overlay **visible / colour / remove** controls and a global
 and the previous active demotes back to an overlay. The active spectrum is always
 the single object the 1D fitter works on, so overlays never disturb a fit.
 
-**File ▸ Save project…** captures every open 1D workspace — spectrum,
-processing, fit, *and its overlays* — as one reopenable `.larproj.json`
-file; **File ▸ Open project…** restores it all, relocating each overlay
-from its saved source path (an overlay whose file has moved is reported,
-not silently dropped). 2D workspaces are not yet included in a project —
-reopen those from their source.
+**File ▸ Save project…** (Ctrl + Shift + P) captures the whole session as one
+reopenable `.larproj.json` file — every row of the **Workspaces** dock, in
+order: 1D spectra with their processing, fit *and overlays* (overlays by
+reference); 2D maps **by reference** — the source path (absolute and
+project-relative) plus the recorded phase / shear / transpose / reverse /
+symmetrize / calibrate operations, the contour settings and the projection
+overlays — replayed on the freshly loaded data when the project reopens;
+figures kept from the Plotting / Figure studio; and batch-fit sessions with
+their spectra, model, release / baseline / error settings and fitted results.
+**File ▸ Open project…** (or **File ▸ Open…** on a `.larproj.json`) restores it
+all; opening into a session that already holds a fit offers **Replace / Add /
+Cancel**. Anything relocated or missing — a moved 2D source, an overlay or a
+batch spectrum that cannot be found — is listed once in a "Project opened"
+box rather than silently dropped; the fitted 2D model overlay is redrawn by
+**Fit** rather than stored. The co-fit page (§3) is not part of a project.
 
 ## 2 · Background subtraction (a related but different tool)
 

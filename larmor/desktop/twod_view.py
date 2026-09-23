@@ -42,6 +42,37 @@ def _hscroll(inner: QWidget) -> QScrollArea:
     return sc
 
 
+#: ops that REBASE the view: they replace _orig from _committed, so a phase
+#: applied before them is baked in and a later phase Reset cannot undo it
+_REBASING_OPS = ("shear", "transpose", "rev_f2", "rev_f1", "symmetrize")
+
+
+def _ops_after_reset(ops: list[dict]) -> list[dict]:
+    """The op log after a phase Reset (``_committed = _orig``): every phase op
+    after the LAST rebasing op disappears; shift (calibrate) ops stay, because
+    _shift_axes relabels _orig and _committed alike without rebasing. This is
+    the one place the rule lives -- _reset_phase prunes with it and
+    apply_persisted_view rebuilds _orig with it, so they cannot drift."""
+    last = -1
+    for i, o in enumerate(ops):
+        if o.get("op") in _REBASING_OPS:
+            last = i
+    return [o for i, o in enumerate(ops) if i <= last or o.get("op") != "phase"]
+
+
+def _model_ops_from(ops: list[dict]) -> list[str]:
+    """The reverse / transpose record the fitted-model overlay must follow,
+    derived from a full op log (mirrors _op: symmetrize resets it)."""
+    out: list[str] = []
+    for o in ops:
+        k = o.get("op")
+        if k == "symmetrize":
+            out = []
+        elif k in ("transpose", "rev_f2", "rev_f1"):
+            out.append(k)
+    return out
+
+
 class Contour2DView(QWidget):
     #: (ppm, amp, label) of a 1D trace the user wants to fit
     slice_to_fit = Signal(object, object, str)
@@ -64,10 +95,18 @@ class Contour2DView(QWidget):
         #: is mirrored the same way so the overlay tracks the data — and so a
         #: freshly simulated model (Compute) lands in the same orientation.
         self._model_ops: list[str] = []
+        #: every operation that replaced _orig / _committed since load, in
+        #: order ({"op": ...} dicts twod.replay_ops re-applies to a fresh
+        #: load) -- the record a project bundle saves instead of the arrays.
+        #: Every method that replaces _orig or _committed must append here.
+        self._ops: list[dict] = []
         #: HMQC: an external 1D per projection axis, {"f2":(ppm,amp),"f1":...}
         self._hmqc = {"f2": None, "f1": None}
         self._hmqc_scale = {"f2": 1.0, "f1": 1.0}
         self._hmqc_color = {"f2": "#e8832a", "f1": "#6a4fb0"}
+        #: source path of each projection overlay ("" = not persistable), so
+        #: a project bundle reloads it by reference like the 1D overlays
+        self._hmqc_source = {"f2": "", "f1": ""}
         self._picks: list[int] = []  # reference row/column indices (1 or 2)
         self._pick_axis = "f2"
         self._pivot = None          # pivot ppm on the phased axis
@@ -349,6 +388,8 @@ class Contour2DView(QWidget):
         self._committed = d
         self.data = d
         self._model_ops = []                 # a new dataset starts un-reversed
+        self._ops = []                       # ...and with an empty op log
+        self._hmqc_source = {"f2": "", "f1": ""}
         self.title.setText(title or "2D dataset")
         f1_kind = "arrayed (relaxation)" if getattr(data, "notes", None) and \
             any("pseudo" in n or "arrayed" in n for n in data.notes) else "F1"
@@ -373,9 +414,13 @@ class Contour2DView(QWidget):
             "hmqc": dict(self._hmqc), "hmqc_scale": dict(self._hmqc_scale),
             "hmqc_color": dict(self._hmqc_color), "model": self._model,
             "model_sites": self._model_sites, "model_ops": list(self._model_ops),
+            "ops": [dict(o) for o in self._ops],
+            "hmqc_source": dict(self._hmqc_source),
             "sign": self.sign.currentText(),
             "nlevels": self.nlevels.value(), "floor": self.floor.value(),
             "title": self.title.text(),
+            "disp": self.disp.currentText(), "cmap": self.cmap.currentText(),
+            "flip": dict(self._flip),
         }
 
     def set_state(self, s: dict):
@@ -385,11 +430,27 @@ class Contour2DView(QWidget):
         self._hmqc_color = dict(s["hmqc_color"]); self._model = s["model"]
         self._model_sites = s.get("model_sites")     # keep per-site colours
         self._model_ops = list(s.get("model_ops", []))  # keep reverse/transpose
+        # the op log and overlay sources travel with the workspace too (a
+        # legacy state dict without them is an empty log / no sources)
+        self._ops = [dict(o) for o in (s.get("ops") or [])]
+        self._hmqc_source = {"f2": "", "f1": "", **(s.get("hmqc_source") or {})}
         self.title.setText(s["title"])
         for w, val in ((self.nlevels, s["nlevels"]), (self.floor, s["floor"])):
             w.blockSignals(True); w.setValue(val); w.blockSignals(False)
         self.sign.blockSignals(True); self.sign.setCurrentText(s["sign"])
         self.sign.blockSignals(False)
+        # display mode / colormap / axis flips are the view's own knobs; they
+        # used to be silently lost on a workspace switch
+        for w, key in ((self.disp, "disp"), (self.cmap, "cmap")):
+            if key in s:
+                w.blockSignals(True); w.setCurrentText(s[key]); w.blockSignals(False)
+        flip = s.get("flip")
+        if flip:
+            self._flip = {**self._flip, **{k: bool(v) for k, v in flip.items()}}
+            for act, axis in ((self.actFlipF2, "f2"), (self.actFlipF1, "f1")):
+                act.blockSignals(True); act.setChecked(self._flip[axis])
+                act.blockSignals(False)
+            self._apply_axis_dirs()
         # drop any transient interaction state, then draw
         self.btnPhase.blockSignals(True); self.btnPhase.setChecked(False)
         self.btnPhase.blockSignals(False); self.phasebar.setVisible(False)
@@ -400,6 +461,33 @@ class Contour2DView(QWidget):
         self._picks = []; self._pivot = None; self._pref = []
         self.stack.setCurrentWidget(self.glw)
         self._redraw()
+
+    def apply_persisted_view(self, d: dict):
+        """Restore a project bundle's persisted view (project.view2d_persisted)
+        onto a map that was just set_data()'d from its source: replay the op
+        log on the as-loaded data, rebuild what a phase Reset would return to,
+        then the contour / display settings -- all through set_state, so no
+        widget code is duplicated and the map redraws once. Projection
+        overlays are re-added by the caller (set_projection_1d) because their
+        arrays live in files."""
+        from larmor import twod
+
+        if self._orig is None:
+            return
+        ops = [dict(o) for o in (d.get("ops") or [])]
+        fresh = self._orig
+        committed = twod.replay_ops(fresh, ops)
+        base = _ops_after_reset(ops)
+        orig = committed if base == ops else twod.replay_ops(fresh, base)
+        st = self.get_state()
+        st.update(orig=orig, committed=committed, data=committed, ops=ops,
+                  model=None, model_sites=None, model_ops=_model_ops_from(ops))
+        for key in ("sign", "nlevels", "floor", "title", "disp", "cmap"):
+            if key in d:
+                st[key] = d[key]
+        if d.get("flip"):
+            st["flip"] = {**st["flip"], **d["flip"]}
+        self.set_state(st)
 
     # ---------- phasing: pick 1-2 peaks on the contour ----------
     def _axis(self) -> str:
@@ -522,8 +610,14 @@ class Contour2DView(QWidget):
     def _apply_phase(self):
         if self._committed is None or not self._pref:
             return
+        p0, p1 = float(self.p0v.value()), float(self.p1v.value())
         self._committed = self._committed.phased(
-            self._pick_axis, self.p0v.value(), self.p1v.value(), self._pivot)
+            self._pick_axis, p0, p1, self._pivot)
+        if p0 != 0.0 or p1 != 0.0:           # phased() is a no-op otherwise
+            self._ops.append({"op": "phase", "axis": self._pick_axis,
+                              "p0": p0, "p1": p1,
+                              "pivot": None if self._pivot is None
+                              else float(self._pivot)})
         self.data = self._committed
         self._picks = []
         for s in (self.p0v, self.p1v):
@@ -535,6 +629,7 @@ class Contour2DView(QWidget):
     def _reset_phase(self):
         self._committed = self._orig
         self.data = self._orig
+        self._ops = _ops_after_reset(self._ops)   # the log follows the data
         self._picks = []
         for s in (self.p0v, self.p1v):
             s.blockSignals(True); s.setValue(0); s.blockSignals(False)
@@ -546,9 +641,11 @@ class Contour2DView(QWidget):
             return
         from larmor import twod
 
-        self._orig = twod.shear(self._committed, self.shearv.value())
+        factor = float(self.shearv.value())
+        self._orig = twod.shear(self._committed, factor)
         self._committed = self._orig
         self.data = self._orig
+        self._ops.append({"op": "shear", "factor": factor})
         self._redraw()
 
     # ---------- 2D operations ----------
@@ -571,6 +668,7 @@ class Contour2DView(QWidget):
         else:
             return
         self._orig = self._committed = self.data = new
+        self._ops.append({"op": kind})
         # mirror the fitted model overlay the same way, and remember the op so a
         # later Compute lands in the same orientation (symmetrize isn't a simple
         # mirror -> drop the overlay, it will be rebuilt on the next Compute).
@@ -627,15 +725,14 @@ class Contour2DView(QWidget):
         self.btnCal.setChecked(False)
 
     def _shift_axes(self, d2: float, d1: float):
-        from larmor.twod import Data2D
-
-        def sh(src):
-            return Data2D(src.f2_ppm + d2, src.f1_ppm + d1, src.z, src.nucleus,
-                          src.larmor_MHz, src.spin_rate_Hz, src.source,
-                          list(src.notes), src.ri, src.ir, src.ii)
-        self._orig = sh(self._orig)
-        self._committed = sh(self._committed)
-        self.data = sh(self.data)
+        d2, d1 = float(d2), float(d1)
+        # _orig and _committed are relabelled SEPARATELY (no rebasing): a
+        # phase applied before a calibrate is still undone by Reset while the
+        # shift survives -- _ops_after_reset encodes exactly that
+        self._orig = self._orig.shifted(d2, d1)
+        self._committed = self._committed.shifted(d2, d1)
+        self.data = self.data.shifted(d2, d1)
+        self._ops.append({"op": "shift", "d2": d2, "d1": d1})
         # re-referencing relabels the axes; move the fitted model overlay too so
         # it stays on the peaks (matches the 1D calibrate behaviour)
         if self._model is not None:
@@ -723,15 +820,21 @@ class Contour2DView(QWidget):
         self._redraw()
 
     # ---------- HMQC: overlay 1D on projections + uncorrelated features ----------
-    def set_projection_1d(self, axis: str, ppm, amp, color: str | None = None):
+    def set_projection_1d(self, axis: str, ppm, amp, color: str | None = None,
+                          *, source: str = "", scale: float | None = None):
         """Store an external 1D for the F2 or F1 projection and peak-match its
-        scale to the HMQC sum-projection."""
+        scale to the HMQC sum-projection. ``source`` (the file it came from)
+        lets a project bundle reload the overlay by reference -- empty means
+        "not persistable", like a sourceless 1D overlay; ``scale`` restores a
+        saved scale instead of the peak match."""
         ppm = np.asarray(ppm, float); amp = np.asarray(amp, float)
         o = np.argsort(ppm)
         self._hmqc[axis] = (ppm[o], amp[o])
+        self._hmqc_source[axis] = str(source or "")
         if color:
             self._hmqc_color[axis] = color
-        self._hmqc_scale[axis] = self._peak_match(axis)
+        self._hmqc_scale[axis] = (float(scale) if scale is not None
+                                  else self._peak_match(axis))
         self.hmqcScale.blockSignals(True); self.hmqcScale.setValue(1.0)
         self.hmqcScale.blockSignals(False)
         if not self.btnHmqc.isChecked():
@@ -758,6 +861,7 @@ class Contour2DView(QWidget):
         for a in (("f2", "f1") if axis is None else (axis,)):
             self._hmqc[a] = None
             self._hmqc_scale[a] = 1.0
+            self._hmqc_source[a] = ""
         self._redraw()
 
     def _draw_mqmas_axes(self, f2, f1):

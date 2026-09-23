@@ -1352,11 +1352,7 @@ class BatchFitDialog(QDialog):
         name, ok = QInputDialog.getText(self, "Save batch setup", "Template name:")
         if not ok or not name.strip():
             return
-        tpl = {"release": [pn for pn, c in self._rel_checks.items() if c.isChecked()],
-               "frac": self.frac.value(), "tol": self.tol.value(),
-               "baseline": self._baseline_kind,
-               "components": self.chkComp.isChecked(),
-               "shared_scale": self.chkShared.isChecked()}
+        tpl = self._template_dict()
         s = QSettings("LARMOR", "app")
         lib = json.loads(s.value("batchTemplates", "{}") or "{}")
         lib[name.strip()] = tpl
@@ -1376,20 +1372,160 @@ class BatchFitDialog(QDialog):
                                           names, 0, False)
         if not ok:
             return
-        tpl = lib[choice]
+        self._apply_template(lib[choice])
+        self.status.setText(f"loaded setup “{choice}” — Fit to apply")
+
+    def _template_dict(self) -> dict:
+        """The reusable setup -- release set, drift %, threshold, baseline
+        kind and the view options: what Save setup… stores, and the core of
+        a project's batch session (session_state)."""
+        return {"release": [pn for pn, c in self._rel_checks.items() if c.isChecked()],
+                "frac": self.frac.value(), "tol": self.tol.value(),
+                "baseline": self._baseline_kind,
+                "components": self.chkComp.isChecked(),
+                "shared_scale": self.chkShared.isChecked()}
+
+    def _apply_template(self, tpl: dict):
         for pn, c in self._rel_checks.items():
             c.setChecked(pn in tpl.get("release", []))
         self.frac.setValue(tpl.get("frac", 10))
         self.tol.setValue(tpl.get("tol", 0.0))
         self.chkComp.setChecked(tpl.get("components", False))
         self.chkShared.setChecked(tpl.get("shared_scale", False))
-        self.status.setText(f"loaded setup “{choice}” — Fit to apply")
 
     def _series_plot(self):
         if self._result is None:
             return
         from larmor.desktop.series_plot import SeriesPlotDialog
         SeriesPlotDialog(self, self._result).exec()
+
+    # ------------------------------------------------------------------ session
+    # A project bundle (larmor.project) keeps a batch-fit session as a row of
+    # the Workspaces dock: the setup, the spectra, the model, per-spectrum
+    # baselines / exclusions, the error method and the fitted result. The
+    # dialog is modal, so "saving the session" means recording its state when
+    # it closes (app.py _remember_batch) and rebuilding it from that state
+    # when the row is reopened (_open_batch_session -> apply_session_state).
+    def session_state(self) -> dict:
+        """Everything needed to reopen this dialog as it is. The result goes
+        through batchfit.result_to_dict (recipes, RMSDs, error detail -- the
+        curves are recomputed on reopen). Pass through project.json_safe
+        before json.dumps."""
+        from larmor import batchfit
+
+        per = {}
+        for k, d in enumerate(self._data):
+            per[d["path"]] = {
+                "baseline_ops": [dict(o) for o in (d.get("baseline_ops") or [])],
+                "excluded": sorted(self._excluded.get(k, ()))}
+        return {**self._template_dict(),
+                "paths": list(self._src_paths),
+                "model_sites": copy.deepcopy(self._model_sites),
+                "window": list(self._window) if self._window else None,
+                "recipe_tag": self._recipe_tag,
+                "baseline_kind": self._baseline_kind,
+                "per_spectrum": per,
+                "error_method": self.errCombo.currentData(),
+                "error_n": self.errN.value(),
+                "auto_recipes": self.chkAutoRecipes.isChecked(),
+                "table": self.chkTable.isChecked(),
+                "result": (batchfit.result_to_dict(self._result)
+                           if self._result is not None else None)}
+
+    def apply_session_state(self, state: dict) -> list[str]:
+        """Restore a session_state() dict onto a dialog built over
+        ``state["paths"]`` and the model. Baseline ops are replayed through
+        larmor.processing exactly as BASELINE_OPS promises; exclusions go
+        through _toggle_exclude; the error method is set BEFORE the count
+        (the combo handler clamps the count's range); the fitted result is
+        re-paired with the spectra that actually loaded (batchfit.align_result),
+        its curves recomputed and handed to _done, so cells, RMSD labels,
+        buttons, the table and the error status repaint through the live-fit
+        path. Returns the notes (spectra that could not be reloaded, whose
+        results were dropped); they are also appended to the status line."""
+        from larmor import batchfit
+
+        notes: list[str] = []
+        self._recipe_tag = state.get("recipe_tag") or ""
+        self._apply_template(state)
+        self._baseline_kind = (state.get("baseline_kind")
+                               or state.get("baseline") or "None")
+        per = state.get("per_spectrum") or {}
+        order = None
+        for k, d in enumerate(self._data):
+            ps = per.get(d["path"]) or {}
+            ops = [dict(o) for o in (ps.get("baseline_ops") or [])]
+            if ops:
+                from larmor import processing as proc
+
+                s = proc.apply(proc.from_processed(d["ppm"], d["amp0"],
+                                                   d["larmor"] or 1.0), ops)
+                d["amp"] = np.asarray(s.y.real, float)
+                d["baseline_ops"] = ops
+                if k < len(self._cells):
+                    self._cells[k]["exp"].setData(d["ppm"], d["amp"])
+                for o in ops:
+                    if "order" in o:
+                        order = o["order"]
+            excluded = [int(i) for i in (ps.get("excluded") or [])]
+            for i in excluded:
+                self._toggle_exclude(k, i, True)
+            if excluded:
+                self._rebuild_cell_menu(k)   # checkable entries follow the state
+        kind = self._baseline_kind
+        if kind in (None, "", "None"):
+            self.lblBaseline.setText("none")
+        else:
+            self.lblBaseline.setText(
+                kind + (f" (order {order})"
+                        if kind == "Polynomial" and order is not None else ""))
+        idx = self.errCombo.findData(state.get("error_method"))
+        if idx >= 0:
+            self.errCombo.setCurrentIndex(idx)
+        if state.get("error_n") is not None:
+            self.errN.setValue(int(state["error_n"]))
+        self.chkAutoRecipes.setChecked(bool(state.get("auto_recipes", True)))
+        self.chkTable.setChecked(bool(state.get("table", True)))
+        self._result = None
+        res_d = state.get("result")
+        if res_d:
+            full = batchfit.result_from_dict(res_d)
+            res, _dropped = batchfit.align_result(full, [d["path"] for d in self._data])
+            if res.recipes and len(res.recipes) == len(self._data):
+                res.per_dataset = batchfit.result_curves(
+                    res, [d["ppm"] for d in self._data])
+                self._done(res)
+            elif res.recipes:
+                notes.append("the fitted results could not be paired with the "
+                             "loaded spectra — run Fit again")
+        loaded = {d["path"] for d in self._data}
+        missing = [p for p in (state.get("paths") or []) if p not in loaded]
+        if missing:
+            notes.insert(0, f"{len(missing)} spectrum/spectra could not be "
+                            "reloaded — their results were dropped: "
+                            + ", ".join(Path(p).name for p in missing))
+        if self._result is None:
+            self.status.setText(self._model_status())
+        if notes:
+            self.status.setText(self.status.text() + "  ⚠ " + "; ".join(notes))
+        return notes
+
+    def session_title(self) -> str:
+        t = f"batch fit · {len(self._data)} spectra"
+        return t + (f" · {self._recipe_tag}" if self._recipe_tag else "")
+
+    def _rebuild_cell_menu(self, k: int):
+        """Rebuild one cell's right-click menu from scratch so its checkable
+        "Exclude component" entries reflect self._excluded (pyqtgraph's
+        setMenuEnabled(True) builds a fresh default menu, which
+        _attach_cell_menu then populates -- the same sequence _end_bg_pick
+        relies on)."""
+        if k >= len(self._cells) or self._cells[k]["bl_picking"]:
+            return
+        vb = self._cells[k]["plot"].getPlotItem().getViewBox()
+        vb.setMenuEnabled(False)
+        vb.setMenuEnabled(True)
+        self._attach_cell_menu(k)
 
     # ------------------------------------------------------------------ errors
     def _on_err_method(self):

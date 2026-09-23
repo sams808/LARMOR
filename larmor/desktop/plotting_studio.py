@@ -32,6 +32,30 @@ from larmor import figures, series_grid
 _KINDS = ["1D overlay / stack", "2D contour", "Series", "Batch grid",
          "Species distribution"]
 
+#: the figure kinds the studio edits, in the "Plot:" combo's order
+#: (figures.RENDERERS also has "infinite_field", which only the Figure
+#: studio's JSON editor handles -- app.py routes a kept figure by this)
+EDITABLE_KINDS = ("1d", "2d", "series", "batch_grid", "species_bar")
+
+
+def spec_is_empty(spec: dict) -> str | None:
+    """The preview hint for a spec with nothing to draw yet (no traces, no
+    EXPNO, no panels, no categories), or None when it can render. Shared by
+    the studio's own preview and by the app, which keeps a figure in the
+    Workspaces dock only when the studio closed on something drawable."""
+    kind = spec.get("kind", "1d")
+    if kind == "1d" and not spec.get("traces"):
+        return "add a trace to preview"
+    if kind in ("2d", "series") and not spec.get("path"):
+        return "pick an EXPNO folder to preview"
+    if kind == "batch_grid" and not spec.get("panels"):
+        return ("load a batch CSV or a folder of saved fits, "
+                "then check the panels to include")
+    if kind == "species_bar" and not any(spec.get("categories", [])):
+        return ("add categories and species to the table "
+                "(or load them from a batch CSV)")
+    return None
+
 _LINESTYLES = ["-", "--", "-.", ":"]
 _CMAPS = ["viridis", "plasma", "magma", "cividis", "coolwarm", "Blues",
           "Reds", "Greens", "turbo", "gray"]
@@ -1314,8 +1338,8 @@ class PlottingStudio(QDialog):
 
     def _apply_spec(self, spec: dict):
         self._apply_common(spec)
-        kind = {"1d": 0, "2d": 1, "series": 2, "batch_grid": 3,
-               "species_bar": 4}.get(spec.get("kind", "1d"), 0)
+        kind = {k: i for i, k in enumerate(EDITABLE_KINDS)}.get(
+            spec.get("kind", "1d"), 0)
         self.kind.setCurrentIndex(kind)
         if kind == 0:
             for t in spec.get("traces", []):
@@ -1377,16 +1401,9 @@ class PlottingStudio(QDialog):
     # ------------------------------------------------------------------ render
     def _refresh(self):
         spec = self._spec()
-        if spec["kind"] == "1d" and not spec["traces"]:
-            self.msg.setText("add a trace to preview"); return
-        if spec["kind"] in ("2d", "series") and not spec.get("path"):
-            self.msg.setText("pick an EXPNO folder to preview"); return
-        if spec["kind"] == "batch_grid" and not spec.get("panels"):
-            self.msg.setText("load a batch CSV or a folder of saved fits, "
-                             "then check the panels to include"); return
-        if spec["kind"] == "species_bar" and not any(spec.get("categories", [])):
-            self.msg.setText("add categories and species to the table "
-                             "(or load them from a batch CSV)"); return
+        hint = spec_is_empty(spec)
+        if hint:
+            self.msg.setText(hint); return
         try:
             # render straight onto the live canvas figure (crisp, no bitmap scaling)
             new_fig = figures.render(spec)

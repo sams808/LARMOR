@@ -1,10 +1,12 @@
 """Workspace manager panel: a list of open documents (1D fits, 2D maps) you can
-switch between, close, or save — like TopSpin windows / ssNake workspaces.
+switch between, close, or save — like TopSpin windows / ssNake workspaces —
+plus the session rows (figures, batch-fit sessions) a project keeps alongside
+them; those open in their own dialog on Enter / double-click (``activate``).
 
 The panel is a thin view: the main window owns the workspace snapshots and does
 the heavy lifting. Snapshots are lightweight (data arrays + recipe), and the
 display widgets are shared and re-populated on switch, so many open workspaces
-cost little.
+cost little. Row == workspace index, always.
 """
 from __future__ import annotations
 
@@ -18,6 +20,10 @@ class WorkspacePanel(QWidget):
     switch = Signal(int)
     close = Signal(int)
     save = Signal(int)
+    #: Enter / double-click on a row -- an explicit gesture, unlike
+    #: currentRowChanged which also fires on arrow-key navigation, so a
+    #: figure / batch row never pops its modal dialog while merely browsing
+    activate = Signal(int)
 
     def __init__(self):
         super().__init__()
@@ -25,6 +31,8 @@ class WorkspacePanel(QWidget):
         v.setContentsMargins(4, 4, 4, 4); v.setSpacing(4)
         self.list = QListWidget()
         self.list.currentRowChanged.connect(self._row_changed)
+        self.list.itemActivated.connect(
+            lambda it: self.activate.emit(self.list.row(it)))
         v.addWidget(self.list, 1)
         row = QHBoxLayout()
         self.btnClose = QPushButton("Close")

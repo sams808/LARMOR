@@ -558,3 +558,119 @@ def pivot_by_spectrum(rows: list[dict], n_spectra: int
         cells[(k, col)] = row
     columns.sort(key=lambda c: c[0])          # stable: first-seen order within a site
     return columns, cells
+
+
+# --------------------------------------------------------------------------
+# Session persistence (project bundles, larmor.project). A finished result is
+# stored as plain JSON -- recipes, labels, RMSDs, shared / released, error
+# method and detail; the per-spectrum model curves are recomputed on reopen
+# (result_curves) and the lmfit result is not kept. Results are re-paired with
+# the reloaded spectra by recipe.source_path (align_result), so a spectrum whose
+# file moved or vanished drops out with a note instead of shifting every other
+# row onto the wrong spectrum.
+
+def _param_error_to_dict(pe: ParamError) -> dict:
+    def num(v):
+        return None if v is None else float(v)
+    lo, hi = pe.ci68 if pe.ci68 else (None, None)
+    return {"site": int(pe.site), "param": str(pe.param), "label": str(pe.label),
+            "value": num(pe.value), "stderr": num(pe.stderr),
+            "ci68": [num(lo), num(hi)], "pct": num(pe.pct)}
+
+
+def result_to_dict(result: BatchFitResult) -> dict:
+    """A JSON-able record of a batch result. ``per_dataset`` (model curves)
+    and ``lmfit_result`` are deliberately left out -- see result_curves."""
+    detail: dict = {}
+    for method, per_spec in (result.error_detail or {}).items():
+        detail[str(method)] = [{pe.label: _param_error_to_dict(pe)
+                                for pe in (d or {}).values()} for d in per_spec]
+    return {"recipes": [r.to_dict() for r in result.recipes],
+            "labels": [str(x) for x in result.labels],
+            "rmsd": [float(x) for x in result.rmsd],
+            "shared": list(result.shared), "released": list(result.released),
+            "release_frac": float(result.release_frac or 0.0),
+            "warnings": list(result.warnings),
+            "error_method": str(result.error_method or "covariance"),
+            "error_detail": detail}
+
+
+def result_from_dict(d: dict) -> BatchFitResult:
+    """The inverse of result_to_dict: recipes through Recipe.from_dict (so
+    recipe-schema migrations apply), error detail back to ``{(site, param):
+    ParamError}`` per spectrum, no curves, no lmfit result."""
+    recipes = [Recipe.from_dict(r) for r in d.get("recipes") or []]
+    detail: dict = {}
+    for method, per_spec in (d.get("error_detail") or {}).items():
+        rows = []
+        for spec_d in per_spec or []:
+            row: dict = {}
+            for _label, pd in (spec_d or {}).items():
+                site, param = int(pd["site"]), str(pd["param"])
+                ci = pd.get("ci68") or (None, None)
+                pe = ParamError(site, param,
+                                str(pd.get("label") or f"s{site}.{param}"),
+                                pd.get("value"), pd.get("stderr"),
+                                (ci[0], ci[1]), pd.get("pct"))
+                row[(site, param)] = pe
+            rows.append(row)
+        detail[str(method)] = rows
+    return BatchFitResult(
+        recipes=recipes, labels=[str(x) for x in d.get("labels") or []],
+        rmsd=[float(x) for x in d.get("rmsd") or []], per_dataset=[],
+        shared=tuple(d.get("shared") or ()), released=tuple(d.get("released") or ()),
+        release_frac=float(d.get("release_frac") or 0.0), lmfit_result=None,
+        warnings=list(d.get("warnings") or []),
+        error_method=str(d.get("error_method") or "covariance"),
+        error_detail=detail)
+
+
+def align_result(result: BatchFitResult, paths: list[str]
+                 ) -> tuple[BatchFitResult, list[str]]:
+    """Subset and reorder a result to ``paths`` (the spectra that actually
+    loaded), pairing by ``recipe.source_path`` (set per spectrum by the batch
+    dialog's _entries). Returns the aligned result and the source paths whose
+    results found no spectrum (dropped)."""
+    slots: dict[str, list[int]] = {}
+    for k, rec in enumerate(result.recipes):
+        slots.setdefault(rec.source_path or "", []).append(k)
+    keep: list[int] = []
+    for p in paths:
+        idx = slots.get(str(p))
+        if idx:
+            keep.append(idx.pop(0))
+    kept = set(keep)
+    dropped = [rec.source_path or "" for k, rec in enumerate(result.recipes)
+               if k not in kept]
+
+    def pick(seq, fill=None):
+        return [seq[k] if k < len(seq) else fill for k in keep]
+
+    curves = (pick(result.per_dataset)
+              if len(result.per_dataset) == len(result.recipes) else [])
+    sub = BatchFitResult(
+        recipes=pick(result.recipes), labels=pick(result.labels, ""),
+        rmsd=pick(result.rmsd, float("nan")), per_dataset=curves,
+        shared=tuple(result.shared), released=tuple(result.released),
+        release_frac=result.release_frac, lmfit_result=None,
+        warnings=list(result.warnings), error_method=result.error_method,
+        error_detail={m: pick(det, {}) for m, det in
+                      (result.error_detail or {}).items()})
+    return sub, dropped
+
+
+def result_curves(result: BatchFitResult, ppm_list: list) -> list[dict]:
+    """Recompute ``per_dataset`` ({"x", "y_fit"} per spectrum) for a restored
+    result on the given ppm axes -- the same engine.simulate call the batch
+    dialog makes for its component curves. A spectrum whose model cannot be
+    simulated gets empty arrays (drawn as nothing), never a shifted row."""
+    from larmor import engine
+
+    out = []
+    for rec, ppm in zip(result.recipes, ppm_list):
+        try:
+            x, total, _ = engine.simulate(rec, exp_ppm=np.asarray(ppm, float))
+            out.append({"x": np.asarray(x, float), "y_fit": np.asarray(total, float)})
+        except Exception:
+            out.append({"x": np.array([]), "y_fit": np.array([])})
+    return out
