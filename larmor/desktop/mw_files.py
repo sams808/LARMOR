@@ -188,23 +188,36 @@ class _FilesMixin:
         self.exp_ppm, self.exp_amp = np.asarray(ppm)[order], np.asarray(amp)[order]
         self._proc_base = None
         self.source_path = meta.get("expno", "")
+        # the FULL processing record (every qcpmg_* key) rides along so a
+        # saved fit of a QCPMG spectrum still says how it was made
+        provenance = {k: v for k, v in meta.items() if k.startswith("qcpmg_")}
+        spin_rate = meta.get("spin_rate_Hz") or meta.get("masr_Hz") or 0.0
+        mas_uncertain = bool(meta.get("mas_uncertain", False))
+        if "mas_sources" in meta:
+            # a spectrum processed from an EXPNO's fid: the same three-source
+            # resolution and per-session confirmation as File > Open (QCPMG
+            # meta carries no sources block and keeps the values above)
+            from larmor import masrate
+
+            mas = masrate.resolve_for_load(meta, meta.get("expno", ""))
+            spin_rate, mas_uncertain = mas["spin_rate_Hz"], mas["mas_uncertain"]
+            provenance["mas_rate"] = mas["provenance"]
+            if mas["note"]:
+                self.statusBar().showMessage("⚠ " + mas["note"])
         self.recipe = Recipe(
             sample=(meta.get("title", "").splitlines() or [""])[0],
             source_kind="bruker", source_path=meta.get("expno", ""),
             nucleus=meta.get("nucleus", ""),
             larmor_frequency_MHz=meta.get("larmor_MHz", 0.0),
-            spin_rate_Hz=(meta.get("spin_rate_Hz") or meta.get("masr_Hz") or 0.0),
-            mas_uncertain=bool(meta.get("mas_uncertain", False)),
+            spin_rate_Hz=spin_rate,
+            mas_uncertain=mas_uncertain,
             # the Open FID dialog records the chain that produced its result
             # (window, zf, ft, phase | autophase): the fit is reproducible and
             # FID ⇄ spectrum replays it from the instrument fid. QCPMG's meta
             # has no such record and keeps an empty (pdata) chain, as before.
             processing=list(meta.get("processing") or []),
             processing_from_raw=bool(meta.get("processing_from_raw", False)),
-            # the FULL processing record (every qcpmg_* key) rides along so a
-            # saved fit of a QCPMG spectrum still says how it was made
-            provenance={k: v for k, v in meta.items()
-                        if k.startswith("qcpmg_")}).to_dict()
+            provenance=provenance).to_dict()
         self.hidden.clear(); self.undo_stack.clear(); self.redo_stack.clear()
         self.view.set_experiment(self.exp_ppm, self.exp_amp)
         self.view.set_title(self.recipe.get("sample") or "processed FID")
