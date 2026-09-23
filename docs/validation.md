@@ -232,6 +232,25 @@ $W_q\propto 1/\nu_0^2$ (narrows at high field) and a field-independent
 chemical-shift-distribution part $W_\text{csd}$; two fields determine the
 split (here recovered as $W_\text{csd}=8.0$ ppm).
 
+**Distribution case (regression `tests/test_qcpmg_fields.py`,
+`test_manifold_and_centreband_modes_on_simulated_patterns`).** A $^{35}$Cl
+Czjzek glass (200 mrsimulator sites drawn at $\sigma = 1.0$ MHz,
+$\delta_\text{iso} = -70$ ppm, 10 ppm Gaussian) simulated under MAS at the
+tutorial's fields and rates, 78.354 MHz / 16 kHz and 107.811 MHz / 20 kHz.
+The whole-manifold centre of gravity at the two fields extrapolates to
+$\delta_\text{iso} = -69.99$ ppm and $P_Q = 4.310$ MHz against the drawn
+sample's $\sqrt{\langle P_Q^2\rangle} = 4.306$ MHz (the first-moment
+theorem: the slope of a distribution measures the rms $P_Q$, not a single
+$C_Q$; asserted within 1 ppm and 3 %). The first-minima window on the same
+spectra is wider than $\nu_r$ at both fields, drifts by 11 ppm at 78 MHz
+when doubled (flagged *CG not converged*) and extrapolates to
+$-81.3$ ppm with a slope that is not significantly negative. The centreband
+window is refused for the glass (29 % of the intensity outside
+$\pm\nu_r/2$ at 78 MHz) and accepted for a single crystalline site
+($C_Q = 3$ MHz, where it reproduces Eq. 1 to 0.06 ppm). Static, the full-axis
+centroids of the same glass recover $\delta_\text{iso}$ within 1 ppm and the
+rms $P_Q$ within 3 %.
+
 ### 5.6 Analytic lineshapes <a name="fig6"></a>
 
 ![Analytic lineshapes](figures/fig6_analytic_lineshapes.png)

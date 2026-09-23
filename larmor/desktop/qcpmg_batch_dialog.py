@@ -19,9 +19,9 @@ import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QDialog, QDialogButtonBox, QDoubleSpinBox, QFileDialog, QHBoxLayout,
-    QHeaderView, QLabel, QMessageBox, QPlainTextEdit, QSpinBox, QSplitter,
-    QTableWidget, QTableWidgetItem, QVBoxLayout,
+    QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFileDialog,
+    QHBoxLayout, QHeaderView, QLabel, QMessageBox, QPlainTextEdit, QSpinBox,
+    QSplitter, QTableWidget, QTableWidgetItem, QVBoxLayout,
 )
 
 from larmor.desktop import theme
@@ -109,8 +109,19 @@ class QcpmgBatchFieldsDialog(QDialog):
         self.eta.setToolTip("η is not determined by centres of gravity; 0.7 "
                             "is the conventional choice")
         self.lblNuc = QLabel(f"nucleus <b>{self._nucleus or '—'}</b>")
+        self.winMode = QComboBox()
+        from larmor.desktop.qcpmg_fields_dialog import WINDOW_MODES
+        self.winMode.addItems(WINDOW_MODES)
+        self.winMode.setToolTip(
+            "how the SELECTED cell's δcg window is defined: first minima / "
+            "dragged band (default), the whole sideband manifold (full axis, "
+            "edge floor subtracted -- exact for a distribution under MAS) or "
+            "the centreband alone (peak ± ν_r/2, valid only when it "
+            "reproduces the whole-manifold CG)")
+        self.winMode.currentIndexChanged.connect(self._mode_changed)
         for w in ("samples", self.nSamples, "  fields", self.nFields,
-                  "   ", self.lblNuc, "  spin I", self.spin, "  η", self.eta):
+                  "   ", self.lblNuc, "  spin I", self.spin, "  η", self.eta,
+                  "   window", self.winMode):
             top.addWidget(QLabel(w) if isinstance(w, str) else w)
         top.addStretch(1)
         v.addLayout(top)
@@ -271,7 +282,10 @@ class QcpmgBatchFieldsDialog(QDialog):
                                   "nucleus": file_nuc,
                                   "magnitude": fs["magnitude"],
                                   "source": fs["source"],
-                                  "comb": seed.comb, "seed_note": seed.note}
+                                  "comb": seed.comb, "seed_note": seed.note,
+                                  "rotor_Hz": fs["rotor_Hz"],
+                                  "rotor_note": fs.get("rotor_note", ""),
+                                  "mode": "minima"}
         self._measure_cell(row, col)
 
     def _set_nucleus(self, nucleus: str):
@@ -283,32 +297,65 @@ class QcpmgBatchFieldsDialog(QDialog):
 
     def _measure_cell(self, row: int, col: int):
         from larmor import qcpmg
+        from larmor.qcpmg_fields import ERR_FLOOR_PPM
         d = self.cells.get((row, col))
         if d is None:
             return
-        lo, hi = d["window"]
-        cg, sigma = qcpmg.centre_of_gravity(d["ppm"], d["amp"], (hi, lo))
-        fw_ppm = qcpmg.fwhm_hz(d["ppm"], d["amp"], 1.0, (hi, lo))
-        from larmor.qcpmg_fields import ERR_FLOOR_PPM
+        mode = d.get("mode", "minima")
+        try:
+            m = qcpmg.measure_cg(
+                d["ppm"], d["amp"],
+                window=None if mode == "manifold" else tuple(d["window"]),
+                mode="manual" if mode in ("minima", "manual") else mode,
+                rotor_Hz=d.get("rotor_Hz", 0.0), larmor_MHz=d["larmor"],
+                magnitude=d.get("magnitude"))
+        except ValueError as exc:                     # centreband refused
+            self.msg.setText(f"⚠ {exc}")
+            d["mode"] = "manual"
+            return
+        m.mode = mode
+        d["meas"] = m
+        d["window"] = tuple(m.window)
+        cg, sigma, fw_ppm = m.cg_ppm, m.sigma_ppm, m.fwhm_ppm
         d["cg"], d["sigma"], d["fwhm"] = cg, max(sigma, ERR_FLOOR_PPM), fw_ppm
         it = self.table.item(row, col)
         if it is not None:
             txt = Path(d["path"]).name
             if np.isfinite(cg):
-                txt += f"\nδcg {cg:.1f} ± {d['sigma']:.1f}   FWHM {fw_ppm:.0f} ppm"
+                txt += (f"\nδcg {cg:.1f} ± {d['sigma']:.1f}"
+                        + (" (mc)" if d.get("magnitude") else "")
+                        + f"   FWHM {fw_ppm:.0f} ppm")
             else:
                 txt += "\n⚠ no usable signal in the window"
+            for fl in m.flags:
+                txt += f"\n{fl}"
             if d.get("comb"):
                 txt += "\n⚠ spikelet comb -- window from its envelope"
             tip = d["path"]
             if d.get("source"):
                 tip += f"\nsource: {d['source']}"
+            tip += f"\nwindow {m.window[0]:.1f} … {m.window[1]:.1f} ppm ({mode})"
+            if d.get("rotor_Hz"):
+                tip += f"\nMAS {d['rotor_Hz']:.0f} Hz = {d['rotor_Hz'] / d['larmor']:.0f} ppm"
+            if d.get("rotor_note"):
+                tip += f"\n⚠ {d['rotor_note']}"
+            if m.convergence is not None:
+                tip += "\n" + m.convergence.sequence()
             if d.get("seed_note"):
                 tip += f"\n⚠ {d['seed_note']}"
             self.table.blockSignals(True)
             it.setText(txt)
             it.setToolTip(tip)
             self.table.blockSignals(False)
+
+    def _mode_changed(self, idx: int):
+        from larmor.desktop.qcpmg_fields_dialog import WINDOW_MODE_KEYS
+        if self._sel is None or self._sel not in self.cells:
+            return
+        self.cells[self._sel]["mode"] = WINDOW_MODE_KEYS[idx]
+        self._measure_cell(*self._sel)
+        self._set_dirty()
+        self._show_cell()
 
     # -------------------------------------------------------- supervision
     def _show_cell(self):
@@ -322,6 +369,7 @@ class QcpmgBatchFieldsDialog(QDialog):
         self._sel = (r, c)
         if d is None:
             return
+        from larmor.desktop.qcpmg_fields_dialog import WINDOW_MODE_KEYS
         self.plot.plot(d["ppm"], d["amp"],
                        pen=pg.mkPen(theme.active().experiment, width=1.2))
         lo, hi = d["window"]
@@ -333,8 +381,21 @@ class QcpmgBatchFieldsDialog(QDialog):
                                    pen=pg.mkPen(theme.active().pivot,
                                                 style=Qt.DashLine))
             self.plot.addItem(line)
-        self.plot.setTitle(f"{Path(d['path']).name} — {d['larmor']:.3f} MHz",
-                           color=theme.active().text_dim, size="9pt")
+        m = d.get("meas")
+        if m is not None:
+            pen = pg.mkPen(theme.active().text_dim, style=Qt.DotLine)
+            for t in m.ticks_ppm:
+                self.plot.addItem(pg.InfiniteLine(pos=t, angle=90, movable=False,
+                                                  pen=pen))
+        mode = d.get("mode", "minima")
+        self.winMode.blockSignals(True)
+        self.winMode.setCurrentIndex(WINDOW_MODE_KEYS.index(mode)
+                                     if mode in WINDOW_MODE_KEYS else 0)
+        self.winMode.blockSignals(False)
+        title = f"{Path(d['path']).name} — {d['larmor']:.3f} MHz"
+        if m is not None and m.flags:
+            title += "   " + "  ·  ".join(m.flags)
+        self.plot.setTitle(title, color=theme.active().text_dim, size="9pt")
 
     def _region_moved(self):
         if self._region is None or self._sel is None:
@@ -344,6 +405,7 @@ class QcpmgBatchFieldsDialog(QDialog):
             return
         a, b = self._region.getRegion()
         d["window"] = (min(a, b), max(a, b))
+        d["mode"] = "manual"                    # the user placed it
         self._measure_cell(*self._sel)
         self._set_dirty()
         self._show_cell()
@@ -357,8 +419,10 @@ class QcpmgBatchFieldsDialog(QDialog):
                 continue
             name_item = self.table.item(r, 0)
             name = (name_item.text() if name_item else "") or f"sample {r + 1}"
-            out.append((name, FieldPoint(d["larmor"], float(d["cg"]),
-                                         float(d["sigma"]), None, name)))
+            out.append((name, FieldPoint.from_measurement(
+                d["larmor"], d["meas"], magnitude=d.get("magnitude"),
+                source=d.get("source", ""), rotor_Hz=d.get("rotor_Hz", 0.0),
+                label=name, dcg_ppm=float(d["cg"]), dcg_err_ppm=float(d["sigma"]))))
         return out
 
     def _compute(self):

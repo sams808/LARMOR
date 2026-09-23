@@ -181,3 +181,97 @@ def test_batch_cell_seeds_a_comb_from_its_envelope(qapp, tmp_path):
     assert cell["cg"] == pytest.approx(cg_env, abs=1.0)
     assert abs(qcpmg.centre_of_gravity(x, env * comb)[0] - cg_env) > 8.0
     d.close()
+
+
+# ---------------------------------------------------------------- fix 7 / 8
+def _write_manifold(tmp, name, nu, rot, centre, side=0.4, tail=False, **hdr):
+    """A centreband with +-1 sidebands at +-nu_r/nu0, optionally with a long
+    low-frequency tail; the header carries the rotor rate like a dataset
+    written by Save as dataset..."""
+    x = np.linspace(centre - 700.0, centre + 500.0, 6001)
+    step = rot / nu
+    y = np.exp(-(((x - centre) / 15.0) ** 2))
+    for k in (-1, 1):
+        y += side * np.exp(-(((x - centre - k * step) / 15.0) ** 2))
+    if tail:
+        y += 0.5 * np.where(x < centre, np.exp(-(((x - centre) / 150.0) ** 2)), 0.0)
+    p = tmp / name
+    meta = {"nucleus": "35Cl", "larmor_MHz": nu, "qcpmg_rotor_Hz": rot,
+            "spectrum_mode": "absorption"}
+    meta.update(hdr)
+    spectra.write_csv(p, x, y, meta)
+    return str(p)
+
+
+def test_batch_cell_carries_the_rotor_rate_and_flags_the_window(qapp, tmp_path):
+    """The saved dataset's qcpmg_rotor_Hz reaches the cell; the supervision
+    view ticks the sidebands; a window that catches one sideband, a sloppy
+    sigma (> 8 ppm) and a cut tail are flagged in the cell text and the
+    report; the cell's sigma is max(jitter, drift)."""
+    from larmor import qcpmg
+    from larmor.desktop.qcpmg_batch_dialog import QcpmgBatchFieldsDialog
+
+    d = QcpmgBatchFieldsDialog(None, "35Cl")
+    d.nSamples.setValue(1)
+    lo = _write_manifold(tmp_path, "lo.csv", 78.354, 16000.0, -100.0, tail=True)
+    hi = _write_manifold(tmp_path, "hi.csv", 107.811, 20000.0, -80.0)
+    d._drop_files(0, 1, [lo, hi])
+    c = d.cells[(0, 1)]
+    assert c["rotor_Hz"] == 16000.0 and c["magnitude"] is False
+    m = c["meas"]
+    assert m.ticks_ppm                                     # sidebands located
+    assert c["sigma"] == pytest.approx(max(m.jitter_ppm, m.drift_ppm, 0.1))
+    # drag the window over the centreband and the +1 sideband only
+    d.table.setCurrentCell(0, 1)
+    d._region.setRegion((-160.0, 160.0))
+    d._region_moved()
+    c = d.cells[(0, 1)]
+    assert c["mode"] == "manual"
+    assert "! window catches one sideband only" in c["meas"].flags
+    assert "! window catches one sideband only" in d.table.item(0, 1).text()
+    assert "!" in d.plot.plotItem.titleLabel.text
+    d._compute()
+    assert "! window catches one sideband only" in d.report.toPlainText()
+    assert "CG(w, 1.5w, 2w, 3w) =" in d.report.toPlainText()
+    # a window that cuts the long tail: the drift flag, and sigma = drift
+    d._region.setRegion((-250.0, -20.0))
+    d._region_moved()
+    c = d.cells[(0, 1)]
+    assert "! CG not converged -- window cuts the pattern" in c["meas"].flags
+    assert "! CG not converged" in d.table.item(0, 1).text()
+    assert c["sigma"] == pytest.approx(c["meas"].drift_ppm)
+    d._compute()
+    assert "! CG not converged" in d.report.toPlainText()
+    # whole-manifold mode: the window becomes the full axis
+    d.table.setCurrentCell(0, 2)
+    d.winMode.setCurrentIndex(1)
+    c2 = d.cells[(0, 2)]
+    assert c2["mode"] == "manifold"
+    assert c2["window"][0] == pytest.approx(c2["ppm"].min())
+    assert c2["window"][1] == pytest.approx(c2["ppm"].max())
+    assert c2["cg"] == pytest.approx(qcpmg.manifold_cg(c2["ppm"], c2["amp"])[0])
+    d.close()
+
+
+def test_batch_sigma_above_8ppm_is_flagged_in_cell_and_report(qapp, tmp_path):
+    from larmor.desktop.qcpmg_batch_dialog import QcpmgBatchFieldsDialog
+
+    d = QcpmgBatchFieldsDialog(None, "35Cl")
+    d.nSamples.setValue(1)
+    # a broad Gaussian (sigma 200 ppm) with the window cutting it at
+    # half height on both sides: jitter 11.5 ppm, drift 0
+    x = np.linspace(-900.0, 500.0, 7001)
+    y = np.exp(-(((x + 150.0) / 200.0) ** 2))
+    p = tmp_path / "broad.csv"
+    spectra.write_csv(p, x, y, {"nucleus": "35Cl", "larmor_MHz": 78.354})
+    d._drop_files(0, 1, [str(p)])
+    d._drop_files(0, 2, [_write(tmp_path, "b2.csv", 107.811, -100.0)])
+    d.table.setCurrentCell(0, 1)
+    d._region.setRegion((-350.0, 50.0))
+    d._region_moved()
+    c = d.cells[(0, 1)]
+    assert c["meas"].jitter_ppm > 8.0
+    assert "! window sensitive" in d.table.item(0, 1).text()
+    d._compute()
+    assert "! window sensitive" in d.report.toPlainText()
+    d.close()

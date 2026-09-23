@@ -83,12 +83,44 @@ class FieldPoint:
     dcg_err_ppm: float = 0.0          # 0 / NaN / negative = no uncertainty known
     ct_selective: bool | None = None  # operator's declaration; provenance only
     label: str = ""
+    # ---- provenance (reported, never fitted) ------------------------------
+    magnitude: bool | None = None     # δcg measured on |spectrum| (mc)? None = unknown
+    window: tuple | None = None       # (lo, hi) ppm the CG was integrated over
+    window_mode: str = ""             # minima | manual | manifold | centreband
+    source: str = ""                  # file / EXPNO / 'workspace'
+    rotor_Hz: float = 0.0             # MAS rate of the acquisition (0 = static/unknown)
+    flags: tuple = ()                 # quality flags of the measurement ('! ...')
+    cg_sequence: str = ""             # 'CG(w, 1.5w, 2w, 3w) = ...' convergence record
+    drift_ppm: float = float("nan")   # |CG(2w) - CG(w)|
 
     @property
     def has_err(self) -> bool:
         """True when dcg_err_ppm is a usable (finite, positive) uncertainty."""
         e = float(self.dcg_err_ppm)
         return bool(np.isfinite(e) and e > 0.0)
+
+    @classmethod
+    def from_measurement(cls, larmor_MHz: float, meas, *, magnitude=None,
+                         source: str = "", rotor_Hz: float = 0.0,
+                         ct_selective=None, label: str = "",
+                         dcg_ppm: float | None = None,
+                         dcg_err_ppm: float | None = None) -> "FieldPoint":
+        """A point from a :class:`larmor.qcpmg.CgMeasurement`: the error is
+        max(jitter sigma, convergence drift) floored at ERR_FLOOR_PPM, and
+        window, mode, flags and the convergence sequence travel with it.
+        ``dcg_ppm`` / ``dcg_err_ppm`` override the measured values when the
+        user edited the cells."""
+        err = meas.sigma_ppm if dcg_err_ppm is None else dcg_err_ppm
+        err = max(float(err), ERR_FLOOR_PPM) if np.isfinite(err) else 0.0
+        conv = getattr(meas, "convergence", None)
+        return cls(float(larmor_MHz),
+                   float(meas.cg_ppm if dcg_ppm is None else dcg_ppm), err,
+                   ct_selective, label, magnitude=magnitude,
+                   window=tuple(meas.window), window_mode=meas.mode,
+                   source=source, rotor_Hz=float(rotor_Hz or 0.0),
+                   flags=tuple(meas.flags),
+                   cg_sequence=conv.sequence() if conv is not None else "",
+                   drift_ppm=float(meas.drift_ppm))
 
 
 @dataclass
@@ -245,6 +277,14 @@ def infinite_field_diso(points: list[FieldPoint], spin: float,
         warnings.append(
             f"poorly constrained: sigma(delta_iso) = {sig_a:.1f} ppm is more "
             "than 10x the largest dcg uncertainty")
+    sep = float(y.max() - y.min())
+    for p in points:
+        d = float(getattr(p, "drift_ppm", float("nan")))
+        if np.isfinite(d) and sep > 0 and d > 0.10 * sep:
+            warnings.append(
+                f"CG drift {d:.1f} ppm at {p.larmor_MHz:.3f} MHz is {100 * d / sep:.0f} % "
+                f"of the {sep:.1f} ppm separation between the fields -- the window "
+                "cuts the pattern")
 
     return InfiniteFieldResult(
         delta_iso_ppm=float(a), delta_iso_err_ppm=sig_a,
@@ -335,15 +375,21 @@ def two_field_widths(nu1_MHz: float, fwhm1_ppm: float,
 def centre_of_gravity(ppm: np.ndarray, amp: np.ndarray,
                       lo_ppm: float | None = None,
                       hi_ppm: float | None = None) -> float:
-    """Intensity-weighted centre of gravity of a spectrum (over an optional
-    ppm window — restrict it to the central-transition band)."""
-    ppm = np.asarray(ppm, float); amp = np.asarray(amp, float)
-    a = np.clip(amp, 0.0, None)
-    if lo_ppm is not None and hi_ppm is not None:
-        m = (ppm >= min(lo_ppm, hi_ppm)) & (ppm <= max(lo_ppm, hi_ppm))
-        ppm, a = ppm[m], a[m]
-    s = a.sum()
-    return float((ppm * a).sum() / s) if s > 0 else float("nan")
+    """Intensity-weighted centre of gravity of a spectrum over an optional
+    ppm window (restrict it to the central-transition band).
+
+    A thin wrapper on :func:`larmor.qcpmg.centre_of_gravity` -- the SIGNED
+    estimator the dataset rows and the batch grid use -- so every route into
+    the fit shares one definition. The former ``np.clip(amp, 0)`` turned
+    zero-mean noise into a positive pedestal that pulled the CG towards the
+    window centre (bias -3.7 ppm on a Gaussian at S/N 20 over a wide window
+    against -0.1 ppm signed). With no window the first-minima window of
+    :func:`larmor.qcpmg.cg_window` is used.
+    """
+    from larmor import qcpmg
+    window = None if lo_ppm is None or hi_ppm is None else (float(lo_ppm), float(hi_ppm))
+    return float(qcpmg.centre_of_gravity(np.asarray(ppm, float),
+                                         np.asarray(amp, float), window)[0])
 
 
 def spectrum_mode_from_meta(meta: dict) -> bool | None:
@@ -409,9 +455,40 @@ def read_field_spectrum(path: str) -> dict:
     if not larmor:
         raise ValueError("no Larmor frequency in the file — save it from "
                          "the QCPMG dialog, which records one")
+    rotor, rotor_note = rotor_rate_of(meta, ppm, amp, larmor)
     return {"ppm": ppm, "amp": amp, "larmor": larmor, "nucleus": nucleus,
             "magnitude": spectrum_mode_from_meta(meta), "source": source,
-            "meta": meta, "seed": qcpmg.seed_window(ppm, amp, meta)}
+            "meta": meta, "seed": qcpmg.seed_window(ppm, amp, meta),
+            "rotor_Hz": rotor, "rotor_note": rotor_note}
+
+
+def rotor_rate_of(meta: dict, ppm=None, amp=None, larmor_MHz: float = 0.0
+                  ) -> tuple[float, str]:
+    """(rotor_Hz, note): the MAS rate a spectrum was acquired at -- a saved
+    dataset's ``qcpmg_rotor_Hz`` header (its ``spin_rate_Hz`` is 0 by design,
+    see QcpmgDialog.dataset_meta), else a Bruker meta's resolved
+    ``spin_rate_Hz``. When the trace shows a sideband repeat
+    (larmor.sidebands.detect) that disagrees with the recorded rate by more
+    than 5 % the note says so; ``mas_uncertain`` is passed on as a note."""
+    rate = 0.0
+    if meta.get("qcpmg_rotor_Hz") is not None:
+        rate = float(meta.get("qcpmg_rotor_Hz") or 0.0)
+    elif meta.get("spin_rate_Hz") is not None and "larmor_MHz" in meta:
+        rate = float(meta.get("spin_rate_Hz") or 0.0)       # Bruker meta
+    notes = []
+    if rate > 0 and meta.get("mas_uncertain"):
+        notes.append(f"rotor rate {rate:.0f} Hz is flagged uncertain "
+                     "(acqus MASR and the title disagree)")
+    if rate > 0 and ppm is not None and amp is not None and larmor_MHz:
+        try:
+            from larmor import sidebands
+            det = sidebands.detect(ppm, amp, larmor_MHz, rate)
+            if det.ok and abs(det.nu_rot_Hz - rate) > 0.05 * rate:
+                notes.append(f"sideband spacing measured {det.nu_rot_Hz:.0f} Hz "
+                             f"vs recorded {rate:.0f} Hz")
+        except Exception:                                     # noqa: BLE001
+            pass
+    return rate, "; ".join(notes)
 
 
 def fit_samples(rows, spin: float, eta: float = DEFAULT_ETA
@@ -487,6 +564,10 @@ def report_text(results: dict, spin: float, eta: float, nucleus: str = "",
             err = f"{p.dcg_err_ppm:7.2f}" if p.has_err else f"{'n/a':>7s}"
             lines.append(f"    {p.larmor_MHz:10.4f}  {p.dcg_ppm:11.2f}  "
                          f"{err}   {sel}")
+            for fl in p.flags:
+                lines.append(f"                 {fl}")
+            if p.cg_sequence:
+                lines.append(f"                 {p.cg_sequence}")
         for ln in fmt_result_lines(res):
             key, _, rest = ln.partition(" ")
             lines.append(f"    {key:14s} {rest}")

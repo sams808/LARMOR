@@ -439,3 +439,256 @@ def test_real_qcpmg_1r_is_a_comb_read_as_magnitude():
     assert abs(cg_1r - cg_csv) < 2.0
     # and the raw first-minima window really was the 7.7 ppm bug
     assert qcpmg.centre_of_gravity(fs["ppm"], fs["amp"])[0] == pytest.approx(-105.1, abs=0.3)
+
+
+# ---------------------------------------------------------------- fix 7 / 8
+def _three_peaks(step_ppm=200.0, centre=-100.0, side=0.4):
+    """A centreband with +-1 sidebands at +-step -- the MAS manifold of a
+    narrow pattern, for the window/sideband checks."""
+    x = np.linspace(-700.0, 500.0, 6001)
+    y = np.exp(-(((x - centre) / 15.0) ** 2))
+    for k in (-1, 1):
+        y += side * np.exp(-(((x - centre - k * step_ppm) / 15.0) ** 2))
+    return x, y
+
+
+def test_sideband_ticks_and_the_one_sided_window_flag():
+    from larmor import qcpmg
+
+    nu, rot = 78.354, 16000.0                        # 204.2 ppm per sideband
+    x, y = _three_peaks(step_ppm=rot / nu)
+    peak, ticks = qcpmg.sideband_ticks(x, y, (-160.0, -40.0), rot, nu)
+    assert peak == pytest.approx(-100.0, abs=0.5)
+    # k = +-1, +-2 fall inside the -700..500 ppm axis, +-3 do not
+    assert len(ticks) == 4 and ticks[2] == pytest.approx(-100.0 + rot / nu, abs=0.5)
+    assert not qcpmg.one_sided_sideband((-160.0, -40.0), peak, rot, nu)
+    # centreband + the +1 sideband, not the -1: one-sided -> flag
+    m = qcpmg.measure_cg(x, y, window=(-160.0, 160.0), rotor_Hz=rot, larmor_MHz=nu)
+    assert "! window catches one sideband only" in m.flags
+    assert m.ticks_ppm and "wider than nu_r" in m.note
+    # symmetric manifold window: no flag, and the CG is the centreband's
+    m2 = qcpmg.measure_cg(x, y, window=(-360.0, 160.0), rotor_Hz=rot, larmor_MHz=nu)
+    assert "! window catches one sideband only" not in m2.flags
+    assert m2.cg_ppm == pytest.approx(-100.0, abs=0.5)
+    # static / unknown rate: nothing to tick, nothing to flag
+    m3 = qcpmg.measure_cg(x, y, window=(-160.0, 160.0))
+    assert m3.ticks_ppm == [] and not any("sideband" in f for f in m3.flags)
+
+
+def test_cg_convergence_sees_a_cut_tail_and_a_pedestal():
+    """The jitter sigma is a local sensitivity; the drift |CG(2w) - CG(w)|
+    is what a window that cuts a tail shows. A raw magnitude pedestal is
+    subtracted (out-of-window median) and flagged, never mistaken for
+    convergence."""
+    from larmor import qcpmg
+
+    x = np.linspace(-600.0, 300.0, 9001)
+    # an asymmetric pattern with a long low-frequency tail
+    y = np.where(x < -100.0, np.exp(-(((x + 100.0) / 120.0) ** 2)),
+                 np.exp(-(((x + 100.0) / 30.0) ** 2)))
+    true_cg = float((x * y).sum() / y.sum())
+    m = qcpmg.measure_cg(x, y, window=(-180.0, -20.0))     # cuts the tail
+    conv = m.convergence
+    assert conv.drift_ppm > 5.0 and conv.drift_lo_ppm > conv.drift_hi_ppm
+    assert "! CG not converged -- window cuts the pattern" in m.flags
+    assert m.sigma_ppm == pytest.approx(max(m.jitter_ppm, m.drift_ppm))
+    assert m.sigma_ppm >= m.drift_ppm > m.jitter_ppm
+    assert "CG(w, 1.5w, 2w, 3w) =" in conv.sequence()
+    wide = qcpmg.measure_cg(x, y, window=(-500.0, 50.0))
+    assert wide.drift_ppm < 0.5 and wide.cg_ppm == pytest.approx(true_cg, abs=0.5)
+    assert not any("converged" in f for f in wide.flags)
+    # a positive pedestal (raw |spectrum| noise floor) on a clean line
+    rng = np.random.default_rng(1)
+    xg = np.linspace(-400.0, 200.0, 6001)
+    yg = np.exp(-(((xg + 110.0) / 30.0) ** 2))
+    ped = np.abs(yg + 0.05 * rng.standard_normal(xg.size))
+    mp = qcpmg.measure_cg(xg, ped, window=(-260.0, 40.0))
+    assert mp.convergence.floor_frac > 0.02
+    assert any("floor" in f for f in mp.flags)
+    assert mp.cg_ppm == pytest.approx(-110.0, abs=1.0)
+    # ... and the signed (unclipped) CG is the one used
+    ys = yg.copy(); ys[xg > -60.0] -= 0.3 * np.exp(-(((xg[xg > -60.0] + 30.0) / 20.0) ** 2))
+    ms = qcpmg.measure_cg(xg, ys, window=(-260.0, 40.0))
+    assert ms.cg_ppm == pytest.approx(
+        qcpmg.centre_of_gravity(xg, ys, (40.0, -260.0))[0], abs=1e-9)
+
+
+def test_manifold_and_centreband_modes_on_simulated_patterns():
+    """The whole-manifold CG recovers a Czjzek glass's delta_iso and rms P_Q
+    at the tutorial's MAS rates where the first-minima window is one-sided
+    and biased; the centreband mode is accepted only for a pattern narrower
+    than nu_r."""
+    from larmor import qcpmg
+    from larmor.convert import ct_second_order_shift_ppm, pq_from_cq_eta
+    from larmor.qcpmg_fields import FieldPoint, infinite_field_diso
+    from tests.conftest import simulate_ct_czjzek, simulate_ct_single
+
+    fields = ((78.354, 16000.0), (107.811, 20000.0))
+    man, mini = [], []
+    for nu, rot in fields:
+        x, y, rms = simulate_ct_czjzek("35Cl", nu, rot, 1.0, -70.0)
+        m = qcpmg.measure_cg(x, y, mode="manifold", rotor_Hz=rot, larmor_MHz=nu)
+        man.append(FieldPoint(nu, m.cg_ppm, max(m.sigma_ppm, 0.1)))
+        mm = qcpmg.measure_cg(x, y, mode="minima", rotor_Hz=rot, larmor_MHz=nu)
+        mini.append(mm)
+        assert mm.window[1] - mm.window[0] > rot / nu          # wider than nu_r
+        assert "wider than nu_r" in mm.note
+    res = infinite_field_diso(man, spin=1.5, eta=0.7)
+    assert res.delta_iso_ppm == pytest.approx(-70.0, abs=1.0)
+    assert res.pq_MHz == pytest.approx(rms, rel=0.03)
+    # the first-minima window at 78 MHz cuts the pattern: drift > 5 ppm
+    assert mini[0].drift_ppm > 5.0
+    assert "! CG not converged -- window cuts the pattern" in mini[0].flags
+    # centreband: refused for the glass, accepted for one crystalline site
+    x, y, _ = simulate_ct_czjzek("35Cl", 78.354, 16000.0, 1.0, -70.0)
+    with pytest.raises(ValueError, match="centreband window refused"):
+        qcpmg.measure_cg(x, y, mode="centreband", rotor_Hz=16000.0, larmor_MHz=78.354)
+    x, y, _ = simulate_ct_czjzek("35Cl", 107.811, 20000.0, 1.5, -70.0)
+    with pytest.raises(ValueError, match="centreband window refused"):
+        qcpmg.measure_cg(x, y, mode="centreband", rotor_Hz=20000.0, larmor_MHz=107.811)
+    for nu, rot in fields:
+        xs, ys = simulate_ct_single("35Cl", nu, rot, 3.0, 0.7, -70.0)
+        m = qcpmg.measure_cg(xs, ys, mode="centreband", rotor_Hz=rot, larmor_MHz=nu)
+        expect = -70.0 + ct_second_order_shift_ppm(pq_from_cq_eta(3.0, 0.7), 1.5, nu)
+        assert m.cg_ppm == pytest.approx(expect, abs=0.5)
+        assert m.mode == "centreband" and m.window[1] - m.window[0] == pytest.approx(rot / nu)
+    # magnitude + whole manifold is flagged as the biased combination
+    mg = qcpmg.measure_cg(x, np.abs(y), mode="manifold", magnitude=True)
+    assert any("magnitude + whole manifold" in f for f in mg.flags)
+
+
+def test_static_czjzek_full_axis_is_converged_and_recovers_rms_pq():
+    from larmor import qcpmg
+    from larmor.qcpmg_fields import FieldPoint, infinite_field_diso
+    from tests.conftest import simulate_ct_czjzek
+
+    pts = []
+    for nu in (78.354, 107.811):
+        x, y, rms = simulate_ct_czjzek("35Cl", nu, 0.0, 1.0, -70.0)
+        m = qcpmg.measure_cg(x, y, window=(float(x.min()), float(x.max())))
+        assert m.drift_ppm < 0.5 and not any("converged" in f for f in m.flags)
+        pts.append(FieldPoint(nu, m.cg_ppm, max(m.sigma_ppm, 0.1)))
+    res = infinite_field_diso(pts, spin=1.5, eta=0.7)
+    assert res.delta_iso_ppm == pytest.approx(-70.0, abs=1.0)
+    assert res.pq_MHz == pytest.approx(rms, rel=0.03)
+
+
+def test_field_point_from_measurement_carries_the_provenance():
+    from larmor import qcpmg
+    from larmor.qcpmg_fields import FieldPoint, report_text, infinite_field_diso
+
+    x, y = _three_peaks(step_ppm=204.2)
+    m = qcpmg.measure_cg(x, y, window=(-160.0, 160.0), rotor_Hz=16000.0,
+                         larmor_MHz=78.354)
+    p = FieldPoint.from_measurement(78.354, m, magnitude=True, source="LAW.csv",
+                                    rotor_Hz=16000.0)
+    assert p.window == m.window and p.flags == tuple(m.flags)
+    assert p.dcg_err_ppm == pytest.approx(max(m.sigma_ppm, 0.1))
+    assert "CG(w, 1.5w, 2w, 3w)" in p.cg_sequence and p.rotor_Hz == 16000.0
+    q = FieldPoint(107.811, -80.0, 1.0)
+    res = infinite_field_diso([p, q], 1.5, 0.7)
+    txt = report_text({"s": res}, 1.5, 0.7, "35Cl")
+    assert "! window catches one sideband only" in txt
+    assert "CG(w, 1.5w, 2w, 3w) =" in txt
+
+
+def test_real_law_series_one_sided_flag_fires_only_on_law4ca():
+    """LAW4Ca at 78 MHz: the auto window (-391..+129 ppm) catches the
+    centreband and ONE sideband of the ~-80 ppm centreband; LAW2/3Ca do not
+    trip the check although their windows are wider than nu_r."""
+    from larmor import qcpmg
+    from larmor.io import spectra
+    from tests.conftest import MAGLAB_35CL, require
+
+    root = require(MAGLAB_35CL).parent
+    flags = {}
+    for k in (2, 3, 4):
+        x, y, _ = spectra.read_csv(require(root / f"LAW{k}Ca-3Cl_850_MHz.csv"))
+        m = qcpmg.measure_cg(x, y, rotor_Hz=16000.0, larmor_MHz=78.354)
+        flags[k] = m.flags
+        assert m.window[1] - m.window[0] > 16000.0 / 78.354
+    assert "! window catches one sideband only" in flags[4]
+    assert "! window sensitive" in flags[4]
+    for k in (2, 3):
+        assert "! window catches one sideband only" not in flags[k]
+    # LAW0Ca: a genuine centreband window; the drift, not the jitter, sets sigma
+    x, y, _ = spectra.read_csv(require(root / "LAW0Ca-3Cl_850_MHz.csv"))
+    m = qcpmg.measure_cg(x, y, rotor_Hz=16000.0, larmor_MHz=78.354)
+    assert m.cg_ppm == pytest.approx(-112.76, abs=0.05)
+    assert m.jitter_ppm == pytest.approx(1.28, abs=0.05)
+    assert m.drift_ppm > m.jitter_ppm and m.sigma_ppm == pytest.approx(m.drift_ppm)
+    assert not any("sideband" in f for f in m.flags)
+
+
+# ---------------------------------------------------------------- fix 9
+def test_module_centre_of_gravity_is_the_signed_estimator():
+    """qcpmg_fields.centre_of_gravity clipped negatives (a positive noise
+    pedestal pulling the CG to the window centre); it is now a thin wrapper
+    on the signed qcpmg.centre_of_gravity, so the two routes agree."""
+    from larmor import qcpmg
+
+    rng = np.random.default_rng(0)
+    x = np.linspace(-300.0, -20.0, 2801)
+    y = np.exp(-(((x + 110.0) / 30.0) ** 2)) + 0.05 * rng.standard_normal(x.size)
+    assert (y < 0).any()
+    a = centre_of_gravity(x, y, -300.0, -20.0)
+    b = qcpmg.centre_of_gravity(x, y, (-20.0, -300.0))[0]
+    assert a == pytest.approx(b, abs=0.05)
+    # the clipped estimator this replaces was biased by several ppm here
+    yc = np.clip(y, 0.0, None)
+    clipped = float((x * yc).sum() / yc.sum())
+    assert abs(clipped + 110.0) > 1.0 and abs(a + 110.0) < 1.0
+
+
+def test_from_current_goes_through_the_dataset_route(qapp):
+    """'dcg from open spectrum (visible range)' used to write a clipped
+    whole-visible-range CG into the first empty cell with the default 5 ppm
+    sigma and no window record. It now adds a dataset row: signed CG,
+    data-derived sigma, FWHM, stored window, supervision band."""
+    import pyqtgraph as pg
+    from PySide6.QtWidgets import QWidget
+
+    from larmor import qcpmg
+    from larmor.desktop.qcpmg_fields_dialog import QcpmgFieldsDialog
+    from larmor.qcpmg_fields import report_text
+
+    class _Parent(QWidget):
+        def __init__(self):
+            super().__init__()
+            self.view = pg.PlotWidget()
+            self.recipe = {"qcpmg_magnitude": False}
+
+    rng = np.random.default_rng(3)
+    x = np.linspace(-400.0, 200.0, 6001)
+    y = np.exp(-(((x + 110.0) / 30.0) ** 2)) + 0.05 * rng.standard_normal(x.size)
+    parent = _Parent()
+    parent.view.setXRange(-300.0, 20.0, padding=0)       # wider than the line
+    d = QcpmgFieldsDialog(parent, "35Cl", (78.354, x, y))
+    n0 = d.table.rowCount()
+    d._from_current()
+    assert d.table.rowCount() == n0 + 1
+    r = n0
+    ds_id = d._row_ds_id(r)
+    assert ds_id is not None                              # a dataset row
+    ds = d._ds[ds_id]
+    x0, x1 = parent.view.getPlotItem().getViewBox().viewRange()[0]
+    assert ds["window"] == pytest.approx((min(x0, x1), max(x0, x1)), abs=1.0)
+    assert ds["magnitude"] is False and ds["source"] == "workspace spectrum"
+    cg_cell = float(d.table.item(r, 1).text())
+    err_cell = d.table.item(r, 2).text()
+    ref = qcpmg.centre_of_gravity(x, y, tuple(ds["window"]))
+    assert cg_cell == pytest.approx(ref[0], abs=max(ref[1], 0.05))
+    assert err_cell != "5" and float(err_cell) >= 0.1       # data-derived
+    assert d._region is not None                             # supervision band
+    # the same spectrum through add_dataset_spectrum with the same window
+    r2 = d.add_dataset_spectrum(107.811, x, y, window=tuple(ds["window"]))
+    assert float(d.table.item(r2, 1).text()) == pytest.approx(cg_cell, abs=1e-6)
+    d._compute()
+    txt = report_text(d._result_map(), 1.5, 0.7, "35Cl")
+    assert "workspace spectrum" in txt or "window" in txt   # provenance travels
+    # a window straddling equal +/- lobes never writes 'nan' into a cell
+    y2 = np.exp(-(((x + 110.0) / 20.0) ** 2)) - np.exp(-(((x + 40.0) / 20.0) ** 2))
+    d2 = QcpmgFieldsDialog(None, "35Cl", (78.354, x, y2))
+    r3 = d2.add_dataset_spectrum(78.354, x, y2, window=(-200.0, 50.0))
+    assert "nan" not in d2.table.item(r3, 1).text().lower()
+    d.close(); d2.close(); parent.close()

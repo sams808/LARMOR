@@ -632,3 +632,69 @@ def test_send_to_fit_keeps_the_full_qcpmg_record(qapp, monkeypatch):
         assert r2.provenance["qcpmg_split_offset"] == 4
     finally:
         win.close()
+
+
+# ---------------------------------------------------------------- fix 7
+def test_saved_dataset_carries_the_rotor_rate_under_its_own_key(qapp, tmp_path,
+                                                                monkeypatch):
+    """The sum-echo CSV hard-coded spin_rate_Hz = 0.0 and nothing else, so the
+    multi-field tools could not place the sidebands. The rotor rate now
+    travels as qcpmg_rotor_Hz (and mas_uncertain), while the recipe's
+    spin_rate_Hz -- what the workbench MODELS -- stays 0; mode, LB,
+    referencing and the source are recorded too."""
+    from larmor.io import spectra
+    from larmor.loader import load_any
+
+    d = _dialog_with(qapp, _synthetic_qcpmg(tmp_path))
+    d.meta.update({"spin_rate_Hz": 16000.0, "mas_uncertain": True,
+                   "sf_MHz": 78.36217, "sr_hz": 3982.87,
+                   "title": "12/09/2025\nSample LAW3CL0CA\nRotor-synchronized CPMG"})
+    d._carrier, d._referenced = -102.8, True
+    out = tmp_path / "ds.csv"
+    monkeypatch.setattr(
+        "PySide6.QtWidgets.QFileDialog.getSaveFileName",
+        staticmethod(lambda *a, **k: (str(out), "")))
+    d._save_dataset()
+    _, _, meta = spectra.read_csv(out)
+    assert meta["qcpmg_rotor_Hz"] == pytest.approx(16000.0)
+    assert meta["mas_uncertain"] is True
+    assert meta["spectrum_mode"] == "absorption"
+    assert meta["lb_Hz"] == pytest.approx(d.lb.value())
+    assert meta["sf_MHz"] == pytest.approx(78.36217)
+    assert meta["sr_hz"] == pytest.approx(3982.87)
+    assert meta["referenced"] is True
+    assert meta["carrier_ppm"] == pytest.approx(-102.8)
+    assert meta["sample"].startswith("Sample LAW3CL0CA")      # not the date
+    assert "12/09/2025" in meta["title"]
+    _, _, recipe, _, _ = load_any(str(out))
+    assert recipe["spin_rate_Hz"] == 0.0                     # nothing to model
+    # an UNreferenced axis writes sr_hz = 0.0 explicitly (information, not
+    # absence) and referenced False
+    d.meta.update({"sr_hz": 0.0})
+    d._referenced = False
+    d.meta.pop("sf_MHz")
+    d._save_dataset()
+    _, _, meta = spectra.read_csv(out)
+    assert meta["sr_hz"] == 0.0 and meta["referenced"] is False
+    d.close()
+
+
+def test_send_to_infinite_field_passes_the_rotor_rate(qapp, tmp_path):
+    from larmor.desktop import qcpmg_fields_dialog as qfd
+
+    qfd._shared = None
+    try:
+        d = _dialog_with(qapp, _synthetic_qcpmg(tmp_path))
+        d.meta["spin_rate_Hz"] = 16000.0
+        d._autophase()
+        d._send_infinite()
+        shared = qfd._shared
+        ds = list(shared._ds.values())[-1]
+        assert ds["rotor_Hz"] == 16000.0 and ds["mode"] == "manual"
+        assert "sum-echo" in ds["source"]
+        pts = shared._points()
+        assert pts[-1].rotor_Hz == 16000.0 and pts[-1].window_mode == "manual"
+        assert pts[-1].window is not None
+        shared.close(); d.close()
+    finally:
+        qfd._shared = None

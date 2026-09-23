@@ -22,20 +22,45 @@ from pathlib import Path
 
 import numpy as np
 
-_FLOAT_KEYS = {"larmor_mhz": "larmor_MHz", "spin_rate_hz": "spin_rate_Hz"}
+#: header keys parsed back as floats (lower-cased key -> canonical name)
+_FLOAT_KEYS = {"larmor_mhz": "larmor_MHz", "spin_rate_hz": "spin_rate_Hz",
+               "qcpmg_rotor_hz": "qcpmg_rotor_Hz", "sf_mhz": "sf_MHz",
+               "sr_hz": "sr_hz", "lb_hz": "lb_Hz", "carrier_ppm": "carrier_ppm"}
+#: header keys parsed back as booleans
+_BOOL_KEYS = {"referenced": "referenced", "mas_uncertain": "mas_uncertain"}
+
+#: the recipe keys, written when they carry a value (a 0 spin rate is
+#: dropped: the recipe's default), then the PROVENANCE keys, written whenever
+#: they are present in ``meta`` -- a 0.0 SR or a 0 Hz rotor is information
+#: (an unreferenced axis, a static experiment), not an absence
+_RECIPE_KEYS = ("nucleus", "larmor_MHz", "spin_rate_Hz", "sample")
+_PROVENANCE_KEYS = ("qcpmg_rotor_Hz", "mas_uncertain", "spectrum_mode",
+                    "lb_Hz", "sf_MHz", "sr_hz", "referenced", "carrier_ppm",
+                    "source", "title")
 
 
 def write_csv(path: str | Path, ppm: np.ndarray, amp: np.ndarray,
               meta: dict | None = None) -> str:
-    """Write a (ppm, intensity) CSV with a metadata header. Returns the path."""
+    """Write a (ppm, intensity) CSV with a metadata header. Returns the path.
+
+    Besides the recipe keys (nucleus, larmor_MHz, spin_rate_Hz, sample) any
+    of ``_PROVENANCE_KEYS`` present in ``meta`` is written -- including
+    zero-valued ones -- so a saved QCPMG dataset records its rotor rate,
+    processing mode, LB and referencing for the multi-field tools."""
     meta = meta or {}
     ppm = np.asarray(ppm, float)
     amp = np.asarray(amp, float)
     order = np.argsort(ppm)[::-1]            # descending ppm, NMR convention
     lines = ["# LARMOR spectrum"]
-    for key in ("nucleus", "larmor_MHz", "spin_rate_Hz", "sample"):
+    for key in _RECIPE_KEYS:
         if meta.get(key) not in (None, "", 0) or key == "nucleus":
             lines.append(f"# {key}={meta.get(key, '')}")
+    for key in _PROVENANCE_KEYS:
+        if key in meta and meta[key] is not None:
+            val = meta[key]
+            if isinstance(val, str):
+                val = " ".join(val.splitlines())          # one header line
+            lines.append(f"# {key}={val}")
     lines.append("ppm,intensity")
     for x, y in zip(ppm[order], amp[order]):
         lines.append(f"{x:.6f},{y:.8g}")
@@ -56,12 +81,14 @@ def read_csv(path: str | Path) -> tuple[np.ndarray, np.ndarray, dict]:
             if "=" in body:
                 k, val = body.split("=", 1)
                 k = k.strip().lower()
-                key = _FLOAT_KEYS.get(k, k)
+                key = _FLOAT_KEYS.get(k, _BOOL_KEYS.get(k, k))
                 if k in _FLOAT_KEYS:
                     try:
                         meta[key] = float(val)
                     except ValueError:
                         pass
+                elif k in _BOOL_KEYS:
+                    meta[key] = val.strip().lower() in ("true", "1", "yes")
                 else:
                     meta[key] = val.strip()
             continue

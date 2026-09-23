@@ -224,6 +224,28 @@ hand. Read σ as a **quality flag**: a few ppm means the window is well
 defined; tens of ppm means the edges are running down a tail and should be
 placed by hand (the dialog says so).
 
+**Under MAS the first-minima window is safe only when the pattern is
+narrower than the rotor rate.** A QCPMG train acquired while spinning keeps
+its spinning sidebands in the sum-echo spectrum (at ±ν_r/ν₀ — 204 ppm at
+16 kHz and 78 MHz). For a pattern narrower than ν_r the first minima bracket
+a genuine centreband and the window is fine. For a distribution-broadened
+pattern wider than ν_r the "first minimum" is a valley *between* sidebands:
+the window catches the centreband plus one sideband on one side only, with
+opposite sign at the two fields, and δ_CG moves by tens of ppm (a simulated
+35Cl Czjzek glass: −129.7 ppm with the first-minima window against −145.6
+for the whole manifold at 78 MHz). The multi-field tools (§4) know the rotor
+rate of a saved dataset, tick the sideband positions on the supervision plot
+and flag *window catches one sideband only*; use the **whole manifold**
+window there.
+
+**The window must reach the noise on both sides.** The jitter σ is a local
+sensitivity: it does not see a tail that the window cuts. The tools also
+re-measure δ_CG with the window at 1.5×, 2× and 3× its width (each edge
+alone as well) and report the drift |CG(2w) − CG(w)|; the quoted ± is the
+larger of σ and that drift, and *CG not converged — window cuts the pattern*
+is flagged when the drift exceeds max(2σ, 5 ppm). The out-of-window median
+is subtracted first, so a raw magnitude pedestal cannot fake convergence.
+
 ---
 
 **→ infinite-field δiso…** (stage 6) sends this dataset's (field, δ_CG,
@@ -301,8 +323,10 @@ was CT-selective, set η, and **Compute**. It plots δcg vs $1/\nu_0^2$ with the
 fit line and reports δiso, $C_Q$, and $P_Q$ with propagated uncertainties.
 
 **Add from datasets…** expects the **sum-echo dataset** written by *Save as
-dataset…* (its header carries the Larmor frequency, the nucleus and the
-processing mode). A TopSpin `1r` of a QCPMG EXPNO can be opened too, but it
+dataset…* (its header carries the Larmor frequency, the nucleus, the
+processing mode and the rotor rate under `qcpmg_rotor_Hz` — the recipe's
+`spin_rate_Hz` stays 0 because a sum-echo spectrum is not re-modelled with
+sidebands). A TopSpin `1r` of a QCPMG EXPNO can be opened too, but it
 is a **spikelet comb**: the first-minima window would stop at the first
 spikelet gap (measured: δcg −105.1 ppm against −112.8 ppm from the sum echo
 of the same EXPNO, 8.6 ppm on δiso through the low-field lever). The comb is
@@ -310,6 +334,40 @@ detected from the data, the window is seeded from the envelope over one
 spikelet period, and the row is flagged — process the `fid` in *Tools ▸
 QCPMG* and use *Save as dataset…* / *→ infinite-field δiso…* instead. A
 `1r` processed with `mc` (procs `PH_mod = 2`) is recorded as magnitude.
+
+**Window modes (MAS data).** Each dataset row or batch cell has a window
+mode: *first minima / dragged band* (the default — supervise it), *whole
+manifold* and *centreband*. When the rotor rate is known the supervision
+plot ticks the sideband positions of the tallest peak and flags a window
+that catches **one sideband only**. The **whole manifold** integrates the
+full axis with the edge-noise floor subtracted and repeats the centre of
+gravity with the trace cut at 5 / 2 / 1 / 0 % of the peak (their spread is
+its σ): by the first-moment theorem it is exact for any distribution of
+sites *provided the whole sideband manifold is in the spectrum*. Rectified
+noise pulls a full-axis centroid towards the axis centre, so use it on the
+absorption sum echo; the report flags *magnitude + whole manifold*. The
+**centreband** window (peak ± ν_r/2) is accepted only when it holds ≥ 80 %
+of the intensity and its FWHM is below ν_r/2 — a pattern narrower than
+ν_r — and is refused with the measured fraction otherwise, because for a
+distribution it weights every site by its centreband share, which falls
+with P_Q (simulated glass: −89.1 ppm against −70 true).
+
+**Convergence.** Every measurement re-integrates the window at 1.5×, 2× and
+3× its width and quotes ± = max(jitter σ, |CG(2w) − CG(w)|); the report
+prints the sequence CG(w, 1.5w, 2w, 3w) per field and flags *CG not
+converged — window cuts the pattern* (drift beyond max(2σ, 5 ppm) or 10 %
+of the separation between the two fields' δcg). On the tutorial's LAW4Ca
+dataset at 78 MHz the sequence runs −73.4, −68.1, −57.3, −40.1 ppm while
+the jitter σ was 14.5 ppm.
+
+**What the slope measures for a distribution.** For a Czjzek (or any)
+distribution of sites the slope gives $\sqrt{\langle P_Q^2\rangle}$ — in
+LARMOR's σ convention $2\sqrt{5}\,\sigma$ (= $\sqrt{5}\,\sigma_\text{Cz}$ in
+the d'Espinose convention), `larmor.czjzek_dist.rms_pq` — not a single
+$C_Q$. Because $C_Q^2(3+\eta^2) = 3P_Q^2$ the slope needs no η at all; only
+the $C_Q$ line does. The window must reach the noise on **both** sides: a
+wide-window $P_Q$ is a lower bound when the tail runs into the noise (a
+Czjzek lineshape fit recovers the tail weight).
 
 > **Selective vs non-selective pulses.** Equation (1) is the shift of the
 > *central-transition* centre of gravity. In the **large-$C_Q$ limit**
@@ -342,9 +400,13 @@ the cells** (the `.csv` files stage 5 writes with *Save as dataset…*), or
 double-click a cell to browse. Dropping several files at once fills a row
 from that column onwards.
 
-Each cell is measured exactly as the single-sample dialog does it — δcg over
-an automatic window — and the column header learns its field from the files
-themselves, warning if the frequencies in one column disagree. **Select any
+Each cell is measured with the same functions and the same automatic window
+the single-sample dialog proposes for *Add from datasets…* (the stage-6 send
+instead uses the band placed there, so supervise each batch cell), and the
+column header learns its field from the files themselves, warning if the
+frequencies in one column disagree. A cell whose jitter σ exceeds 8 ppm, whose
+centre of gravity drifts as the window widens, or whose window catches one
+sideband only shows a **!** flag in the cell and in the report. **Select any
 cell** to see its spectrum with a draggable band and supervise that one
 measurement; the fit is invalidated whenever you move a window, so a stale
 result can never be exported.

@@ -10,15 +10,23 @@ import numpy as np
 import pyqtgraph as pg
 from larmor.desktop import theme
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
-    QCheckBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QHBoxLayout, QLabel,
-    QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
+    QHBoxLayout, QLabel, QPushButton, QTableWidget, QTableWidgetItem,
+    QVBoxLayout, QWidget,
 )
 
 from larmor.qcpmg_fields import (
-    ERR_FLOOR_PPM, FieldPoint, centre_of_gravity, field_plausibility_warning,
-    fmt_result_lines, infinite_field_diso, read_field_spectrum,
+    ERR_FLOOR_PPM, FieldPoint, field_plausibility_warning, fmt_result_lines,
+    infinite_field_diso, read_field_spectrum,
 )
+
+
+#: window-mode combo labels and the qcpmg.measure_cg modes behind them
+WINDOW_MODES = ("first minima / dragged band", "whole manifold",
+                "centreband (< ν_r)")
+WINDOW_MODE_KEYS = ("manual", "manifold", "centreband")
 
 
 def _spin_of(nucleus: str) -> float:
@@ -116,6 +124,19 @@ class QcpmgFieldsDialog(QDialog):
         row.addWidget(b_add); row.addWidget(b_del); row.addWidget(b_ds)
         row.addWidget(self.b_cur)
         row.addStretch(1)
+        row.addWidget(QLabel("window"))
+        self.winMode = QComboBox()
+        self.winMode.addItems(WINDOW_MODES)
+        self.winMode.setToolTip(
+            "how the selected dataset row's δcg window is defined:\n"
+            "• first minima / dragged band — the default, supervise it\n"
+            "• whole manifold — integrate the full axis (edge floor "
+            "subtracted); exact for a distribution of sites under MAS "
+            "provided the whole sideband manifold is in the spectrum\n"
+            "• centreband — peak ± ν_r/2, valid only when it reproduces the "
+            "whole-manifold CG (a pattern narrower than ν_r)")
+        self.winMode.currentIndexChanged.connect(self._mode_changed)
+        row.addWidget(self.winMode)
         v.addLayout(row)
 
         self.plot = pg.PlotWidget(background=theme.active().plot_bg)
@@ -193,9 +214,14 @@ class QcpmgFieldsDialog(QDialog):
         is a spikelet comb and is seeded from its envelope, see
         :func:`larmor.qcpmg.seed_window`)."""
         fs = read_field_spectrum(path)
-        return self.add_dataset_spectrum(
+        r = self.add_dataset_spectrum(
             fs["larmor"], fs["ppm"], fs["amp"], magnitude=fs["magnitude"],
-            nucleus=fs["nucleus"], source=fs["source"], meta=fs["meta"])
+            nucleus=fs["nucleus"], source=fs["source"], meta=fs["meta"],
+            rotor_Hz=fs["rotor_Hz"])
+        if r >= 0 and fs.get("rotor_note"):
+            self.wresult.setText(
+                f"<span style='color:#c0392b'>⚠ row {r + 1}: {fs['rotor_note']}</span>")
+        return r
 
     def _set_nucleus(self, nucleus: str, spin: bool = True):
         self._nucleus = nucleus or ""
@@ -234,7 +260,8 @@ class QcpmgFieldsDialog(QDialog):
     def add_dataset_spectrum(self, larmor_MHz: float, ppm, amp,
                              window=None, magnitude: bool | None = False,
                              nucleus: str = "", source: str = "",
-                             meta: dict | None = None) -> int:
+                             meta: dict | None = None,
+                             rotor_Hz: float = 0.0) -> int:
         """Add one field's spectrum: δcg ± σ and FWHM are computed over the
         given window (or a seeded one) and written into a new row; the
         spectrum stays attached so selecting the row shows it for
@@ -262,7 +289,10 @@ class QcpmgFieldsDialog(QDialog):
                            "magnitude": None if magnitude is None else bool(magnitude),
                            "source": source or "",
                            "comb": bool(seed is not None and seed.comb),
-                           "seed_note": seed.note if seed is not None else ""}
+                           "seed_note": seed.note if seed is not None else "",
+                           "larmor": float(larmor_MHz or 0.0),
+                           "rotor_Hz": float(rotor_Hz or 0.0),
+                           "mode": "manual" if window is not None else "minima"}
         self._add_row(larmor_MHz)
         r = self.table.rowCount() - 1
         self.table.item(r, 0).setData(Qt.UserRole, ds_id)
@@ -272,6 +302,8 @@ class QcpmgFieldsDialog(QDialog):
         tip = f"δcg measured on the {mode} spectrum"
         if source:
             tip += f"\nsource: {source}"
+        if rotor_Hz:
+            tip += f"\nMAS {float(rotor_Hz):.0f} Hz = {float(rotor_Hz) / float(larmor_MHz):.0f} ppm"
         if seed is not None and seed.comb:
             tip += f"\n⚠ {seed.note}"
             self.wresult.setText(
@@ -299,22 +331,75 @@ class QcpmgFieldsDialog(QDialog):
     def _apply_ds_values(self, r: int, ds_id: int):
         from larmor import qcpmg
         d = self._ds[ds_id]
-        lo, hi = d["window"]
-        cg, sigma = qcpmg.centre_of_gravity(d["ppm"], d["amp"], (hi, lo),
-                                            jitter_frac=0.10)
-        fw_ppm = qcpmg.fwhm_hz(d["ppm"], d["amp"], 1.0, (hi, lo))
+        mode = d.get("mode", "minima")
+        try:
+            m = qcpmg.measure_cg(
+                d["ppm"], d["amp"],
+                window=None if mode == "manifold" else tuple(d["window"]),
+                mode="manual" if mode in ("minima", "manual") else mode,
+                rotor_Hz=d.get("rotor_Hz", 0.0), larmor_MHz=d.get("larmor", 0.0),
+                magnitude=d.get("magnitude"))
+        except ValueError as exc:                     # centreband refused
+            self.wresult.setText(f"<span style='color:#c0392b'>⚠ {exc}</span>")
+            d["mode"] = "manual"
+            return
+        m.mode = mode
+        d["meas"] = m
+        d["window"] = tuple(m.window)
+        cg, sigma, fw_ppm = m.cg_ppm, m.sigma_ppm, m.fwhm_ppm
         if np.isfinite(cg):
             self.table.setItem(r, 1, QTableWidgetItem(f"{cg:.2f}"))
             self.table.setItem(r, 2, QTableWidgetItem(f"{max(sigma, ERR_FLOOR_PPM):.1f}"))
         self.table.setItem(r, 3, QTableWidgetItem(f"{fw_ppm:.2f}"))
         tip = d.get("tip", "")
-        if tip:                       # the cells were just recreated
-            for c in range(4):
-                it = self.table.item(r, c)
-                if it is not None:
-                    it.setToolTip(tip)
+        tip = "\n".join(bit for bit in [tip, f"window {m.window[0]:.1f} … "
+                                              f"{m.window[1]:.1f} ppm ({mode})",
+                                        (m.convergence.sequence()
+                                         if m.convergence is not None else ""),
+                                        *m.flags] if bit)
+        for c in range(4):
+            it = self.table.item(r, c)
+            if it is not None:
+                it.setToolTip(tip)
+                if c == 2:
+                    it.setForeground(QBrush(QColor("#c0392b")) if m.flags
+                                     else QBrush())
+        if m.flags:
+            self.wresult.setText(
+                f"<span style='color:#c0392b'>row {r + 1}: "
+                + "  ·  ".join(m.flags) + "</span>")
         if self._cg_line is not None and np.isfinite(cg):
             self._cg_line.setValue(cg)
+        if self._region is not None and self._row_ds_id(self.table.currentRow()) == ds_id:
+            self._region.blockSignals(True)
+            self._region.setRegion(m.window)
+            self._region.blockSignals(False)
+        self._draw_ticks(m)
+
+    def _draw_ticks(self, m):
+        """Dotted lines at the tallest peak ± k·ν_r/ν0 on the supervision
+        plot, so a window that catches one sideband is visible."""
+        for ln in getattr(self, "_tick_lines", []):
+            try:
+                self.plot.removeItem(ln)
+            except Exception:                                 # noqa: BLE001
+                pass
+        self._tick_lines = []
+        if self._region is None or not m.ticks_ppm:
+            return
+        pen = pg.mkPen(theme.active().text_dim, style=Qt.DotLine)
+        for t in m.ticks_ppm:
+            ln = pg.InfiniteLine(pos=t, angle=90, movable=False, pen=pen)
+            self.plot.addItem(ln)
+            self._tick_lines.append(ln)
+
+    def _mode_changed(self, idx: int):
+        r = self.table.currentRow()
+        ds_id = self._row_ds_id(r) if r >= 0 else None
+        if ds_id is None or ds_id not in self._ds:
+            return
+        self._ds[ds_id]["mode"] = WINDOW_MODE_KEYS[idx]
+        self._apply_ds_values(r, ds_id)
 
     def _row_ds_id(self, r: int):
         it = self.table.item(r, 0)
@@ -328,6 +413,12 @@ class QcpmgFieldsDialog(QDialog):
         d = self._ds[ds_id]
         self.plot.clear()
         self._region = self._cg_line = None
+        self._tick_lines = []
+        self.winMode.blockSignals(True)
+        self.winMode.setCurrentIndex(
+            WINDOW_MODE_KEYS.index(d.get("mode", "minima"))
+            if d.get("mode", "minima") in WINDOW_MODE_KEYS else 0)
+        self.winMode.blockSignals(False)
         self.plot.getPlotItem().invertX(True)
         self.plot.setLabel("bottom", "shift", units="ppm")
         self.plot.setLabel("left", "intensity", units="")
@@ -353,6 +444,10 @@ class QcpmgFieldsDialog(QDialog):
             return
         a, b = self._region.getRegion()
         self._ds[ds_id]["window"] = (min(a, b), max(a, b))
+        self._ds[ds_id]["mode"] = "manual"          # the user placed it
+        self.winMode.blockSignals(True)
+        self.winMode.setCurrentIndex(0)
+        self.winMode.blockSignals(False)
         if r < self.table.rowCount() and self._row_ds_id(r) == ds_id:
             self._apply_ds_values(r, ds_id)
 
@@ -457,21 +552,27 @@ class QcpmgFieldsDialog(QDialog):
             self.table.removeRow(r)
 
     def _from_current(self):
+        """δcg of the open workspace spectrum over the VISIBLE x-range --
+        through the same dataset route as 'Add from datasets…' (signed CG,
+        data-derived σ, FWHM, a stored window and the draggable band), never
+        a clipped whole-spectrum integral. The visible range is the window
+        when the parent has a view; otherwise the first-minima window is
+        seeded. The workspace does not know its processing mode, so the
+        row says 'mode unknown' unless the recipe recorded it."""
         if self._current is None:
             return
         larmor, ppm, amp = self._current
-        (x0, x1) = self.parent().view.getPlotItem().getViewBox().viewRange()[0] \
-            if hasattr(self.parent(), "view") else (None, None)
-        cg = centre_of_gravity(ppm, amp, x0, x1)
-        # write into the first empty δcg cell (or a new row)
-        for r in range(self.table.rowCount()):
-            if not (self.table.item(r, 1) and self.table.item(r, 1).text().strip()):
-                self.table.setItem(r, 0, QTableWidgetItem(f"{larmor:g}"))
-                self.table.setItem(r, 1, QTableWidgetItem(f"{cg:.2f}"))
-                return
-        self._add_row(larmor)
-        self.table.setItem(self.table.rowCount() - 1, 1,
-                           QTableWidgetItem(f"{cg:.2f}"))
+        window = None
+        parent = self.parent()
+        if parent is not None and hasattr(parent, "view"):
+            x0, x1 = parent.view.getPlotItem().getViewBox().viewRange()[0]
+            window = (float(min(x0, x1)), float(max(x0, x1)))
+        mag = None
+        recipe = getattr(parent, "recipe", None)
+        if isinstance(recipe, dict) and "qcpmg_magnitude" in recipe:
+            mag = bool(recipe.get("qcpmg_magnitude"))
+        self.add_dataset_spectrum(float(larmor), ppm, amp, window=window,
+                                  magnitude=mag, source="workspace spectrum")
 
     def _points(self) -> list[FieldPoint]:
         pts = []
@@ -489,7 +590,14 @@ class QcpmgFieldsDialog(QDialog):
                 err = 0.0                     # negative / NaN: not a sigma
             w = self.table.cellWidget(r, 4)
             sel = w.findChild(QCheckBox).isChecked() if w else True
-            pts.append(FieldPoint(nu, dcg, err, sel))
+            ds = self._ds.get(self._row_ds_id(r))
+            if ds is not None and ds.get("meas") is not None:
+                pts.append(FieldPoint.from_measurement(
+                    nu, ds["meas"], magnitude=ds.get("magnitude"),
+                    source=ds.get("source", ""), rotor_Hz=ds.get("rotor_Hz", 0.0),
+                    ct_selective=sel, dcg_ppm=dcg, dcg_err_ppm=err))
+            else:
+                pts.append(FieldPoint(nu, dcg, err, sel, source="manual"))
         return pts
 
     def _fields_fwhm(self):

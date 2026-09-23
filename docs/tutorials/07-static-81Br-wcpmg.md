@@ -284,8 +284,16 @@ determine η). The ⁸¹Br series exists at one field only, so the
 demonstration uses a ³⁵Cl chloride glass measured at 78.354 MHz
 (`<NMR>/MagLab/DATA/35Cl_2025-12/1`) and at 107.811 MHz
 (`<NMR>/NMRFAM/DATA/2026-06_35Cl/06102026_RS40175_LAW3Cl0Ca_SS_ALP/3`); both
-are MAS-QCPMG trains, which is fine — the extrapolation concerns the
-central-transition centroid.
+are MAS-QCPMG trains (16 kHz and 20 kHz — the NMRFAM `acqus` still says
+`MASR = 5000`, a stale controller value the title and `CNST31` correct, and
+LARMOR flags the conflict). MAS is fine for the extrapolation only when the
+window is a genuine centreband narrower than ν_r, as it is for this 0 Ca
+glass (171 and 135 ppm windows against sideband spacings of 204 and 186
+ppm), or when the window is the **whole sideband manifold**. For the
+distribution-broadened 2–4 Ca glasses the pattern is wider than ν_r, the
+first-minima window is one-sided (it catches the centreband plus one
+sideband, with opposite sign at the two fields) and δiso shifts by tens of
+ppm; the batch grid flags those cells and offers the whole-manifold window.
 
 **From the processing dialog.** Run each EXPNO's `fid` through §2–§7 and
 press **→ infinite-field δiso…** in stage 6. The first press opens *QCPMG —
