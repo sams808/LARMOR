@@ -324,18 +324,29 @@ def _crash_log_path() -> str:
         return "larmor_crash.log"
 
 
-def main() -> int:
-    import time
+def _install_faulthandler() -> str:
+    """Make a C-level crash (segfault) leave a traceback instead of a silent
+    "LARMOR stopped". A console run dumps to stderr; the frozen, windowed
+    exe has ``sys.stderr is None`` -- ``faulthandler.enable()`` then raises
+    RuntimeError, which killed every frozen build at start-up until the
+    0.13.0 smoke test caught it -- so it dumps to the crash log instead.
+    faulthandler writes to ONE target, hence the either/or. Returns where."""
     import faulthandler
 
-    # a C-level crash (segfault) otherwise exits silently ("LARMOR stopped" with no
-    # traceback) — this prints where it happened so it can actually be diagnosed
-    faulthandler.enable()
-    _log = _crash_log_path()
     try:
-        faulthandler.enable(open(_log, "w"))       # also persist it to a file
+        if sys.stderr is not None:
+            faulthandler.enable()
+            return "stderr"
+        faulthandler.enable(open(_crash_log_path(), "w"))
+        return _crash_log_path()
     except Exception:
-        pass
+        return "unavailable"
+
+
+def main() -> int:
+    import time
+
+    _install_faulthandler()
 
     import pyqtgraph as pg
     from PySide6.QtGui import QFont, QIcon, QPixmap
