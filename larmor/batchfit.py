@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from larmor import fit as fitmod
+from larmor import paramstatus
 from larmor.recipe import Recipe
 
 
@@ -397,6 +398,18 @@ def batch_error_analysis(result: BatchFitResult, data: list[tuple], *,
     return result
 
 
+def _status_fields(model: str, pn: str, p) -> dict:
+    """The five status columns of a table row, from the SAME Param the value
+    comes from: ``vary`` (False on every shared row -- batch_fit holds them),
+    the recipe bounds (a released parameter carries its ±frac window) and
+    ``at_bound`` = 'min' / 'max' / '' by the fit's own rule (paramstatus)."""
+    return {"vary": p.vary, "min": p.min, "max": p.max, "expr": p.expr or "",
+            "at_bound": paramstatus.param_status(model, pn, p).side}
+
+
+_NO_STATUS = {"vary": None, "min": None, "max": None, "expr": "", "at_bound": ""}
+
+
 def error_table(result: BatchFitResult, method: str | None = None) -> list[dict]:
     """Per-parameter rows for a CSV export carrying the selected error method.
 
@@ -420,7 +433,8 @@ def error_table(result: BatchFitResult, method: str | None = None) -> list[dict]
                              "value": p.value, "stderr": None, "sigma_pct": None,
                              "ci68_lo": None, "ci68_hi": None,
                              "error_method": method, "model": site.model,
-                             "source_path": "", "index": None})
+                             "source_path": "", "index": None,
+                             **_status_fields(site.model, pn, p)})
     for k, rec in enumerate(result.recipes):       # per-spectrum free params
         d = detail[k] if k < len(detail) else {}
         for i, site in enumerate(rec.sites):
@@ -440,7 +454,7 @@ def error_table(result: BatchFitResult, method: str | None = None) -> list[dict]
                                  "sigma_pct": pct, "ci68_lo": lo, "ci68_hi": hi,
                                  "error_method": method, "model": site.model,
                                  "source_path": rec.source_path or "",
-                                 "index": k})
+                                 "index": k, **_status_fields(site.model, pn, p)})
         rows.extend(_population_rows(rec, result.labels[k], method,
                                      {i: d.get((i, "amplitude")) for i in range(len(rec.sites))},
                                      index=k))
@@ -489,7 +503,7 @@ def _population_rows(rec: Recipe, scope: str, method: str | None,
                 "label": site.label or site.model, "param": "population_pct",
                 "value": row["fraction_pct"], "stderr": row["fraction_err_pct"],
                 "model": site.model, "source_path": rec.source_path or "",
-                "index": index}
+                "index": index, **_NO_STATUS}
         if method is not None:      # error_table's richer schema
             entry.update(sigma_pct=None, ci68_lo=None, ci68_hi=None,
                         error_method=method)
@@ -512,7 +526,7 @@ def shared_table(result: BatchFitResult) -> list[dict]:
                              "label": site.label or site.model, "param": pn,
                              "value": p.value, "stderr": p.stderr,
                              "model": site.model, "source_path": "",
-                             "index": None})
+                             "index": None, **_status_fields(site.model, pn, p)})
     for k, rec in enumerate(result.recipes):
         for i, site in enumerate(rec.sites):
             if is_zeroed_out(site.params.get("amplitude")):
@@ -524,7 +538,7 @@ def shared_table(result: BatchFitResult) -> list[dict]:
                                  "value": p.value, "stderr": p.stderr,
                                  "model": site.model,
                                  "source_path": rec.source_path or "",
-                                 "index": k})
+                                 "index": k, **_status_fields(site.model, pn, p)})
         rows.extend(_population_rows(rec, result.labels[k], None, index=k))
     return rows
 
@@ -534,17 +548,20 @@ def shared_table(result: BatchFitResult) -> list[dict]:
 # batch_table.csv / seq_table.csv and io/bundle all write -- one header list
 # and one writer per table, so a column added here reaches every export.
 SHARED_HEADER = ["scope", "site", "label", "param", "value", "stderr",
-                 "model", "source_path"]
+                 "model", "source_path", *paramstatus.CSV_COLUMNS]
 ERROR_HEADER = ["scope", "site", "label", "param", "value", "stderr",
                 "error_method", "sigma_pct", "ci68_lo", "ci68_hi",
-                "model", "source_path"]
+                "model", "source_path", *paramstatus.CSV_COLUMNS]
 
 
 def write_shared_csv(result: BatchFitResult, path) -> str:
     """``shared_table(result)`` as CSV with SHARED_HEADER (value ``.6g``,
     stderr ``.4g`` or blank). model + source_path let the Plotting studio's
     batch-grid figure find each row's spectrum/fit straight from this CSV,
-    even without "Save individual fits…" too. Returns the path written."""
+    even without "Save individual fits…" too; the trailing status columns
+    (``paramstatus.csv_fields``) say which values were held (shared rows:
+    vary False) and which released value stopped at the edge of its window
+    (``at_bound`` min / max). Returns the path written."""
     import csv
 
     rows = shared_table(result)
@@ -555,7 +572,8 @@ def write_shared_csv(result: BatchFitResult, path) -> str:
             w.writerow([r["scope"], r["site"], r["label"], r["param"],
                         f"{r['value']:.6g}",
                         "" if r["stderr"] is None else f"{r['stderr']:.4g}",
-                        r.get("model", ""), r.get("source_path", "")])
+                        r.get("model", ""), r.get("source_path", ""),
+                        *paramstatus.csv_fields(r)])
     return str(path)
 
 
@@ -579,7 +597,8 @@ def write_error_csv(result: BatchFitResult, path, method: str | None = None) -> 
                         num(r["value"]), num(r["stderr"]), r["error_method"],
                         num(r["sigma_pct"], ".3g"),
                         num(r["ci68_lo"]), num(r["ci68_hi"]),
-                        r.get("model", ""), r.get("source_path", "")])
+                        r.get("model", ""), r.get("source_path", ""),
+                        *paramstatus.csv_fields(r)])
     return str(path)
 
 

@@ -169,9 +169,11 @@ def test_batch_fit_dialog_loads_grid_and_fits(qapp, tmp_path):
     lines = out.read_text(encoding="utf-8").splitlines()
     assert lines[0].split(",") == ["scope", "site", "label", "param", "value",
                                    "stderr", "error_method", "sigma_pct",
-                                   "ci68_lo", "ci68_hi", "model", "source_path"]
+                                   "ci68_lo", "ci68_hi", "model", "source_path",
+                                   "vary", "min", "max", "expr", "at_bound"]   # N5
     amp = [ln for ln in lines[1:] if ln.split(",")[3] == "amplitude"]
     assert amp and all(ln.split(",")[6] == "covariance" for ln in amp)
+    assert all(ln.split(",")[12] == "True" and ln.split(",")[13] == "0" for ln in amp)
 
 
 def test_batch_dialog_covariance_errors_go_through_the_threaded_worker(qapp, tmp_path):

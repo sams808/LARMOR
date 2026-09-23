@@ -38,6 +38,24 @@ def test_cli_batchfit_writes_outputs(tmp_path):
     assert (out / "batch_table.csv").exists()
     assert len(list(out.glob("*_batch.recipe.json"))) == 3
 
+    # N5: the five status columns end the header; shared rows are held by
+    # the batch (vary False), amplitudes free, population rows blank
+    import csv
+    with open(out / "batch_table.csv", newline="", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    assert list(rows[0].keys())[-5:] == ["vary", "min", "max", "expr", "at_bound"]
+    shared = [r for r in rows if r["scope"] == "shared"]
+    assert {r["param"] for r in shared} == {"isotropic_chemical_shift_ppm",
+                                             "shift_fwhm_ppm", "gl"}
+    assert all(r["vary"] == "False" and r["at_bound"] == "" for r in shared)
+    assert next(r for r in shared if r["param"] == "shift_fwhm_ppm")["min"] == "0.1"
+    amps = [r for r in rows if r["param"] == "amplitude"]
+    assert len(amps) == 3
+    assert all(r["vary"] == "True" and r["min"] == "0" and r["max"] == "" for r in amps)
+    pops = [r for r in rows if r["param"] == "population_pct"]
+    assert len(pops) == 3
+    assert all(r["vary"] == "" and r["expr"] == "" and r["at_bound"] == "" for r in pops)
+
 
 def test_cli_seqfit_beats_shared_on_marching_series(tmp_path):
     paths, model = _make_series(tmp_path)
@@ -52,6 +70,17 @@ def test_cli_seqfit_beats_shared_on_marching_series(tmp_path):
            for r in recs]
     # each spectrum found its own marching position (12/14/16-ish, not one shared)
     assert max(pos) - min(pos) > 1.0
+
+    # N5: seq_table.csv carries the same status columns; every position is
+    # free inside its recipe bounds (0..30) -- no ±window, nothing at a bound
+    import csv
+    with open(out / "seq_table.csv", newline="", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    assert list(rows[0].keys())[-5:] == ["vary", "min", "max", "expr", "at_bound"]
+    prow = [r for r in rows if r["param"] == "isotropic_chemical_shift_ppm"]
+    assert len(prow) == 3
+    assert all(r["vary"] == "True" and r["at_bound"] == "" for r in prow)
+    assert all((r["min"], r["max"]) == ("0", "30") for r in prow)
 
 
 def test_cli_seqfit_needs_model(tmp_path):

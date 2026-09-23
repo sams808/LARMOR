@@ -339,7 +339,8 @@ class BatchFitDialog(QDialog):
         self.btnErrCsv = QPushButton("Export CSV…")
         self.btnErrCsv.setToolTip("write a CSV of every fitted parameter with its "
                                   "value and error, using the SELECTED error method "
-                                  "(computes it first if needed)")
+                                  "(computes it first if needed), plus its vary / "
+                                  "min / max / expr / at_bound status columns")
         self.btnErrCsv.setEnabled(False)
         self.btnErrCsv.clicked.connect(self._export_csv)
         er.addWidget(self.btnErrCsv)
@@ -379,7 +380,8 @@ class BatchFitDialog(QDialog):
         self.btnTable = bb.addButton("Save table…", QDialogButtonBox.ActionRole)
         self.btnTable.setToolTip("write a batch_table.csv of shared / per-spectrum "
                                  "values — the same numbers as the table under the "
-                                 "grid, in long form")
+                                 "grid, in long form, with each row's vary / min / "
+                                 "max / expr / at_bound status columns")
         self.btnTable.setEnabled(False)
         self.btnTable.clicked.connect(self._save_table)
         self.btnBundle = bb.addButton("Publication bundle…", QDialogButtonBox.ActionRole)
@@ -992,6 +994,9 @@ class BatchFitDialog(QDialog):
                     txt = _num(value, ".4g")
                     if _finite(stderr):
                         txt += f" ± {float(stderr):.2g}"
+                    side = row.get("at_bound")          # N5: ‡ finished at a bound
+                    if side:
+                        txt += " ‡"
                     it = _NumItem(txt)
                     if _finite(value):
                         it.setData(Qt.UserRole + 1, float(value))
@@ -999,6 +1004,12 @@ class BatchFitDialog(QDialog):
                     tip = f"{pn} · {row.get('error_method', '')}"
                     if _finite(row.get("sigma_pct")):
                         tip += f" · σ {float(row['sigma_pct']):.2g} %"
+                    if side:
+                        bound = row.get(side)
+                        tip += (f" · ‡ finished at its {'lower' if side == 'min' else 'upper'} "
+                                f"bound ({_num(bound, '.4g') if _finite(bound) else '?'}): "
+                                "the shared value does not fit this spectrum — widen "
+                                "the release % or fit the series sequentially")
                     it.setToolTip(tip)
                 items.append(it)
             for c, it in enumerate(items):

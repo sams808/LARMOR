@@ -438,11 +438,13 @@ class _FittingMixin:
         if not self.recipe or not self.recipe.get("sites"):
             self.statusBar().showMessage("no fit to tabulate")
             return
-        from larmor import methods
+        from larmor import methods, paramstatus
         tex = methods.latex_table(self.recipe, self._last_quant,
                                   caption=(self.recipe.get("sample") or ""))
         QApplication.clipboard().setText(tex)
-        self.statusBar().showMessage("LaTeX table copied to clipboard")
+        marked = paramstatus.summary(self.recipe)      # '1 fixed · 2 at a bound'
+        self.statusBar().showMessage("LaTeX table copied to clipboard"
+                                     + (f" · marked: {marked}" if marked else ""))
 
     def copy_methods(self):
         if not self.recipe or not self.recipe.get("sites"):

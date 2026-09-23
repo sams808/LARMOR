@@ -14,7 +14,13 @@ from larmor import batch, engine
 from larmor.recipe import Recipe, SiteModel, Param
 
 
-def _write_fit(tmp_path, name, pos1=15.0, nucleus="11B"):
+def _write_fit(tmp_path, name, pos1=15.0, nucleus="11B", bo3_width_start=None,
+               fix_bo4_pos=False):
+    """A synthetic two-line 11B fit (truth: BO3 width 6 ppm, BO4 at 0 ppm).
+    ``bo3_width_start=w`` writes the RECIPE's BO3 width as ``Param(w, min=w)``
+    after the data are made from the truth, so a fit from it must stop at
+    that floor; ``fix_bo4_pos`` holds the BO4 position. Defaults reproduce
+    the original fixture exactly."""
     x = np.linspace(-20, 60, 900)
     r = Recipe(nucleus=nucleus, larmor_frequency_MHz=160.0, spin_rate_Hz=20000.0,
                sample=name, source_kind="csv", sites=[
@@ -37,6 +43,10 @@ def _write_fit(tmp_path, name, pos1=15.0, nucleus="11B"):
             f.write(f"{xi:.5f} {yi:.5f}\n")
     r.source_path = str(csvp)
     r.fit_window_ppm = (-10.0, 40.0)
+    if bo3_width_start is not None:
+        r.sites[0].params["shift_fwhm_ppm"] = Param(bo3_width_start, min=bo3_width_start)
+    if fix_bo4_pos:
+        r.sites[1].params["isotropic_chemical_shift_ppm"].vary = False
     p = tmp_path / f"{name}.recipe.json"
     p.write_text(json.dumps(r.to_dict()), encoding="utf-8")
     return str(p)
@@ -81,6 +91,82 @@ def test_run_batch_writes_table_and_report(tmp_path):
     md = (out / "report.md").read_text(encoding="utf-8")
     assert "| Sample |" in md and "pop (%)" in md
     assert "figures/glassA.png" in md
+
+
+def test_report_marks_fixed_and_at_bound_cells(tmp_path):
+    """N5: every table the batch report writes marks held (†) and at-bound
+    (‡) values -- flag columns in table.csv (numbers unmarked), LaTeX
+    superscripts plus one legend row in table.tex, glyphs plus the legend
+    sentence and a ## Constraints section in report.md."""
+    paths = [_write_fit(tmp_path, "glassA", 15.0, bo3_width_start=8.0, fix_bo4_pos=True),
+             _write_fit(tmp_path, "glassB", 14.5, bo3_width_start=8.0, fix_bo4_pos=True)]
+    out = tmp_path / "report"
+    res = batch.run_batch(paths, out, error_method="covariance",
+                          make_plots=False, formats=("csv", "latex", "markdown"))
+    assert res.n_fits == 2 and res.n_sites == 4
+
+    with open(out / "table.csv", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    bo3 = [r for r in rows if r["label"] == "BO3"]
+    bo4 = [r for r in rows if r["label"] == "BO4"]
+    assert len(bo3) == 2 and len(bo4) == 2
+    assert all(r["dCS/FWHM (ppm) flag"] == "at_min" for r in bo3)
+    assert all(r["δiso (ppm) flag"] == "fixed" for r in bo4)
+    assert all(r["δiso (ppm) flag"] == "" for r in bo3)
+    assert all(r["dCS/FWHM (ppm) flag"] == "" for r in bo4)
+    assert all(r["pop (%) flag"] == "" for r in rows)
+    for r in rows:                      # numbers stay numbers: no glyph in a value
+        for c in ("δiso (ppm)", "dCS/FWHM (ppm)", "pop (%)"):
+            assert not any(g in r[c] for g in "†‡§")
+            float(r[c])
+    assert all(float(r["dCS/FWHM (ppm)"]) == pytest.approx(8.0, abs=0.01) for r in bo3)
+    assert all(float(r["δiso (ppm)"]) == 0.0 for r in bo4)
+    header = list(rows[0].keys())
+    assert header.index("δiso (ppm) err") < header.index("δiso (ppm) flag")
+
+    tex = (out / "table.tex").read_text(encoding="utf-8")
+    assert r"$^{\ddagger}$" in tex and r"$^{\dagger}$" in tex and r"\S" not in tex
+    tl = tex.splitlines()
+    foot = [ln for ln in tl if ln.startswith(r"\multicolumn")]
+    assert len(foot) == 1
+    assert tl.index(foot[0]) < tl.index(r"\end{tabular}")
+    assert r"$\dagger$ held fixed" in foot[0] and r"$\ddagger$ finished at a bound" in foot[0]
+    assert "linked" not in foot[0]
+    assert "‡" not in tex and "†" not in tex        # Unicode glyphs mapped to LaTeX
+
+    md = (out / "report.md").read_text(encoding="utf-8")
+    table_lines = [ln for ln in md.splitlines() if ln.startswith("| glass")]
+    assert len(table_lines) == 4
+    assert all("‡" in ln for ln in table_lines if "| BO3 |" in ln)
+    assert all("†" in ln for ln in table_lines if "| BO4 |" in ln)
+    para = next(ln for ln in md.splitlines() if ln.startswith("Errors are ± one standard error"))
+    assert "† held fixed · ‡ finished at a bound" in para and "§" not in para
+    assert "## Constraints" in md
+    cons = md.split("## Constraints", 1)[1].split("## ", 1)[0]
+    for sample in ("glassA", "glassB"):
+        line = next(ln for ln in cons.splitlines() if ln.startswith(f"- **{sample}**"))
+        assert "dCS/FWHM (ppm) (BO3) lower bound 8" in line
+        assert "δiso (ppm) (BO4)" in line and "gl (BO3)" in line
+        assert line.endswith("linked: —")
+
+
+def test_report_has_no_markers_for_an_unconstrained_batch(tmp_path):
+    """Free values print exactly as before: no glyph, no legend, no
+    Constraints section beyond what the recipe actually holds (gl is fixed
+    in the fixture, so the section lists just that)."""
+    paths = [_write_fit(tmp_path, "freeA", 15.0)]
+    out = tmp_path / "report"
+    batch.run_batch(paths, out, error_method="covariance",
+                    make_plots=False, formats=("csv", "latex", "markdown"))
+    with open(out / "table.csv", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    assert all(r[k] == "" for r in rows for k in r if k.endswith(" flag"))
+    tex = (out / "table.tex").read_text(encoding="utf-8")
+    assert r"\multicolumn" not in tex and "dagger" not in tex
+    md = (out / "report.md").read_text(encoding="utf-8")
+    assert "‡" not in md and "Marked values" not in md
+    cons = md.split("## Constraints", 1)[1]
+    assert "fixed: gl (BO3), gl (BO4) · at a bound: — · linked: —" in cons
 
 
 @pytest.mark.slow
