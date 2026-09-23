@@ -244,6 +244,20 @@ def readme_text(result, kind: str, files_glossary: list[str],
               f"  Python {v['python']}", ""]
     lines += ["METHODS"]
     if recs:
+        # the acquisition / processing part of the Experimental section over
+        # the series (varying parameters as ranges, one paragraph per
+        # nucleus) when the recipes carry acquisition blocks; the versions
+        # are the SOFTWARE block above, so the fit sentence stays version-free
+        from larmor import acquisition
+
+        blocks, spin = [], {}
+        for r in recs:
+            b = acquisition.block_for_recipe(r.to_dict())
+            if b:
+                blocks.append(b)
+                spin[b.get("expno_path")] = (r.spin_rate_Hz, r.mas_uncertain)
+        if blocks:
+            lines.append(acquisition.paragraph(blocks, spin_rates=spin))
         lines.append(methods.methods_sentence(recs[0].to_dict(), error_method))
     shared = tuple(getattr(result, "shared", ()) or ())
     released = tuple(getattr(result, "released", ()) or ())
