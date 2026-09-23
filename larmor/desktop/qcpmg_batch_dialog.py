@@ -411,14 +411,44 @@ class QcpmgBatchFieldsDialog(QDialog):
         self._show_cell()
 
     # ------------------------------------------------------------ compute
+    def _row_labels(self) -> dict[int, str]:
+        """row -> sample label. A typed name is used as is; an empty one is
+        'sample N'; a name another row already uses gets ' [row N]' appended
+        so two rows typed 'LAW0Ca' are two 2-point fits, never one pooled
+        4-point extrapolation (fit_samples groups by label on purpose, for
+        API callers who mean to pool)."""
+        labels: dict[int, str] = {}
+        seen: dict[str, int] = {}
+        for r in range(self.table.rowCount()):
+            it = self.table.item(r, 0)
+            name = (it.text().strip() if it is not None else "") or f"sample {r + 1}"
+            if name in seen:
+                name = f"{name} [row {r + 1}]"
+            else:
+                seen[name] = r
+            labels[r] = name
+        self._row_label = labels
+        return labels
+
+    def _duplicate_names(self) -> list[str]:
+        """'rows 1 and 3 share the name LAW0Ca' for every repeated name."""
+        groups: dict[str, list[int]] = {}
+        for r in range(self.table.rowCount()):
+            it = self.table.item(r, 0)
+            name = (it.text().strip() if it is not None else "")
+            if name:
+                groups.setdefault(name, []).append(r + 1)
+        return [f"rows {' and '.join(str(r) for r in rows)} share the name {name}"
+                for name, rows in groups.items() if len(rows) > 1]
+
     def _rows(self):
         from larmor.qcpmg_fields import FieldPoint
+        labels = self._row_labels()
         out = []
         for (r, c), d in sorted(self.cells.items()):
             if d.get("cg") is None or not np.isfinite(d["cg"]):
                 continue
-            name_item = self.table.item(r, 0)
-            name = (name_item.text() if name_item else "") or f"sample {r + 1}"
+            name = labels.get(r, f"sample {r + 1}")
             out.append((name, FieldPoint.from_measurement(
                 d["larmor"], d["meas"], magnitude=d.get("magnitude"),
                 source=d.get("source", ""), rotor_Hz=d.get("rotor_Hz", 0.0),
@@ -435,10 +465,10 @@ class QcpmgBatchFieldsDialog(QDialog):
         self._results = fit_samples(rows, spin=self.spin.value(),
                                     eta=self.eta.value())
         widths = {}
+        labels = self._row_label
         for name in self._results:
             fw = sorted((d["larmor"], d["fwhm"]) for (r, c), d in self.cells.items()
-                        if (self.table.item(r, 0).text() if self.table.item(r, 0)
-                            else f"sample {r + 1}") == name
+                        if labels.get(r) == name
                         and d.get("fwhm") is not None and np.isfinite(d["fwhm"])
                         and d["fwhm"] > 0)
             if len(fw) >= 2:
@@ -453,6 +483,9 @@ class QcpmgBatchFieldsDialog(QDialog):
         mixed = [name for name, r in self._results.items()
                  if isinstance(r, InfiniteFieldResult) and mixed_modes(r.points)]
         text = f"{n_ok} of {len(self._results)} samples extrapolated"
+        dups = self._duplicate_names()
+        if dups:
+            text += "   ⚠ " + "; ".join(dups) + " -- fitted separately"
         if mixed:
             text += ("   ⚠ NOT COMPARABLE: " + ", ".join(mixed)
                      + " mix magnitude and absorption δcg")

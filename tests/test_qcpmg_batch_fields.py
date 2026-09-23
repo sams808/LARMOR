@@ -318,3 +318,34 @@ def test_batch_grid_knows_the_processing_mode(qapp, tmp_path):
     assert "NOT COMPARABLE" in d.msg.text() and "mixed" in d.msg.text()
     assert "both-mc" not in d.msg.text().split("NOT COMPARABLE")[1]
     d.close()
+
+
+# ---------------------------------------------------------------- fix 14
+def test_identically_named_rows_are_fitted_separately(qapp, tmp_path):
+    """Two rows both typed 'LAW0Ca' became one pooled 4-point fit (and the
+    widths loop pooled their FWHMs). They are two fits, labelled apart, and
+    the status line says so; the widths keys match the result keys."""
+    from larmor.desktop.qcpmg_batch_dialog import QcpmgBatchFieldsDialog
+
+    d = QcpmgBatchFieldsDialog(None, "35Cl")
+    d.nSamples.setValue(3)
+    for si, (iso, cq) in enumerate(((-70.0, 3.2), (-80.0, 3.6), (-60.0, 2.8))):
+        for fi, nu in enumerate((78.3541, 107.811)):
+            centre = iso - 1e6 * cq ** 2 * 0.02 / nu ** 2
+            d._drop_files(si, 1 + fi, [_write(tmp_path, f"d{si}{fi}.csv", nu, centre)])
+    d.table.item(0, 0).setText("LAW0Ca")
+    d.table.item(1, 0).setText("LAW4Ca")
+    d.table.item(2, 0).setText("LAW0Ca")                  # the duplicate
+    d._compute()
+    assert len(d._results) == 3                          # not 2 (pooled)
+    assert set(d._results) == {"LAW0Ca", "LAW4Ca", "LAW0Ca [row 3]"}
+    assert d.report.toPlainText().count("--- ") == 3
+    assert all(len(r.points) == 2 for r in d._results.values())
+    assert d._results["LAW0Ca"].delta_iso_ppm == pytest.approx(-70.0, abs=3.0)
+    assert d._results["LAW0Ca [row 3]"].delta_iso_ppm == pytest.approx(-60.0, abs=3.0)
+    assert set(d._widths) <= set(d._results) and len(d._widths) == 3
+    assert "rows 1 and 3 share the name LAW0Ca" in d.msg.text()
+    assert "fitted separately" in d.msg.text()
+    # the figure spec follows the same labels
+    assert [s_["label"] for s_ in d._figure_spec()["samples"]] == list(d._results)
+    d.close()
