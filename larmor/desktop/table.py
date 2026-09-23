@@ -543,6 +543,20 @@ class LinesTable(QWidget):
     def set_sn(self, text: str):
         self.sn.setText(text)
 
+    def select_param(self, row: int, key: str) -> bool:
+        """Select the cell of parameter ``key`` on line ``row`` and put the
+        keyboard focus in its editor (the fit-health strip's click-through
+        for a flagged value). False when the cell does not exist."""
+        if key not in self._used_keys or not (0 <= row < self.table.rowCount()):
+            return False
+        c = 2 + self._used_keys.index(key)
+        self.table.setCurrentCell(row, c)
+        w = self.table.cellWidget(row, c)
+        if w is not None and hasattr(w, "edit"):
+            w.edit.setFocus()
+            w.edit.selectAll()
+        return True
+
     # ------------------------------------------------------------------
     def _context_menu(self, pos):
         """Right-click on the table body (row header / blank cells)."""

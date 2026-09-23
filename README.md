@@ -54,7 +54,11 @@ awkward starting points.
 matrix, by Monte-Carlo resampling, or from χ² profiling (proper 1σ/2σ confidence
 intervals). The latter two run on all CPU cores. Parameters that finish pinned at
 a bound are flagged rather than reported with a meaningless error bar, and the fit
-warns when two parameters are so correlated the data cannot separate them.
+warns when two parameters are so correlated the data cannot separate them. Every
+such flag — unphysical values, degenerate pairs, a structured residual,
+parameters at bounds, a missing covariance, unsupported populations — is
+gathered into one always-visible fit-health strip under the spectrum, each
+chip opening its detail.
 
 **Series of spectra.** A batch fit applies one shared model to many spectra at
 once, with amplitudes free per spectrum and any parameter optionally "released"

@@ -94,6 +94,14 @@ need more data — an MQMAS spectrum (one ships in `examples/pCABS2-4/3620`), a
 second field, or a constraint from chemistry. dmfit reports the same parameter
 values with no error bars, so this degeneracy stays invisible there.
 
+**In the desktop app** the same verdict is on screen without opening anything:
+after **F5** on this dataset the fit-health strip under the spectrum reads
+`✗ Fit: degenerate`, with a red `degenerate ×4: s2.pos↔s2.sigma (+1.00)` chip —
+`s2` is the AlO₆ site, whose position and Czjzek width trade off perfectly —
+and an amber `structured residual` chip from the runs test. Clicking the red
+chip opens the correlation matrix (Decomposition ▸ Parameter correlations);
+**F7** lists every flag.
+
 Tutorial 2 shows how to add exactly those constraints.
 
 ## 5. Same thing, interactively

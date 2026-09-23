@@ -36,6 +36,8 @@ from larmor.desktop import theme
 from larmor.desktop.plot import SpectrumView
 from larmor.desktop.table import LinesTable
 from larmor.recipe import Recipe
+from larmor import fithealth
+from larmor.desktop.fithealth_strip import FitHealthStrip
 
 #: project-bundle (.larproj.json) schema version -- was a write-only literal
 PROJECT_BUNDLE_VERSION = 1
@@ -301,6 +303,13 @@ class MainWindow(QMainWindow):
         self._paddle_live = False   # true while a paddle is being dragged
         self._last_model = None     # (x, total) of the latest simulation
         self._first_sim = False     # autoscale Y once the first model arrives
+        # fit health (see _health_from_result / _health_live): the verdict on
+        # screen, the verdict of the last fit it derives from, and that fit's
+        # lmfit result (Parameter correlations) -- all dropped together by
+        # _health_reset whenever the active 1D document changes
+        self._last_lmfit = None
+        self._health = None         # fithealth.Health currently shown (fit or live)
+        self._health_fit = None     # fithealth.Health of the last fit
 
         # central area holds a 1D spectrum view AND a 2D contour view; the
         # loader switches between them so ANY dataset opens with a basic
@@ -315,7 +324,18 @@ class MainWindow(QMainWindow):
         self.central_stack.addWidget(self.view)      # index 0: 1D
         self.central_stack.addWidget(self.view2d)    # index 1: 2D
         self._build_cofit_page()                     # index 2: co-fit split
-        self.setCentralWidget(self.central_stack)
+        # the stack sits in a container so the fit-health strip can run
+        # full-width directly under the spectrum (outside the plot, so it never
+        # reaches a figure export); every page check keeps using
+        # central_stack.currentWidget(), nothing reads centralWidget()
+        container = QWidget()
+        lay = QVBoxLayout(container)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        lay.addWidget(self.central_stack, 1)
+        self.health_strip = FitHealthStrip()
+        lay.addWidget(self.health_strip)
+        self.setCentralWidget(container)
         self._build_progress()
 
         self.view.add_requested.connect(self.add_site_at)
@@ -339,6 +359,20 @@ class MainWindow(QMainWindow):
         self._build_bottom_docks()
         self._build_right_dock()
         self._build_panels_menu()
+
+        # fit-health strip: every click is navigation, never a recipe edit
+        self.health_strip.pill.clicked.connect(self.show_fit_health)
+        self.health_strip.open_report.connect(
+            lambda: (self.results_dock.show(), self.results_dock.raise_()))
+        self.health_strip.show_residual.connect(self._health_show_residual)
+        self.health_strip.focus_param.connect(self._health_focus_param)
+        self.health_strip.open_correlations.connect(self.show_correlations)
+        self.health_strip.open_errors.connect(self.run_errors_analysis)
+        self.health_strip.open_help.connect(
+            lambda: self._open_manual("spectra-1d",
+                                      "1D spectra — processing & fitting"))
+        self.central_stack.currentChanged.connect(self._health_show)
+        self.health_strip.setVisible(False)      # shown once a 1D recipe has sites
 
         self.exp_label = ClickableLabel("")
         self.exp_label.setStyleSheet(
@@ -518,18 +552,23 @@ class MainWindow(QMainWindow):
         m_dec.addSeparator()
         # --- analyze ---
         self.actQuant = self._add(m_dec, "&Report (quantify)", self.run_quantify, "F6")
+        # F5 Fit / F6 Report / F7 Health form one cluster
+        self.actHealth = self._add(m_dec, "Fit &health details…  (why this verdict)",
+                                   self.show_fit_health, "F7")
         self.actErrors = self._add(m_dec, "&Errors Analysis (χ² profile)…",
                                    self.run_errors_analysis)
-        self._add(m_dec, "Monte-&Carlo errors…  (synthetic-noise refits)",
-                  self.run_monte_carlo)
-        self._add(m_dec, "Parameter correlations…  (from the last fit)",
-                  self.show_correlations)
+        # kept as attributes: the fit-health strip's menu lists these SAME
+        # QAction objects (no duplicated labels or slots)
+        self.actMC = self._add(m_dec, "Monte-&Carlo errors…  (synthetic-noise refits)",
+                               self.run_monte_carlo)
+        self.actCorr = self._add(m_dec, "Parameter correlations…  (from the last fit)",
+                                 self.show_correlations)
         self._add(m_dec, "Compare with a saved fit…  (parameter diff)",
                   self.compare_with_saved_fit)
         self._add(m_dec, "Czjzek distribution P(C_Q)…  (what σ stands for)",
                   self.show_czjzek_dist)
-        self._add(m_dec, "χ² map (parameter pair)…  (is the pair determined?)",
-                  self.show_chi2_map)
+        self.actChi2 = self._add(m_dec, "χ² map (parameter pair)…  (is the pair determined?)",
+                                 self.show_chi2_map)
         m_dec.addSeparator()
         # --- advanced / configuration (rarely touched) ---
         m_adv = m_dec.addMenu("Ad&vanced")
@@ -1443,6 +1482,21 @@ class MainWindow(QMainWindow):
         for dock in (self.explorer_dock, self.datasets_dock, self.ws_dock,
                      self.lines_dock, self.results_dock, self.proc_dock):
             m.addAction(dock.toggleViewAction())
+        # the strip under the spectrum is not a dock; its switch is remembered
+        # (small laptops), the actScrollNudge QSettings pattern
+        self.actHealthStrip = QAction("Fit &health strip", self)
+        self.actHealthStrip.setCheckable(True)
+        self.actHealthStrip.setToolTip("the verdict line under the spectrum: "
+                                       "residual, physical values, degenerate "
+                                       "pairs, bounds, error bars")
+        self.actHealthStrip.setChecked(bool(QSettings("LARMOR", "app").value(
+            "fitHealthStrip", True, type=bool)))
+        self.actHealthStrip.toggled.connect(self._toggle_health_strip)
+        m.addAction(self.actHealthStrip)
+
+    def _toggle_health_strip(self, on: bool):
+        QSettings("LARMOR", "app").setValue("fitHealthStrip", bool(on))
+        self._health_show()
 
     def _update_enabled(self):
         loaded = self.recipe is not None
@@ -1450,6 +1504,8 @@ class MainWindow(QMainWindow):
             a.setEnabled(loaded)
         self.actUndo.setEnabled(bool(self.undo_stack))
         self.actRedo.setEnabled(bool(self.redo_stack))
+        if getattr(self, "actHealth", None) is not None:
+            self.actHealth.setEnabled(self._health is not None)
 
     # ------------------------------------------------------------- axis unit
     def _build_axis_unit_menu(self, m_view):
@@ -1936,6 +1992,10 @@ class MainWindow(QMainWindow):
             f"color: {theme.active().accent}; font-weight: 600;")
         if hasattr(self, "progress"):
             self._style_progress()
+        # the verdict pill and chips take their colours from the theme's
+        # signal roles; the request_simulation() below then re-runs
+        # _health_live, whose signature check leaves a fit verdict untouched
+        self.health_strip.apply_theme()
         # re-theme both plot canvases
         self.view.apply_theme()
         if hasattr(self.view2d, "apply_theme"):
@@ -2212,6 +2272,12 @@ class MainWindow(QMainWindow):
             snap["exp_amp"] = np.array(self.exp_amp, copy=True)
             snap["proc_base"] = self._proc_base
             snap["overlays"] = [dict(o) for o in self._overlays]
+            # in-memory only (like the arrays above; never serialised): the
+            # verdict and covariance of this workspace's last fit, so that
+            # switching back restores them instead of reading 'no fit yet'
+            snap["health"] = self._health
+            snap["health_fit"] = self._health_fit
+            snap["lmfit"] = self._last_lmfit
         return snap
 
     def _apply_doc(self, snap: dict):
@@ -2225,6 +2291,7 @@ class MainWindow(QMainWindow):
             self._data2d_fittable = snap.get("fittable", False)
             self.view2d.set_state(snap["view2d"])
             self.central_stack.setCurrentWidget(self.view2d)
+            self._health_reset()          # a 2D workspace carries no 1D verdict
         else:
             self.exp_ppm = snap["exp_ppm"]; self.exp_amp = snap["exp_amp"]
             self._proc_base = snap["proc_base"]
@@ -2234,6 +2301,13 @@ class MainWindow(QMainWindow):
             self.view.set_title(self.recipe.get("sample", "") if self.recipe else "")
             self.lines_table.rebuild(self.recipe, self.hidden)
             self._update_paddles(); self._refresh_overlays(); self._update_sn()
+            # _update_sn dropped the verdict; put this workspace's own back.
+            # The re-simulation below finds equal signatures and keeps it.
+            self._health = snap.get("health")
+            self._health_fit = snap.get("health_fit")
+            self._last_lmfit = snap.get("lmfit")
+            self.health_strip.set_health(self._health)
+            self._health_show()
             if self.recipe and self.recipe.get("sites"):
                 self.request_simulation()
             else:
@@ -2551,6 +2625,12 @@ class MainWindow(QMainWindow):
         """Signal-to-noise: peak signal over the RMS of a signal-free region.
         The noise region is taken from the quiet outer edges of the spectrum
         (robust to where the peak sits), matching TopSpin's sino spirit."""
+        # this method runs at every active-1D-document change (see the comment
+        # below), which is exactly when the previous fit's verdict and
+        # covariance stop describing what is on screen: drop them here, once,
+        # rather than at every call site (Parameter correlations used to show
+        # another spectrum's covariance after a load or a workspace switch)
+        self._health_reset()
         y = self.exp_amp
         if y is None or y.size < 20:
             self.lines_table.set_sn("")
@@ -2802,6 +2882,9 @@ class MainWindow(QMainWindow):
         self.view2d.set_data(data2d, f"{kind} — {title}")
         self.view2d.clear_model()
         self.central_stack.setCurrentWidget(self.view2d)
+        # _show_2d does not pass through _update_sn; the outgoing 1D
+        # workspace's verdict was saved by _sync_active() above
+        self._health_reset()
         # a genuine spectroscopic 2D (not a relaxation array) is fittable, so
         # give it a recipe if there isn't a fit already in progress
         pseudo = any("pseudo" in n or "arrayed" in n for n in data2d.notes)
@@ -3461,6 +3544,7 @@ class MainWindow(QMainWindow):
     def on_paddle_released(self, idx):
         self._paddle_live = False
         self.lines_table.rebuild(self.recipe, self.hidden)
+        self._health_live(full=True)          # the one full pass after a drag
         self._persist_session()
 
     # ------------------------------------------------------------- simulate
@@ -3483,6 +3567,7 @@ class MainWindow(QMainWindow):
             return
         if not self.recipe or not self.recipe["sites"]:
             self.view.set_model(None, None, None, None, self.hidden)
+            self._health_reset()          # New fit / last line deleted: no verdict
             return
         if self._sim_worker and self._sim_worker.isRunning():
             self._sim_pending = True
@@ -3527,6 +3612,10 @@ class MainWindow(QMainWindow):
         self._last_model = (np.asarray(x), np.asarray(total))
         self.view.set_model(x, total, per_site, labels, self.hidden,
                             self.exp_ppm, self.exp_amp)
+        # the single debounced hook for table edits, paddles, undo/redo,
+        # processing, workspace switches and theme re-sims; during a paddle
+        # drag only the signature compare runs (the release does a full pass)
+        self._health_live(full=not self._paddle_live)
         if self._first_sim:
             self._first_sim = False
             self.autoscale_y()
@@ -3666,25 +3755,110 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _residual_noise_ratio(result):
-        """RMS of the residual in the signal region ÷ the baseline noise (RMS of
-        the quiet edges). ≈1 means the model captures the data down to the noise;
-        ≫1 means there is unmodelled structure left in the residual."""
-        try:
-            y = np.asarray(result.y_exp, float)
-            f = np.asarray(result.y_fit, float)
-            r = y - f
-            n = r.size
-            if n < 40:
-                return None
-            edge = max(5, n // 12)
-            noise = float(np.std(np.concatenate([r[:edge], r[-edge:]])))
-            if noise <= 0:
-                return None
-            sig = np.abs(f) > 0.05 * (np.abs(f).max() or 1.0)
-            r_sig = r[sig] if sig.any() else r
-            return float(np.sqrt(np.mean(r_sig ** 2)) / noise)
-        except Exception:
-            return None
+        """Delegate to fithealth.residual_noise_ratio (the body moved to the
+        Qt-free core with the fit-health strip); kept so callers holding a
+        duck-typed result still work. To remove when app.py is split."""
+        return fithealth.residual_noise_ratio(getattr(result, "y_exp", None),
+                                              getattr(result, "y_fit", None))
+
+    # ------------------------------------------------------------- fit health
+    def _health_from_result(self, result):
+        """Judge a finished fit (plain or Auto Fit): one fithealth.Health from
+        the FitResult, the quantify rows of THIS fit and the window's data;
+        remembered as the reference the live passes compare against."""
+        rl = getattr(result, "lmfit_result", None)
+        self._last_lmfit = rl                              # for correlations
+        rows = (self._last_quant or {}).get("rows")
+        h = fithealth.assess(
+            result.recipe, result.y_exp, result.y_fit, lmfit_result=rl,
+            at_bounds=result.at_bounds or [], frozen=result.frozen_sites or [],
+            window=getattr(result.recipe, "fit_window_ppm", None),
+            rmsd=result.rmsd, quant_rows=rows, fitted=True, ppm=self.exp_ppm,
+            x_fit=getattr(result, "x_ppm", None))
+        h.recipe_sig = fithealth.recipe_signature(self.recipe)
+        h.data_sig = fithealth.data_signature(self.exp_ppm, self.exp_amp)
+        self._health_fit = h
+        self._health_apply(h)
+        return h
+
+    def _health_live(self, full: bool = True):
+        """Re-judge the live model after the debounced simulation landed.
+        ``full=False`` (a paddle drag) only compares the cheap signatures and
+        marks the pill; the full pass interpolates the model onto the
+        experimental axis and reruns the residual + physical checks, carrying
+        the fit's covariance flags forward as stale."""
+        if (self._last_model is None or not len(self.exp_ppm)
+                or not (self.recipe and self.recipe.get("sites"))):
+            return
+        base = self._health_fit
+        if not full:
+            if base is None or (self._health is not None and self._health.stale):
+                return
+            if (fithealth.recipe_signature(self.recipe) != base.recipe_sig
+                    or fithealth.data_signature(self.exp_ppm, self.exp_amp)
+                    != base.data_sig):
+                self.health_strip.set_stale_hint(True)
+            return
+        x, tot = self._last_model
+        xp = np.asarray(self.exp_ppm)
+        if x.shape == xp.shape and np.array_equal(x, xp):
+            y = tot
+        else:
+            if x.size > 1 and x[0] > x[-1]:
+                x, tot = x[::-1], tot[::-1]
+            y = np.interp(xp, x, tot)     # kernel models simulate on their own axis
+        h = fithealth.reassess_live(base, self.recipe, self.exp_amp, y, ppm=xp,
+                                    window=self.recipe.get("fit_window_ppm"))
+        if h is not self._health and h != self._health:
+            self._health_apply(h)
+
+    def _health_apply(self, h):
+        self._health = h
+        self.health_strip.set_health(h)
+        if h.fitted and not h.stale:
+            # the Report header documents the LAST FIT; live edits do not
+            # rewrite it (the strip carries the live state)
+            self.results_summary.setText(h.summary())
+            self.results_summary.setToolTip(h.summary_tooltip())
+        self._update_enabled()
+        self._health_show()
+
+    def _health_show(self, *_):
+        on = (self.central_stack.currentWidget() is self.view
+              and bool(self.recipe and self.recipe.get("sites"))
+              and getattr(self, "actHealthStrip", None) is not None
+              and self.actHealthStrip.isChecked())
+        self.health_strip.setVisible(on)
+
+    def _health_reset(self):
+        self._health = None
+        self._health_fit = None
+        self._last_lmfit = None
+        self.health_strip.set_health(None)
+        self._update_enabled()
+        self._health_show()
+
+    def show_fit_health(self, *_):
+        """Decomposition ▸ Fit health details (F7) and the pill click: every
+        flag plus the analysis tools, anchored under the pill."""
+        if self._health is None:
+            self.statusBar().showMessage("run a fit first (F5)")
+            return
+        self.health_strip.show_details(
+            [self.actCorr, self.actErrors, self.actMC, self.actChi2])
+
+    def _health_focus_param(self, i: int, pname: str):
+        self.lines_dock.show()
+        self.lines_dock.raise_()
+        self.lines_table.select_param(i, pname)
+
+    def _health_show_residual(self):
+        # QAction.setChecked emits toggled, not triggered, so the slot would
+        # not run: trigger() (the sidebar's own route), guarded to never
+        # toggle the residual OFF
+        if not self.actResid.isChecked():
+            self.actResid.trigger()
+        self.view.show_residual = True
 
     def _fit_done(self, result, stop_mode: str = ""):
         self._active_fit_worker = None
@@ -3695,7 +3869,6 @@ class MainWindow(QMainWindow):
             self._progress_end(False)
             self.statusBar().showMessage("fit cancelled — parameters unchanged")
             return
-        self._last_lmfit = getattr(result, "lmfit_result", None)   # for correlations
         self._progress_end(True)
         self.recipe = result.recipe.to_dict()
         self.lines_table.rebuild(self.recipe, self.hidden)
@@ -3704,67 +3877,20 @@ class MainWindow(QMainWindow):
         self._last_model = (np.asarray(result.x_ppm), np.asarray(result.y_fit))
         self.view.set_model(result.x_ppm, result.y_fit, result.per_site,
                             labels, self.hidden, self.exp_ppm, self.exp_amp)
-        rl = getattr(result, "lmfit_result", None)
-        redchi = getattr(rl, "redchi", None)
-        chi_txt = f"RMSD {result.rmsd:.4f}"
-        if redchi is not None and np.isfinite(redchi):
-            chi_txt += f" · χ²ᵣ {redchi:.2f}"
-        self.lines_table.set_chi2(chi_txt)
-        bits = [chi_txt]
-        # residual diagnostics: is the model within the noise, or is there
-        # unmodelled structure? (residual RMS in the signal region ÷ edge noise)
-        ratio = self._residual_noise_ratio(result)
-        if ratio is not None:
-            bits.append("residual within noise" if ratio < 1.5
-                        else f"⚠ residual {ratio:.1f}× noise (structure left)")
-        # runs test / autocorrelation: catch a systematically-wrong model even
-        # when the RMSD looks small (structured residual, not white noise)
-        struct_msg = ""
-        try:
-            from larmor import diagnostics
-            struct = diagnostics.residual_structure(
-                np.asarray(result.y_exp, float) - np.asarray(result.y_fit, float))
-            if struct["structured"]:
-                bits.append("⚠ structured residual")
-                struct_msg = struct["message"]
-        except Exception:
-            pass
-        if result.frozen_sites:
-            bits.append("frozen: " + ", ".join(result.frozen_sites))
-        if result.at_bounds:
-            bits.append("⚠ at bounds: " + ", ".join(result.at_bounds))
-        # physical sanity: η∈[0,1], positive widths, non-negative amplitudes,
-        # sites inside the window — flag (never silently correct) so the human
-        # can judge whether the fit is physically meaningful
-        from larmor import sanity
-        window = getattr(result.recipe, "fit_window_ppm", None)
-        warns = sanity.check_recipe(result.recipe, window)
-        if warns:
-            bits.append(f"⚠ {len(warns)} physical warning"
-                        f"{'s' if len(warns) != 1 else ''}")
-        # identifiability: parameter pairs the data cannot separate (|r| ≥ 0.95)
-        from larmor.identifiability import unidentifiable_pairs
-        uni = unidentifiable_pairs(getattr(result, "lmfit_result", None))
-        if uni:
-            bits.append(f"⚠ {len(uni)} unidentifiable pair"
-                        f"{'s' if len(uni) != 1 else ''} (see Correlations)")
-        self.results_summary.setText("   ·   ".join(bits))
-        tip_lines = []
-        if struct_msg:
-            tip_lines.append(struct_msg)
-        if sanity.summarize(warns):
-            tip_lines.append(sanity.summarize(warns))
-        if uni:
-            tip_lines.append("unidentifiable: " + ", ".join(
-                f"{a}↔{b} ({r:+.2f})" for a, b, r in uni[:8]))
-        self.results_summary.setToolTip("\n".join(tip_lines))
+        # populations first, so the verdict's population rule reads THIS
+        # fit's rows (a failed quantify must not leave the previous fit's)
+        self._last_quant = None
+        self.run_quantify(show=False)
+        # one verdict -- residual within the noise / structured, physical
+        # values, degenerate pairs, bounds, covariance, populations -- shown
+        # by the strip under the spectrum, the Report header and the status
+        # bar; the three dialogs stay the detail views (fithealth.assess)
+        h = self._health_from_result(result)
+        self.lines_table.set_chi2(h.chi_text())
         self.report.setPlainText(result.report)
         self.statusBar().showMessage(
             ("fit stopped — kept the latest iteration values"
-             if stop_mode == "stop" else "fit done")
-            + ("  ⚠ parameters at bounds — check constraints"
-               if result.at_bounds else ""))
-        self.run_quantify(show=False)
+             if stop_mode == "stop" else "fit done") + h.status_suffix())
         self._remember_site_defaults()   # per-nucleus smart defaults for next time
         self._persist_session()
 
@@ -5070,9 +5196,17 @@ class MainWindow(QMainWindow):
         self.recipe = r.to_dict()
         self.lines_table.rebuild(self.recipe, self.hidden)
         self._update_paddles()
-        self.lines_table.set_chi2(f"RMSD {res.best_rmsd:.4f}")
-        self.request_simulation()
+        # the winning FitResult goes through the same path as a plain fit, so
+        # an Auto Fit gets the same verdict, chi text and correlations
+        self._last_quant = None
         self.run_quantify(show=False)
+        if res.result is not None:
+            h = self._health_from_result(res.result)
+            self.lines_table.set_chi2(h.chi_text())
+        else:                              # defensive: auto_fit always sets it
+            self._health_reset()
+            self.lines_table.set_chi2(f"RMSD {res.best_rmsd:.4f}")
+        self.request_simulation()
         self.statusBar().showMessage(res.summary)
 
     def run_errors_analysis(self):

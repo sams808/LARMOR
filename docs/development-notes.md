@@ -42,7 +42,7 @@ lines — by far the largest and the main window's monolith),
 | Processing | `processing.py` (the replayable op pipeline), `baseline.py`, `qcpmg.py`, `qcpmg_fields.py` |
 | Simulation | `models/` (the registry), `engine.py` (Czjzek kernel + `simulate`), `twod.py` (MQMAS), `estimate.py` (starting values measured from data) |
 | Fitting | `fit.py`, `batchfit.py`, `seqfit.py`, `multifit.py`, `autofit.py`, `parallel.py` |
-| Interpretation | `quantify.py`, `sanity.py`, `identifiability.py`, `diagnostics.py`, `chi2map.py`, `czjzek_dist.py`, `convert.py`, `nuclei.py`, `refranges.py` |
+| Interpretation | `quantify.py`, `sanity.py`, `identifiability.py`, `diagnostics.py`, `fithealth.py` (one verdict from the previous four, rendered by the desktop strip), `chi2map.py`, `czjzek_dist.py`, `convert.py`, `nuclei.py`, `refranges.py` |
 | Output | `figures.py` (spec-driven renderers), `methods.py` (auto-written Methods text), `series_grid.py` |
 
 **Data flow.** `loader.load_any(path)` → `(ppm, amp, recipe, meta, warnings)`
@@ -293,6 +293,26 @@ Ordered by how likely they are to mislead someone.
    1D — stale since the ladder replaced the fixed ceiling.
 10. ~~README test count stale~~ kept current (README says ~700; 712
     collected at 0.11.2).
+11. ~~`_last_lmfit` survived load / workspace switch / 2D~~ **fixed with the
+    fit-health strip (F7)**: the covariance of the previous fit was only ever
+    written by `_fit_done`, so Decomposition ▸ Parameter correlations could
+    show another spectrum's matrix. `_health_reset()` now drops verdict and
+    covariance together in `_update_sn` (the active-1D-document funnel),
+    `_show_2d` and `_apply_doc`'s 2D branch; workspace snapshots carry them
+    in memory so a switch back restores the right ones.
+12. ~~Auto Fit bypassed the diagnostics~~ **fixed with the fit-health strip**:
+    `run_auto_fit` wrote only an RMSD; the winning `FitResult`
+    (`AutoFitResult.result`) now goes through `_health_from_result` like a
+    plain fit, so it gets the same verdict, chi text and correlations.
+13. ~~Residual diagnostics never ran for kernel-model fits~~ **fixed with the
+    fit-health strip**: `_fit_done` subtracted `y_fit` (on the model axis,
+    16k points for a Czjzek recipe) from `y_exp` (the data axis) and swallowed
+    the shape error, so the residual/noise ratio and the runs test were
+    silently absent from every Czjzek / Amorphous fit's Report header.
+    `fithealth.assess` interpolates the model onto the data axis first
+    (`x_fit` + `ppm`). `MainWindow._residual_noise_ratio` is now a two-line
+    delegate to `fithealth.residual_noise_ratio`, to remove when `app.py` is
+    split.
 
 Genuinely open work is in `docs/roadmap.md`. The largest structural items:
 `app.py` is a 4.7k-line monolith, and there is no CI — so every "suite green"

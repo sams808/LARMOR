@@ -55,7 +55,11 @@ with errors), `sanity.py` (physical-plausibility flags on eta, widths,
 amplitudes, window coverage), `identifiability.py` (flags parameter pairs
 with |r| >= 0.95), `diagnostics.py` (residual runs-test and autocorrelation),
 `chi2map.py` (parameter-pair chi-squared surfaces), and `recipe_diff.py`
-(current fit versus a reference).
+(current fit versus a reference). `fithealth.py` gathers sanity,
+identifiability, the residual diagnostics and the population rule into one
+verdict — a `Health` with a level and flags carrying fixed wording,
+click-through targets and the table cells they concern; the strip under the
+desktop workbench and the Report header both read it.
 
 Output is `figures.py` — `render()` on plain-dict specs for 1D/2D/series
 figures with journal presets and png/pdf/svg/tiff export — together with
@@ -76,6 +80,7 @@ load_any ──▶ (ppm, amp, recipe) ──▶ processing ──▶ workbench
                                         ▼
                        quantify · sanity · identifiability · diagnostics · chi2
                                         │
+                                        ├──▶ fithealth ──▶ strip / Report header
                                         ▼
                         figures / methods / batch ──▶ publication bundle
 ```

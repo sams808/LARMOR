@@ -131,12 +131,48 @@ shift of the axis; the raw data is untouched.
    full relaxation. No fit can repair a non-quantitative acquisition; see
    **Fitting glasses for publication** §6 for the exact conditions.
 
+### Reading the fit-health strip
+
+Under the spectrum, a one-line strip states whether the last fit's numbers can
+be read as they stand. It is filled after every **Fit** and **Auto Fit** and
+re-evaluated as values change: a coloured pill, the RMSD and $\chi^2_r$ of the
+fit, then one chip per flag. A click on a chip opens the matching detail;
+**F7** (Decomposition ▸ Fit health details…) or a click on the pill lists every
+flag together with the analysis tools. The colours classify the *kind* of
+flag, not the quality of the fit — LARMOR does not grade a fit.
+
+| Pill | Meaning |
+|---|---|
+| `no fit yet — F5 fits the lines` | the model has not been fitted; only unphysical values are flagged while lines are placed |
+| `✓ Fit: no flags` (teal) | every check passed — the pill's tooltip lists them |
+| `⚠ Fit: n caveats` (amber) | statistical caveats: the values are readable, but the residual or the error bars are not clean |
+| `✗ Fit: not physical · degenerate` (red) | the numbers cannot be read as physical values: an unphysical value, or a pair the data cannot separate |
+
+| Chip | What it measures | A click opens |
+|---|---|---|
+| `residual N.N× noise` | residual RMS in the signal region ÷ the noise of the spectrum edges, at or above 1.5× | the residual trace (View ▸ Residual) |
+| `structured residual` | Wald–Wolfowitz runs test with $\vert z\vert > 3$, or lag-1 autocorrelation above 0.4 | the residual trace |
+| `unphysical ×n` | η or the Gauss/Lorentz mix outside [0, 1], a width ≤ 0, a negative amplitude, δiso outside the fit window | the offending cell of the Fit-Parameters table |
+| `degenerate ×n: a↔b (r)` | a parameter pair with $\vert r\vert \geq 0.95$ in the covariance | Parameter correlations |
+| `at bounds: …` | a parameter that finished pinned at a min/max bound | its cell |
+| `no error bars (no covariance)` | the fit returned no covariance matrix | Errors Analysis (χ² profile) |
+| `population ±≥100 %: …` | a population whose relative error reaches 100 % (see *Fitting glasses for publication* §5) | the Report |
+| `frozen: …` | a site the fit held because its centre lies outside the window | its δiso cell |
+
+After an edit the pill reads **Model** instead of **Fit**, with `edited since
+fit`: the residual and physical chips follow the live model, while the
+covariance-based chips (degenerate, at bounds, no error bars, population) are
+dimmed — they describe the last fit until the next **F5**. Re-processing the
+spectrum drops the verdict altogether, since the covariance no longer describes
+the data. **View ▸ Panels ▸ Fit health strip** hides the strip.
+
 **Zones** restrict the fit to chosen spectral regions (union of intervals) — fit
 only where the model is valid and let peaks outside float frozen. **Auto Fit**
 does a multi-start search to escape local minima.
 
 **Three ways to get errors** (Decomposition ▸ Analyze), in increasing rigour and
-cost:
+cost — the strip's `no error bars` chip opens the second one, the rescue when
+the covariance failed:
 
 - **Covariance** — the standard error printed next to every fitted value after a
   **Fit**. Instant, but assumes a locally quadratic, well-conditioned $\chi^2$ —
