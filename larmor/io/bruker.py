@@ -409,6 +409,9 @@ def _meta_1d(acqus: dict, title: str, expno: Path) -> dict:
     # backward-compat API are unchanged); spin_rate_Hz is the resolved rate the
     # recipe should use (highest of the sources, or a flagged fallback).
     spin_hz, mas_uncertain = _resolve_mas(acqus, title)
+    d = _num_list(acqus.get("D"))
+    td = int(acqus.get("TD", 0) or 0)
+    sw = float(acqus.get("SW_h", 0.0) or 0.0)
     return {
         "nucleus": str(acqus.get("NUC1", "")).strip(),
         "larmor_MHz": float(acqus.get("SFO1", 0.0)),
@@ -428,8 +431,17 @@ def _meta_1d(acqus: dict, title: str, expno: Path) -> dict:
         # spikelet spacing / echo period exactly, so the echo period is READ,
         # never guessed from an autocorrelation (see larmor.qcpmg)
         "cnst": _num_list(acqus.get("CNST")),
-        "d": _num_list(acqus.get("D")),
+        "d": d,
         "l": _num_list(acqus.get("L")),
+        # acquisition facts for the quantitativity chips (larmor.quantitativity):
+        # scans, the pulse / power arrays, the recycle delay D1, the acquisition
+        # time TD/(2*SW_h) and the probe name (the 90-degree pulse memory key)
+        "ns": int(acqus.get("NS", 0) or 0),
+        "p_us": _num_list(acqus.get("P")),
+        "plw_w": _num_list(acqus.get("PLW")),
+        "d1_s": (d[1] if len(d) > 1 else None),
+        "aq_s": (td / (2.0 * sw) if td and sw > 0 else None),
+        "probhd": str(acqus.get("PROBHD", "")).strip().strip("<>").strip(),
         # processing reference (procs/SF) -- needed for a correctly referenced
         # ppm axis; O1/BF1 alone is off by (SFO1-SF)*1e6/SF, tens of ppm on a
         # referenced dataset. Filled by _read_procs_ref() where procs exists.
@@ -488,6 +500,19 @@ def _read_procs_ref(expno: Path) -> dict:
     except Exception:
         pass
     return {"sf_MHz": sf, "sr_hz": sr}
+
+
+def read_acqus_meta(expno: str | Path) -> dict:
+    """The ``_meta_1d`` dict of an EXPNO from acqus + pdata/1/title alone --
+    no fid/ser is read (``read_expno`` reads the data). {} when the folder
+    has no readable acqus; never raises."""
+    p = Path(expno)
+    try:
+        acqus = ng.fileio.bruker.read_jcamp(str(p / "acqus"))
+        title = _read_title(p / "pdata" / "1")
+        return _meta_1d(acqus, title, p)
+    except Exception:
+        return {}
 
 
 def _conflicts(meta: dict, title: str) -> list[str]:
