@@ -299,6 +299,13 @@ it agrees with the profile.
 - **Decomposition > Report (quantify)** (F6) integrates each site over the
   window and reports populations `± error`; those errors are first-order
   propagation of the amplitude covariance and inherit its limitations.
+- The Report's family sums and named ratios (the Σ rows and N₄ of lines
+  tagged in the `family` column) take their error from the Monte-Carlo
+  per-trial integrals once **Use as fit errors** is pressed (the dialog
+  lists `s0.population_pct`, `family.BO4`, `ratio.N4` with histograms), from
+  the amplitude covariance (lmfit's correlated values) right after a plain
+  fit, and are flagged *independent* otherwise — the row tooltip, Copy CSV
+  and the Methods sentence state which basis was used.
 - The batch-fit dialog of Tutorial 4 has an *Error calculation:* selector
   with the same three estimators — `Covariance (from the fit)`,
   `Monte-Carlo (synthetic-noise refits)`, `χ² profile (error analysis)` —

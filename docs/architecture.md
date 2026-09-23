@@ -68,7 +68,9 @@ co-fits several datasets with parameters shared through `share=`.
 fit, shear, and 2D kernels.
 
 Interpretation sits beside the fitters: `quantify.py` (integral populations
-with errors), `sanity.py` (physical-plausibility flags on eta, widths,
+with errors), `families.py` (preset family tags, the named-ratio catalogue
+and the covariance / Monte-Carlo / independent summaries of tagged lines),
+`sanity.py` (physical-plausibility flags on eta, widths,
 amplitudes, window coverage), `identifiability.py` (flags parameter pairs
 with |r| >= 0.95), `diagnostics.py` (residual runs-test and autocorrelation),
 `chi2map.py` (parameter-pair chi-squared surfaces), and `recipe_diff.py`

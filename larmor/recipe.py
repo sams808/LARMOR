@@ -88,6 +88,13 @@ class SiteModel:
     ref: dict | None = None
     #: for the "function" model: a y(x; a,b,c,d) expression string
     func: str | None = None
+    #: structural species tag (BO3/BO4, Al(IV)…, Qn, free text) that groups
+    #: lines for the Report's summed populations and named ratios (N4, ⟨CN⟩,
+    #: ⟨n⟩ -- larmor.families); "" = untagged, never grouped. Omitted from the
+    #: saved recipe when empty, so an untagged recipe keeps opening in older
+    #: LARMOR versions (their SiteModel rejects unknown site keys). Last field
+    #: so positional SiteModel(model, label, params) construction still works.
+    family: str = ""
 
 
 @dataclass
@@ -153,6 +160,12 @@ class Recipe:
     # ---------- serialization ----------
     def to_dict(self) -> dict:
         d = asdict(self)
+        # an empty family is not written: an untagged recipe stays byte-
+        # compatible with readers that predate the field (their
+        # SiteModel(**s) raises TypeError on an unknown site key)
+        for s in d["sites"]:
+            if not s.get("family"):
+                s.pop("family", None)
         d["larmor_recipe_version"] = RECIPE_VERSION
         return d
 
@@ -168,9 +181,17 @@ class Recipe:
             d, migration_notes = run_migrations(d, version, _MIGRATIONS,
                                                 RECIPE_VERSION)
         sites = []
+        # forward compatibility at the SITE level too: a site key this
+        # version does not know (written by a newer LARMOR) is dropped with a
+        # note instead of a TypeError from SiteModel(**s)
+        site_known = {f.name for f in fields(SiteModel)}
+        unknown_site_keys: set[str] = set()
         for s in d.pop("sites", []):
             s = dict(s)   # never mutate the caller's dicts
             params = {k: Param(**p) for k, p in s.pop("params", {}).items()}
+            for k in [k for k in s if k not in site_known]:
+                unknown_site_keys.add(k)
+                s.pop(k)
             sites.append(SiteModel(params=params, **s))
         window = d.pop("fit_window_ppm", None)
         # forward compatibility: a recipe written by a NEWER LARMOR may carry
@@ -188,6 +209,10 @@ class Recipe:
         recipe.fit_window_ppm = tuple(window) if window else None
         if extra_note:
             recipe.notes.append(extra_note)
+        if unknown_site_keys:
+            recipe.notes.append(
+                "ignored unknown site fields (written by a newer LARMOR?): "
+                + ", ".join(sorted(unknown_site_keys)))
         for n in migration_notes:
             recipe.notes.append(n)
         return recipe

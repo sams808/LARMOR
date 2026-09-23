@@ -135,6 +135,61 @@ def test_run_batch_writes_acquisition_outputs(tmp_path):
     assert not any("acquisition" in f for f in res3.files)
 
 
+def test_run_batch_adds_family_rows_and_ratios_csv_for_tagged_fits(tmp_path):
+    """N3: BO3/BO4-tagged fits add Σ family rows (model 'family') to
+    table.csv, ratios.csv with one N4 per glass and a '## Named ratios'
+    section; n_sites still counts real sites; an untagged batch writes no
+    ratios.csv and no Σ."""
+    from pathlib import Path
+
+    paths = [_write_fit(tmp_path, "glassA", 15.0),
+             _write_fit(tmp_path, "glassB", 14.5)]
+    for p in paths:
+        d = json.loads(Path(p).read_text(encoding="utf-8"))
+        d["sites"][0]["family"] = "BO3"
+        d["sites"][1]["family"] = "BO4"
+        Path(p).write_text(json.dumps(d), encoding="utf-8")
+    out = tmp_path / "report"
+    res = batch.run_batch(paths, out, error_method="covariance",
+                          make_plots=False, formats=("csv", "latex", "markdown"))
+    assert res.n_fits == 2 and res.n_sites == 4
+    with open(out / "table.csv", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    fam = [r for r in rows if r["model"] == "family"]
+    assert len(rows) == 8 and len(fam) == 4              # 2 glasses x (2 sites + 2 Σ)
+    assert {r["site"] for r in fam} == {"f0", "f1"}
+    assert {r["label"] for r in fam} == {"Σ BO3", "Σ BO4"}
+    for r in fam:
+        assert r["pop (%)"] and r["pop (%) err"]           # value AND propagated error
+        assert r["δiso (ppm)"] == "" and r["pop (%) flag"] == ""
+    a = {r["label"]: float(r["pop (%)"]) for r in rows if r["sample"] == "glassA"}
+    assert a["Σ BO3"] == pytest.approx(a["BO3"], rel=1e-9)
+    assert a["Σ BO3"] + a["Σ BO4"] == pytest.approx(100.0, abs=1e-6)
+    assert (out / "ratios.csv").exists() and str(out / "ratios.csv") in res.files
+    with open(out / "ratios.csv", encoding="utf-8") as f:
+        rr = list(csv.DictReader(f))
+    assert [r["name"] for r in rr] == ["N4", "N4"]
+    assert [r["sample"] for r in rr] == ["glassA", "glassB"]
+    assert all(r["basis"] == "covariance" for r in rr)
+    assert all(0.0 < float(r["value"]) < 1.0 and float(r["err"]) > 0 for r in rr)
+    assert rr[0]["description"] == "BO4/(BO3+BO4)"
+    assert float(rr[0]["value"]) == pytest.approx(a["Σ BO4"] / 100.0, rel=1e-5)
+    md = (out / "report.md").read_text(encoding="utf-8")
+    assert "## Named ratios" in md and "| glassA | N4 |" in md
+    assert "Σ BO4" in md and "2 fits · 4 sites" in md
+    assert "Family rows (Σ) sum their lines" in md
+    tex = (out / "table.tex").read_text(encoding="utf-8")
+    assert "Σ BO4" in tex
+    # untagged: byte-for-byte the old outputs
+    out2 = tmp_path / "report2"
+    res2 = batch.run_batch([_write_fit(tmp_path, "plain", 15.0)], out2,
+                           error_method="covariance", make_plots=False,
+                           formats=("csv", "markdown"))
+    assert res2.n_sites == 2 and not (out2 / "ratios.csv").exists()
+    md2 = (out2 / "report.md").read_text(encoding="utf-8")
+    assert "Named ratios" not in md2 and "Σ" not in md2 and "Family rows" not in md2
+
+
 def test_report_marks_fixed_and_at_bound_cells(tmp_path):
     """N5: every table the batch report writes marks held (†) and at-bound
     (‡) values -- flag columns in table.csv (numbers unmarked), LaTeX

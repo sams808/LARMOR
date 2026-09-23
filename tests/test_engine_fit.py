@@ -42,6 +42,46 @@ def _degenerate_recipe():
     return r, x, data
 
 
+def test_amplitude_uvars_matches_param_stderr_and_goes_stale_on_edit():
+    """fit.amplitude_uvars (N3): the ufloat per site carries the covariance
+    stderr lmfit wrote on the Param (and its correlations), returns None once
+    an amplitude was edited after the fit, and None without a covariance."""
+    from types import SimpleNamespace
+
+    x = np.linspace(-20, 40, 600)
+    truth = Recipe(nucleus="11B", larmor_frequency_MHz=160.0, sites=[
+        SiteModel(model="gauss_lor", label="A", params={
+            "isotropic_chemical_shift_ppm": Param(12.0), "shift_fwhm_ppm": Param(8.0),
+            "amplitude": Param(100.0), "gl": Param(1.0, vary=False)}),
+        SiteModel(model="gauss_lor", label="B", params={
+            "isotropic_chemical_shift_ppm": Param(6.0), "shift_fwhm_ppm": Param(6.0),
+            "amplitude": Param(60.0), "gl": Param(1.0, vary=False)})])
+    _, y, _ = engine.simulate(truth, exp_ppm=x)
+    data = y + np.random.default_rng(3).normal(0, 0.5, x.size)
+    rec = Recipe.from_dict(truth.to_dict())
+    for s in rec.sites:
+        s.params["amplitude"].value *= 0.8
+    res = fitmod.fit(rec, x, data, window_ppm=(40, -20))
+    uv = fitmod.amplitude_uvars(res.lmfit_result, rec)
+    assert uv is not None and set(uv) == {0, 1}
+    for i in range(2):
+        p = rec.sites[i].params["amplitude"]
+        assert uv[i].nominal_value == pytest.approx(p.value, rel=1e-12)
+        assert uv[i].std_dev == pytest.approx(p.stderr, rel=1e-9)
+    # overlapping lines: the two amplitudes are correlated, not independent
+    from uncertainties import covariance_matrix
+    cm = covariance_matrix([uv[0], uv[1]])
+    assert cm[0][1] != 0.0
+    # a nudge after the fit makes the covariance stale -> None
+    rec.sites[0].params["amplitude"].value *= 1.001
+    assert fitmod.amplitude_uvars(res.lmfit_result, rec) is None
+    rec.sites[0].params["amplitude"].value /= 1.001
+    assert fitmod.amplitude_uvars(res.lmfit_result, rec) is not None
+    # no covariance at all (lmfit sets uvars None), or no result -> None
+    assert fitmod.amplitude_uvars(SimpleNamespace(uvars=None), rec) is None
+    assert fitmod.amplitude_uvars(None, rec) is None
+
+
 def test_compute_errorbars_false_skips_the_rescue_retry():
     """A degenerate covariance normally triggers a second full optimization
     (leastsq from the converged point) to try to recover error bars.

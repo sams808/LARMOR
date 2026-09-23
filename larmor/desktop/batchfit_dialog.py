@@ -38,6 +38,7 @@ from larmor.desktop.comparability_dialog import (
 )
 from larmor.desktop.panels import PARAM_LABELS
 from larmor.desktop.plot import site_color
+from larmor.families import GROUP_PARAMS
 from larmor.io.scan import disambiguate, sample_label
 from larmor.series_table import SeriesTable
 
@@ -1103,6 +1104,18 @@ class BatchFitDialog(QDialog):
         m = self.errCombo.currentData()
         return m if m in (getattr(result, "error_detail", {}) or {}) else "covariance"
 
+    @staticmethod
+    def _column_header(i: int, label: str, pn: str) -> str:
+        """Header of one wide-table column: 's0 A\\namplitude', 's0 A\\n
+        population %' and, for the group columns (N3, where i is a family
+        or ratio index rather than a site), 'Σ BO4\\nfamily %' / 'N4\\nratio'."""
+        if pn == "family_pct":
+            return f"Σ {label}\nfamily %"
+        if pn == "ratio":
+            return f"{label}\nratio"
+        return f"s{i} {label}\n" + ("population %" if pn == "population_pct"
+                                     else PARAM_LABELS.get(pn, pn))
+
     def _fill_table(self, result):
         """(Re)build the table: the fixed columns (#, sample, proc, S/N, RMSD)
         always, plus one column per site x parameter once ``result`` exists.
@@ -1124,10 +1137,7 @@ class BatchFitDialog(QDialog):
         else:
             rows = batchfit.error_table(result, self._table_method(result))
             cols, cells = batchfit.pivot_by_spectrum(rows, len(result.recipes))
-        headers = fixed + [
-            f"s{i} {label}\n" + ("population %" if pn == "population_pct"
-                                 else PARAM_LABELS.get(pn, pn))
-            for i, label, pn in cols]
+        headers = fixed + [self._column_header(i, label, pn) for i, label, pn in cols]
         t.setRowCount(0)
         t.setColumnCount(len(headers))
         t.setHorizontalHeaderLabels(headers)
@@ -1164,10 +1174,17 @@ class BatchFitDialog(QDialog):
             for col in cols:
                 i, _label, pn = col
                 row = cells.get((k, col))
+                # a family / ratio column (N3): i is the family index, not a
+                # site -- neutral text colour, no site tooltip lookups
+                group = pn in GROUP_PARAMS
                 if row is None:
                     it = _NumItem("")
                     rec = result.recipes[k] if k < len(result.recipes) else None
-                    if (rec is not None and i < len(rec.sites)
+                    if group:
+                        if pn == "family_pct":
+                            it.setToolTip("every line of this family is excluded "
+                                          "for this spectrum")
+                    elif (rec is not None and i < len(rec.sites)
                             and batchfit.is_zeroed_out(
                                 rec.sites[i].params.get("amplitude"))):
                         it.setToolTip("excluded for this spectrum")
@@ -1182,8 +1199,18 @@ class BatchFitDialog(QDialog):
                     it = _NumItem(txt)
                     if _finite(value):
                         it.setData(Qt.UserRole + 1, float(value))
-                    it.setForeground(QColor(site_color(i)))
+                    if not group:
+                        it.setForeground(QColor(site_color(i)))
                     tip = f"{pn} · {row.get('error_method', '')}"
+                    if group:
+                        tip = (("summed family population %" if pn == "family_pct"
+                                else "named ratio")
+                               + f" · errors: {row.get('basis', '')}"
+                               + (" (lines treated as independent -- run an "
+                                  "error calculation for a propagated value)"
+                                  if row.get("basis") == "independent" else
+                                  " (propagated over the lines' covariance / "
+                                  "per-trial sums)"))
                     if _finite(row.get("sigma_pct")):
                         tip += f" · σ {float(row['sigma_pct']):.2g} %"
                     if side:

@@ -227,6 +227,16 @@ runs anywhere.
   ± window in `min` / `max`, and `at_bound` reads `min` or `max` when the
   value stopped at that edge — the same cell shows ‡ in the results table,
   with the remedy in its tooltip.
+- **Families and N4:** tag BO₃ and BO₄ once in the model — the `family`
+  column of the Fit-parameters table (right-click ▸ **Family**), or
+  **Decomposition > Label lines from literature ranges**, which fills it for
+  ¹¹B — before F5, and the same tables gain a `family_pct` row per family
+  and a `ratio` row for N₄ per glass (site ids `f0`, `r0`), the results table
+  its `Σ BO4 / family %` and `N4 / ratio` columns, and the Series plot and
+  species bar their Σ items. After **Compute errors** their error is the
+  exact per-glass value — propagated over the amplitude covariance or the
+  spread of the Monte-Carlo trials, never a quadrature of independent site
+  errors; before it, the tooltip flags the estimate as *independent*.
 - **Save table…** writes `batch_table.csv` (shared values once, then the
   per-spectrum amplitudes, released parameters and populations, with the
   same `vary, min, max, expr, at_bound` columns); the

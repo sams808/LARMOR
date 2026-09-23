@@ -137,6 +137,65 @@ def test_arrow_keys_nudge_a_parameter_cell(qapp):
     t.close()
 
 
+def test_lines_table_family_column_edits_and_menu_presets(qapp):
+    """N3: the family tag is the LAST column (parameter columns keep their
+    2 + index offsets); typing writes site['family'] and emits family_edited
+    once; the right-click Family submenu lists the nucleus presets, the tags
+    in use, Other… and None; _set_family refreshes the cell."""
+    from larmor.desktop.table import LinesTable
+
+    t = LinesTable()
+    got = []
+    t.family_edited.connect(lambda: got.append(1))
+    rec = _recipe_dict(2)
+    t.rebuild(rec, set())
+    n_used = len(t._used_keys)
+    assert t._family_col == 2 + n_used == t.table.columnCount() - 1
+    assert t.table.horizontalHeaderItem(t._family_col).text() == "family"
+    for key in ("shift_fwhm_ppm", "amplitude"):        # pinned offsets intact
+        assert t.table.cellWidget(0, 2 + t._used_keys.index(key)) is not None
+    assert t.table.item(0, t._family_col).text() == ""
+    # typing in the cell writes the recipe and emits exactly once
+    t.table.item(0, t._family_col).setText("Al(IV)")
+    assert rec["sites"][0]["family"] == "Al(IV)"
+    assert got == [1]
+    t.table.item(0, t._family_col).setText("Al(IV) ")    # a no-op edit stays silent
+    assert got == [1] and rec["sites"][0]["family"] == "Al(IV)"
+    # right-click on the row: Family comes first with the 27Al presets
+    menu = t._build_menu(0, None)
+    first = menu.actions()[0]
+    assert first.menu() is not None and first.menu().title() == "Family"
+    texts = [a.text() for a in first.menu().actions() if not a.isSeparator()]
+    assert texts == ["Al(IV)", "Al(V)", "Al(VI)", "Other…", "None"]
+    assert [a.text() for a in first.menu().actions() if a.isChecked()] == ["Al(IV)"]
+    # the amplitude cell carries it too; a width cell does not
+    assert t._build_menu(1, "amplitude").actions()[0].menu().title() == "Family"
+    assert not any(a.menu() is not None and a.menu().title() == "Family"
+                   for a in t._build_menu(1, "shift_fwhm_ppm").actions())
+    # a preset pick writes the recipe, refreshes the cell, emits
+    t._set_family(1, "Al(VI)")
+    assert rec["sites"][1]["family"] == "Al(VI)"
+    assert t.table.item(1, t._family_col).text() == "Al(VI)"
+    assert got == [1, 1]
+    # a tag already in use (not a preset) joins the submenu after the presets
+    rec["sites"][1]["family"] = "mine"
+    t.rebuild(rec, set())
+    texts = [a.text() for a in t._build_menu(0, None).actions()[0].menu().actions()
+             if not a.isSeparator()]
+    assert texts == ["Al(IV)", "Al(V)", "Al(VI)", "mine", "Other…", "None"]
+    # None untags: the key is popped (saved recipes stay 0.13-readable)
+    t._set_family(1, "")
+    assert "family" not in rec["sites"][1]
+    assert t.table.item(1, t._family_col).text() == ""
+    # a rebuild shows the stored tags; a second rebuild still emits once per edit
+    t.rebuild(rec, set())
+    assert t.table.item(0, t._family_col).text() == "Al(IV)"
+    got.clear()
+    t.table.item(1, t._family_col).setText("BO4")
+    assert got == [1] and rec["sites"][1]["family"] == "BO4"
+    t.close()
+
+
 def test_sidebands_are_linked_to_their_parent(qapp, monkeypatch):
     """Decomposition > Add spinning sidebands: position = parent +- k*nu_rot as
     a constraint, every shape parameter tied to the parent, amplitude free."""

@@ -159,7 +159,7 @@ SURFACE = (
     'open_plotting_studio', 'plot_current_spectrum', '_open_session_entry',
     '_remember_figure', '_remember_batch', '_open_batch_session',
     '_session_file', '_persist_session', '_flush_session', '_autosave_tick',
-    'closeEvent', '_restore_session',
+    'closeEvent', '_restore_session', 'on_family_changed',
 )
 
 # 191 menu rows: (menu path, text, shortcut, checkable, has submenu)

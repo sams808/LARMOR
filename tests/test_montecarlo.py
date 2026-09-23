@@ -109,6 +109,51 @@ def test_parallel_matches_sequential_for_the_same_seed():
         pp = by_par[label]
         assert pp.mean == pytest.approx(ps.mean, rel=1e-9)
         assert pp.std == pytest.approx(ps.std, rel=1e-9)
+    # the per-trial site integrals (N3) ride along in the same draw order
+    assert seq.site_integrals.shape == par.site_integrals.shape == (12, 1)
+    assert np.allclose(seq.site_integrals, par.site_integrals, rtol=1e-9)
+    assert seq.window_ppm == par.window_ppm == (40, -10)
+
+
+def test_monte_carlo_keeps_per_trial_site_integrals_and_quantify_uses_them():
+    """N3: every ok trial is re-integrated over the fit window; quantify()
+    takes the Monte-Carlo basis for the family block only when asked over
+    the SAME window, and says which window the trials covered otherwise."""
+    from larmor.quantify import quantify
+
+    x = np.linspace(-20, 60, 1200)
+    truth = Recipe(nucleus="11B", larmor_frequency_MHz=160.0, spin_rate_Hz=0.0, sites=[
+        SiteModel(model="gauss_lor", label="B3", family="BO3", params={
+            "isotropic_chemical_shift_ppm": Param(15.0),
+            "shift_fwhm_ppm": Param(6.0, min=0.1), "amplitude": Param(100.0, min=0.0),
+            "gl": Param(1.0, vary=False)}),
+        SiteModel(model="gauss_lor", label="B4", family="BO4", params={
+            "isotropic_chemical_shift_ppm": Param(1.0),
+            "shift_fwhm_ppm": Param(3.0, min=0.1), "amplitude": Param(60.0, min=0.0),
+            "gl": Param(1.0, vary=False)})])
+    _, model, _ = engine.simulate(truth, exp_ppm=x)
+    data = model + np.random.default_rng(5).normal(0.0, 1.5, x.size)
+    rec = Recipe.from_dict(truth.to_dict())
+    res = autofit.monte_carlo_errors(rec, x, data, window_ppm=(40, -10),
+                                     n_trials=30, seed=2)
+    assert res.n_ok == 30
+    assert res.site_integrals.shape == (30, 2) and (res.site_integrals > 0).all()
+    assert res.window_ppm == (40, -10)
+    # the family tags survive the trial round trip and the basis is MC
+    from larmor import fit as fitmod
+    fitmod.fit(rec, x, data, window_ppm=(40, -10))
+    q = quantify(rec, (40, -10), mc=res)
+    assert q["family_basis"] == "montecarlo"
+    assert "30 trials" in q["family_note"]
+    n4 = next(r for r in q["ratios"] if r["name"] == "N4")
+    assert n4["defined"] and np.isfinite(n4["err"]) and n4["err"] > 0
+    assert n4["value"] == pytest.approx(60 * 3 / (100 * 6 + 60 * 3), abs=0.02)
+    # per-site rows never change with the basis
+    assert q["rows"] == quantify(rec, (40, -10))["rows"]
+    # a different window: flagged fallback, the note names the MC window
+    q2 = quantify(rec, (35, -10), mc=res)
+    assert q2["family_basis"] == "independent"
+    assert "40..-10" in q2["family_note"] and "35..-10" in q2["family_note"]
 
 
 def test_report_lists_every_free_parameter():

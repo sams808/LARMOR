@@ -119,6 +119,35 @@ def translate_expr(expr: str, recipe: Recipe) -> str:
     return _EXPR_REF.sub(repl, expr)
 
 
+def amplitude_uvars(lmfit_result, recipe: Recipe) -> dict | None:
+    """``{site index: ufloat amplitude}`` from a finished fit's
+    ``MinimizerResult.uvars`` (correlated ``uncertainties`` values built from
+    the covariance, expr-linked amplitudes included) -- the input of the
+    covariance basis of larmor.families.
+
+    None when no covariance came out of the fit (``uvars`` None, e.g.
+    ``compute_errorbars=False``), when a site has no amplitude entry, or when
+    ANY nominal value differs from the recipe's current amplitude (the recipe
+    was edited since the fit: a stale covariance must not be quoted, so
+    callers fall back to the flagged independent basis)."""
+    uv = getattr(lmfit_result, "uvars", None)
+    if not uv:
+        return None
+    out: dict = {}
+    for i, site in enumerate(recipe.sites):
+        amp = site.params.get("amplitude")
+        if amp is None:
+            return None
+        u = uv.get(_lmfit_name(i, site, "amplitude"))
+        if u is None:
+            return None
+        ref = float(amp.value)
+        if abs(float(u.nominal_value) - ref) > 1e-9 * max(1.0, abs(ref)):
+            return None
+        out[i] = u
+    return out
+
+
 @dataclass
 class FitResult:
     recipe: Recipe

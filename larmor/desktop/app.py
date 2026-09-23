@@ -130,6 +130,11 @@ class MainWindow(_MenusMixin, _ChromeMixin, _FilesMixin, _SessionMixin,
         # lmfit result (Parameter correlations) -- all dropped together by
         # _health_reset whenever the active 1D document changes
         self._last_lmfit = None
+        # the Monte-Carlo result the Report's family block may reuse (handed
+        # over by the Monte-Carlo dialog's "Use as fit errors") and the
+        # fithealth.recipe_signature it belongs to; a value edit invalidates it
+        self._last_mc = None
+        self._last_mc_sig = None
         self._health = None         # fithealth.Health currently shown (fit or live)
         self._health_fit = None     # fithealth.Health of the last fit
         # acquisition facts per source_path for the quantitativity chips

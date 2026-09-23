@@ -61,6 +61,16 @@ def _fmt(v, err, fmt, status=None):
     return s
 
 
+def _tex_name(s: str) -> str:
+    """'N4' -> 'N$_{4}$', 'BO4/(BO3+BO4)' -> 'BO$_{4}$/(BO$_{3}$+BO$_{4}$)',
+    '⟨CN⟩ Al' -> '$\\langle$CN$\\rangle$ Al': the family / ratio names of
+    larmor.families set in LaTeX, digits glued to letters as subscripts."""
+    import re
+
+    s = str(s).replace("⟨", r"$\langle$").replace("⟩", r"$\rangle$")
+    return re.sub(r"(?<=[A-Za-z])(\d+)(?!\w)", r"$_{\1}$", s)
+
+
 def latex_table(recipe: dict, quant: dict | None = None,
                 caption: str = "", label: str = "tab:fit") -> str:
     """A LaTeX ``tabular`` (booktabs) of the fitted sites: the model-relevant
@@ -112,6 +122,27 @@ def latex_table(recipe: dict, quant: dict | None = None,
         row.append("--" if frac is None else
                    _fmt(frac, ferr, "{:.1f}", amp_st if amp_st.kind != "free" else None))
         lines.append(" & ".join(str(c) for c in row) + r" \\")
+    # Σ family rows and named ratios (N3) -- only when a line is tagged, so
+    # an untagged table is byte-identical to before
+    fams = (quant or {}).get("families") or []
+    if fams:
+        lines.append(r"\midrule")
+        for f in fams:
+            row = [f"Σ {f['family']}"] + ["--"] * len(present)
+            row.append(_fmt(float(f["fraction_pct"]), f.get("fraction_err_pct"),
+                            "{:.1f}"))
+            lines.append(" & ".join(row) + r" \\")
+        for r in quant.get("ratios") or []:
+            if not r.get("defined") or r.get("value") is None:
+                continue
+            txt = _tex_name(r["name"])
+            if r.get("description"):
+                txt += " = " + _tex_name(r["description"])
+            txt += " = " + _fmt(float(r["value"]), r.get("err"), r.get("fmt", "{:.3f}"))
+            lines.append(r"\multicolumn{" + str(ncol) + r"}{l}{" + txt + r"} \\")
+        lines.append(r"\multicolumn{" + str(ncol) + r"}{l}{\footnotesize "
+                     + "family/ratio errors: " + str(quant.get("family_basis", ""))
+                     + r"} \\")
     lines.append(r"\bottomrule")
     if entries:
         lines.append(r"\multicolumn{" + str(ncol) + r"}{l}{\footnotesize "
@@ -150,12 +181,43 @@ def _dft_clause(recipe: dict) -> str:
     return head + "; " + cal.methods_clause()
 
 
+def _family_clause(quant: dict | None) -> str:
+    """One sentence on the summed families and named ratios (N3) with the
+    basis their uncertainty was propagated on; '' for an untagged fit so the
+    untagged Methods text is byte-identical."""
+    fams = (quant or {}).get("families") or []
+    if not fams:
+        return ""
+    names = ", ".join(f["family"] for f in fams)
+    ratios = [r for r in (quant.get("ratios") or [])
+              if r.get("defined") and r.get("value") is not None]
+    txt = f" Site populations were summed into structural families ({names})"
+    if ratios:
+        txt += ("; the ratio" + ("s " if len(ratios) > 1 else " ")
+                + ", ".join(r["name"] + (f" ({r['description']})" if r.get("description")
+                                          else "") for r in ratios)
+                + (" are" if len(ratios) > 1 else " is") + " reported")
+    basis = quant.get("family_basis", "")
+    if basis == "covariance":
+        txt += (" with uncertainties that propagate the covariance between "
+                "line amplitudes.")
+    elif basis == "montecarlo":
+        txt += (" with uncertainties from the spread of per-trial sums over "
+                "the Monte-Carlo refits.")
+    else:
+        txt += (" with uncertainties propagated to first order with the lines "
+                "treated as independent.")
+    return txt
+
+
 def methods_sentence(recipe: dict, error_method: str = "covariance",
-                     software: dict | None = None) -> str:
+                     software: dict | None = None, quant: dict | None = None) -> str:
     """A short, paper-ready methods sentence describing the fit. With
     ``software`` (a recipe's ``software`` block or ``provenance.
     software_stamp()``) the LARMOR clause names the versions; the default
-    keeps the version-free wording."""
+    keeps the version-free wording. ``quant`` (a quantify() result) adds the
+    family/ratio sentence when lines are tagged; without it, or untagged, the
+    text is unchanged."""
     sites = recipe.get("sites", [])
     nucleus = recipe.get("nucleus", "") or "the"
     field = recipe.get("larmor_frequency_MHz", 0.0) or 0.0
@@ -203,12 +265,14 @@ def methods_sentence(recipe: dict, error_method: str = "covariance",
         f"Isotropic chemical shifts, quadrupolar parameters and relative "
         f"populations (integrated over the fit window) are reported with "
         f"uncertainties from {err_txt}." + czjzek_txt + _dft_clause(recipe)
+        + _family_clause(quant)
     )
 
 
 def methods_paragraph(recipe: dict, error_method: str = "covariance", *,
                       block: dict | None = None,
-                      referencing_text: str | None = None) -> str:
+                      referencing_text: str | None = None,
+                      quant: dict | None = None) -> str:
     """The full Experimental paragraph of one fit: the acquisition and
     processing sentences from the recipe's acquisition block (``larmor.
     acquisition.sentences`` -- spectrometer and field, probe, the confirmed
@@ -235,7 +299,8 @@ def methods_paragraph(recipe: dict, error_method: str = "covariance", *,
             sr_hz=recipe.get("sr_hz"), referencing_text=referencing_text,
             larmor_ops=recipe.get("processing"))
     software = recipe.get("software") or provenance.software_stamp()
-    return " ".join(sents + [methods_sentence(recipe, error_method, software=software)])
+    return " ".join(sents + [methods_sentence(recipe, error_method,
+                                              software=software, quant=quant)])
 
 
 # ---------------------------------------------------------------- software

@@ -633,6 +633,134 @@ def test_pivot_by_spectrum_blanks_excluded_sites_and_orders_columns_by_site():
     assert batchfit.pivot_by_spectrum(rows, 0) == ([], {})
 
 
+def _tagged_entries():
+    entries = _entries()
+    for rec, *_ in entries:
+        rec.sites[0].family = "BO3"
+        rec.sites[1].family = "BO4"
+    return entries
+
+
+def test_family_rows_flow_into_tables_pivot_and_error_detail():
+    """N3: tagged lines add family_pct (f<j>) and ratio (r<j>) rows in the
+    same long schema; an all-excluded family has no cell; the wide pivot
+    trails them after every site column; a Monte-Carlo error run stores the
+    exact per-spectrum spread under (-1, 'family:NAME') / (-1, 'ratio:NAME')
+    and it survives the JSON round trip and align_result."""
+    from larmor.families import GROUP_PARAMS
+
+    entries = _tagged_entries()
+    entries[1][0].sites[1].params["amplitude"] = Param(
+        0.0, vary=False, min=0.0, max=0.0)
+    res = batchfit.batch_fit(entries)
+    rows = batchfit.shared_table(res)
+    g0 = {(r["site"], r["label"], r["param"]) for r in rows if r["scope"] == "g0"}
+    assert ("f0", "BO3", "family_pct") in g0 and ("f1", "BO4", "family_pct") in g0
+    assert ("r0", "N4", "ratio") in g0
+    g1 = {(r["site"], r["param"]) for r in rows if r["scope"] == "g1"}
+    assert ("f0", "family_pct") in g1 and ("f1", "family_pct") not in g1   # BO4 excluded
+    n4_g1 = next(r for r in rows if r["scope"] == "g1" and r["param"] == "ratio")
+    assert n4_g1["value"] == 0.0                     # tagged but zero: N4 = 0 defined
+    n4_g0 = next(r for r in rows if r["scope"] == "g0" and r["param"] == "ratio")
+    bo4_g0 = next(r for r in rows if r["scope"] == "g0" and r["site"] == "f1")
+    assert n4_g0["value"] == pytest.approx(bo4_g0["value"] / 100.0, rel=1e-9)
+    assert all(r["model"] == "" for r in rows if r["param"] in GROUP_PARAMS)
+    assert all(r["index"] is not None for r in rows if r["param"] in GROUP_PARAMS)
+
+    cols, cells = batchfit.pivot_by_spectrum(rows, 3)
+    assert cols[-3:] == [(0, "BO3", "family_pct"), (1, "BO4", "family_pct"),
+                         (0, "N4", "ratio")]
+    assert cols[:-3] == [(0, "A", "amplitude"), (0, "A", "population_pct"),
+                         (1, "B", "amplitude"), (1, "B", "population_pct")]
+    assert (0, (1, "BO4", "family_pct")) in cells and (1, (1, "BO4", "family_pct")) not in cells
+
+    batchfit.batch_error_analysis(res, _data_for(entries), method="montecarlo",
+                                  n_trials=20, seed=3)
+    det = res.error_detail["montecarlo"]
+    for k in range(3):
+        pe = det[k].get((-1, "family:BO3"))
+        assert pe is not None and pe.stderr is not None and pe.stderr >= 0
+        assert pe.label == "family.BO3" and pe.value == pytest.approx(
+            next(r["value"] for r in rows if r["scope"] == f"g{k}" and r["site"] == "f0"))
+        assert det[k].get((-1, "ratio:N4")) is not None
+    err_rows = batchfit.error_table(res, method="montecarlo")
+    fam_row = next(r for r in err_rows if r["scope"] == "g0" and r["site"] == "f0")
+    assert fam_row["stderr"] == det[0][(-1, "family:BO3")].stderr
+    assert fam_row["error_method"] == "montecarlo" and fam_row["label"] == "BO3"
+    r_row = next(r for r in err_rows if r["scope"] == "g0" and r["site"] == "r0")
+    assert r_row["stderr"] == det[0][(-1, "ratio:N4")].stderr
+    # the per-site rows of the same export are untouched by the family block
+    assert {r["site"] for r in err_rows if r["scope"] == "g0"} == {"s0", "s1", "f0", "f1", "r0"}
+
+    back = batchfit.result_from_dict(batchfit.result_to_dict(res))
+    assert (-1, "family:BO3") in back.error_detail["montecarlo"][0]
+    assert (-1, "ratio:N4") in back.error_detail["montecarlo"][2]
+    assert back.error_detail["montecarlo"][0][(-1, "family:BO3")].stderr == \
+        det[0][(-1, "family:BO3")].stderr
+    for k, rec in enumerate(res.recipes):
+        rec.source_path = f"p{k}"
+    sub, dropped = batchfit.align_result(res, ["p2", "p0"])
+    assert dropped == ["p1"]
+    assert sub.error_detail["montecarlo"][0][(-1, "family:BO3")].stderr == \
+        det[2][(-1, "family:BO3")].stderr
+
+
+def test_batch_covariance_family_error_comes_from_uvars_not_quadrature_and_untagged_emits_nothing():
+    """Strongly overlapping tagged lines: the stored covariance family error
+    is a propagated number, not the independent fallback quantify() prints
+    without uvars; an untagged batch emits no group row and keeps the pinned
+    pivot golden."""
+    from larmor.families import GROUP_PARAMS
+    from larmor.quantify import quantify
+
+    x = np.linspace(-20, 60, 800)
+    entries = []
+    for k, (a, b) in enumerate([(100.0, 60.0), (80.0, 90.0)]):
+        truth = Recipe(nucleus="11B", larmor_frequency_MHz=160.0, spin_rate_Hz=0.0, sites=[
+            SiteModel(model="gauss_lor", label="A", family="BO3", params={
+                "isotropic_chemical_shift_ppm": Param(15.0), "shift_fwhm_ppm": Param(8.0),
+                "amplitude": Param(a), "gl": Param(1.0, vary=False)}),
+            SiteModel(model="gauss_lor", label="B", family="BO4", params={
+                "isotropic_chemical_shift_ppm": Param(11.0), "shift_fwhm_ppm": Param(8.0),
+                "amplitude": Param(b), "gl": Param(1.0, vary=False)})])
+        _, m, _ = engine.simulate(truth, exp_ppm=x)
+        data = m + np.random.default_rng(k).normal(0.0, 1.0, x.size)
+        start = Recipe.from_dict(truth.to_dict())
+        start.sample = f"o{k}"
+        for s in start.sites:
+            s.params["amplitude"] = Param(70.0, min=0.0)
+        entries.append((start, x, data, (-10.0, 40.0)))
+    res = batchfit.batch_fit(entries)
+    batchfit.batch_error_analysis(res, _data_for(entries), method="covariance")
+    det = res.error_detail["covariance"]
+    for k, rec in enumerate(res.recipes):
+        stored = {name: det[k][(-1, name)].stderr
+                  for name in ("family:BO3", "family:BO4", "ratio:N4")}
+        assert all(v is not None and np.isfinite(v) and v > 0 for v in stored.values())
+        q = quantify(rec)                        # no uvars: the independent fallback
+        assert q["family_basis"] == "independent"
+        indep = {f"family:{f['family']}": f["fraction_err_pct"] for f in q["families"]}
+        indep["ratio:N4"] = q["ratios"][0]["err"]
+        for name, v in stored.items():
+            assert abs(v - indep[name]) > 1e-6 * max(v, 1e-12), name
+        # the SUM of the anticorrelated pair is known better than either line
+        pop_err = [pe.stderr for (i, pn), pe in det[k].items() if pn == "amplitude"]
+        assert len(pop_err) == 2
+    err_rows = batchfit.error_table(res, method="covariance")
+    fam = next(r for r in err_rows if r["scope"] == "o0" and r["site"] == "f0")
+    assert fam["stderr"] == det[0][(-1, "family:BO3")].stderr
+    # untagged: nothing new anywhere
+    res_u = batchfit.batch_fit(_entries())
+    rows_u = batchfit.shared_table(res_u)
+    assert not any(r["param"] in GROUP_PARAMS for r in rows_u)
+    cols_u, _ = batchfit.pivot_by_spectrum(rows_u, 3)
+    assert cols_u == [(0, "A", "amplitude"), (0, "A", "population_pct"),
+                      (1, "B", "amplitude"), (1, "B", "population_pct")]
+    batchfit.batch_error_analysis(res_u, _data_for(_entries()), method="covariance")
+    assert not any(site == -1 for d in res_u.error_detail["covariance"]
+                   for (site, _pn) in d)
+
+
 def test_write_shared_and_error_csv_match_the_dialog_headers(tmp_path):
     """The long-table CSV writers (moved here from the batch dialog so the CLI
     and io/bundle share them): golden headers, one row per table row, the

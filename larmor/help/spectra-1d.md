@@ -202,6 +202,17 @@ command line: `larmor srcheck <session folder> --csv audit.csv`.
 4. **Report** (F6) gives the **quantification**: each site's integrated area as a
    population **% ± error**. Use the area-normalised `gl_norm` model (or a Czjzek
    site) so an amplitude *is* a population.
+   Lines that belong to one structural species can be tagged in the **family**
+   column of the Fit-Parameters table (the last column; right-click a row ▸
+   **Family** for the presets of the nucleus — BO3/BO4, Al(IV)/Al(V)/Al(VI),
+   Q0–Q4 — or type any name; **Decomposition ▸ Label lines from literature
+   ranges** fills it for ²⁷Al and ¹¹B). The Report then adds a bold **Σ** row
+   per family and the named ratios of the nucleus (N4 = BO4/(BO3+BO4), ⟨CN⟩ Al,
+   ⟨n⟩); their uncertainty propagates the covariance between the line
+   amplitudes after a fit, or the spread of the Monte-Carlo trials after
+   **Use as fit errors**, and the row tooltip states which basis was used —
+   *covariance*, *Monte-Carlo* or, when neither is available, *independent*
+   (see **Fitting glasses for publication** §5).
    ⚠ For **quadrupolar** nuclei, integrated areas only reflect populations if
    the *acquisition* was quantitative — CT-selective excitation, or the
    short-pulse regime (flip angle ≤ 30°/(I+½), i.e. ≤ 10° for I = 5/2), plus

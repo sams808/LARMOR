@@ -1145,6 +1145,95 @@ def test_computing_params_controls_are_all_wired(qapp, monkeypatch):
 # spectrum cells. Synthetic '# nucleus = 11B' CSVs only (no real data), the
 # dialog built alone and the fit run synchronously through its own worker.
 
+def test_mc_dialog_lists_populations_families_and_hands_them_to_the_report(qapp, monkeypatch):
+    """N3: the Monte-Carlo dialog adds s<i>.population_pct, family.<name>
+    and ratio.<name> rows (from the per-trial re-integrated site integrals)
+    with histograms, and 'Use as fit errors' switches the Report's family
+    block to the Monte-Carlo basis until a value is edited."""
+    from larmor import autofit, fithealth
+    from larmor.autofit import MCParam, MonteCarloResult
+    from larmor.desktop.app import MainWindow
+    from larmor.desktop.montecarlo_dialog import MonteCarloDialog
+    from larmor.engine import make_context, simulate_site
+    from larmor.quantify import site_integrals
+    from larmor.recipe import Param, Recipe, SiteModel
+
+    win = MainWindow()
+    try:
+        x = np.linspace(-20, 40, 600)
+        truth = Recipe(nucleus="11B", larmor_frequency_MHz=160.0, sites=[
+            SiteModel(model="gauss_lor", label="B3", family="BO3", params={
+                "isotropic_chemical_shift_ppm": Param(15.0), "shift_fwhm_ppm": Param(8.0),
+                "gl": Param(1.0, vary=False), "amplitude": Param(100.0, min=0)}),
+            SiteModel(model="gauss_lor", label="B4", family="BO4", params={
+                "isotropic_chemical_shift_ppm": Param(1.0), "shift_fwhm_ppm": Param(4.0),
+                "gl": Param(1.0, vary=False), "amplitude": Param(60.0, min=0)})])
+        ctx = make_context(truth, exp_ppm=x)
+        y = np.sum([simulate_site(s, ctx) for s in truth.sites], axis=0)
+        win._display_1d(x, y, "11B", 160.0, None, "t", "src")
+        win.recipe["sites"] = truth.to_dict()["sites"]
+        win.on_structure_changed()
+        # a never-shown offscreen window keeps a (0, 1) view range: pin the
+        # range the Report integrates over, as a user zoomed to the data would
+        vb = win.view.getPlotItem().getViewBox()
+        vb.setXRange(-20.0, 40.0, padding=0)
+        win.run_quantify(show=False)
+        qapp.processEvents()
+        assert win._last_quant["family_basis"] == "independent"
+        (x0, x1), _ = vb.viewRange()
+        window = (max(x0, x1), min(x0, x1))
+        assert window == pytest.approx((40.0, -20.0))
+        # a canned run: 50 trials whose two integrals are perfectly
+        # anticorrelated (I_A + I_B constant)
+        ints, win_ppm = site_integrals(Recipe.from_dict(win.recipe), window)
+        rng = np.random.default_rng(0)
+        d = rng.normal(0.0, 0.02 * float(ints.sum()), 50)
+        S = np.column_stack([ints[0] + d, ints[1] - d])
+        assert S.min() > 0                      # the premise: positive integrals
+        amp_vals = 100.0 + rng.normal(0.0, 2.0, 50)
+        canned = MonteCarloResult(
+            trials=50, n_ok=50, noise=0.5, seed=0,
+            params=[MCParam(0, "amplitude", "s0.amplitude", 100.0,
+                            float(amp_vals.mean()), float(amp_vals.std()), amp_vals)],
+            site_integrals=S, window_ppm=win_ppm)
+        monkeypatch.setattr(autofit, "monte_carlo_errors", lambda *a, **k: canned)
+
+        dlg = MonteCarloDialog(win, win.recipe, x, y, window)
+        dlg._run()
+        labels = [dlg.table.item(r, 0).text() for r in range(dlg.table.rowCount())]
+        assert labels == ["s0.amplitude", "s0.population_pct", "s1.population_pct",
+                          "family.BO3", "family.BO4", "ratio.N4"]
+        assert [dlg.pick.itemText(i) for i in range(dlg.pick.count())] == labels
+        vals, best, mean, std = dlg._extra["ratio.N4"]
+        assert std == pytest.approx(float(np.std(S[:, 1] / S.sum(axis=1))))
+        assert best == pytest.approx(float(ints[1] / ints.sum()))
+        assert float(dlg.table.item(5, 1).text()) == pytest.approx(best, rel=1e-4)
+        # a family of both lines would have zero spread; each alone has some
+        assert dlg._extra["family.BO4"][3] > 0
+        # the histogram draws for a derived row (bars + Gaussian + best line)
+        dlg.pick.setCurrentIndex(labels.index("ratio.N4"))
+        dlg._draw_hist()
+        assert len(dlg.plot.plotItem.items) >= 3
+        # Use as fit errors: the Report's family block goes Monte-Carlo
+        dlg._apply_errors()
+        assert win._last_mc is canned
+        assert win._last_mc_sig == fithealth.recipe_signature(win.recipe)
+        assert win._last_quant["family_basis"] == "montecarlo"
+        assert win.qtable.rowCount() == 5
+        assert "montecarlo" in win.qtable.item(2, 0).toolTip()
+        assert win._last_quant["ratios"][0]["err"] == pytest.approx(std)
+        assert "family errors now Monte-Carlo" in win.statusBar().currentMessage()
+        dlg._copy()
+        assert "ratio.N4" in QApplication.clipboard().text()
+        # a value edit invalidates the handed-over result: flagged independent
+        win.recipe["sites"][0]["params"]["amplitude"]["value"] *= 1.05
+        win.run_quantify(show=False)
+        assert win._last_quant["family_basis"] == "independent"
+        dlg.close()
+    finally:
+        win.close()
+
+
 def _batch_dialog(tmp_path, n, noise=None):
     """A BatchFitDialog over n synthetic 1-site 11B spectra (amplitude and
     shift vary along the series; ``noise[k]`` is spectrum k's noise sigma,
@@ -1406,6 +1495,86 @@ def test_batch_table_exists_before_fit_and_fills_after(qapp, tmp_path):
         assert f"{res.rmsd[k]:.4f}" in t.item(r, 3).text()
     # the spotlight survived the refill
     assert dlg._hl == 1 and _selected_rows(t) == [dlg._row_of(1)]
+
+
+def _tagged_batch_dialog(tmp_path, n):
+    """A BatchFitDialog over n two-line 11B spectra with a BO3/BO4-tagged
+    two-site model (N3)."""
+    from larmor.recipe import Recipe, SiteModel, Param
+    from larmor import engine
+    from larmor.desktop.batchfit_dialog import BatchFitDialog
+
+    x = np.linspace(-20, 60, 600)
+    paths = []
+    for k in range(n):
+        tr = Recipe(nucleus="11B", larmor_frequency_MHz=160.0, spin_rate_Hz=0.0, sites=[
+            SiteModel(model="gauss_lor", label="B3", params={
+                "isotropic_chemical_shift_ppm": Param(15.0), "shift_fwhm_ppm": Param(6.0),
+                "amplitude": Param(100.0 - 10.0 * k), "gl": Param(1.0, vary=False)}),
+            SiteModel(model="gauss_lor", label="B4", params={
+                "isotropic_chemical_shift_ppm": Param(1.0), "shift_fwhm_ppm": Param(3.0),
+                "amplitude": Param(50.0 + 10.0 * k), "gl": Param(1.0, vary=False)})])
+        _, m, _ = engine.simulate(tr, exp_ppm=x)
+        d = m + np.random.default_rng(k).normal(0, 1.5, x.size)
+        p = tmp_path / f"tagged{k:02d}.csv"
+        p.write_text("# nucleus = 11B\n# larmor_MHz = 160\n" +
+                     "\n".join(f"{xi:.4f} {yi:.4f}" for xi, yi in zip(x, d)),
+                     encoding="utf-8")
+        paths.append(str(p))
+    model = {"nucleus": "11B", "larmor_frequency_MHz": 160.0, "spin_rate_Hz": 0.0,
+             "sites": [
+                 {"model": "gauss_lor", "label": "B3", "family": "BO3", "params": {
+                     "isotropic_chemical_shift_ppm": {"value": 15.0, "min": 0, "max": 30},
+                     "shift_fwhm_ppm": {"value": 6.0, "min": 0.1},
+                     "amplitude": {"value": 80.0, "min": 0},
+                     "gl": {"value": 1.0, "vary": False}}},
+                 {"model": "gauss_lor", "label": "B4", "family": "BO4", "params": {
+                     "isotropic_chemical_shift_ppm": {"value": 1.0, "min": -10, "max": 10},
+                     "shift_fwhm_ppm": {"value": 3.0, "min": 0.1},
+                     "amplitude": {"value": 60.0, "min": 0},
+                     "gl": {"value": 1.0, "vary": False}}}]}
+    return BatchFitDialog(None, paths, model)
+
+
+def test_batch_table_family_columns_come_last_with_neutral_colour(qapp, tmp_path):
+    """N3: the wide F5 table trails 'Σ BO3 / family %', 'Σ BO4 / family %'
+    and 'N4 / ratio' columns in the neutral text colour (the index of a group
+    column is a family index, never a site); Save table… keeps its header and
+    writes the f0/r0 rows; the untagged fixture is unchanged."""
+    from PySide6.QtGui import QColor
+    from larmor import batchfit
+    from larmor.desktop.plot import site_color
+
+    dlg = _tagged_batch_dialog(tmp_path, 2)
+    res = _fit_batch(dlg)
+    t = dlg.table
+    headers = _headers(t)
+    assert headers[-3:] == ["Σ BO3\nfamily %", "Σ BO4\nfamily %", "N4\nratio"]
+    assert headers[4:6] == ["s0 B3\namplitude", "s0 B3\npopulation %"]
+    n4_col = headers.index("N4\nratio")
+    bo4_col = headers.index("Σ BO4\nfamily %")
+    for k in range(2):
+        r = dlg._row_of(k)
+        bo4 = float(t.item(r, bo4_col).text().split(" ±")[0])
+        pop_b4 = float(t.item(r, headers.index("s1 B4\npopulation %")).text().split(" ±")[0])
+        assert bo4 == pytest.approx(pop_b4, rel=1e-3)
+        n4 = float(t.item(r, n4_col).text().split(" ±")[0])
+        assert n4 == pytest.approx(bo4 / 100.0, rel=2e-3)
+        for c in (bo4_col, n4_col):
+            assert t.item(r, c).foreground().color() != QColor(site_color(0))
+            assert t.item(r, c).foreground().color() != QColor(site_color(1))
+            assert "errors: independent" in t.item(r, c).toolTip()
+    # Save table…: same header as ever, plus the group rows
+    out = tmp_path / "batch_table.csv"
+    batchfit.write_shared_csv(res, out)
+    lines = out.read_text(encoding="utf-8").splitlines()
+    assert lines[0] == ",".join(batchfit.SHARED_HEADER)
+    assert any(",f0,BO3,family_pct," in ln for ln in lines)
+    assert any(",r0,N4,ratio," in ln for ln in lines)
+    # the untagged fixture keeps its headers
+    plain = _batch_dialog(tmp_path, 2)
+    _fit_batch(plain)
+    assert not any("family" in h or "ratio" in h for h in _headers(plain.table))
 
 
 def test_batch_table_row_selection_spotlights_cell(qapp, tmp_path):

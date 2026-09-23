@@ -9,6 +9,8 @@ Owned state: ``_sim_worker`` / ``_sim_pending`` / ``_busy`` (the timers are
 created in ``__init__``), ``_fit_worker`` / ``_fit2d_worker`` /
 ``_active_fit_worker``, ``_anim_last_ms`` / ``_anim_last_rms``,
 ``_last_quant``, ``_last_model``, ``_first_sim``, ``_last_lmfit``,
+``_last_mc`` / ``_last_mc_sig`` (the Monte-Carlo result the Report's family
+block reuses and the recipe signature it belongs to),
 ``_health`` / ``_health_fit``, ``_acq_cache`` (the quantitativity facts per
 source path; dropped by ``_health_reset``).
 """
@@ -350,6 +352,8 @@ class _FittingMixin:
         self._health = None
         self._health_fit = None
         self._last_lmfit = None
+        self._last_mc = None
+        self._last_mc_sig = None
         # a reload re-reads the acquisition facts, so a ct1t2.txt TopSpin
         # wrote during the session is seen
         self._acq_cache = {}
@@ -524,7 +528,12 @@ class _FittingMixin:
         self.view.set_model(result.x_ppm, result.y_fit, result.per_site,
                             labels, self.hidden, self.exp_ppm, self.exp_amp)
         # populations first, so the verdict's population rule reads THIS
-        # fit's rows (a failed quantify must not leave the previous fit's)
+        # fit's rows (a failed quantify must not leave the previous fit's);
+        # the fit's covariance is in place BEFORE that pass so the family
+        # block already uses the covariance basis (a fresh fit supersedes
+        # any Monte-Carlo result handed over earlier)
+        self._last_lmfit = getattr(result, "lmfit_result", None)
+        self._last_mc = self._last_mc_sig = None
         self._last_quant = None
         self.run_quantify(show=False)
         # one verdict -- residual within the noise / structured, physical
@@ -544,18 +553,32 @@ class _FittingMixin:
     def run_quantify(self, show: bool = True):
         if not self.recipe or not self.recipe["sites"]:
             return
+        from larmor import fit as fitmod
         from larmor.quantify import quantify
 
         (x0, x1), _ = self.view.getPlotItem().getViewBox().viewRange()
         try:
-            q = quantify(Recipe.from_dict(self.recipe),
-                         window_ppm=(max(x0, x1), min(x0, x1)))
+            rec = Recipe.from_dict(self.recipe)
+            # family block (N3): the last fit's covariance while its
+            # amplitudes are unchanged (amplitude_uvars checks), the
+            # Monte-Carlo result the MC dialog handed over while the recipe
+            # signature still matches, else the flagged independent basis
+            uv = (fitmod.amplitude_uvars(self._last_lmfit, rec)
+                  if self._last_lmfit is not None else None)
+            mc = (self._last_mc if self._last_mc is not None and
+                  self._last_mc_sig == fithealth.recipe_signature(self.recipe)
+                  else None)
+            q = quantify(rec, window_ppm=(max(x0, x1), min(x0, x1)),
+                         uvars=uv, mc=mc)
         except Exception as exc:
             self.statusBar().showMessage("quantify: " + str(exc))
             return
         self._last_quant = q
         rows = q["rows"]
-        self.qtable.setRowCount(len(rows))
+        fams = q.get("families") or []
+        ratios = [r for r in (q.get("ratios") or [])
+                  if r.get("defined") and r.get("value") is not None]
+        self.qtable.setRowCount(len(rows) + len(fams) + len(ratios))
         for r, row in enumerate(rows):
             pos = f"{row['position_ppm']:.2f}"
             if row["position_err"]:
@@ -574,10 +597,45 @@ class _FittingMixin:
                     item.setToolTip("share of this line's simulated area "
                                     "outside the integration window")
                 self.qtable.setItem(r, c, item)
+        # Σ family rows and named ratios, bold, below the sites; the tooltip
+        # states the error basis (covariance / Monte-Carlo / independent)
+        tip = ("family/ratio errors: " + str(q.get("family_basis", ""))
+               + (" — " + q["family_note"] if q.get("family_note") else ""))
+        r = len(rows)
+        for fam in fams:
+            frac = f"{fam['fraction_pct']:.1f}"
+            if fam.get("fraction_err_pct") is not None:
+                frac += f" ± {fam['fraction_err_pct']:.1f}"
+            texts = [f"Σ {fam['family']}  ({fam['letters']})", "",
+                     f"{fam['integral']:.4g}", frac, ""]
+            self._qtable_group_row(r, texts, tip)
+            r += 1
+        for rt in ratios:
+            val = rt["fmt"].format(rt["value"])
+            if rt.get("err") is not None:
+                val += " ± " + rt["fmt"].format(rt["err"])
+            desc = rt.get("description") or ""
+            name = rt["name"] + (f" = {desc}" if "/" in desc else "")
+            self._qtable_group_row(r, [name, "", "", val, ""],
+                                   (desc + " · " if desc else "") + tip)
+            r += 1
         self.qtable.resizeColumnsToContents()
         if show:
+            if fams:
+                self.statusBar().showMessage(
+                    "families: " + str(q.get("family_basis", "")), 8000)
             self.results_dock.show()
             self.results_dock.raise_()
+
+    def _qtable_group_row(self, r: int, texts: list, tip: str):
+        for c, text in enumerate(texts):
+            item = QTableWidgetItem(text)
+            item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+            f = item.font()
+            f.setBold(True)
+            item.setFont(f)
+            item.setToolTip(tip)
+            self.qtable.setItem(r, c, item)
 
     def copy_csv(self):
         if not self._last_quant:
@@ -592,6 +650,27 @@ class _FittingMixin:
                                             "integral_err", "fraction_pct",
                                             "fraction_err_pct",
                                             "tail_outside_pct")))
+        # family sums and named ratios (N3) after a blank line, with the
+        # basis their error was propagated on
+        q = self._last_quant
+        fams = q.get("families") or []
+        if fams:
+            def cell(v):
+                return "" if v is None else str(v).replace(",", ";")
+            lines.append("")
+            lines.append("family,lines,integral,fraction_pct,fraction_err_pct")
+            for f in fams:
+                lines.append(",".join(cell(v) for v in (
+                    f["family"], f["letters"], f["integral"], f["fraction_pct"],
+                    f["fraction_err_pct"])))
+            ratios = [r for r in (q.get("ratios") or [])
+                      if r.get("defined") and r.get("value") is not None]
+            if ratios:
+                lines.append("ratio,description,value,err")
+                for r in ratios:
+                    lines.append(",".join(cell(v) for v in (
+                        r["name"], r.get("description", ""), r["value"], r["err"])))
+            lines.append(f"# family/ratio errors: {q.get('family_basis', '')}")
         QApplication.clipboard().setText("\n".join(lines))
         self.statusBar().showMessage("report table copied as CSV")
 
@@ -616,7 +695,7 @@ class _FittingMixin:
         # software) when the source carries an acquisition record; the fit
         # sentence with the software versions otherwise
         block = acquisition.block_for_recipe(self.recipe)
-        QApplication.clipboard().setText(methods.methods_paragraph(self.recipe, block=block))
+        QApplication.clipboard().setText(methods.methods_paragraph(self.recipe, block=block, quant=self._last_quant))
         self.statusBar().showMessage(
             "Experimental paragraph copied to clipboard — check every [bracket] before pasting"
             if block else
@@ -640,7 +719,7 @@ class _FittingMixin:
         if self._last_quant is None:
             self.run_quantify(show=False)
         # the same Experimental paragraph as the Report dock's Copy methods
-        paragraph = methods.methods_paragraph(self.recipe)
+        paragraph = methods.methods_paragraph(self.recipe, quant=self._last_quant)
         (folder / "methods.txt").write_text(paragraph, encoding="utf-8")
         (folder / "table.tex").write_text(
             methods.latex_table(self.recipe, self._last_quant,
@@ -682,6 +761,25 @@ class _FittingMixin:
             tail_txt = f"{tail:.1f}" if tail is not None else "—"
             md.append(f"| {r.get('label')} | {r.get('position_ppm')} | "
                       f"{r.get('fraction_pct', 0):.1f} | {tail_txt} |")
+        # Σ families and named ratios (N3) with the basis of their error
+        q = self._last_quant or {}
+        fams = q.get("families") or []
+        if fams:
+            basis = q.get("family_basis", "")
+            md += ["", "| Σ family / ratio | value | error basis |", "|---|---|---|"]
+            for f in fams:
+                v = f"{f['fraction_pct']:.1f}"
+                if f.get("fraction_err_pct") is not None:
+                    v += f" ± {f['fraction_err_pct']:.1f}"
+                md.append(f"| Σ {f['family']} ({f['letters']}) | {v} % | {basis} |")
+            for r in q.get("ratios") or []:
+                if not r.get("defined") or r.get("value") is None:
+                    continue
+                v = r["fmt"].format(r["value"])
+                if r.get("err") is not None:
+                    v += " ± " + r["fmt"].format(r["err"])
+                desc = f" = {r['description']}" if r.get("description") else ""
+                md.append(f"| {r['name']}{desc} | {v} | {basis} |")
         md += ["", "![figure](figure.png)", ""]
         (folder / "report.md").write_text("\n".join(md), encoding="utf-8")
         self.statusBar().showMessage(f"publication bundle written to {folder}")
@@ -716,7 +814,10 @@ class _FittingMixin:
         self.lines_table.rebuild(self.recipe, self.hidden)
         self._update_paddles()
         # the winning FitResult goes through the same path as a plain fit, so
-        # an Auto Fit gets the same verdict, chi text and correlations
+        # an Auto Fit gets the same verdict, chi text and correlations (and
+        # the Report's family block its covariance basis)
+        self._last_lmfit = getattr(res.result, "lmfit_result", None)
+        self._last_mc = self._last_mc_sig = None
         self._last_quant = None
         self.run_quantify(show=False)
         if res.result is not None:

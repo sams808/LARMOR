@@ -119,6 +119,7 @@ def test_label_lines_from_literature_in_the_app():
                 "isotropic_chemical_shift_ppm": Param(110.0),
                 "shift_fwhm_ppm": Param(5.0), "amplitude": Param(1.0),
                 "gl": Param(0.5)})]).to_dict()
+        rec["sites"][1]["family"] = "mine"          # a user tag: never overwritten
         win.recipe["sites"] = rec["sites"]
         win.on_structure_changed()
         win.label_from_literature()
@@ -126,10 +127,51 @@ def test_label_lines_from_literature_in_the_app():
         assert labels == ["Al[4]", "my octahedral", "pk-2"]
         msg = win.statusBar().currentMessage()
         assert "A=Al[4]" in msg and "kept your own" in msg and "outside" in msg
+        # N3: the Al[4] band also fills the EMPTY family tag; the pre-tagged
+        # line keeps its own; the line outside every band stays untagged
+        fams = [s.get("family", "") for s in win.recipe["sites"]]
+        assert fams == ["Al(IV)", "mine", ""]
+        assert "tagged 1 family" in msg
+        assert [f["family"] for f in win._last_quant["families"]] == ["Al(IV)", "mine"]
         win.undo()
         assert win.recipe["sites"][0]["label"] == "pk-0"
+        assert "family" not in win.recipe["sites"][0]
+        # a line dropped inside the Al[4] band is pre-tagged and the status says so
+        win._model_actions["gauss_lor"].setChecked(True)
+        win.add_site_at(62.0, 1.0)
+        added = win.recipe["sites"][-1]
+        assert added["family"] == "Al(IV)"
+        assert "family Al(IV) (literature band" in win.statusBar().currentMessage()
+        win.add_site_at(110.0, 1.0)                  # outside every band: no tag
+        assert "family" not in win.recipe["sites"][-1]
+        assert "family" not in win.statusBar().currentMessage()
+        win._model_actions["gauss_lor"].setChecked(False)
     finally:
         win.close()
+
+
+def test_ranges_carry_families_only_where_the_band_names_one():
+    """N3: the 27Al and 11B bands name a structural species, so they seed a
+    site's family tag; 17O (overlapping BO/NBO bands), 29Si and 31P (a band
+    cannot name a Qn) carry none."""
+    assert refranges.family_for("27Al", 65.0) == "Al(IV)"
+    assert refranges.family_for("27Al", 37.0) == "Al(V)"
+    assert refranges.family_for("27Al", 5.0) == "Al(VI)"
+    assert refranges.family_for("11B", 15.0) == "BO3"
+    assert refranges.family_for("11B", 0.5) == "BO4"
+    assert refranges.family_for("29Si", -90.0) == ""
+    assert refranges.family_for("17O", 50.0) == ""
+    assert refranges.family_for("31P", 0.0) == ""
+    assert refranges.family_for("7Li", 0.0) == "" and refranges.family_for(None, 1.0) == ""
+    assert refranges.family_for("27Al", 200.0) == ""          # outside every band
+    for nuc, entries in refranges.REF_RANGES.items():
+        for r in entries:
+            assert ("family" in r) == (nuc in ("27Al", "11B")), (nuc, r["label"])
+    # every seeded family is a preset of its nucleus
+    from larmor import families
+    for nuc in ("27Al", "11B"):
+        for r in refranges.REF_RANGES[nuc]:
+            assert r["family"] in families.presets_for(nuc)
 
 
 def test_ranges_for_normalizes_and_defaults_empty():

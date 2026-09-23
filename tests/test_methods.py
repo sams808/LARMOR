@@ -35,6 +35,52 @@ def test_methods_sentence_names_nucleus_model_and_errors():
     assert "Monte-Carlo" in mc
 
 
+def test_latex_table_and_methods_sentence_carry_families():
+    """N3: tagged sites add Σ family rows after a \\midrule, one
+    \\multicolumn line per defined ratio and a 'family/ratio errors: <basis>'
+    line; the Methods sentence names the families and the basis. Untagged
+    output is byte-identical to before."""
+    rec = _czjzek_recipe()
+    rec.sites[0].family = "Al(IV)"
+    rec.sites[1].family = "Al(VI)"
+    q = quantify.quantify(rec, (120.0, -40.0))
+    tex = methods.latex_table(rec.to_dict(), q)
+    lines = tex.splitlines()
+    i4 = next(i for i, ln in enumerate(lines) if ln.startswith("Σ Al(IV)"))
+    i6 = next(i for i, ln in enumerate(lines) if ln.startswith("Σ Al(VI)"))
+    assert lines[i4 - 1] == r"\midrule" and i6 == i4 + 1
+    assert lines[i4].count("&") == lines[1 + lines.index(r"\midrule")].count("&")
+    assert " -- & -- & -- & " in lines[i4]                  # no parameter cells
+    multi = [ln for ln in lines if ln.startswith(r"\multicolumn")]
+    assert any(r"$\langle$CN$\rangle$ Al" in ln and "mean Al coordination" in ln
+               for ln in multi)
+    assert any("family/ratio errors: independent" in ln for ln in multi)
+    assert lines.index(r"\bottomrule") > lines.index(multi[-1])
+    # N4 is typeset with subscripts
+    assert methods._tex_name("N4") == "N$_{4}$"
+    assert methods._tex_name("BO4/(BO3+BO4)") == "BO$_{4}$/(BO$_{3}$+BO$_{4}$)"
+    assert methods._tex_name("mean Al coordination number") == "mean Al coordination number"
+
+    s = methods.methods_sentence(rec.to_dict(), quant=q)
+    assert "structural families (Al(IV), Al(VI))" in s
+    assert "⟨CN⟩ Al (mean Al coordination number) is reported" in s
+    assert "treated as independent" in s
+    assert s.startswith(methods.methods_sentence(rec.to_dict()))     # appended only
+    q["family_basis"] = "covariance"
+    assert "covariance between line amplitudes" in methods.methods_sentence(
+        rec.to_dict(), quant=q)
+    q["family_basis"] = "montecarlo"
+    assert "per-trial sums" in methods.methods_sentence(rec.to_dict(), quant=q)
+
+    plain = _czjzek_recipe()
+    qp = quantify.quantify(plain, (120.0, -40.0))
+    assert "Σ" not in methods.latex_table(plain.to_dict(), qp)
+    assert "family/ratio" not in methods.latex_table(plain.to_dict(), qp)
+    base = methods.methods_sentence(plain.to_dict())
+    assert methods.methods_sentence(plain.to_dict(), quant=qp) == base
+    assert "structural families" not in base
+
+
 def test_latex_handles_gauss_lor_without_quad_columns():
     rec = Recipe(nucleus="11B", larmor_frequency_MHz=160.0, sites=[
         SiteModel(model="gauss_lor", label="B(3)", params={

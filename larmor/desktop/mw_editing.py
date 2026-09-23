@@ -232,15 +232,24 @@ class _EditingMixin:
         params["isotropic_chemical_shift_ppm"]["value"] = ppm
         params["amplitude"]["value"] = amp or 1.0
         n = len(self.recipe["sites"])
-        self.recipe["sites"].append(
-            {"model": name, "label": f"{m.label.split(' ')[0]}-{n}",
-             "params": params})
+        site = {"model": name, "label": f"{m.label.split(' ')[0]}-{n}",
+                "params": params}
+        # a line dropped inside a 27Al / 11B literature band is pre-tagged
+        # with the species the band names (larmor.families); visible in the
+        # family column, never overwriting a user tag (there is none yet)
+        from larmor import refranges
+        fam = refranges.family_for(self.recipe.get("nucleus", ""), ppm)
+        if fam:
+            site["family"] = fam
+        self.recipe["sites"].append(site)
         # stay in placement mode: drop as many lines as wanted, click the model
         # again (or Esc) to leave the mode
         self.on_structure_changed()
         self.statusBar().showMessage(
-            f"added {name} #{n} — click to add more, or click {name} again "
-            "(Esc) to stop")
+            f"added {name} #{n}"
+            + (f" · family {fam} (literature band; edit in the family column)"
+               if fam else "")
+            + f" — click to add more, or click {name} again (Esc) to stop")
 
     def add_function_line(self):
         """Add a user y(x; a,b,c,d) expression line (ssNake Function fit)."""
@@ -319,6 +328,7 @@ class _EditingMixin:
                 "Help ▸ Literature shift ranges")
             return
         changed, kept, unmatched = [], [], []
+        tagged = 0
         self.snapshot()
         for i, s in enumerate(self.recipe["sites"]):
             p = s.get("params", {}).get("isotropic_chemical_shift_ppm")
@@ -328,7 +338,14 @@ class _EditingMixin:
             letter = cellparse.index_to_letter(i)
             if hit is None:
                 unmatched.append(letter)
-            elif refranges.is_auto_label(s.get("label")):
+                continue
+            # a band that names a species also fills an EMPTY family tag
+            # (larmor.families) -- a user's own tag is never overwritten,
+            # whichever way the label goes
+            if hit.get("family") and not str(s.get("family") or "").strip():
+                s["family"] = hit["family"]
+                tagged += 1
+            if refranges.is_auto_label(s.get("label")):
                 s["label"] = hit["label"]
                 changed.append(f"{letter}={hit['label']}")
             else:
@@ -340,6 +357,9 @@ class _EditingMixin:
             msg += "  ·  kept your own: " + ", ".join(kept)
         if unmatched:
             msg += "  ·  outside every band: " + ", ".join(unmatched)
+        if tagged:
+            msg += f"  ·  tagged {tagged} famil{'y' if tagged == 1 else 'ies'}"
+            self.run_quantify(show=False)
         self.statusBar().showMessage(msg, 12000)
 
     def predict_at_field(self):
@@ -617,6 +637,16 @@ class _EditingMixin:
         self._persist_session()
         self._update_paddles()
         self.request_simulation()
+
+    def on_family_changed(self):
+        """A family tag changed in the Fit-parameters table (typed in the
+        family column or picked from its right-click menu): the Report's
+        family block (Σ rows, N4 …) follows at once and the session is
+        persisted. No undo snapshot, like a rename; the model itself is
+        untouched, so no resimulation."""
+        self.run_quantify(show=False)
+        self._persist_session()
+        self.statusBar().showMessage("family tags changed — Report (F6) updated")
 
     # ------------------------------------------------------------- paddles
     def _update_paddles(self):
