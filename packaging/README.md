@@ -28,9 +28,23 @@ packaging\.buildenv\Scripts\python -m PyInstaller packaging/larmor.spec --noconf
 
 The result is `dist/LARMOR/` (~350 MB from the pip stack). Smoke-tested by
 launching `LARMOR.exe` with `QT_QPA_PLATFORM=offscreen`: the event loop must
-run and `~/LARMOR_crash.log` must stay absent/empty.
-Zip that folder to distribute, or wrap it with an installer (Inno Setup /
-NSIS) for a Start-menu entry.
+run and `~/LARMOR_crash.log` must stay absent/empty. Before a rebuild,
+reinstall the package into the venv (`python -m pip install --no-deps
+".[desktop]"`) so the bundled version matches `larmor/__init__.py`; after it,
+list the archive (`python -m PyInstaller.utils.cliutils.archive_viewer -l -r
+dist/LARMOR/LARMOR.exe`) and check that every new module is present.
+
+## Distribute
+
+Copy a plain-language `INSTALL.txt` next to `LARMOR.exe` (unzip anywhere,
+double-click, first start 10–30 s, where the crash log is, SmartScreen
+"Run anyway") and zip the folder as `dist/LARMOR-<version>-win64.zip`
+(~154 MB compressed). Recipients need no Python: unzip and double-click.
+Check the archive once by extracting it elsewhere and launching that copy.
+Inno Setup / NSIS would add a Start-menu entry; neither is installed on the
+build machine, so the zip is the distribution. A GitHub release
+(`gh release create v<version> dist/LARMOR-<version>-win64.zip`) is the place
+to publish it once a clean-machine run has confirmed it.
 
 ## First run
 
