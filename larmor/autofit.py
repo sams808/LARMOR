@@ -117,6 +117,13 @@ class ErrorProfile:
     ci68: tuple[float | None, float | None]
     ci95: tuple[float | None, float | None]
     notes: list[str] = field(default_factory=list)
+    #: degrees of freedom of the full fit (points in the window minus free
+    #: parameters) and the residual variance chi2_min / dof it implies --
+    #: the unit the delta-chi-square rule is stated in
+    dof: int = 0
+    noise_var: float = 0.0
+    level68: float = 0.0            # chi2 at the 1-sigma crossing
+    level95: float = 0.0            # chi2 at the 2-sigma (95 %) crossing
 
     @property
     def summary(self) -> str:
@@ -182,7 +189,17 @@ def error_profile(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
     parameter is re-fitted, so correlations are absorbed rather than ignored.
     `span` = how many stderr (or 25% of the value if no stderr) to scan each
     way. Confidence intervals come from the delta-chi-square rule for one
-    parameter of interest: 1.00 for 1σ, 3.84 for 2σ (95%).
+    parameter of interest: 1.00 for 1σ, 3.84 for 2σ (95%) -- in units of
+    the residual variance. The fit minimises an UNWEIGHTED sum of squares,
+    so chi2 carries the data's intensity units; the rule holds for
+    residuals divided by the noise sigma, which is unknown and is
+    estimated the way lmfit scales its covariance: chi2_min / dof, with
+    dof = points in the window - free parameters. The levels are therefore
+    chi2_min (1 + 1.00 / dof) and chi2_min (1 + 3.84 / dof). Stating them
+    as chi2_min + 1.00 / + 3.84 (as this function did until 0.12.1) puts
+    them a part in 1e13 above the minimum on real-intensity data, so the
+    interpolated crossings collapsed onto the best value and the tool
+    reported a zero-width interval for every parameter.
 
     Every scan point is an independent refit -- ``parallel=True`` runs them
     across a process pool (larmor.parallel) instead of one at a time, which
@@ -225,14 +242,40 @@ def error_profile(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
 
     chi2_min = float(np.min(chi2))
     best = float(values[int(np.argmin(chi2))])
-    ci68 = _crossings(values, chi2, chi2_min + 1.00, best)
-    ci95 = _crossings(values, chi2, chi2_min + 3.84, best)
+    dof = _profile_dof(recipe, exp_ppm, window_ppm)
+    noise_var = chi2_min / dof if chi2_min > 0 else 0.0
+    level68 = chi2_min + 1.00 * noise_var
+    level95 = chi2_min + 3.84 * noise_var
+    ci68 = _crossings(values, chi2, level68, best)
+    ci95 = _crossings(values, chi2, level95, best)
     if ci68[0] is None or ci68[1] is None:
         notes.append("1σ not bracketed — widen `span`; the parameter may be "
                      "poorly determined")
+    elif ci68 == (best, best) or (ci68[1] - ci68[0]) < 0.05 * abs(
+            values[1] - values[0]):
+        notes.append("1σ interval narrower than the scan step — rerun with "
+                     "a smaller `span` to resolve it")
     return ErrorProfile(site=site, param=param, values=values, chi2=chi2,
                         best_value=best, chi2_min=chi2_min,
-                        ci68=ci68, ci95=ci95, notes=notes)
+                        ci68=ci68, ci95=ci95, notes=notes, dof=dof,
+                        noise_var=noise_var, level68=level68,
+                        level95=level95)
+
+
+def _profile_dof(recipe: Recipe, exp_ppm: np.ndarray,
+                 window_ppm: tuple[float, float] | None) -> int:
+    """Degrees of freedom of the full fit: data points inside the fit
+    window minus the parameters it varies (linked ones are not free)."""
+    x = np.asarray(exp_ppm, float)
+    window_ppm = window_ppm or recipe.fit_window_ppm     # as fit.fit resolves it
+    if window_ppm is not None and len(window_ppm) == 2:
+        hi, lo = max(window_ppm), min(window_ppm)
+        n_pts = int(np.count_nonzero((x >= lo) & (x <= hi)))
+    else:
+        n_pts = int(x.size)
+    n_free = sum(1 for s in recipe.sites for p in s.params.values()
+                 if p.vary and not p.expr)
+    return max(n_pts - n_free, 1)
 
 
 # --------------------------------------------------------------------------

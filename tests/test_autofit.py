@@ -127,3 +127,39 @@ def test_error_profile_is_parabolic_near_minimum():
     assert 0 < imin < len(prof.chi2) - 1
     assert prof.chi2[0] > prof.chi2_min
     assert prof.chi2[-1] > prof.chi2_min
+
+
+def test_error_profile_levels_are_in_residual_variance_units():
+    """The delta-chi2 rule (1.00 / 3.84) holds for residuals in units of the
+    noise sigma. The fit is unweighted, so the levels are scaled by the
+    residual variance chi2_min / dof: the 1-sigma half-width must then agree
+    with the covariance stderr of the same fit, and scaling the data by 1e6
+    must leave the interval unchanged (until 0.12.1 it collapsed to zero
+    width on real-intensity data)."""
+    from larmor import fit as fitmod
+
+    x, y = _synthetic()
+    r = _recipe()
+    fitmod.fit(r, x, y)
+    pname = "isotropic_chemical_shift_ppm"
+    prof = autofit.error_profile(r, x, y, site=0, param=pname,
+                                 n_points=15, span=3.0)
+    assert prof.dof == x.size - 6                    # 2000 points, six free
+    assert prof.noise_var == pytest.approx(0.4 ** 2, rel=0.15)   # sigma = 0.4
+    assert prof.level68 == pytest.approx(prof.chi2_min * (1 + 1.0 / prof.dof))
+    assert prof.level95 == pytest.approx(prof.chi2_min * (1 + 3.84 / prof.dof))
+    lo, hi = prof.ci68
+    se = r.sites[0].params[pname].stderr
+    assert se and (hi - lo) / 2.0 == pytest.approx(se, rel=0.35)
+    assert not any("narrower than the scan step" in n for n in prof.notes)
+
+    big = _recipe()
+    for s in big.sites:
+        s.params["amplitude"].value *= 1e6
+        s.params["amplitude"].max = 4e8
+    fitmod.fit(big, x, y * 1e6)
+    prof_big = autofit.error_profile(big, x, y * 1e6, site=0, param=pname,
+                                     n_points=15, span=3.0)
+    assert prof_big.chi2_min == pytest.approx(prof.chi2_min * 1e12, rel=1e-3)
+    assert prof_big.ci68 == pytest.approx(prof.ci68, rel=0.05)
+

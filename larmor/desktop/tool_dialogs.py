@@ -253,9 +253,10 @@ class ErrorsDialog(QDialog):
         self.plot.clear()
         self.plot.plot(prof.values, prof.chi2, pen=pg.mkPen("#0e7c86", width=1.5),
                        symbol="o", symbolSize=5)
-        # 1sigma and 2sigma levels
-        for lvl, col in ((prof.chi2_min + 1.0, "#d62728"),
-                         (prof.chi2_min + 3.84, "#c88a1e")):
+        # 1sigma and 2sigma levels, in units of the residual variance
+        # chi2_min / dof (see autofit.error_profile)
+        for lvl, col in ((prof.level68, "#d62728"),
+                         (prof.level95, "#c88a1e")):
             line = pg.InfiniteLine(pos=lvl, angle=0,
                                    pen=pg.mkPen(col, style=Qt.DashLine))
             self.plot.addItem(line)
