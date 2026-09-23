@@ -94,8 +94,9 @@ table at the bottom is a dmfit-style spreadsheet with paddles on the plot; the
 **Tools** and **Decomposition** menus hold the experiment-specific machinery.
 Under the spectrum, a **fit-health strip** states whether the last fit's
 numbers can be read as they stand — unphysical values, degenerate pairs,
-structured residual, parameters at bounds, missing error bars — and each chip
-opens the matching detail (**F7** lists them all).
+structured residual, parameters at bounds, missing error bars, a line cut by
+the integration window, an under-relaxed recycle delay, a too-long pulse — and
+each chip opens the matching detail (**F7** lists them all).
 
 **Appearance.** **View ▸ Theme** offers ten colour presets (five light, five dark
 — Light, Sepia, Solarized, Nord, Slate, Ocean, High-Contrast, …). The choice is

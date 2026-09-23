@@ -65,6 +65,12 @@ where a single $T_1$ is a fiction. The fitted formula is shown above the curve.
   region, decompose *every slice* on the **current fit's lineshapes** (NNLS on the
   fixed model) and follow each **site's** amplitude → a $T_1$/$T_2$ per resolved
   site, even where the sites overlap.
+- **Recycle-delay chip** — after a TopSpin `t1/t2` analysis, the per-integral
+  $T_1$ in `pdata/1/ct1t2.txt` is read by the fit-health strip of the sibling 1D
+  spectrum (same nucleus, same sample folder) and compared with its recycle
+  delay; a click on that chip opens this tool on the relaxation EXPNO, and the
+  **F7** menu's *Measure T1 per site from EXPNO N* runs the per-site decomposition
+  above on the current fit and feeds its $T_1$ back into the chip.
 - **Variable temperature** (Tools ▸ Variable temperature) — feed a τ(T) series and
   fit an **Arrhenius** $\tau = \tau_0\,e^{E_a/RT}$ or **Vogel–Fulcher–Tammann**
   $\tau = \tau_0\,e^{B/(T-T_0)}$ law to extract an activation energy $E_a$ (VFT for
