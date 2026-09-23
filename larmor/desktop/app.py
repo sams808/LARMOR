@@ -39,6 +39,18 @@ from larmor.recipe import Recipe
 #: project-bundle (.larproj.json) schema version -- was a write-only literal
 PROJECT_BUNDLE_VERSION = 1
 
+#: (file stem under docs/tutorials, menu title) -- the Help ▸ Tutorials entries.
+#: tests/test_tutorials.py holds the same list and checks the files ship.
+TUTORIALS = (
+    ("01-first-fit-27Al-czjzek", "1 · A first fit — ²⁷Al Czjzek"),
+    ("02-constraints", "2 · Constraints — fix, bound, link"),
+    ("03-figures", "3 · Plotting studio figures"),
+    ("04-batch-fitting", "4 · Batch fitting a composition series"),
+    ("05-mqmas", "5 · MQMAS — 2D processing & fitting"),
+    ("06-error-analysis", "6 · Error analysis — covariance, Monte-Carlo, χ² profile"),
+    ("07-static-81Br-wcpmg", "7 · Static wideline — ⁸¹Br WURST-CPMG"),
+)
+
 
 
 
@@ -653,6 +665,10 @@ class MainWindow(QMainWindow):
                 ("multi-dataset", "Multi-dataset & co-fitting")):
             self._add(m_man, title,
                       lambda _=False, n=name, t=title: self._open_manual(n, t))
+        m_tut = m_help.addMenu("&Tutorials")
+        for name, title in TUTORIALS:
+            self._add(m_tut, title,
+                      lambda _=False, n=name, t=title: self._open_tutorial(n, t))
         self._add(m_help, "About LARMOR", self._about)
         self._add(m_help, "More…", self._show_more)
 
@@ -999,6 +1015,11 @@ class MainWindow(QMainWindow):
         from larmor.desktop.help_dialog import show_help
 
         show_help(self, name, title)
+
+    def _open_tutorial(self, name: str, title: str):
+        from larmor.desktop.help_dialog import show_help
+
+        show_help(self, name, title, kind="tutorial")
 
     def _about(self):
         from PySide6.QtWidgets import QDialog, QTextBrowser
@@ -4078,7 +4099,7 @@ class MainWindow(QMainWindow):
         form.addRow(bb)
         if dlg.exec() != QDialog.Accepted:
             return
-        self.snapshot()
+        self.snapshot(with_axis=True)       # undoable (changes the data)
         w = wurst_profile(self.exp_ppm, sfo, float(centre.value()),
                           float(sweep.value()), n=float(order.value()),
                           floor=float(floor.value()) / 100.0)

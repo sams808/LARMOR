@@ -48,6 +48,14 @@ BRUKER_2RR_DQSQ = _data("Desktop/SAVE_PC_PRO/THESE/RMN/Data/ISG-2GPa"
                         "/1181/pdata/1")
 # the published MagLab 35Cl QCPMG acceptance set (12 samples, ssNake T2s)
 MAGLAB_35CL = _data("Desktop/WSU_work/NMR/MagLab/DATA/35Cl_2025-12")
+# Tutorial 7: the static 81Br WURST-CPMG set (EXPNOs 30-34 = 0-4 Ca glasses;
+# acqus records a stale MASR=14000 on a static probe)
+MAGLAB_81BR = _data("Desktop/WSU_work/NMR/MagLab/DATA/81Br_2026-08")
+# Tutorial 4: the five-glass 11B composition series (EXPNO 24 of each sample)
+LAW_CA_11B = tuple(_D / f"2026-01/{s}/24" for s in (
+    "01192026_SR31649_Base0Ca_SS_ALP", "01202026_SR31649_Base1Ca_SS_ALP",
+    "01202026_SR31649_Base2Ca_SS_ALP", "01202026_SR31648_Base3Ca_SS_ALP",
+    "01202026_SR31649_Base4Ca_SS_ALP"))
 
 #: the full manifest, so the summary can report what a MACHINE is missing
 #: (not only what this particular selection of tests happened to request)
@@ -58,6 +66,8 @@ ALL_DATASETS = {
     "pseudo-2D 2rr": BRUKER_2RR_PSEUDO, "ser": BRUKER_SER,
     "MQMAS 2rr": BRUKER_2RR_MQMAS, "DQ/SQ 2rr": BRUKER_2RR_DQSQ,
     "MagLab 35Cl QCPMG set": MAGLAB_35CL,
+    "81Br WCPMG set (Tutorial 7)": MAGLAB_81BR / "30",
+    "LAW Ca 11B series (Tutorial 4)": LAW_CA_11B[0],
 }
 
 

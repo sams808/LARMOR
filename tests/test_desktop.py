@@ -1271,3 +1271,21 @@ def test_staticct_dialog_reads_a_simulated_pattern(win, qapp, monkeypatch):
     assert got["Cq_MHz"]["value"] == pytest.approx(cq, rel=0.05)
     assert got["eta"]["value"] == pytest.approx(eta, abs=0.05)
     dlg.close()
+
+
+def test_wurst_correction_is_undoable(win, qapp, monkeypatch):
+    """Process > WURST excitation profile rewrites exp_amp, so its undo
+    snapshot must carry the axis: Ctrl+Z restores the spectrum, not only the
+    recipe (Tutorial 7 says the step is undoable)."""
+    from PySide6.QtWidgets import QDialog
+
+    win._display_1d(np.linspace(-3000, 1000, 2001), np.ones(2001), "81Br",
+                    216.0, 0.0, "sim", "sim")
+    qapp.processEvents()
+    monkeypatch.setattr(QDialog, "exec", lambda self: QDialog.Accepted)
+    before = win.exp_amp.copy()
+    win.open_wurst_correct()
+    assert not np.allclose(win.exp_amp, before)
+    assert "wurst_correct" in (win.recipe.get("provenance") or {})
+    win.undo()
+    assert np.allclose(win.exp_amp, before)

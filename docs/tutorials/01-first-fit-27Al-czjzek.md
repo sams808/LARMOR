@@ -22,6 +22,7 @@ EXPNO: examples\pCABS2-4\3616
 nucleus: 27Al   SFO1: 130.3230 MHz
 pulse program: zg   TD: 2048   SW: 100000 Hz
 MASR (acqus): 26000.0 Hz
+title: 02/12/21 : conditions OK
 ```
 
 A single-pulse ²⁷Al acquisition at 26 kHz MAS. The dmfit fit made for this
@@ -71,7 +72,7 @@ The first run builds the Czjzek simulation kernel (~15 s); after that,
 iterations are milliseconds. At the end of the report:
 
 ```
-normalized RMSD: 0.0462
+normalized RMSD: 0.0468
 ```
 
 and `fit.png` shows the experiment (black), total fit (red), and each site's

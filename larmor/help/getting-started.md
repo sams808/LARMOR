@@ -105,6 +105,7 @@ Each experiment has its own manual with worked steps and the science behind it:
 | several datasets to compare or co-fit | **Multi-dataset & co-fitting** |
 | a question about a lineshape model | **Lineshapes — models & physics** |
 | a question about a processing step | **Processing reference** |
+| a step-by-step walkthrough on real data | **Help ▸ Tutorials** (seven tutorials) |
 
 All are under **? ▸ User manuals**; the reference documents are direct **?**-menu
 items. Every tool with a **Help** button opens the matching section.
