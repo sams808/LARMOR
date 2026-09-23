@@ -330,7 +330,18 @@ manual, §2, describes the rule and the flags.
    same integral-over-the-window quantification as Report/§5) — the exact
    column the Plotting studio's species-distribution chart wants, without a
    separate export step. An excluded component (above) is left out entirely,
-   not reported at 0%. The "also save individual fits… next to the CSV"
+   not reported at 0%. Lines tagged with a **family** in the model (the
+   family column of the Fit-parameters table) add a `family_pct` row per
+   family (site ids `f0`, `f1`, …; label = the family) and a `ratio` row per
+   named ratio of the nucleus (`r0`, …; label `N4`, `⟨CN⟩ Al`, …) in the same
+   long format — the headers do not change. Their error is the exact
+   per-spectrum value of the last error calculation when one was run
+   (Monte-Carlo: the spread of the per-trial re-integrated sums;
+   covariance: propagated over the amplitude covariance), else the flagged
+   *independent* estimate; the results table under the grid shows them as
+   trailing `Σ BO4 / family %` and `N4 / ratio` columns in a neutral colour
+   (blank where every line of the family is excluded), and the tooltip
+   names the basis. The "also save individual fits… next to the CSV"
    checkbox (on by default) auto-writes each spectrum's `.recipe.json`
    alongside the table too, so the Plotting studio's batch-grid finds the
    real saved fits automatically (bounds, `vary`, baseline processing
@@ -357,7 +368,10 @@ manual, §2, describes the rule and the flags.
    `manifest.csv`, the tool asks before replacing it. The same bundle comes
    from the command line with `larmor batchfit … --curves`.
    **Series plot…** charts how any parameter (δ_iso, width, C_Q, η, or population %)
-   evolves along the series. Its **Error bars** menu chooses which computed error
+   evolves along the series. With tagged lines the list also offers **Σ BO4**-style
+   family items (drawn on the population subplot) and the named ratios (their own
+   *named ratio* subplot), each with the error bars of the chosen method and
+   exported as `family:BO4` / `ratio:N4` columns. Its **Error bars** menu chooses which computed error
    to draw and export — *covariance*, *Monte-Carlo*, or *χ² profile* (whichever
    you ran in step 5), or *none*. The **integrated population %** carries an
    error too — first-order from the amplitude's error under the chosen method

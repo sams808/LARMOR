@@ -115,6 +115,60 @@ window` chip naming the line, and a click widens the window to contain
 99.5 % of every line and re-integrates (F5 then refits over the wider
 window).
 
+### Grouped populations and N4
+
+A glass paper rarely quotes every fitted line; it quotes the species — the
+BO₄ fraction $N_4 = \mathrm{BO_4}/(\mathrm{BO_3}+\mathrm{BO_4})$, the mean
+aluminium coordination ⟨CN⟩, the mean connectivity ⟨n⟩ of a Qⁿ
+distribution, or a grouped fraction such as "bonded" phosphorus. Each is a
+sum of site populations, and the error of a sum is **not** the quadrature of
+the site errors: two overlapping lines have strongly anticorrelated
+amplitudes, so their sum is known far better than either member, while the
+split between them (a ratio) is known worse.
+
+A **family** is the tag that groups lines. Three ways to set it: type it in
+the **family** column of the Fit-parameters table (the last column); pick it
+from the right-click **Family** submenu (the presets of the nucleus —
+BO3/BO4, Al(IV)/Al(V)/Al(VI), Q0–Q4, the 31P scheme — plus any tag already
+in use, plus **Other…** for free text); or let **Decomposition ▸ Label lines
+from literature ranges** fill it for ²⁷Al and ¹¹B (only empty tags are
+filled; a line dropped inside one of those bands is pre-tagged the same
+way). Untagged lines stay in the total but belong to no family.
+
+The Report (F6) then adds one bold **Σ** row per family — its population is
+the family's share of the **full** total, untagged lines included — and the
+named ratios of the nucleus: $N_4$ for ¹¹B; ⟨CN⟩ = (4·Al(IV) + 5·Al(V) +
+6·Al(VI)) / (Al(IV) + Al(V) + Al(VI)) for ²⁷Al; ⟨n⟩ = Σ n·Qⁿ / Σ Qⁿ for ²⁹Si
+and ³¹P. A ratio needs at least two of its families tagged (a tagged family
+whose amplitude is zero counts, so $N_4 = 0$ is a result, not a blank).
+
+The uncertainty of a Σ row or a ratio is propagated on one of three bases,
+and the basis is always stated (row tooltip, Copy CSV, the LaTeX table, the
+Methods sentence):
+
+- **covariance** — right after a fit: the family integral is Σ kᵢ·aᵢ with
+  kᵢ = integral/amplitude fixed at the best fit, and fractions and ratios
+  are evaluated with the full covariance between the amplitudes (lmfit's
+  correlated values; linked amplitudes exact). Lineshape covariance is
+  neglected, as for the site rows.
+- **Monte-Carlo** — after **Errors ▸ Monte-Carlo errors ▸ Use as fit
+  errors**: every synthetic refit is re-integrated, the family sum and the
+  ratio are recomputed per trial, and the spread of those per-trial values
+  is the error. This is the only basis that also carries the lineshape
+  covariance, and it has to be integrals rather than amplitudes: the
+  amplitude is the peak height for most models. The dialog lists the
+  per-trial populations, Σ families and ratios with their histograms.
+- **independent** — printed whenever neither is available (no fit yet, a
+  value edited after the fit, a Monte-Carlo run integrated over another
+  window): the lines are treated as independent and the site errors are
+  combined in quadrature (delta method for a ratio). It is a fallback and it
+  is flagged as one — refit, or run Monte-Carlo errors, before quoting it.
+
+A one-line family's Σ row can show a slightly different ± than its site
+row: the site rows keep their first-order amplitude-only statement, the Σ
+rows carry the propagation above. Batch fit (F5) writes the same families
+as `family_pct` / `ratio` rows (manual *Multi-dataset* §6).
+
 ## 6 · Quantitative intensities from quadrupolar nuclei
 
 Peak areas of half-integer quadrupolar nuclei (²⁷Al, ¹¹B, ²³Na, ¹⁷O …) are
@@ -175,6 +229,9 @@ the Methods text.
   delay (the quantitativity conditions of §6 above);
 - per site: δiso, FWHM, population with **uncertainties** (and how they
   were obtained: covariance / MC / χ² profile);
+- family sums and named ratios ($N_4$, ⟨CN⟩, ⟨n⟩ — the Report's Σ rows) with
+  the error basis stated: covariance, Monte-Carlo, or the flagged
+  independent fallback (§5 above);
 - for Czjzek sites: **σ and/or √⟨P_Q²⟩ = 2√5·σ, with the convention stated**
   (σ is the width LARMOR stores and fits, half of Czjzek's own σ_Cz; dmfit's
   sCZ_CQ = 2σ and its displayed CQ = 4σ) — see *Lineshapes ▸ Czjzek width

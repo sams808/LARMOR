@@ -74,6 +74,85 @@ def _fitted(win, qapp, title="t", src="src"):
     return x, y, result
 
 
+def _two_site_fitted(win, qapp):
+    """A two-line 11B synthetic (15 ppm / 1 ppm) on the workbench, fitted,
+    fed through _fit_done -- the shape a BO3/BO4 tagging needs."""
+    from larmor import fit as fitmod
+    from larmor.engine import make_context, simulate_site
+    from larmor.recipe import Param, Recipe, SiteModel
+
+    x = np.linspace(-20, 40, 600)
+    truth = Recipe(nucleus="11B", larmor_frequency_MHz=160.0, sites=[
+        SiteModel(model="gauss_lor", label="B3", params={
+            "isotropic_chemical_shift_ppm": Param(15.0, min=0, max=30),
+            "shift_fwhm_ppm": Param(8.0, min=1, max=40),
+            "gl": Param(1.0, vary=False), "amplitude": Param(100.0, min=0)}),
+        SiteModel(model="gauss_lor", label="B4", params={
+            "isotropic_chemical_shift_ppm": Param(1.0, min=-10, max=10),
+            "shift_fwhm_ppm": Param(4.0, min=1, max=40),
+            "gl": Param(1.0, vary=False), "amplitude": Param(60.0, min=0)})])
+    ctx = make_context(truth, exp_ppm=x)
+    y = np.sum([simulate_site(s, ctx) for s in truth.sites], axis=0)
+    y = y + np.random.RandomState(1).normal(0, 0.5, y.size)
+    win._display_1d(x, y, "11B", 160.0, None, "t", "src")
+    win.recipe["sites"] = truth.to_dict()["sites"]
+    result = fitmod.fit(Recipe.from_dict(win.recipe), x, y, window_ppm=(40, -20))
+    win._fit_done(result)
+    qapp.processEvents()
+    return x, y, result
+
+
+def test_report_family_rows_appear_after_tagging_and_stay_absent_when_untagged(qapp, win):
+    """N3: the Report (F6) adds bold Σ family rows and the N4 row only once
+    lines are tagged, on the covariance basis right after a fit (the
+    tooltip says so), falls back to the flagged independent basis after a
+    value edit, and Copy CSV / Copy methods carry the block."""
+    _two_site_fitted(win, qapp)
+    assert win.qtable.rowCount() == 2
+    assert win._last_quant["families"] == [] and win._last_quant["ratios"] == []
+    win.recipe["sites"][0]["family"] = "BO3"
+    win.recipe["sites"][1]["family"] = "BO4"
+    win.on_family_changed()
+    assert win.qtable.rowCount() == 2 + 2 + 1
+    assert win.qtable.item(2, 0).text().startswith("Σ BO3  (A)")
+    assert win.qtable.item(3, 0).text().startswith("Σ BO4  (B)")
+    assert win.qtable.item(4, 0).text() == "N4 = BO4/(BO3+BO4)"
+    assert "±" in win.qtable.item(4, 3).text() and "±" in win.qtable.item(2, 3).text()
+    assert win.qtable.item(2, 0).font().bold() and not win.qtable.item(0, 0).font().bold()
+    assert win._last_quant["family_basis"] == "covariance"
+    assert "covariance" in win.qtable.item(4, 0).toolTip()
+    n4 = win._last_quant["ratios"][0]
+    assert n4["defined"] and 0.0 < n4["value"] < 1.0 and n4["err"] > 0
+    assert "Report (F6) updated" in win.statusBar().currentMessage()
+    # the per-site rows are the same numbers as before the tagging
+    assert win.qtable.item(0, 3).text() and win.qtable.item(1, 3).text()
+    # Copy CSV: the site table, a blank line, the family block, the basis line
+    win.copy_csv()
+    text = QApplication.clipboard().text()
+    assert "\n\nfamily,lines,integral,fraction_pct,fraction_err_pct\n" in text
+    assert "\nBO3,A," in text and "\nBO4,B," in text
+    assert "ratio,description,value,err\nN4,BO4/(BO3+BO4)," in text
+    assert text.rstrip().endswith("# family/ratio errors: covariance")
+    win.copy_methods()
+    assert "structural families (BO3, BO4)" in QApplication.clipboard().text()
+    assert "covariance between line amplitudes" in QApplication.clipboard().text()
+    # an amplitude edited after the fit: the covariance is stale -> flagged
+    win.recipe["sites"][0]["params"]["amplitude"]["value"] *= 1.01
+    win.on_family_changed()
+    assert win.qtable.rowCount() == 5
+    assert win._last_quant["family_basis"] == "independent"
+    assert "independent" in win.qtable.item(4, 0).toolTip()
+    win.copy_methods()
+    assert "treated as independent" in QApplication.clipboard().text()
+    # untagging both lines removes the block again
+    win.recipe["sites"][0].pop("family")
+    win.recipe["sites"][1].pop("family")
+    win.on_family_changed()
+    assert win.qtable.rowCount() == 2
+    win.copy_csv()
+    assert "family" not in QApplication.clipboard().text()
+
+
 def test_fit_done_feeds_strip_report_header_chi2_and_status(qapp, win):
     x, y, result = _fitted(win, qapp)
     strip = win.health_strip

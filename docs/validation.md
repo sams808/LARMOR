@@ -440,6 +440,26 @@ regime, MAS coherence effects and incomplete saturation are ignored, 90° is
 assumed when no flip angle is known), and the flip angle against 30°/(I + ½)
 for single-pulse spectra. Both are caveats, never corrections.
 
+**Family sums and named ratios.** Lines tagged with a family
+(`larmor.families`) are summed into Σ rows, and the named ratios of the
+nucleus ($N_4$, ⟨CN⟩ Al, ⟨n⟩) are derived from them. Their uncertainty is
+propagated on one of three stated bases: *covariance* — the family integral
+$F = \sum_i k_i a_i$ with $k_i = |I_i|/a_i$ fixed at the best fit, fractions
+and ratios evaluated over the full amplitude covariance through lmfit's
+`uvars` (linked amplitudes exact; lineshape covariance neglected, as for the
+site rows); *Monte-Carlo* — every synthetic refit is re-integrated and the
+family value recomputed per trial, so the spread also carries the lineshape
+covariance (integrals, not amplitudes: the amplitude is the peak height for
+most models); *independent* — the flagged fallback (quadrature of the site
+errors, delta method for a ratio) printed whenever neither is available.
+`tests/test_families.py` pins the covariance basis against the analytic
+two-site formula
+$\sigma^2(N_4) = (b^2\sigma_a^2 + a^2\sigma_b^2 - 2ab\,\mathrm{cov}_{ab})/(a+b)^4$
+and the Monte-Carlo basis against the plain spread of the per-trial ratio.
+The site rows keep their first-order amplitude-only statement; only the Σ
+rows carry the new propagation, so a one-line family may show a slightly
+different ± than its site row.
+
 ---
 
 ## 8. Processing and phasing
@@ -568,7 +588,10 @@ chemical-shift anisotropy."*
    tail; report the stated first-order errors and cross-check important
    ratios with the χ² profile (*Errors Analysis*) rather than the covariance
    alone. Confirm the fit-health strip shows no tail / recovery / excitation
-   chip, or carry the caveat into the Methods text.
+   chip, or carry the caveat into the Methods text. Report $N_4$ / ⟨CN⟩ from
+   the Report's Σ rows with covariance or Monte-Carlo family errors, never a
+   quadrature of independent site errors; if the stated basis reads
+   *independent*, refit or run Monte-Carlo errors first.
 2. **Czjzek glasses** — report σ, $\sqrt{\langle P_Q^2\rangle}$, and dCS
    rather than a single $C_Q$; in 2D check that `cq_max` covers the distribution if
    σ is large (mode $\approx 3.7\sigma$; the 1D kernel reaches 10σ automatically).

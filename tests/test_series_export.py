@@ -120,6 +120,80 @@ def test_population_integral_carries_an_error():
     assert v2 == pytest.approx(vals[:, 0]) and e2 == pytest.approx(errs[:, 0])
 
 
+def test_series_values_for_family_and_ratio_kinds_and_dialog_items(qapp):
+    """N3: Σ family and named-ratio series beside the sites -- values from
+    quantify per spectrum, the error the stored exact per-spectrum value
+    when an error run wrote one, the dialog lists them and adds a ratio
+    subplot only when a ratio is defined; a SeqFitResult still works."""
+    from larmor.batchfit import ParamError
+    from larmor.desktop.series_plot import (SeriesPlotDialog, _param_specs,
+                                            series_options, series_values)
+    res = _result()
+    for rec in res.recipes:
+        rec.sites[0].family = "BO3"
+        rec.sites[1].family = "BO4"
+    opts = series_options(res)
+    kinds = {(o["kind"], o.get("family"), o.get("ratio")) for o in opts}
+    assert {("family", "BO3", None), ("family", "BO4", None), ("ratio", None, "N4")} <= kinds
+    assert any(o["text"] == "Σ BO4: population % (integral)" for o in opts)
+    fam_opt = {"kind": "family", "family": "BO4", "param": "family_pct", "site": None}
+    rat_opt = {"kind": "ratio", "ratio": "N4", "param": "ratio", "site": None}
+    pop = series_values(res, {"site": 1, "param": "population_pct",
+                              "kind": "pop_integral"}, "none")[0]
+    fam, e_none = series_values(res, fam_opt, "none")
+    assert list(fam) == pytest.approx(list(pop)) and np.isnan(e_none).all()
+    rat, _ = series_values(res, rat_opt, "none")
+    assert list(rat) == pytest.approx(list(pop / 100.0))
+    # a stored Monte-Carlo family error is used verbatim; without a stored
+    # entry the fallback is quantify's own (None here: no stderr on the fit)
+    res.error_detail = {"montecarlo": [
+        {(-1, "family:BO4"): ParamError(-1, "family:BO4", "family.BO4", float(v),
+                                        0.5 + k, (None, None), None)}
+        for k, v in enumerate(fam)]}
+    res.error_method = "montecarlo"
+    _, e_mc = series_values(res, fam_opt, "montecarlo")
+    assert list(e_mc) == pytest.approx([0.5, 1.5, 2.5])
+    _, e_cov = series_values(res, fam_opt, "covariance")
+    assert np.isnan(e_cov).all()
+    _, e_rat = series_values(res, rat_opt, "montecarlo")     # no stored ratio error
+    assert np.isnan(e_rat).all()
+
+    dlg = SeriesPlotDialog(None, res)
+    texts = [dlg.list.item(i).text() for i in range(dlg.list.count())]
+    assert texts[-3:] == ["Σ BO3", "Σ BO4", "N4"]
+    assert "ratio" in dlg._subplots and _param_specs(res)[-1]["kind"] == "ratio"
+    dlg.list.clearSelection()
+    dlg.list.item(dlg.list.count() - 2).setSelected(True)          # Σ BO4
+    assert dlg._selected() == ["f:BO4"]
+    pop_spec = next(s for s in dlg._params if s["kind"] == "pop_integral")
+    spec = dlg._studio_spec_for(pop_spec)
+    assert [tr["label"] for tr in spec["traces"]] == ["Σ BO4"]
+    assert spec["traces"][0]["data"]["y"] == pytest.approx(list(fam))
+    assert "yerr" in spec["traces"][0]["data"]                   # the MC errors
+    amp_spec = next(s for s in dlg._params if s["param"] == "amplitude")
+    assert dlg._studio_spec_for(amp_spec)["traces"] == []        # families: population only
+    dlg.list.item(dlg.list.count() - 1).setSelected(True)          # + N4
+    ratio_spec = next(s for s in dlg._params if s["kind"] == "ratio")
+    assert [tr["label"] for tr in dlg._studio_spec_for(ratio_spec)["traces"]] == ["N4"]
+    dlg._draw()
+    assert dlg._sel_key("f:BO4", pop_spec) == "family:BO4"
+    assert dlg._sel_key("r:N4", ratio_spec) == "ratio:N4"
+    assert dlg._sel_key(0, amp_spec) == "s0:amplitude"
+    # a SeqFitResult (no error_detail / shared / released) still works
+    from larmor.seqfit import SeqFitResult
+    seq = SeqFitResult(recipes=res.recipes, labels=res.labels, rmsd=res.rmsd,
+                       per_dataset=[], history=[], passes=1, propagated=())
+    v, e = series_values(seq, fam_opt, "montecarlo")
+    assert list(v) == pytest.approx(list(fam)) and np.isnan(e).all()
+    dlg_seq = SeriesPlotDialog(None, seq)
+    assert "ratio" in dlg_seq._subplots
+    # untagged: no Σ items, no ratio subplot, options as before
+    plain = SeriesPlotDialog(None, _result())
+    assert not any(plain.list.item(i).text().startswith("Σ") for i in range(plain.list.count()))
+    assert "ratio" not in plain._subplots
+    assert not any(o["kind"] in ("family", "ratio") for o in series_options(_result()))
+
+
 def test_series_dialog_error_selector_and_studio_yerr(qapp):
     from larmor.desktop.series_plot import SeriesPlotDialog
     dlg = SeriesPlotDialog(None, _result_with_mc())

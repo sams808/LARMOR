@@ -36,7 +36,79 @@ def _param_specs(result) -> list[dict]:
     specs.append({"param": "amplitude", "kind": "param", "label": "amplitude"})
     specs.append({"param": "population_pct", "kind": "pop_integral",
                   "label": "population % (integral)"})
+    # a ratio subplot only when the master recipe's families define one (N3)
+    if _group_names(result)[1]:
+        specs.append({"param": "ratio", "kind": "ratio", "label": "named ratio"})
     return specs
+
+
+def _group_names(result) -> tuple[list[str], list[str]]:
+    """(family names, defined ratio names) of the master recipe's tags
+    (larmor.families) -- ([], []) when nothing is tagged or quantify fails."""
+    from larmor.quantify import quantify
+    master = result.recipes[0]
+    try:
+        q = quantify(master, getattr(master, "fit_window_ppm", None))
+    except Exception:
+        return [], []
+    fams = [f["family"] for f in q.get("families") or []]
+    ratios = [r["name"] for r in q.get("ratios") or []
+              if r.get("defined") and r.get("value") is not None]
+    return fams, ratios
+
+
+def _stored_group_error(result, k: int, key: str, method) -> float:
+    """The exact per-spectrum family/ratio error an error run stored under
+    ``(-1, key)`` ('family:NAME' / 'ratio:NAME'), else NaN. Never reads the
+    recipe (site -1 is not a site), unlike _param_error."""
+    if method in (None, "none"):
+        return np.nan
+    detail = (getattr(result, "error_detail", {}) or {}).get(method)
+    if detail is not None and k < len(detail):
+        pe = detail[k].get((-1, key))
+        if pe is not None and pe.stderr is not None:
+            return float(pe.stderr)
+    return np.nan
+
+
+def _group_series(result, opt: dict, method) -> tuple[np.ndarray, np.ndarray]:
+    """(values, errors) across the series of one family's summed % or one
+    named ratio: quantify() per spectrum, the error the stored exact value
+    (Monte-Carlo / covariance run) or quantify's own flagged fallback; NaN
+    for 'none', for a spectrum whose every member is excluded, or when the
+    ratio is undefined there."""
+    from larmor.batchfit import is_zeroed_out
+    from larmor.quantify import quantify
+    kind = opt["kind"]
+    name = opt["family"] if kind == "family" else opt["ratio"]
+    vals, errs = [], []
+    for k, rec in enumerate(result.recipes):
+        v = e = np.nan
+        try:
+            q = quantify(rec, getattr(rec, "fit_window_ppm", None))
+        except Exception:
+            q = None
+        row, fallback = None, None
+        if q is not None and kind == "family":
+            row = next((f for f in q["families"] if f["family"] == name), None)
+            if row is not None and all(
+                    is_zeroed_out(rec.sites[i].params.get("amplitude"))
+                    for i in row["sites"] if i < len(rec.sites)):
+                row = None                         # every member excluded here
+            if row is not None:
+                v, fallback = row["fraction_pct"], row["fraction_err_pct"]
+        elif q is not None:
+            row = next((r for r in q["ratios"] if r["name"] == name
+                        and r.get("defined") and r.get("value") is not None), None)
+            if row is not None:
+                v, fallback = row["value"], row["err"]
+        if row is not None and method not in (None, "none"):
+            stored = _stored_group_error(result, k, f"{kind}:{name}", method)
+            e = stored if np.isfinite(stored) else (
+                float(fallback) if fallback is not None else np.nan)
+        vals.append(v)
+        errs.append(e)
+    return np.array(vals, float), np.array(errs, float)
 
 
 def population_integral(result, error_method: str | None = None
@@ -90,6 +162,13 @@ def series_options(result) -> list[dict]:
                     "text": f"s{i} {label}: population % (by amplitude)"})
         out.append({"site": i, "param": "population_pct", "kind": "pop_integral",
                     "text": f"s{i} {label}: population % (integral)"})
+    fams, ratios = _group_names(result)
+    for name in fams:
+        out.append({"kind": "family", "family": name, "param": "family_pct",
+                    "site": None, "text": f"Σ {name}: population % (integral)"})
+    for name in ratios:
+        out.append({"kind": "ratio", "ratio": name, "param": "ratio",
+                    "site": None, "text": f"{name}: named ratio"})
     return out
 
 
@@ -129,7 +208,11 @@ def series_values(result, opt: dict, error_method: str | None = "covariance"):
     ``error_method`` selects which computed error to show — 'covariance' (the
     least-squares stderr, default), 'montecarlo', 'profile', or 'none'. Both
     population kinds get an error too (first-order, from the amplitude's error
-    under the chosen method — see :func:`population_integral`)."""
+    under the chosen method — see :func:`population_integral`). The 'family'
+    and 'ratio' kinds (N3: ``opt['family']`` / ``opt['ratio']``) take the
+    exact per-spectrum error an error run stored, else quantify's own."""
+    if opt["kind"] in ("family", "ratio"):
+        return _group_series(result, opt, error_method)
     if opt["kind"] == "pop_integral":
         vals, errs = population_integral(result, error_method)
         return np.asarray(vals[:, opt["site"]], float), \
@@ -187,6 +270,25 @@ class SeriesPlotDialog(QDialog):
             it.setData(Qt.UserRole, i)
             it.setForeground(pg.mkColor(site_color(i)))
             self.list.addItem(it)
+        # Σ families feed the population subplot, ratios the ratio subplot
+        # (N3); UserRole 'f:NAME' / 'r:NAME' beside the sites' ints
+        fams, ratios = _group_names(result)
+        self._group_index = {}
+        for j, name in enumerate(fams):
+            it = QListWidgetItem(f"Σ {name}")
+            it.setData(Qt.UserRole, f"f:{name}")
+            it.setForeground(pg.mkColor(self._sel_color(f"f:{name}", j)))
+            it.setToolTip("summed population % of the lines tagged "
+                          f"{name} (Report F6 families)")
+            self.list.addItem(it)
+            self._group_index[f"f:{name}"] = j
+        for j, name in enumerate(ratios):
+            it = QListWidgetItem(name)
+            it.setData(Qt.UserRole, f"r:{name}")
+            it.setForeground(pg.mkColor(self._sel_color(f"r:{name}", j)))
+            it.setToolTip(f"named ratio {name} of the tagged families")
+            self.list.addItem(it)
+            self._group_index[f"r:{name}"] = j
         if self.list.count():
             self.list.item(0).setSelected(True)
         self.list.itemSelectionChanged.connect(self._draw)
@@ -224,8 +326,54 @@ class SeriesPlotDialog(QDialog):
     def _error_method(self) -> str:
         return self.errSel.currentData() or "covariance"
 
-    def _selected(self) -> list[int]:
+    def _selected(self) -> list:
+        """Site indices (int) and group keys ('f:NAME' / 'r:NAME', str)."""
         return [it.data(Qt.UserRole) for it in self.list.selectedItems()]
+
+    # -- one selection x one subplot -> a series option (or None) ---------
+    @staticmethod
+    def _opt_for(sel, spec: dict) -> dict | None:
+        """Sites feed every parameter subplot but the ratio one; a Σ family
+        feeds only the population subplot; a ratio only the ratio subplot."""
+        if isinstance(sel, str):
+            kind, name = sel.split(":", 1)
+            if kind == "f" and spec["kind"] == "pop_integral":
+                return {"kind": "family", "family": name, "param": "family_pct",
+                        "site": None}
+            if kind == "r" and spec["kind"] == "ratio":
+                return {"kind": "ratio", "ratio": name, "param": "ratio",
+                        "site": None}
+            return None
+        if spec["kind"] == "ratio":
+            return None
+        return {"site": sel, "param": spec["param"], "kind": spec["kind"]}
+
+    @staticmethod
+    def _sel_label(sel) -> str:
+        if isinstance(sel, str):
+            kind, name = sel.split(":", 1)
+            return f"Σ {name}" if kind == "f" else name
+        return f"s{sel}"
+
+    def _sel_color(self, sel, j: int | None = None) -> str:
+        if isinstance(sel, str):
+            if j is None:
+                j = getattr(self, "_group_index", {}).get(sel, 0)
+            # hues away from the site palette; families warm, ratios cool
+            return pg.intColor(j, hues=6, values=2, maxValue=200,
+                               minValue=90, sat=180,
+                               alpha=255).name() if sel.startswith("f:") else \
+                pg.intColor(j + 3, hues=6, values=2, maxValue=160, minValue=60,
+                            sat=200, alpha=255).name()
+        return site_color(sel)
+
+    @staticmethod
+    def _sel_key(sel, spec: dict) -> str:
+        """CSV column: 's0:amplitude', 'family:BO4', 'ratio:N4'."""
+        if isinstance(sel, str):
+            kind, name = sel.split(":", 1)
+            return ("family:" if kind == "f" else "ratio:") + name
+        return f"s{sel}:{spec['param']}"
 
     def _build_subplots(self):
         from larmor.desktop.plot_menu import attach_plot_menu
@@ -248,15 +396,16 @@ class SeriesPlotDialog(QDialog):
         vs the series, on an upright axis with the sample names as x-ticks."""
         x = list(range(1, len(self._labels) + 1))
         traces = []
-        for i in self._selected() or [0]:
-            vals, errs = series_values(
-                self._result, {"site": i, "param": spec["param"],
-                               "kind": spec["kind"]}, self._error_method())
+        for sel in self._selected() or [0]:
+            opt = self._opt_for(sel, spec)
+            if opt is None:
+                continue
+            vals, errs = series_values(self._result, opt, self._error_method())
             data = {"x": x, "y": [float(v) for v in vals]}
             if np.isfinite(errs).any():
                 data["yerr"] = [float(e) if np.isfinite(e) else 0.0 for e in errs]
-            traces.append({"data": data, "label": f"s{i}", "marker": "o",
-                           "color": site_color(i), "linestyle": "-"})
+            traces.append({"data": data, "label": self._sel_label(sel), "marker": "o",
+                           "color": self._sel_color(sel), "linestyle": "-"})
         return {"kind": "1d", "x_is_ppm": False, "hide_yaxis": False,
                 "xlabel": "sample", "ylabel": spec["label"],
                 "xticks": [[xi, lab] for xi, lab in zip(x, self._labels)],
@@ -273,13 +422,14 @@ class SeriesPlotDialog(QDialog):
                 pw.plotItem.legend.clear()
             except Exception:
                 pass
-            for i in sites:
-                vals, errs = series_values(
-                    self._result, {"site": i, "param": spec["param"],
-                                   "kind": spec["kind"]}, self._error_method())
-                col = site_color(i)
+            for sel in sites:
+                opt = self._opt_for(sel, spec)
+                if opt is None:
+                    continue
+                vals, errs = series_values(self._result, opt, self._error_method())
+                col = self._sel_color(sel)
                 pw.plot(x, vals, pen=pg.mkPen(col, width=2), symbol="o",
-                        symbolBrush=col, symbolSize=7, name=f"s{i}")
+                        symbolBrush=col, symbolSize=7, name=self._sel_label(sel))
                 if np.isfinite(errs).any():
                     pw.addItem(pg.ErrorBarItem(x=x, y=vals,
                                height=2 * np.nan_to_num(errs), pen=col))
@@ -296,14 +446,16 @@ class SeriesPlotDialog(QDialog):
         import csv
         method = self._error_method()
         cols = {"spectrum": self._labels}
-        for i in sites:
+        for sel in sites:
             for spec in self._params:
-                vals, errs = series_values(
-                    self._result, {"site": i, "param": spec["param"],
-                                   "kind": spec["kind"]}, method)
-                cols[f"s{i}:{spec['param']}"] = vals
+                opt = self._opt_for(sel, spec)
+                if opt is None:
+                    continue
+                vals, errs = series_values(self._result, opt, method)
+                key = self._sel_key(sel, spec)
+                cols[key] = vals
                 if np.isfinite(errs).any():
-                    cols[f"s{i}:{spec['param']} ±({method})"] = errs
+                    cols[f"{key} ±({method})"] = errs
         with open(path, "w", newline="", encoding="utf-8") as f:
             w = csv.writer(f); w.writerow(cols.keys())
             for r in range(len(self._labels)):
@@ -324,13 +476,14 @@ class SeriesPlotDialog(QDialog):
         x = np.arange(1, len(self._labels) + 1)
         for idx, spec in enumerate(specs):
             ax = axes[idx // ncol][idx % ncol]
-            for i in sites:
-                vals, errs = series_values(
-                    self._result, {"site": i, "param": spec["param"],
-                                   "kind": spec["kind"]}, self._error_method())
+            for sel in sites:
+                opt = self._opt_for(sel, spec)
+                if opt is None:
+                    continue
+                vals, errs = series_values(self._result, opt, self._error_method())
                 ax.errorbar(x, vals, yerr=np.nan_to_num(errs) if np.isfinite(errs).any()
-                            else None, marker="o", capsize=2, label=f"s{i}",
-                            color=site_color(i))
+                            else None, marker="o", capsize=2,
+                            label=self._sel_label(sel), color=self._sel_color(sel))
             ax.set_ylabel(spec["label"]); ax.set_xticks(x)
             ax.set_xticklabels(self._labels, rotation=45, ha="right", fontsize=7)
             if len(sites) > 1:

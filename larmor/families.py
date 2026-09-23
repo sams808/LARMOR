@@ -43,7 +43,8 @@ import numpy as np
 from larmor import cellparse
 
 __all__ = ["PRESETS", "RatioDef", "RATIOS", "DERIVED_PARAMS", "GROUP_PARAMS",
-           "presets_for", "ratios_for", "guess_from_label", "summarize"]
+           "presets_for", "ratios_for", "guess_from_label", "summarize",
+           "trial_series"]
 
 #: per-nucleus family vocabulary offered by the Fit-parameters table's Family
 #: submenu (free text is always allowed). 31P carries both the Qn scheme and
@@ -145,6 +146,54 @@ def _letters(idx: Sequence[int]) -> str:
     return "+".join(cellparse.index_to_letter(i) for i in idx)
 
 
+def _family_order(tags: Sequence[str], nucleus) -> tuple[list[str], dict[str, list[int]]]:
+    """Family names in display order (nucleus presets first, then other tags
+    as first seen) and their member site indices."""
+    order = [f for f in presets_for(nucleus) if f in tags]
+    for f in tags:
+        if f and f not in order:
+            order.append(f)
+    members = {f: [i for i, t in enumerate(tags) if t == f] for f in order}
+    return order, members
+
+
+def trial_series(samples, families: Sequence[str], nucleus) -> dict[str, np.ndarray]:
+    """Per-trial derived quantities from Monte-Carlo per-site integrals
+    (``MonteCarloResult.site_integrals``, n_trials x n_sites): the population
+    % of every site (``s<i>.population_pct``), of every family
+    (``family.<name>``) and every defined ratio (``ratio.<name>``), each as
+    an array over the trials whose total (resp. denominator) is positive.
+    The Monte-Carlo dialog histograms these; summarize() takes their spread.
+    Empty for a malformed block."""
+    S = np.abs(np.asarray(samples, float))
+    tags = [str(f or "").strip() for f in families]
+    if S.ndim != 2 or S.shape[1] != len(tags) or S.shape[0] == 0:
+        return {}
+    T = S.sum(axis=1)
+    ok = T > 0
+    if not np.any(ok):
+        return {}
+    S, T = S[ok], T[ok]
+    out: dict[str, np.ndarray] = {}
+    for i in range(S.shape[1]):
+        out[f"s{i}.population_pct"] = 100.0 * S[:, i] / T
+    order, members = _family_order(tags, nucleus)
+    Ft = {f: S[:, idx].sum(axis=1) for f, idx in members.items()}
+    for f in order:
+        out[f"family.{f}"] = 100.0 * Ft[f] / T
+    zero = np.zeros(S.shape[0])
+    for rd in ratios_for(nucleus):
+        present = [f for f in rd.denominator if f in members]
+        if len(present) < 2:
+            continue
+        nt = sum((w * Ft[f] for f, w in rd.numerator.items() if f in members), zero)
+        dt = sum((w * Ft[f] for f, w in rd.denominator.items() if f in members), zero)
+        good = dt > 0
+        if np.any(good):
+            out[f"ratio.{rd.name}"] = nt[good] / dt[good]
+    return out
+
+
 def _finite(v) -> bool:
     return v is not None and np.isfinite(v)
 
@@ -176,11 +225,7 @@ def summarize(integrals: Sequence[float], amplitudes: Sequence[float],
     total = float(I.sum())
 
     # family order: nucleus presets first, then other tags as first seen
-    order = [f for f in presets_for(nucleus) if f in tags]
-    for f in tags:
-        if f and f not in order:
-            order.append(f)
-    members = {f: [i for i in range(n) if tags[i] == f] for f in order}
+    order, members = _family_order(tags, nucleus)
     if not order:
         return {"families": [], "ratios": [], "untagged": untagged,
                 "basis": "independent", "note": ""}
@@ -213,14 +258,14 @@ def summarize(integrals: Sequence[float], amplitudes: Sequence[float],
     basis = "independent"
     note_bits: list[str] = []
 
+    series: dict = {}
     if S is not None:
         basis = "montecarlo"
-        T = S.sum(axis=1)
-        ok = T > 0
-        Ft = {f: S[:, idx].sum(axis=1) for f, idx in members.items()}
+        series = trial_series(S, tags, nucleus)
         for f in order:
-            fr = 100.0 * Ft[f][ok] / T[ok]
-            fam_err[f] = float(np.std(fr)) if fr.size >= 2 else None
+            fr = series.get(f"family.{f}")
+            fam_err[f] = (float(np.std(fr)) if fr is not None and fr.size >= 2
+                          else None)
         note_bits.append(f"Monte-Carlo, {S.shape[0]} trials (per-trial "
                          "re-integrated sums; carries amplitude and shape "
                          "covariance)")
@@ -276,12 +321,9 @@ def summarize(integrals: Sequence[float], amplitudes: Sequence[float],
             continue
         row["value"] = num / den
         if S is not None:
-            nt = sum(w * Ft[f] for f, w in rd.numerator.items() if f in members)
-            dt = sum(w * Ft[f] for f, w in rd.denominator.items() if f in members)
-            dt = np.asarray(dt, float)
-            good = dt > 0
-            rt = np.asarray(nt, float)[good] / dt[good]
-            row["err"] = float(np.std(rt)) if rt.size >= 2 else None
+            rt = series.get(f"ratio.{rd.name}")
+            row["err"] = (float(np.std(rt)) if rt is not None and rt.size >= 2
+                          else None)
         elif U is not None:
             nu = sum(w * Fu[f] for f, w in rd.numerator.items() if f in members)
             du = sum(w * Fu[f] for f, w in rd.denominator.items() if f in members)

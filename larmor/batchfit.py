@@ -567,10 +567,16 @@ def _population_rows(rec: Recipe, scope: str, method: str | None,
 
     detail = detail or {}
 
-    def _group_row(site_id: str, label: str, param: str, value, stderr) -> dict:
+    def _group_row(site_id: str, label: str, param: str, value, pe, fallback) -> dict:
+        # ``basis``: which propagation the stderr is -- the stored error
+        # run's method, else quantify's own (flagged) basis. Not a CSV
+        # column (the writers pick their header fields); the wide table's
+        # tooltip reads it.
         entry = {"scope": scope, "site": site_id, "label": label, "param": param,
-                 "value": value, "stderr": stderr, "model": "",
-                 "source_path": rec.source_path or "", "index": index,
+                 "value": value,
+                 "stderr": pe.stderr if pe is not None else fallback,
+                 "basis": (method if pe is not None else q.get("family_basis", "")),
+                 "model": "", "source_path": rec.source_path or "", "index": index,
                  **_NO_STATUS}
         if method is not None:
             entry.update(sigma_pct=None, ci68_lo=None, ci68_hi=None,
@@ -582,16 +588,16 @@ def _population_rows(rec: Recipe, scope: str, method: str | None,
         if not members or all(is_zeroed_out(rec.sites[i].params.get("amplitude"))
                               for i in members):
             continue                # every member excluded here: no cell
-        pe = detail.get((-1, f"family:{fam['family']}"))
-        stderr = pe.stderr if pe is not None else fam.get("fraction_err_pct")
         rows.append(_group_row(f"f{j}", fam["family"], "family_pct",
-                               fam["fraction_pct"], stderr))
+                               fam["fraction_pct"],
+                               detail.get((-1, f"family:{fam['family']}")),
+                               fam.get("fraction_err_pct")))
     for j, rt in enumerate(q.get("ratios") or []):
         if not rt.get("defined") or rt.get("value") is None:
             continue
-        pe = detail.get((-1, f"ratio:{rt['name']}"))
-        stderr = pe.stderr if pe is not None else rt.get("err")
-        rows.append(_group_row(f"r{j}", rt["name"], "ratio", rt["value"], stderr))
+        rows.append(_group_row(f"r{j}", rt["name"], "ratio", rt["value"],
+                               detail.get((-1, f"ratio:{rt['name']}")),
+                               rt.get("err")))
     return rows
 
 
