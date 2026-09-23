@@ -88,8 +88,12 @@ fit dialogs and the Series evolution plot.
 
 Output is `figures.py` — `render()` on plain-dict specs for 1D/2D/series
 figures with journal presets and png/pdf/svg/tiff export — together with
-`methods.py` (LaTeX table and methods sentence) and `batch.py` (publication
-table across fits).
+`methods.py` (LaTeX table, methods sentence and the full Experimental
+paragraph), `acquisition.py` (the acquisition record of an EXPNO, the
+Experimental sentences and Table S1 with cross-series variation),
+`provenance.py` (software stamp, source hash and reload verification,
+recorded read-out changes) and `batch.py` (publication table across fits,
+Table S1 of the fitted spectra).
 
 ## Data flow
 

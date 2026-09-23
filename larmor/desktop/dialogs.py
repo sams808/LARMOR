@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import os
 
-from PySide6.QtCore import QSettings
+from PySide6.QtCore import QSettings, Qt
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
     QFormLayout, QGridLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
@@ -187,6 +187,21 @@ class ExperimentDialog(QDialog):
         btnCopy.clicked.connect(self._copy_sr)
         sr_row.addWidget(btnCopy)
         form.addRow("SR (reference)", sr_row)
+
+        # what the instrument files say (larmor.acquisition), read-only and
+        # selectable; absent for CSV / dmfit / Varian recipes (no block)
+        acq_block = recipe.get("acquisition") or {}
+        if acq_block:
+            from larmor import acquisition as _acq
+
+            self.acq_label = QLabel("\n".join(_acq.summary_lines(
+                acq_block, recipe.get("software"), recipe.get("spin_rate_Hz"),
+                recipe.get("mas_uncertain"))))
+            self.acq_label.setWordWrap(True)
+            self.acq_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            self.acq_label.setStyleSheet(
+                f"color: {theme.active().text_dim}; font-family: Consolas, monospace;")
+            form.addRow("from the instrument files (read-only)", self.acq_label)
 
         if acq is not None:
             self._build_acquisition(form, acq, recipe)

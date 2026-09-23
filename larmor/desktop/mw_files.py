@@ -204,6 +204,18 @@ class _FilesMixin:
             provenance["mas_rate"] = mas["provenance"]
             if mas["note"]:
                 self.statusBar().showMessage("⚠ " + mas["note"])
+        # the acquisition record and the hash of the fid this spectrum was
+        # processed from (data_file 'fid': the fit is made from the raw data)
+        acq_block, sha = {}, ""
+        expno = meta.get("expno", "")
+        if expno and (Path(str(expno)) / "fid").is_file():
+            from larmor import acquisition
+            from larmor import provenance as _prov
+
+            acq_block = acquisition.read_block(expno, 1)
+            if acq_block:
+                acq_block["data_file"] = "fid"
+            sha = _prov.source_sha256(Path(str(expno)) / "fid")
         self.recipe = Recipe(
             sample=(meta.get("title", "").splitlines() or [""])[0],
             source_kind="bruker", source_path=meta.get("expno", ""),
@@ -217,7 +229,8 @@ class _FilesMixin:
             # has no such record and keeps an empty (pdata) chain, as before.
             processing=list(meta.get("processing") or []),
             processing_from_raw=bool(meta.get("processing_from_raw", False)),
-            provenance=provenance).to_dict()
+            provenance=provenance, acquisition=acq_block,
+            source_sha256=sha).to_dict()
         self.hidden.clear(); self.undo_stack.clear(); self.redo_stack.clear()
         self.view.set_experiment(self.exp_ppm, self.exp_amp)
         self.view.set_title(self.recipe.get("sample") or "processed FID")
@@ -495,7 +508,8 @@ class _FilesMixin:
                              data.meta["larmor_MHz"],
                              data.meta.get("spin_rate_Hz")
                              or data.meta.get("masr_Hz"),
-                             Path(path).name + " (FID preview)", str(ref.expno))
+                             Path(path).name + " (FID preview)", str(ref.expno),
+                             data_file="fid")
             # the exact chain the preview applied, recorded so the first
             # FID ⇄ spectrum syncs the panel to raw / EM 100 / magnitude and
             # shows the TRUE fid; unticking 'magnitude' and phasing turns the
@@ -650,8 +664,12 @@ class _FilesMixin:
             nucleus, lar, rec.get("spin_rate_Hz", 0.0) or 0.0, self.exp_ppm)
         self._warm_worker.start()
 
-    def _display_1d(self, ppm, amp, nucleus, larmor, masr, title, expno):
-        """Put a bare 1D spectrum on the workbench (no fit), ready to fit."""
+    def _display_1d(self, ppm, amp, nucleus, larmor, masr, title, expno,
+                    data_file: str = ""):
+        """Put a bare 1D spectrum on the workbench (no fit), ready to fit.
+        ``data_file='fid'`` (the raw-fid preview) records the EXPNO's
+        acquisition block and the hash of its fid; a stitched, simulated or
+        2D-trace spectrum records neither."""
         from larmor.recipe import Recipe
 
         if not self._in_load_source:
@@ -663,6 +681,14 @@ class _FilesMixin:
                              source_path=expno, nucleus=nucleus,
                              larmor_frequency_MHz=larmor,
                              spin_rate_Hz=masr or 0.0).to_dict()
+        if data_file == "fid" and expno and (Path(str(expno)) / "fid").is_file():
+            from larmor import acquisition, provenance
+
+            block = acquisition.read_block(expno, 1)
+            if block:
+                block["data_file"] = "fid"
+            self.recipe["acquisition"] = block
+            self.recipe["source_sha256"] = provenance.source_sha256(Path(str(expno)) / "fid")
         self.hidden.clear(); self.undo_stack.clear(); self.redo_stack.clear()
         self.view.set_experiment(self.exp_ppm, self.exp_amp)
         self.view.set_model(None, None, None, None, self.hidden)  # clear old model

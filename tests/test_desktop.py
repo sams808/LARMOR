@@ -1679,6 +1679,37 @@ def test_experiment_dialog_without_block_is_unchanged(win, qapp, tmp_path,
     assert masrate.log_path() == store
 
 
+def test_experiment_dialog_shows_the_acquisition_summary(qapp):
+    """N4: a recipe with an acquisition block gets a read-only summary row
+    under SR (acqus facts, the flip angle with its source, the MAS sources
+    and verdict); a recipe without one looks as before."""
+    from larmor.desktop.dialogs import ExperimentDialog
+
+    rec = {"nucleus": "31P", "larmor_frequency_MHz": 242.79, "spin_rate_Hz": 22000.0,
+           "mas_uncertain": True, "sr_hz": -210.86,
+           "acquisition": {"pulprog": "zg", "ns": 14, "d1_s": 300.0, "p1_us": 1.25,
+                           "flip_deg": 30.0, "flip_source": "title", "plw1_W": 207.0,
+                           "probe": "SPRB600511_7297 (MAS)", "mas_acqus_Hz": 4200.0,
+                           "mas_title_Hz": 20000.0, "mas_booking_Hz": 22000.0,
+                           "spin_rate_Hz": 22000.0, "mas_uncertain": True, "procno": 1,
+                           "wdw": "EM", "lb_hz": 0.0, "tdeff": 384, "si": 32768,
+                           "ph_mod": "pk", "absg": 5}}
+    dlg = ExperimentDialog(None, rec)
+    txt = dlg.acq_label.text()
+    for must in ("NS 14", "D1 300 s", "30°", "acqus 4200 Hz", "title 20 kHz", "booking 22 kHz",
+                 "(confirm)", "SPRB600511_7297", "TDeff 384"):
+        assert must in txt, must
+    assert "fitted with" not in txt
+    dlg.close()
+    dlg2 = ExperimentDialog(None, {**rec, "software": {"larmor": "0.13.0", "mrsimulator": "1.0.0"}})
+    assert "fitted with LARMOR 0.13.0" in dlg2.acq_label.text()
+    dlg2.close()
+    plain = ExperimentDialog(None, {"nucleus": "11B", "larmor_frequency_MHz": 160.0,
+                                    "spin_rate_Hz": 0.0})
+    assert not hasattr(plain, "acq_label")
+    plain.close()
+
+
 def test_edit_experiment_remembers_and_clears_badge(win, qapp, monkeypatch, tmp_path):
     from larmor import masrate
     from larmor.desktop.dialogs import ExperimentDialog

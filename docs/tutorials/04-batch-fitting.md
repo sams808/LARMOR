@@ -231,7 +231,19 @@ runs anywhere.
   per-spectrum amplitudes, released parameters and populations, with the
   same `vary, min, max, expr, at_bound` columns); the
   checkbox `also save individual fits (.recipe.json) next to the CSV` is on
-  by default. **Save individual fits…** writes one recipe per spectrum.
+  by default. **Save individual fits…** writes one recipe per spectrum; each
+  carries the source path, the SHA-256 of its 1r and the acquisition block
+  read from acqus / procs / title.
+- **Acquisition table…** (no fit needed; the same window as **Tools >
+  Experimental section…**) lists the five EXPNO 24 acquisitions and
+  highlights what varies across them: D1 (12.5–36 s), LB (0/100 Hz) and the
+  rotor named in the titles (SR31649 for Base0Ca, SR31648 for the others).
+  Everything else is identical — `zg`, P1 0.425 µs at 100 W, 256 scans,
+  35.7 kHz — and the paragraph under the table reads *recycle delays of
+  12.5–36 s (Table S1)*: the number to put in the paper, not a single
+  delay. **Copy paragraph**, **Copy LaTeX table** and **Save CSV + LaTeX…**
+  hand it over; `larmor acqtable` writes the same table from the command
+  line.
 - **Publication bundle…** writes the whole batch to a folder you choose: the
   table, one recipe and one `_curves.csv` per spectrum (experiment exactly
   as fitted, model, residual, components), `manifest.csv` (source, SHA-256,

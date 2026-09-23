@@ -187,5 +187,18 @@ the Methods text.
   CSVs carry `vary` / `min` / `max` / `expr` / `at_bound` columns, so the
   answer is in the SI by default. A ‡ on a restricted-range fit means the
   range, not the data, set that value: widen it or state it;
-- the **Report dock's "Copy methods"** sentence includes the essentials
-  automatically.
+- the **Report dock's "Copy methods"** copies the Experimental paragraph built
+  from acqus / procs / title: spectrometer and B₀, probe, the MAS rate (the
+  confirmed value, or a bracketed candidate list to resolve), pulse program,
+  P1 with the flip angle when the title carries `P1(90)=` or a stated tip
+  angle (its source is named), D1, NS, SW/TD, referencing (adamantane at
+  1.82 ppm only when the session's referencing audit confirms this
+  spectrum's SR or the audit re-referenced this fit, else a bracket to
+  fill), TopSpin processing and the LARMOR steps, then the fit sentence with
+  the software versions. Check every `[bracket]` before pasting — a bracket
+  marks what the files do not prove;
+- for a series, **Tools ▸ Experimental section…** (or the **Acquisition
+  table…** button of Batch fit / Sequential fit) builds Table S1 and
+  highlights every parameter that varies across the set, printing it as a
+  range — a recycle delay written once for a series acquired at 12.5–36 s
+  is exactly the error it prevents.

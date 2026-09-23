@@ -57,6 +57,72 @@ def test_cli_batchfit_writes_outputs(tmp_path):
     assert all(r["vary"] == "" and r["expr"] == "" and r["at_bound"] == "" for r in pops)
 
 
+def test_cli_batchfit_recipes_carry_source_and_hash(tmp_path):
+    """N4: every per-spectrum recipe the CLI writes names its source path,
+    kind, the SHA-256 of the data file and the fitting software (the 32
+    Final2 recipes were written with all three source fields empty)."""
+    import json
+    import re
+
+    import larmor
+    from larmor.recipe import sha256_of
+
+    paths, model = _make_series(tmp_path)
+    out = tmp_path / "bout2"
+    assert cli.main(["batchfit", *paths, "--model", model, "-o", str(out)]) == 0
+    recs = sorted(out.glob("*_batch.recipe.json"))
+    assert len(recs) == 3
+    seen = set()
+    for rp in recs:
+        d = json.loads(rp.read_text(encoding="utf-8"))
+        assert d["source_path"] in paths and d["source_kind"] == "csv"
+        assert re.fullmatch(r"[0-9a-f]{64}", d["source_sha256"])
+        assert d["source_sha256"] == sha256_of(d["source_path"])
+        assert d["software"]["larmor"] == larmor.__version__ and "fitted" in d["software"]
+        assert d["acquisition"] == {}
+        seen.add(d["source_path"])
+    assert seen == set(paths)
+
+
+def test_cli_acqtable_writes_csv_tex_and_paragraph(tmp_path, capsys):
+    from test_acquisition import make_expno, series_11b
+
+    root = tmp_path / "2026-01"
+    expnos = series_11b(root)
+    out = tmp_path / "acq" / "out.csv"
+    rc = cli.main(["acqtable", str(expnos[0]), str(expnos[1]), str(tmp_path / "missing"),
+                   "-o", str(out), "--tex", "--paragraph"])
+    assert rc == 0
+    cap = capsys.readouterr()
+    assert out.exists() and out.with_suffix(".tex").exists()
+    assert "MHz" in cap.out and "transients" in cap.out and "varying: Rotor, D1 (s)" in cap.out
+    assert "recycle delays of 12.5–14 s (Table S1)" in cap.out
+    assert "skipped" in cap.err and "missing" in cap.err
+    assert out.read_text(encoding="utf-8").count("\n") == 4          # header + 2 rows + varies
+    # a month folder scans the session; a sample folder only its own EXPNOs
+    rc = cli.main(["acqtable", str(root), "-o", str(tmp_path / "month.csv")])
+    assert rc == 0
+    assert "varying: Rotor, D1 (s), LB (Hz)" in capsys.readouterr().out
+    assert (tmp_path / "month.csv").read_text(encoding="utf-8").count("\n") == 7
+    rc = cli.main(["acqtable", str(expnos[2].parent), "-o", str(tmp_path / "one.csv")])
+    assert rc == 0 and (tmp_path / "one.csv").read_text(encoding="utf-8").count("\n") == 3
+    # a recipe file stands for its source
+    from larmor.loader import load_any
+    from larmor.recipe import Recipe
+    _, _, rec, _, _ = load_any(expnos[0])
+    rp = tmp_path / "s.recipe.json"
+    Recipe.from_dict(rec).save(rp)
+    assert cli.main(["acqtable", str(rp), "-o", str(tmp_path / "r.csv"), "--full", "--tex"]) == 0
+    assert "NS &" in (tmp_path / "r.tex").read_text(encoding="utf-8")
+    # nothing readable -> rc 1
+    assert cli.main(["acqtable", str(tmp_path / "missing"), "-o", str(tmp_path / "x.csv")]) == 1
+    # `larmor info` appends the acquisition summary
+    e = make_expno(tmp_path / "2026-05", "04272026_S_SS_ALP", 2701, with_fid=True)
+    assert cli.main(["info", str(e)]) == 0
+    info = capsys.readouterr().out
+    assert "NS 512" in info and "D1 5 s" in info and "acqus: zg" in info
+
+
 def test_cli_seqfit_beats_shared_on_marching_series(tmp_path):
     paths, model = _make_series(tmp_path)
     out = tmp_path / "sout"

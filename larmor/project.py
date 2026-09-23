@@ -323,8 +323,13 @@ def build_bundle(workspaces: list[dict], active: int | None,
         remap[i] = len(entries)
         entries.append(e)
     act = remap.get(active) if active is not None else None
+    from larmor.provenance import software_stamp
+
+    # the software that wrote the bundle (the recipes inside carry the
+    # software of their own fits); load_bundle needs only the workspaces list
     return {"larmor_project_version": PROJECT_BUNDLE_VERSION,
-            "active": act, "workspaces": entries}, dropped
+            "active": act, "workspaces": entries,
+            "software": software_stamp()}, dropped
 
 
 def summary(bundle: dict) -> str:

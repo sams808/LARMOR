@@ -42,6 +42,23 @@ def _series(tmp_path):
     return paths, model
 
 
+def test_seqfit_seed_recipe_carries_source_path_and_identity(qapp, tmp_path):
+    """N4: every sequential recipe names its source path, kind, the data
+    file's SHA-256 and an acquisition block (sequential recipes used to
+    carry no source at all); the dialog offers 'Acquisition table…'."""
+    import re
+
+    from larmor.desktop.seqfit_dialog import SeqFitDialog
+    paths, model = _series(tmp_path)
+    dlg = SeqFitDialog(None, paths, model)
+    for k, r in enumerate(dlg._recipes):
+        assert r["source_path"] == paths[k] and r["source_kind"] == "csv"
+        assert re.fullmatch(r"[0-9a-f]{64}", r["source_sha256"])
+        assert "acquisition" in r and r["acquisition"] == {}
+    assert dlg.btnAcq.text() == "Acquisition table…" and dlg.btnAcq.isEnabled()
+    dlg.close()
+
+
 def test_seqfit_dialog_builds_and_navigates(qapp, tmp_path):
     from larmor.desktop.seqfit_dialog import SeqFitDialog
     paths, model = _series(tmp_path)

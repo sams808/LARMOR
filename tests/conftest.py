@@ -64,6 +64,11 @@ BRUKER_2RR_MQMAS = _D / "2025-12/neg8A2O-0F/35/pdata/1/2rr"
 # a real DQ/SQ 2D correlation (indirect dim is double-quantum, not a delay)
 BRUKER_2RR_DQSQ = _data("Desktop/SAVE_PC_PRO/THESE/RMN/Data/ISG-2GPa"
                         "/1181/pdata/1")
+# N4 provenance: a 31P zg with every sidecar (uxnmr.info 'Avance III HD 600',
+# 599.77 MHz; experiment_addenda.xml 22 kHz vs title 'MASR 20 kHz' vs acqus
+# MASR 4200; title 'P1(90)=3.750; 30 deg tip'; NS 14, D1 300 s, P1 1.25 us at
+# 207 W; procs EM / TDeff 384 / SI 32768 / pk / ABSG 5; SR -210.86 Hz)
+EXPNO_3102 = _D / "2026-05/04272026_P5-Bi8-12_SS_ALP/3102"
 # the published MagLab 35Cl QCPMG acceptance set (12 samples, ssNake T2s)
 MAGLAB_35CL = _data("Desktop/WSU_work/NMR/MagLab/DATA/35Cl_2025-12")
 # Tutorial 7: the static 81Br WURST-CPMG set (EXPNOs 30-34 = 0-4 Ca glasses;
@@ -94,6 +99,7 @@ ALL_DATASETS = {
     "MagLab 35Cl QCPMG set": MAGLAB_35CL,
     "81Br WCPMG set (Tutorial 7)": MAGLAB_81BR / "30",
     "LAW Ca 11B series (Tutorial 4)": LAW_CA_11B[0],
+    "31P EXPNO 3102 (acquisition block)": EXPNO_3102,
     "CaF2 magres (GIPAW)": CAF2_MAGRES, "NaF magres (GIPAW)": NAF_MAGRES,
     "19F CaF2 standard 2026-03": F19_STD_CAF2,
     "19F NaF standard 2026-03": F19_STD_NAF,

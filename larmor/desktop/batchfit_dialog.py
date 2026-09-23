@@ -429,6 +429,11 @@ class BatchFitDialog(QDialog):
             "table, the CSV rows and the saved recipes follow) and composition "
             "columns joined from a CSV for the Series plot's x axis")
         self.btnSeriesTable.clicked.connect(self._edit_series)
+        self.btnAcq = bb.addButton("Acquisition table…", QDialogButtonBox.ActionRole)
+        self.btnAcq.setToolTip("Table S1 + Experimental paragraph for these spectra, from "
+                               "acqus / procs / title — no fit needed; parameters that "
+                               "vary across the series are highlighted")
+        self.btnAcq.clicked.connect(self._acquisition_table)
         bb.button(QDialogButtonBox.Close).clicked.connect(self.accept)
         bb.helpRequested.connect(self._help)
 
@@ -459,6 +464,7 @@ class BatchFitDialog(QDialog):
 
     # ------------------------------------------------------------------ load
     def _load(self, paths):
+        from larmor import provenance
         from larmor.loader import load_any
 
         data = []
@@ -469,6 +475,9 @@ class BatchFitDialog(QDialog):
                 continue
             ppm = np.asarray(ppm, float); amp = np.asarray(amp, float)
             data.append({
+                # the source identity every saved individual fit carries
+                # (source_kind, SHA-256 of the data file, acquisition block)
+                "src": provenance.carry_source(rec),
                 "ppm": ppm, "amp": amp, "amp0": amp.copy(),
                 # the TopSpin arrays, kept for "Use TopSpin processing" after a
                 # reprocess from fid
@@ -1324,6 +1333,7 @@ class BatchFitDialog(QDialog):
 
     # ------------------------------------------------------------------ fit
     def _entries(self):
+        from larmor import provenance
         from larmor.recipe import Recipe
 
         out = []
@@ -1331,6 +1341,11 @@ class BatchFitDialog(QDialog):
             rec = Recipe.from_dict({
                 "nucleus": d["nucleus"], "larmor_frequency_MHz": d["larmor"],
                 "spin_rate_Hz": d["spin"], "sample": d["sample"],
+                # source_kind / source_sha256 / acquisition of the loaded
+                # record; a batch reprocessed from its fids hashes the fid
+                **provenance.carry_source(
+                    d.get("src") or {},
+                    raw_expno=(d.get("expno") if d.get("proc_ops") else None)),
                 # the reprocess-from-fid chain (if any) then whatever baseline
                 # correction is active -- the global "Fit baseline…" tool (see
                 # BASELINE_OPS) or a per-spectrum manual 2-point pick --
@@ -2097,6 +2112,21 @@ class BatchFitDialog(QDialog):
     def _help(self):
         from larmor.desktop.help_dialog import show_help
         show_help(self, "multi-dataset", "Multi-dataset & co-fitting")
+
+    def _acquisition_table(self):
+        """'Acquisition table…': the Experimental-section window over the
+        loaded spectra with their confirmed spin rates (no fit needed)."""
+        if not self._data:
+            return
+        from larmor.desktop.acquisition_dialog import AcquisitionTableDialog
+
+        spin = {d["path"]: (d["spin"], bool(((d.get("src") or {}).get("acquisition") or {})
+                                            .get("mas_uncertain")))
+                for d in self._data}
+        dlg = AcquisitionTableDialog(self, [d["path"] for d in self._data],
+                                     spin_rates=spin)
+        dlg.show()
+        dlg.raise_()
 
 
 # ---------------------------------------------------------------- module helpers

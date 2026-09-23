@@ -128,6 +128,55 @@ def test_methods_sentence_states_the_czjzek_width_convention():
     assert "P_Q" not in methods.methods_sentence(plain)
 
 
+def test_methods_paragraph_includes_acquisition_and_software():
+    """The Experimental paragraph: acquisition sentences from the block (the
+    recipe's confirmed MAS rate, the TopSpin and LARMOR processing), then
+    the fit sentence naming the versions; methods_sentence without the
+    software kw is byte-identical to before."""
+    from test_acquisition import _block_3102_like
+
+    rec = _czjzek_recipe().to_dict()
+    rec.update({"nucleus": "31P", "acquisition": _block_3102_like(), "spin_rate_Hz": 20000.0,
+                "mas_uncertain": False, "sr_hz": -210.86,
+                "processing": [{"op": "twopoint_bg"}],
+                "software": {"larmor": "0.13.0", "git_commit": "2fe4800f" + "0" * 32,
+                             "mrsimulator": "1.0.0", "lmfit": "1.3.4"}})
+    para = methods.methods_paragraph(rec, referencing_text=None)
+    for must in ("242.79 MHz", "20.0 kHz", "300 s", "14 transients", "two-point linear baseline",
+                 "LARMOR 0.13.0, commit 2fe4800", "mrsimulator 1.0.0", "lmfit 1.3.4",
+                 "[state the reference standard]"):
+        assert must in para, must
+    assert para.rstrip().endswith("covariance.") or "covariance" in para.split(". ")[-2]
+    assert para.index("14 transients") < para.index("deconvoluted")
+    plain = methods.methods_sentence(rec)
+    assert "LARMOR (an open dmfit-successor built on mrsimulator and lmfit)" in plain
+    assert "0.13.0" not in plain
+    # the recipe's own mas_rate block (confirmed) removes the bracket even
+    # when the stored flag says uncertain
+    rec2 = dict(rec, mas_uncertain=True,
+                provenance={"mas_rate": {"acqus_Hz": 4200.0, "title_Hz": 20000.0,
+                                         "booking_Hz": 22000.0, "confirmed": "2026-09-23"}})
+    assert "[confirm" not in methods.methods_paragraph(rec2, referencing_text=None)
+    rec3 = dict(rec, mas_uncertain=True, provenance={})
+    assert "[confirm MAS rate: acqus 4.2 kHz, title 20 kHz, booking 22 kHz]" in \
+        methods.methods_paragraph(rec3, referencing_text=None)
+
+
+def test_methods_paragraph_without_acquisition_is_the_sentence_plus_software(monkeypatch):
+    from larmor import provenance
+
+    stamp = {"larmor": "0.13.0", "git_commit": "", "mrsimulator": "1.0.0", "lmfit": "1.3.4",
+             "numpy": "2.4.6", "fitted": "2026-09-23T10:00:00"}
+    monkeypatch.setattr(provenance, "software_stamp", lambda: stamp)
+    rec = _czjzek_recipe().to_dict()
+    rec["source_kind"] = "csv"
+    para = methods.methods_paragraph(rec)
+    assert para == methods.methods_sentence(rec, software=stamp)
+    assert "LARMOR 0.13.0 (an open dmfit-successor built on mrsimulator 1.0.0 and lmfit 1.3.4)" in para
+    for never in ("probe", "recycle", "MHz probe", "commit"):
+        assert never not in para
+
+
 def test_methods_sentence_names_the_profile_estimator_and_software_versions(monkeypatch):
     """'profile' used to fall into the Monte-Carlo wording; the software
     block never raises and names every field an export README records."""

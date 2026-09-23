@@ -313,6 +313,8 @@ class _MenusMixin:
                   self.open_integrals)
         self._add(m_tools, "&Batch fit report…  (publication table + plots)",
                   self.run_batch_report)
+        self._add(m_tools, "E&xperimental section…  (paragraph + Table S1 from acqus / "
+                           "procs / title)", self.open_acquisition_table)
         self._add(m_tools, "&Session inventory…  (a month folder as a sample × nucleus "
                            "grid; production EXPNO picks)", self.open_session_inventory)
         self._add(m_tools, "Batch &fit spectra…  (one shared model, 1D)",

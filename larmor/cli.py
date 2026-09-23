@@ -9,6 +9,7 @@
     larmor magres FILE.magres --isotope 19F --calibration f19.shiftcal.json
     larmor compare SPECTRA... [--all] [--csv out.csv]
     larmor inventory MONTH [--csv out.csv] [--nucleus 31P] [--picks]
+    larmor acqtable PATHS... [-o acquisition.csv] [--tex] [--paragraph] [--full]
 """
 from __future__ import annotations
 
@@ -63,10 +64,69 @@ def cmd_info(args: argparse.Namespace) -> int:
     if bruker.is_expno(path):
         exp = bruker.read_expno(path)
         print(exp.summary)
+        # the acquisition record (acqus / procs / title / uxnmr.info / booking)
+        from larmor import acquisition
+
+        for line in acquisition.summary_lines(acquisition.read_block(path)):
+            _say(line)
         return 0
 
     print(f"unrecognized data source: {path}", file=sys.stderr)
     return 1
+
+
+def cmd_acqtable(args: argparse.Namespace) -> int:
+    """Table S1 + the Experimental paragraph of a set of spectra (EXPNO /
+    pdata / 1r paths, .recipe.json files, or a sample / month folder), from
+    acqus / procs / title -- no fit needed (see larmor.acquisition)."""
+    from larmor import acquisition
+    from larmor.recipe import Recipe
+
+    blocks, spin = [], {}
+    for raw in args.paths:
+        p = Path(raw)
+        found = []
+        if p.suffix.lower() == ".json" and p.is_file():
+            try:
+                rec = Recipe.load(p).to_dict()
+            except Exception as exc:                     # noqa: BLE001
+                _say(f"skipped {raw}: {exc}", file=sys.stderr)
+                continue
+            b = acquisition.block_for_recipe(rec)
+            if b:
+                spin[b.get("expno_path")] = (rec.get("spin_rate_Hz"), rec.get("mas_uncertain"))
+                found.append(b)
+        elif p.is_dir() and not (p / "acqus").exists() and p.parent.name != "pdata":
+            found = [b for b in (acquisition.read_block(e)
+                                 for e in acquisition.folder_expnos(p)) if b]
+        else:
+            b = acquisition.read_block(p)
+            if b:
+                found.append(b)
+        if not found:
+            _say(f"skipped {raw}: no readable acqus", file=sys.stderr)
+        blocks.extend(found)
+    if not blocks:
+        _say("no acquisition record found", file=sys.stderr)
+        return 1
+    t = acquisition.table(blocks, spin_rates=spin or None)
+    out = Path(args.output or "acquisition.csv")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(acquisition.table_csv(t), encoding="utf-8")
+    written = [out.name]
+    if getattr(args, "tex", False):
+        tex = out.with_suffix(".tex")
+        tex.write_text(acquisition.table_latex(t, caption="Acquisition parameters.",
+                                               compact=not getattr(args, "full", False)),
+                       encoding="utf-8")
+        written.append(tex.name)
+    if getattr(args, "paragraph", False):
+        _say(acquisition.paragraph(blocks, spin_rates=spin or None))
+        _say("")
+    var = t.varying_headers()
+    _say("varying: " + (", ".join(var) if var else "none"))
+    _say(f"wrote {' + '.join(written)} ({len(t.rows)} spectra) to {out.parent}")
+    return 0
 
 
 def cmd_srcheck(args: argparse.Namespace) -> int:
@@ -508,6 +568,8 @@ def _series_entries(spectra, model_path, window_arg):
     # dialogs, so CSV scopes and recipe slugs match between the two routes
     labels = scan.disambiguate([scan.sample_label(p, rec) for _, _, rec, p in loaded],
                                [str(p) for _, _, _, p in loaded])
+    from larmor import provenance
+
     entries = []
     for (ppm, amp, rec, p), label in zip(loaded, labels):
         r = Recipe.from_dict({
@@ -519,6 +581,8 @@ def _series_entries(spectra, model_path, window_arg):
             # recipes and the publication bundle then reopen with their data
             "source_path": rec.get("source_path") or str(p),
             "source_kind": rec.get("source_kind", ""),
+            # the source hash and acquisition block ride along (N4)
+            **provenance.carry_source(rec),
             "fit_window_ppm": win,
             "sites": copy.deepcopy(model_sites)})
         entries.append((r, ppm, amp, win))
@@ -662,6 +726,23 @@ def main(argv: list[str] | None = None) -> int:
     p_inv.add_argument("--all", action="store_true",
                        help="list every EXPNO, not only the demoted / flagged ones")
     p_inv.set_defaults(func=cmd_inventory)
+
+    p_acq = sub.add_parser("acqtable", help="Table S1 + Experimental paragraph of a "
+                           "set of spectra from acqus / procs / title (no fit needed); "
+                           "columns that vary across the series are flagged")
+    p_acq.add_argument("paths", nargs="+", help="EXPNO / pdata/N / 1r paths, "
+                       ".recipe.json files, or a sample / month folder")
+    p_acq.add_argument("-o", "--output", default="acquisition.csv",
+                       help="CSV to write (default acquisition.csv)")
+    p_acq.add_argument("--tex", action="store_true",
+                       help="also write the LaTeX table next to the CSV")
+    p_acq.add_argument("--paragraph", action="store_true",
+                       help="print the Experimental paragraph (ranges for varying "
+                            "parameters)")
+    p_acq.add_argument("--full", action="store_true",
+                       help="every column in the LaTeX table (default: constant "
+                            "parameters go to the caption)")
+    p_acq.set_defaults(func=cmd_acqtable)
 
     p_imp = sub.add_parser("import", help="convert a dmfit .fxmla to a LARMOR recipe")
     p_imp.add_argument("path")

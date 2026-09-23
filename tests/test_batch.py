@@ -93,6 +93,48 @@ def test_run_batch_writes_table_and_report(tmp_path):
     assert "figures/glassA.png" in md
 
 
+def test_run_batch_writes_acquisition_outputs(tmp_path):
+    """N4: fits carrying an acquisition block get acquisition.csv / .tex and
+    an '## Acquisition' section with ranges and the varying columns; CSV
+    sources (no block) write neither and the checkbox-off path writes
+    neither either."""
+    from pathlib import Path
+
+    from test_acquisition import _block_3102_like
+
+    paths = [_write_fit(tmp_path, "glassA", 15.0), _write_fit(tmp_path, "glassB", 14.5)]
+    out = tmp_path / "plain"
+    batch.run_batch(paths, out, make_plots=False, formats=("csv", "latex", "markdown"))
+    assert not (out / "acquisition.csv").exists() and not (out / "acquisition.tex").exists()
+    md = (out / "report.md").read_text(encoding="utf-8")
+    assert "## Acquisition" not in md and "no acquisition record for glassA" in md
+
+    for p, d1 in zip(paths, (12.5, 36.0)):
+        d = json.loads(Path(p).read_text(encoding="utf-8"))
+        d["acquisition"] = _block_3102_like(
+            expno_path=f"X:/DATA/2026-01/{d['sample']}/24", sample=d["sample"], nucleus="11B",
+            d1_s=d1, spin_rate_Hz=35714.0, mas_uncertain=False)
+        d["spin_rate_Hz"], d["mas_uncertain"] = 35714.0, False
+        Path(p).write_text(json.dumps(d), encoding="utf-8")
+    out2 = tmp_path / "acq"
+    res = batch.run_batch(paths, out2, make_plots=False, formats=("csv", "latex", "markdown"))
+    assert (out2 / "acquisition.csv").exists() and (out2 / "acquisition.tex").exists()
+    assert str(out2 / "acquisition.csv") in res.files and str(out2 / "acquisition.tex") in res.files
+    md = (out2 / "report.md").read_text(encoding="utf-8")
+    assert "## Acquisition" in md and "12.5–36 s" in md and "Table S1" in md
+    assert "Parameters that vary across the series: D1 (s)." in md
+    assert "**D1 (s)**" in md
+    tex = (out2 / "acquisition.tex").read_text(encoding="utf-8")
+    assert max(ord(c) for c in tex) < 0x80 and r"\textbf{12.5}" in tex
+    csv_txt = (out2 / "acquisition.csv").read_text(encoding="utf-8")
+    assert csv_txt.strip().splitlines()[-1].startswith("# varies")
+    out3 = tmp_path / "off"
+    res3 = batch.run_batch(paths, out3, make_plots=False, acquisition_table=False)
+    assert not (out3 / "acquisition.csv").exists()
+    assert "## Acquisition" not in (out3 / "report.md").read_text(encoding="utf-8")
+    assert not any("acquisition" in f for f in res3.files)
+
+
 def test_report_marks_fixed_and_at_bound_cells(tmp_path):
     """N5: every table the batch report writes marks held (†) and at-bound
     (‡) values -- flag columns in table.csv (numbers unmarked), LaTeX

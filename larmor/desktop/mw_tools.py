@@ -9,7 +9,7 @@ tools are here).
 The dialogs themselves live in their own ``larmor.desktop.*_dialog`` modules.
 
 Owned state: the kept-alive non-modal dialogs (``_qcpmg_dlg``,
-``_qcpmg_batch_dlg``, ``_ref_audit``, ``_inventory_dlg``).
+``_qcpmg_batch_dlg``, ``_ref_audit``, ``_inventory_dlg``, ``_acq_dlg``).
 """
 from __future__ import annotations
 
@@ -411,6 +411,40 @@ class _ToolsMixin:
             dlg.current_source = self.source_path
             if start and not dlg.folder.text():
                 dlg.folder.setText(start)
+        dlg.show()
+        dlg.raise_()
+
+    def open_acquisition_table(self, paths=None):
+        """Tools > Experimental section: Table S1 and the Experimental
+        paragraph of the Explorer's selected spectra (else the open EXPNO),
+        with every parameter that varies across the set highlighted and
+        printed as a range. Needs no fit. Non-modal, kept alive; the open
+        fit's confirmed MAS rate and referencing audit count as evidence."""
+        from larmor.desktop.acquisition_dialog import AcquisitionTableDialog
+        from larmor.referencing import session_root
+
+        paths = [p for p in (paths or self.explorer.selected_spectra()) if p]
+        if not paths and self.source_path and Path(self.source_path).exists():
+            paths = [self.source_path]
+        hint = ""
+        if self.source_path and Path(self.source_path).exists():
+            hint = str(session_root(self.source_path))
+        else:
+            hint = str(QSettings("LARMOR", "app").value("lastDir", "") or "")
+        spin = {}
+        if self.recipe and self.source_path and self.recipe.get("source_kind") == "bruker":
+            spin[self.source_path] = (self.recipe.get("spin_rate_Hz"),
+                                      self.recipe.get("mas_uncertain"))
+        dlg = getattr(self, "_acq_dlg", None)
+        if dlg is None:
+            dlg = AcquisitionTableDialog(self, paths, hint, spin, self.recipe)
+            self._acq_dlg = dlg
+        else:
+            dlg.spin_rates.update(spin)
+            dlg.recipe = self.recipe
+            if hint and not dlg.session_hint:
+                dlg.session_hint = hint
+            dlg.add_paths(paths)
         dlg.show()
         dlg.raise_()
 

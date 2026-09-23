@@ -21,6 +21,7 @@ from pathlib import Path
 
 import numpy as np
 
+from larmor import acquisition
 from larmor import autofit
 from larmor import fit as fitmod
 from larmor import paramstatus
@@ -463,8 +464,11 @@ class BatchResult:
 def run_batch(paths, outdir, *, error_method: str = "covariance", n_mc: int = 200,
               seed: int = 0, make_plots: bool = True,
               formats=("csv", "latex", "markdown"), progress=None,
-              should_stop=None) -> BatchResult:
-    """Full pipeline. `progress(stage, k, n)` is called for 'load'/'fit'/'plot'."""
+              should_stop=None, acquisition_table: bool = True) -> BatchResult:
+    """Full pipeline. `progress(stage, k, n)` is called for 'load'/'fit'/'plot'.
+    ``acquisition_table`` adds Table S1 (``acquisition.csv`` / ``.tex`` and an
+    '## Acquisition' section of report.md) from the fits' acquisition blocks
+    -- nothing is written when no fit carries one (CSV / dmfit sources)."""
     outdir = Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
     files: list[str] = []
@@ -500,9 +504,36 @@ def run_batch(paths, outdir, *, error_method: str = "covariance", n_mc: int = 20
         p = outdir / "table.csv"; write_csv(table, p); files.append(str(p))
     if "latex" in formats:
         p = outdir / "table.tex"; write_latex(table, p); files.append(str(p))
+    # Table S1: the acquisition blocks the fits carry (a re-read for a Bruker
+    # source without a stored block; nothing for CSV / dmfit sources)
+    acq_table = None
+    acq_para = ""
+    if acquisition_table:
+        blocks, spin = [], {}
+        for e in entries:
+            b = acquisition.block_for_recipe(e.recipe)
+            if b:
+                blocks.append(b)
+                spin[b.get("expno_path")] = (e.recipe.get("spin_rate_Hz"),
+                                             e.recipe.get("mas_uncertain"))
+            else:
+                warnings = list(warnings) + [f"no acquisition record for {e.sample}"]
+        if blocks:
+            acq_table = acquisition.table(blocks, spin_rates=spin)
+            acq_para = acquisition.paragraph(blocks, spin_rates=spin)
+            if "csv" in formats:
+                p = outdir / "acquisition.csv"
+                p.write_text(acquisition.table_csv(acq_table), encoding="utf-8")
+                files.append(str(p))
+            if "latex" in formats:
+                p = outdir / "acquisition.tex"
+                p.write_text(acquisition.table_latex(
+                    acq_table, caption="Acquisition parameters."), encoding="utf-8")
+                files.append(str(p))
     if "markdown" in formats:
         p = outdir / "report.md"
-        _write_report(p, entries, table, plot_links, warnings)
+        _write_report(p, entries, table, plot_links, warnings, acq=acq_table,
+                      acq_paragraph=acq_para)
         files.append(str(p))
 
     n_sites = len(table.rows)
@@ -541,7 +572,8 @@ def _constraint_lines(table: BatchTable) -> list[str]:
     return out
 
 
-def _write_report(path: Path, entries, table: BatchTable, plot_links, warnings):
+def _write_report(path: Path, entries, table: BatchTable, plot_links, warnings,
+                  acq=None, acq_paragraph: str = ""):
     from datetime import date
 
     method = {"covariance": "covariance matrix (lmfit)",
@@ -589,6 +621,18 @@ def _write_report(path: Path, entries, table: BatchTable, plot_links, warnings):
                 lines.append("")
                 lines.append(f"![{e.sample}]({plot_links[e.sample]})")
                 lines.append("")
+    if acq is not None:
+        # Table S1: the paragraph with ranges, the table with varying columns
+        # in bold, and the one-line verdict a referee looks for
+        lines += ["## Acquisition", ""]
+        if acq_paragraph:
+            lines += [acq_paragraph, ""]
+        lines += [acquisition.table_markdown(acq), ""]
+        var = acq.varying_headers()
+        lines.append("Parameters that vary across the series: " + ", ".join(var) + "."
+                     if var else
+                     "All acquisition parameters are identical across the series.")
+        lines.append("")
     if warnings:
         lines += ["## Load notes", ""] + [f"- {w}" for w in warnings] + [""]
     path.write_text("\n".join(lines), encoding="utf-8")
