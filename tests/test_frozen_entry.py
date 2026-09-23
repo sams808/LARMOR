@@ -29,5 +29,5 @@ def test_faulthandler_install_survives_a_windowed_exe(monkeypatch, tmp_path):
         assert log.exists()
     finally:
         faulthandler.disable()
-        if was_enabled:
-            faulthandler.enable()
+        if was_enabled:                      # pytest's own handler, on the real stderr
+            faulthandler.enable(sys.__stderr__)

@@ -347,6 +347,7 @@ def main() -> int:
     import time
 
     _install_faulthandler()
+    _log = _crash_log_path()                 # named in the start-up error text
 
     import pyqtgraph as pg
     from PySide6.QtGui import QFont, QIcon, QPixmap
