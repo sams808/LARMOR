@@ -9,7 +9,8 @@ Owned state: ``_sim_worker`` / ``_sim_pending`` / ``_busy`` (the timers are
 created in ``__init__``), ``_fit_worker`` / ``_fit2d_worker`` /
 ``_active_fit_worker``, ``_anim_last_ms`` / ``_anim_last_rms``,
 ``_last_quant``, ``_last_model``, ``_first_sim``, ``_last_lmfit``,
-``_health`` / ``_health_fit``.
+``_health`` / ``_health_fit``, ``_acq_cache`` (the quantitativity facts per
+source path; dropped by ``_health_reset``).
 """
 from __future__ import annotations
 
@@ -18,6 +19,7 @@ from pathlib import Path
 
 import numpy as np
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (QApplication, QFileDialog, QMessageBox,
                                QTableWidgetItem)
 
@@ -266,12 +268,33 @@ class _FittingMixin:
             at_bounds=result.at_bounds or [], frozen=result.frozen_sites or [],
             window=getattr(result.recipe, "fit_window_ppm", None),
             rmsd=result.rmsd, quant_rows=rows, fitted=True, ppm=self.exp_ppm,
-            x_fit=getattr(result, "x_ppm", None))
+            x_fit=getattr(result, "x_ppm", None), acquisition=self._acq_facts())
         h.recipe_sig = fithealth.recipe_signature(self.recipe)
         h.data_sig = fithealth.data_signature(self.exp_ppm, self.exp_amp)
         self._health_fit = h
         self._health_apply(h)
         return h
+
+    def _acq_facts(self):
+        """The quantitativity.AcqFacts of the loaded Bruker EXPNO (acqus,
+        title, the sibling T1 EXPNO's ct1t2.txt), read once per source path
+        on the GUI thread and cached until the document changes; None for a
+        non-Bruker source. Never a dialog: a reader failure is a status-bar
+        note."""
+        src = (self.recipe or {}).get("source_path") or self.source_path
+        if not src:
+            return None
+        src = str(src)
+        if src in self._acq_cache:
+            return self._acq_cache[src]
+        facts = None
+        try:
+            from larmor import quantitativity
+            facts = quantitativity.facts_for(src)
+        except Exception as exc:                          # noqa: BLE001
+            self.statusBar().showMessage(f"acquisition facts not read: {exc}", 6000)
+        self._acq_cache[src] = facts
+        return facts
 
     def _health_live(self, full: bool = True):
         """Re-judge the live model after the debounced simulation landed.
@@ -300,7 +323,8 @@ class _FittingMixin:
                 x, tot = x[::-1], tot[::-1]
             y = np.interp(xp, x, tot)     # kernel models simulate on their own axis
         h = fithealth.reassess_live(base, self.recipe, self.exp_amp, y, ppm=xp,
-                                    window=self.recipe.get("fit_window_ppm"))
+                                    window=self.recipe.get("fit_window_ppm"),
+                                    acquisition=self._acq_facts())
         if h is not self._health and h != self._health:
             self._health_apply(h)
 
@@ -326,18 +350,148 @@ class _FittingMixin:
         self._health = None
         self._health_fit = None
         self._last_lmfit = None
+        # a reload re-reads the acquisition facts, so a ct1t2.txt TopSpin
+        # wrote during the session is seen
+        self._acq_cache = {}
         self.health_strip.set_health(None)
         self._update_enabled()
         self._health_show()
 
     def show_fit_health(self, *_):
         """Decomposition ▸ Fit health details (F7) and the pill click: every
-        flag plus the analysis tools, anchored under the pill."""
+        flag plus the analysis tools, anchored under the pill; with a sibling
+        T1 EXPNO known, the per-site T1 measurement and the Relaxation tool
+        on that EXPNO."""
         if self._health is None:
             self.statusBar().showMessage("run a fit first (F5)")
             return
-        self.health_strip.show_details(
-            [self.actCorr, self.actErrors, self.actMC, self.actChi2])
+        extra = [self.actCorr, self.actErrors, self.actMC, self.actChi2]
+        sib = self._health_sibling_expno()
+        if sib:
+            n = Path(sib).name
+            a1 = QAction(f"Measure T1 per site from EXPNO {n} (uses this fit)…")
+            a1.setToolTip("decompose every slice of that saturation-recovery "
+                          "ser on the fitted lineshapes and feed the T1 per "
+                          "site back into the recycle-delay chip")
+            a1.triggered.connect(self._health_measure_t1_per_site)
+            a2 = QAction(f"Open T1 measurement (EXPNO {n})…")
+            a2.triggered.connect(self._health_open_relaxation)
+            self._health_extra_actions = [a1, a2]     # kept alive while shown
+            extra += self._health_extra_actions
+        self.health_strip.show_details(extra)
+
+    def _health_sibling_expno(self):
+        """The T1 EXPNO behind the recycle-delay chip: the fitted one, else
+        the nearest same-nucleus relaxation EXPNO; None without either."""
+        chk = getattr(self._health, "acquisition", None)
+        facts = getattr(chk, "facts", None)
+        if facts is None:
+            return None
+        if facts.t1 is not None and facts.t1.kind == "ct1t2" and facts.t1.expno:
+            return facts.t1.expno
+        return facts.sibling_expno
+
+    def _health_requantify(self):
+        """Re-judge the last fit's quantification-derived chips (population,
+        tail, recycle delay, flip angle) from the current quantify rows and
+        recipe overrides -- after a window widening or a typed 90° pulse /
+        T1 -- without a refit. Only when the verdict on screen IS the fit's."""
+        base = self._health_fit
+        if base is None or (self._health is not None and self._health.stale):
+            self.statusBar().showMessage("F5 to refresh the verdict")
+            return
+        rows = (self._last_quant or {}).get("rows")
+        h = fithealth.with_quantification(base, self.recipe, rows, self._acq_facts())
+        self._health_fit = h
+        self._health_apply(h)
+
+    def _health_widen_window(self):
+        """The tail chip's click: set the view to the window holding 99.5 % of
+        every line (clipped to the acquired axis), re-integrate, re-judge.
+        The fit stays an explicit user action (F5)."""
+        if not (self.recipe and self.recipe.get("sites")):
+            return
+        from larmor.quantify import window_containing_tails
+
+        try:
+            hi, lo, clipped = window_containing_tails(
+                Recipe.from_dict(self.recipe),
+                exp_ppm=self.exp_ppm if len(self.exp_ppm) else None)
+        except Exception as exc:                          # noqa: BLE001
+            self.statusBar().showMessage(f"cannot widen the window: {exc}")
+            return
+        if not hi > lo:
+            self.statusBar().showMessage("cannot widen the window: no line area")
+            return
+        self.view.setXRange(lo, hi, padding=0)
+        self.autoscale_y()
+        self.run_quantify(show=False)
+        self._health_requantify()
+        msg = (f"window widened to {hi:.0f} … {lo:.0f} ppm to contain every "
+               "tail — populations re-integrated; F5 refits over it")
+        if clipped:
+            msg += " · " + ", ".join(
+                f"{pct:.1f} % of {label} lies beyond the acquired spectrum"
+                for label, pct in clipped.items())
+        self.statusBar().showMessage(msg)
+
+    def _health_open_relaxation(self):
+        """The recycle-delay chip's click: Tools ▸ Relaxation on the sibling
+        T1 EXPNO (the picker when none is known)."""
+        expno = self._health_sibling_expno()
+        if expno:
+            from larmor.desktop.satrec_dialog import SatrecDialog
+
+            SatrecDialog(self, str(expno)).exec()
+        else:
+            self.open_satrec()
+
+    def _health_enter_flip(self):
+        """The flip-angle chip's click: Process ▸ Experiment parameters…
+        focused on the 90° pulse field."""
+        self.edit_experiment(focus="p90")
+
+    def _health_measure_t1_per_site(self, *_):
+        """F7 ▸ Measure T1 per site: decompose the sibling saturation-recovery
+        ser on THIS fit's lineshapes (series.analyze_per_site) and store the
+        T1 per site in the recipe (provenance.quantitativity.t1_by_site), so
+        the recycle-delay chip judges each line against its own T1."""
+        expno = self._health_sibling_expno()
+        if not expno or not (Path(expno) / "ser").exists():
+            self.statusBar().showMessage(
+                "no relaxation ser found next to this spectrum — Tools ▸ "
+                "Per-site relaxation lets you pick one")
+            return
+        if not (self.recipe and self.recipe.get("sites")):
+            return
+        from larmor import series
+
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        self.statusBar().showMessage(
+            f"decomposing every slice of EXPNO {Path(expno).name} on the fitted lines…")
+        QApplication.processEvents()
+        try:
+            results = series.analyze_per_site(expno, Recipe.from_dict(self.recipe))
+        except Exception as exc:                          # noqa: BLE001
+            QApplication.restoreOverrideCursor()
+            QMessageBox.warning(self, "Per-site T1", str(exc))
+            return
+        QApplication.restoreOverrideCursor()
+        by_site = {r.label: float(r.tau) for r in results
+                   if r.label and r.tau is not None and r.tau > 0}
+        if by_site:
+            q = self.recipe.setdefault("provenance", {}).setdefault("quantitativity", {})
+            q["t1_by_site"] = by_site
+            q["t1_expno"] = str(expno)
+            self._health_requantify()
+            self._persist_session()
+        msg = "\n".join(r.summary for r in results) or "no results"
+        QMessageBox.information(
+            self, f"Per-site T1 from EXPNO {Path(expno).name}",
+            msg + ("\n\nstored in the recipe — the recycle-delay chip now "
+                   "uses these values" if by_site else ""))
+        self.statusBar().showMessage("per-site T1 stored — recycle-delay chip re-judged"
+                                     if by_site else "per-site T1: no usable result")
 
     def _health_focus_param(self, i: int, pname: str):
         self.lines_dock.show()
@@ -409,10 +563,16 @@ class _FittingMixin:
             frac = f"{row['fraction_pct']:.1f}"
             if row["fraction_err_pct"] is not None:
                 frac += f" ± {row['fraction_err_pct']:.1f}"
+            tail = row.get("tail_outside_pct")
+            tail_text = f"{tail:.1f}" if tail is not None else "—"
             for c, text in enumerate([f"{row['label']}  ({row['model']})",
-                                      pos, f"{row['integral']:.4g}", frac]):
+                                      pos, f"{row['integral']:.4g}", frac,
+                                      tail_text]):
                 item = QTableWidgetItem(text)
                 item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+                if c == 4:
+                    item.setToolTip("share of this line's simulated area "
+                                    "outside the integration window")
                 self.qtable.setItem(r, c, item)
         self.qtable.resizeColumnsToContents()
         if show:
@@ -423,14 +583,15 @@ class _FittingMixin:
         if not self._last_quant:
             return
         head = ("line,model,position_ppm,position_err,integral,"
-                "integral_err,fraction_pct,fraction_err_pct")
+                "integral_err,fraction_pct,fraction_err_pct,tail_outside_pct")
         lines = [head]
         for r in self._last_quant["rows"]:
             lines.append(",".join(str(r.get(k, "") if r.get(k) is not None else "")
                                   for k in ("label", "model", "position_ppm",
                                             "position_err", "integral",
                                             "integral_err", "fraction_pct",
-                                            "fraction_err_pct")))
+                                            "fraction_err_pct",
+                                            "tail_outside_pct")))
         QApplication.clipboard().setText("\n".join(lines))
         self.statusBar().showMessage("report table copied as CSV")
 
@@ -500,11 +661,17 @@ class _FittingMixin:
         # report.md tying it together
         rows = (self._last_quant or {}).get("rows", [])
         md = [f"# {self.recipe.get('sample') or 'Fit'} — {self.recipe.get('nucleus','')}",
-              "", methods.methods_sentence(self.recipe), "",
-              "| site | position (ppm) | fraction (%) |", "|---|---|---|"]
+              "", methods.methods_sentence(self.recipe), ""]
+        h = self._health
+        if h is not None and h.fitted and h.summary():
+            md += ["Fit health: " + h.summary(), ""]
+        md += ["| site | position (ppm) | fraction (%) | outside window (%) |",
+               "|---|---|---|---|"]
         for r in rows:
+            tail = r.get("tail_outside_pct")
+            tail_txt = f"{tail:.1f}" if tail is not None else "—"
             md.append(f"| {r.get('label')} | {r.get('position_ppm')} | "
-                      f"{r.get('fraction_pct', 0):.1f} |")
+                      f"{r.get('fraction_pct', 0):.1f} | {tail_txt} |")
         md += ["", "![figure](figure.png)", ""]
         (folder / "report.md").write_text("\n".join(md), encoding="utf-8")
         self.statusBar().showMessage(f"publication bundle written to {folder}")

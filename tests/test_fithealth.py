@@ -234,3 +234,159 @@ def test_pill_text_is_bounded_for_any_flag_load():
     assert fithealth.short_name("s0_amplitude") == "s0.amp"
     assert fithealth.parse_bound_name("s3.sigma_Cq_MHz") == (3, "sigma_Cq_MHz")
     assert fithealth.parse_bound_name("amplitude") is None
+
+
+# ------------------------------------------------- quantitativity chips
+def _facts(t1=True, spin=1.5, title="11B with short tip angle", p90=None, p1=0.425,
+           d1=14.0, kind="Single pulse", pulprog="zg"):
+    from larmor import quantitativity as Q
+    from larmor.satrec import T1Region
+
+    acq = Q.Acquisition(expno="/x/24", nucleus="11B", pulprog=pulprog, kind=kind,
+                        ns=256, d1_s=d1, aq_s=0.04, p1_us=p1, plw1_w=100.0,
+                        probhd="16_Solenoid (PMAS16)", title=title,
+                        p90_us_title=p90, flip_deg_title=None, t1_multiple_claimed=None)
+    src = Q.T1Source(expno="/x/23", kind="ct1t2", regions=[
+        T1Region(1, 27.382, 5.846, 4.643, (4.643,), 1.207e-2, 7),
+        T1Region(2, 5.846, -7.618, 3.896, (3.896,), 1.350e-2, 7)],
+        vdlist_max_s=256.0, title_notes_s=[4.64, 3.74]) if t1 else None
+    return Q.AcqFacts(acquisition=acq, t1=src, sibling_expno="/x/23", spin=spin,
+                      folder="/x", t1_status="ok" if t1 else "missing")
+
+
+def test_tail_flag_is_check_targets_widen_and_is_carried_stale():
+    rows = [{"site": "s0", "label": "AlO6", "fraction_pct": 20.0, "fraction_err_pct": 1.0,
+             "tail_outside_pct": 14.0},
+            {"site": "s1", "label": "AlO4", "fraction_pct": 80.0, "fraction_err_pct": 1.0,
+             "tail_outside_pct": 0.3}]
+    h = fithealth.assess(_rec(), Y, PEAK, lmfit_result=_lm(), rmsd=0.01, window=WINDOW,
+                         quant_rows=rows)
+    (f,) = h.flags
+    assert (f.kind, f.level, f.text, f.target) == \
+        ("tail", "check", "tail outside window: AlO6 14 %", "widen")
+    assert f.params == [(0, "amplitude")] and f.covariance_based
+    assert "14 % of AlO6's simulated area" in f.detail and "limit 2 %" in f.detail
+    assert "⚠ tail outside window: AlO6 14 %" in h.summary()
+    assert h.level == "check" and h.tail_checked
+    assert "tails inside the window" not in h.passing()
+    inside = [dict(r, tail_outside_pct=0.4) for r in rows]
+    h2 = fithealth.assess(_rec(), Y, PEAK, lmfit_result=_lm(), rmsd=0.01, window=WINDOW,
+                          quant_rows=inside)
+    assert h2.flags == [] and "tails inside the window (≤ 2 %)" in h2.passing()
+    legacy = [{"label": "C", "fraction_pct": 40.0, "fraction_err_pct": 1.0}]
+    h3 = fithealth.assess(_rec(), Y, PEAK, lmfit_result=_lm(), rmsd=0.01, window=WINDOW,
+                          quant_rows=legacy)
+    assert h3.flags == [] and not h3.tail_checked
+    assert "tails inside" not in " ".join(h3.passing())
+    h4 = fithealth.assess(_rec(), Y, PEAK, quant_rows=rows, fitted=False, window=WINDOW)
+    assert "tail" not in h4.kinds()
+    # a live edit carries the fit's tail verdict, dimmed
+    d = _rec().to_dict()
+    h.recipe_sig = fithealth.recipe_signature(d)
+    h.data_sig = fithealth.data_signature(X, Y)
+    edited = copy.deepcopy(d)
+    edited["sites"][0]["params"]["amplitude"]["value"] = 70.0
+    live = fithealth.reassess_live(h, edited, Y, 0.7 * PEAK, ppm=X, window=WINDOW)
+    (tail,) = [f for f in live.flags if f.kind == "tail"]
+    assert tail.stale and live.stale and live.tail_checked
+    assert fithealth.KIND_ORDER.index("tail") > fithealth.KIND_ORDER.index("population")
+    assert fithealth.KIND_ORDER.index("excitation") < fithealth.KIND_ORDER.index("frozen")
+    assert fithealth.KIND_ORDER.index("tail") < fithealth.KIND_ORDER.index("recovery")
+
+
+def test_acquisition_flags_are_live_leveled_and_targeted():
+    from larmor import quantitativity as Q
+
+    facts = _facts()
+    h = fithealth.assess(_rec(), Y, PEAK, lmfit_result=_lm(), rmsd=0.01, window=WINDOW,
+                         acquisition=facts)
+    assert [f.kind for f in h.flags] == ["recovery", "excitation"]
+    rec, exc = h.flags
+    assert (rec.level, rec.text, rec.target) == \
+        ("check", "D1 = 3.0 T1 → 95 % (90° assumed)", "relaxation")
+    assert "EXPNO 23" in rec.detail and "4.64 s" in rec.detail
+    assert (exc.level, exc.text, exc.target) == ("info", "flip angle unknown (I = 3/2)", "flip")
+    assert not rec.covariance_based and not exc.covariance_based
+    assert h.pill_text() == "⚠ Fit: 1 caveat"            # info does not count
+    assert isinstance(h.acquisition, Q.Check) and h.acquisition.facts is facts
+    assert "⚠ D1 = 3.0 T1 → 95 % (90° assumed)" in h.summary()
+    assert "acquisition not checked" not in h.tooltip()
+    # live: shown before the first fit too
+    h0 = fithealth.assess(_rec(), None, None, fitted=False, window=WINDOW, acquisition=facts)
+    assert {"recovery", "excitation"} <= h0.kinds() and h0.level == "check"
+    # a live edit recomputes the site -> region mapping from the cached facts
+    d = _rec().to_dict()
+    h.recipe_sig, h.data_sig = fithealth.recipe_signature(d), fithealth.data_signature(X, Y)
+    moved = copy.deepcopy(d)
+    moved["sites"][0]["params"]["isotropic_chemical_shift_ppm"]["value"] = 1.0
+    live = fithealth.reassess_live(h, moved, Y, PEAK, ppm=X, window=WINDOW)
+    (rec2,) = [f for f in live.flags if f.kind == "recovery"]
+    assert rec2.text == "D1 = 3.6 T1 → 97 % (90° assumed)" and not rec2.stale
+    assert live.acquisition.facts is facts                  # reused from prev
+    assert live.acquisition.recoveries[0].t1_s == 3.896
+    # no usable T1: a grey info chip that never colours the pill
+    hn = fithealth.assess(_rec(), Y, PEAK, lmfit_result=_lm(), rmsd=0.01, window=WINDOW,
+                          acquisition=_facts(t1=False))
+    (f,) = [f for f in hn.flags if f.kind == "recovery"]
+    assert f.level == "info" and f.text == "recycle 14 s — T1 unknown"
+    assert hn.level == "ok"
+    # spin-1/2: no excitation chip, a passing line instead
+    hp = fithealth.assess(_rec(), Y, PEAK, lmfit_result=_lm(), rmsd=0.01, window=WINDOW,
+                          acquisition=_facts(spin=0.5))
+    assert "excitation" not in hp.kinds()
+    assert "spin-½: any flip angle is quantitative" in hp.passing()
+    # the title's P1(90) with a long pulse: an amber excitation chip
+    hx = fithealth.assess(_rec(), Y, PEAK, lmfit_result=_lm(), rmsd=0.01, window=WINDOW,
+                          acquisition=_facts(title="P1(90)=2.5", p90=2.5, p1=0.5))
+    (f,) = [f for f in hx.flags if f.kind == "excitation"]
+    assert f.level == "check" and f.text == "flip 18° > 15° limit (I = 3/2)"
+    assert f.target == "flip" and "⚠ flip 18° > 15° limit (I = 3/2)" in hx.summary()
+    # a long enough delay and a typed 90-degree pulse: both checks pass
+    r = _rec()
+    r.provenance = {"quantitativity": {"p90_us": 3.5}}
+    hok = fithealth.assess(r, Y, PEAK, lmfit_result=_lm(), rmsd=0.01, window=WINDOW,
+                           acquisition=_facts(d1=5 * 4.643))
+    assert not ({"recovery", "excitation"} & hok.kinds())
+    passing = hok.passing()
+    assert any(p.startswith("recycle 23.3 s = 5.0 T1 → ") and "(EXPNO 23)" in p
+               for p in passing), passing
+    assert "flip 10.9° within the linear regime (≤ 15°)" in passing
+    # not a Bruker dataset: nothing judged, and the tooltip says so
+    hno = fithealth.assess(_rec(), Y, PEAK, lmfit_result=_lm(), rmsd=0.01, window=WINDOW)
+    assert not ({"recovery", "excitation"} & hno.kinds()) and hno.acquisition is None
+    assert "acquisition not checked (not a Bruker dataset)" in hno.tooltip()
+    assert "acquisition not checked" not in fithealth.assess(
+        _rec(), None, None, fitted=False, window=WINDOW).tooltip()
+
+
+def test_with_quantification_rebuilds_only_quant_flags():
+    lm = _lm(_DEGEN_NAMES, covar=_DEGEN_COV)
+    rows = [{"site": "s0", "label": "A", "fraction_pct": 50.0, "fraction_err_pct": 1.0,
+             "tail_outside_pct": 14.0}]
+    prev = fithealth.assess(_rec(), Y, PEAK, lmfit_result=lm, rmsd=0.01, window=WINDOW,
+                            quant_rows=rows, acquisition=_facts())
+    prev.recipe_sig, prev.data_sig = ("sig",), ("data",)
+    assert [f.kind for f in prev.flags] == ["degenerate", "tail", "recovery", "excitation"]
+    degen = prev.flags[0]
+    fresh = [dict(rows[0], tail_outside_pct=0.2)]
+    h = fithealth.with_quantification(prev, _rec(), fresh)
+    assert [f.kind for f in h.flags] == ["degenerate", "recovery", "excitation"]
+    assert h.flags[0] == degen
+    assert (h.recipe_sig, h.data_sig, h.stale, h.rmsd, h.fitted) == \
+        (("sig",), ("data",), False, 0.01, True)
+    assert h.acquisition.facts is prev.acquisition.facts and h.tail_checked
+    assert prev.flags[1].kind == "tail"                     # prev untouched
+    h2 = fithealth.with_quantification(prev, _rec().to_dict(), None)
+    assert [f.kind for f in h2.flags] == ["degenerate", "recovery", "excitation"]
+    assert not h2.tail_checked
+    # a typed 90-degree pulse re-judges the recovery without a refit
+    r = _rec()
+    r.provenance = {"quantitativity": {"p90_us": 3.5, "t1_s": 2.0}}
+    h3 = fithealth.with_quantification(prev, r, fresh)
+    assert [f.kind for f in h3.flags] == ["degenerate"]
+    assert any("recycle" in p for p in h3.passing())
+    # on an unfitted verdict nothing fit-only appears
+    unfit = fithealth.assess(_rec(), None, None, fitted=False, window=WINDOW,
+                             acquisition=_facts())
+    h4 = fithealth.with_quantification(unfit, _rec(), rows)
+    assert "tail" not in h4.kinds() and "recovery" in h4.kinds()

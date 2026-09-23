@@ -181,3 +181,32 @@ def test_level_colours_are_readable_in_every_theme(qapp):
         theme.set_active(prev)
         s.apply_theme()
     s.close()
+
+
+def test_widen_relaxation_and_flip_targets_emit_their_signals(qapp):
+    from PySide6.QtCore import Qt
+
+    s = _strip()
+    h = _ok()
+    h.flags = [
+        _flag("tail", "check", "tail outside window: A 14 %", "widen", cov=True),
+        _flag("recovery", "check", "D1 = 3.0 T1 → 95 % (90° assumed)", "relaxation"),
+        _flag("excitation", "info", "flip angle unknown (I = 3/2)", "flip"),
+    ]
+    s.set_health(h)
+    assert [c.text() for c in s.chips] == [f.text for f in h.flags]
+    assert [c.toolTip() for c in s.chips] == [f.detail for f in h.flags]
+    assert [c.property("flag_kind") for c in s.chips] == ["tail", "recovery", "excitation"]
+    assert all(c.cursor().shape() == Qt.PointingHandCursor for c in s.chips)
+    got = []
+    s.widen_window.connect(lambda: got.append("widen"))
+    s.open_relaxation.connect(lambda: got.append("relaxation"))
+    s.enter_flip.connect(lambda: got.append("flip"))
+    for c in s.chips:
+        c.click()
+    assert got == ["widen", "relaxation", "flip"]
+    acts = s.details_menu().actions()
+    for f in h.flags:
+        (a,) = [a for a in acts if a.text().endswith(f.text)]
+        assert a.isEnabled()
+    s.close()
