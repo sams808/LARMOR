@@ -9,6 +9,8 @@ Qt-free and testable; the desktop layer just puts the strings on the clipboard.
 """
 from __future__ import annotations
 
+from larmor import paramstatus
+
 _MODEL_PHRASE = {
     "gauss_lor": "Gauss/Lorentz lines",
     "gl_norm": "area-normalised Gauss/Lorentz lines",
@@ -43,10 +45,18 @@ _COLS = [
 ]
 
 
-def _fmt(v, err, fmt):
+def _fmt(v, err, fmt, status=None):
+    """``value ± err`` with the status marker appended. A HELD value prints
+    without its error (saved recipes carry stderr 0.0 on fixed parameters,
+    which read as a fitted ``1.00 ± 0.00``); a value that finished at a bound
+    has no covariance error at all after the fit's retry, so ‡ is its
+    explanation."""
     s = fmt.format(v)
-    if err is not None:
+    fixed = status is not None and status.kind == "fixed"
+    if err is not None and not fixed:
         s += " ± " + fmt.format(err)
+    if status is not None:
+        s += status.latex
     return s
 
 
@@ -72,22 +82,40 @@ def latex_table(recipe: dict, quant: dict | None = None,
     header = ["site"] + [h for _, h, _ in present] + ["pop. (\\%)"]
     lines.append(" & ".join(header) + r" \\")
     lines.append(r"\midrule")
+    # † fixed · ‡ at a bound · § linked, derived per cell; the footnote lists
+    # only the kinds that occurred, so an all-free recipe prints exactly the
+    # plain table
+    entries: list[tuple[str, paramstatus.ParamStatus]] = []
     for s in sites:
         params = s.get("params", {})
         label_s = s.get("label") or s.get("model", "")
+        model_s = s.get("model")
         row = [label_s]
-        for key, _h, fmt in present:
+        for key, head, fmt in present:
             p = params.get(key)
             if p is None:
                 row.append("--")
             else:
                 v = p.get("value") if isinstance(p, dict) else p
                 e = p.get("stderr") if isinstance(p, dict) else None
-                row.append(_fmt(float(v), e, fmt))
+                st = paramstatus.param_status(model_s, key, p)
+                if st.kind != "free":
+                    entries.append((f"{label_s} {head}", st))
+                row.append(_fmt(float(v), e, fmt, st))
         frac, ferr = pops.get(label_s, (None, None))
-        row.append("--" if frac is None else _fmt(frac, ferr, "{:.1f}"))
+        # the population inherits the amplitude's status: a held (or zeroed)
+        # amplitude is not a fitted population
+        amp_st = paramstatus.param_status(model_s, "amplitude", params.get("amplitude"))
+        if frac is not None and amp_st.kind != "free":
+            entries.append((f"{label_s} pop. (\\%)", amp_st))
+        row.append("--" if frac is None else
+                   _fmt(frac, ferr, "{:.1f}", amp_st if amp_st.kind != "free" else None))
         lines.append(" & ".join(str(c) for c in row) + r" \\")
-    lines += [r"\bottomrule", r"\end{tabular}"]
+    lines.append(r"\bottomrule")
+    if entries:
+        lines.append(r"\multicolumn{" + str(ncol) + r"}{l}{\footnotesize "
+                     + paramstatus.footnote(entries, "latex") + r"} \\")
+    lines.append(r"\end{tabular}")
     if caption:
         lines.append(r"\caption{" + caption + "}")
     lines.append(r"\label{" + label + "}")

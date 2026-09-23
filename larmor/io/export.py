@@ -3,7 +3,10 @@
 - text  : columns ppm, experiment, model, one column per component — for
           plotting elsewhere (Origin, matplotlib, gnuplot).
 - csv   : the parameter table (line, model, parameter, value, ± error,
-          min, max, link) — for a paper's supporting information.
+          min, max, link, vary, at_bound) — for a paper's supporting
+          information. ``vary`` is True/False as stored; ``at_bound`` reads
+          ``min`` / ``max`` when a free value sits at its effective bound
+          (larmor.paramstatus, the fit's own rule) and is blank otherwise.
 - json  : the LARMOR recipe (via Recipe.save) — the reproducible unit.
 - fxmla : a dmfit-compatible file, so a fit made in LARMOR opens in dmfit
           (the σ = sCZ_CQ/2 convention is inverted on the way out).
@@ -18,6 +21,7 @@ from pathlib import Path
 
 import numpy as np
 
+from larmor import paramstatus
 from larmor.recipe import Recipe
 
 SCZ_FROM_SIGMA = 2.0            # dmfit sCZ_CQ = 2 × mrsimulator σ (Phase 0)
@@ -125,8 +129,11 @@ def export_curves_csv(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
 
 
 def export_csv_params(recipe: Recipe, path: str | Path) -> str:
-    """The parameter table as CSV (one row per parameter)."""
-    rows = ["line,model,parameter,value,stderr,min,max,link"]
+    """The parameter table as CSV (one row per parameter). The trailing
+    ``vary`` / ``at_bound`` columns say which values were held and which
+    finished pinned at a bound (``min`` / ``max``); stderr is written as
+    stored (a held value's 0.0 stays 0.0 -- ``vary`` explains it)."""
+    rows = ["line,model,parameter,value,stderr,min,max,link,vary,at_bound"]
     for i, site in enumerate(recipe.sites):
         letter = _letter(i)
         for pname, p in site.params.items():
@@ -135,6 +142,8 @@ def export_csv_params(recipe: Recipe, path: str | Path) -> str:
                 _num(p.value), _num(p.stderr),
                 _num(p.min), _num(p.max),
                 (p.expr or "").replace(",", ";"),
+                str(bool(p.vary)),
+                paramstatus.param_status(site.model, pname, p).side,
             ]))
     if recipe.fit_rmsd is not None:
         rows.append(f"# RMSD,{recipe.fit_rmsd:.6g}")
