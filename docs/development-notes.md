@@ -28,10 +28,12 @@ Qt-free — verified by importing all 71 core modules and finding no PySide6 in
 asserting it. The dependency direction is clean: no core module imports from
 `larmor.desktop`.
 
-**The biggest files**, where most trouble lives: `desktop/app.py` (4,677
-lines — by far the largest and the main window's monolith),
-`desktop/plotting_studio.py` (1,432), `desktop/qcpmg_dialog.py` (1,408),
-`desktop/batchfit_dialog.py` (1,323), `figures.py` (1,134), `qcpmg.py` (992).
+**The biggest files**, where most trouble lives: `desktop/batchfit_dialog.py`
+(1,765), `desktop/plotting_studio.py` (1,449), `desktop/qcpmg_dialog.py`
+(1,411), `figures.py` (1,134), `qcpmg.py` (992). The main window is no
+longer one file: `desktop/app.py` is a 387-line facade and its behaviour
+lives in eleven `desktop/mw_*.py` mixin modules of 207–920 lines each plus
+`desktop/workers.py` (see the Desktop shell row below and §11).
 
 ### Module map
 
@@ -44,6 +46,7 @@ lines — by far the largest and the main window's monolith),
 | Fitting | `fit.py`, `batchfit.py`, `seqfit.py`, `multifit.py`, `autofit.py`, `parallel.py` |
 | Interpretation | `quantify.py`, `sanity.py`, `identifiability.py`, `diagnostics.py`, `fithealth.py` (one verdict from the previous four, rendered by the desktop strip), `chi2map.py`, `czjzek_dist.py`, `convert.py`, `nuclei.py`, `refranges.py` |
 | Output | `figures.py` (spec-driven renderers), `methods.py` (auto-written Methods text), `series_grid.py` |
+| Desktop shell | `desktop/app.py` is the `MainWindow` facade (construction, the two Qt event overrides, `main()`); every other method is defined on one mixin in `desktop/mw_*.py` — `mw_menus`, `mw_chrome`, `mw_files`, `mw_session`, `mw_overlays`, `mw_editing`, `mw_sidebands`, `mw_fitting`, `mw_processing`, `mw_cofit`, `mw_tools` — and the QThreads are in `desktop/workers.py`. The layout and its rules are in §11 |
 
 **Data flow.** `loader.load_any(path)` → `(ppm, amp, recipe, meta, warnings)`
 → `engine.make_context(recipe, exp_ppm)` builds a `SimContext` →
@@ -91,6 +94,12 @@ scipy 1.17.1, PySide6 6.11.1, pyqtgraph 0.14.0. `pyproject.toml` pins
   it was absent. A test that writes `QSettings` without restoring destroys real
   user state — `test_fit_diagnostics.py::test_per_nucleus_seed` did exactly
   that to the learned `siteDefaults` until it was wrapped.
+- **Patch a module global on the module whose code reads it.** After the
+  G5 split a `MainWindow` method reads its globals from the `mw_*.py`
+  module that defines it, not from `larmor.desktop.app`:
+  `test_kernel_warm_worker_spin_gate_and_dedup` patches `KernelWarmWorker`
+  on `larmor.desktop.mw_files` (the module of `_warm_kernel`). A patch on
+  `larmor.desktop.app` is silently ignored and the real worker thread runs.
 
 ### Test data lives outside the repo
 
@@ -188,21 +197,21 @@ comments in the source explain them; this is the index.
 | **`SIMULATED_DIFF_STEP = 1e-3`** for every model not in `_ANALYTIC_MODELS` | `fit.py:52–73` | At scipy's ~1.5e-8 step the Jacobian of a grid model is quantisation noise: the optimiser "converges" without moving a shape parameter |
 | **`_lorentz_convolve` kernel clamp** | `quadrupolar.py:62` | `np.convolve(mode="same")` returns `max(len(a), len(v))`; an unbounded FWHM grew the array and crashed downstream |
 | **`fit_2d` must refuse an all-zero model** | `twod.py:669` | Zero gradient → instant "perfect" fit of nothing with β pinned |
-| **Constraint expressions must be remapped on site delete** | `constraints_util.py`, `app.py:2951` | `E = D + 5.3` silently becomes `E = E + 5.3` and recurses forever |
+| **Constraint expressions must be remapped on site delete** | `constraints_util.py`, `desktop/mw_editing.py` `_remap_exprs_after_delete` | `E = D + 5.3` silently becomes `E = E + 5.3` and recurses forever |
 | **Excluded batch sites are zeroed placeholders, not omitted** | `series_grid.py:116` | Omitting shifts every later site index; index-based figure specs then colour the wrong component |
 | **`setMenuEnabled(False)` destroys the pyqtgraph menu** | `plot.py:269`, `batchfit_dialog.py:559` | Custom context-menu items vanish after the first toggle; re-attach every time |
 | **`keyboardTracking(False)` on every spinbox** in the QCPMG dialog | `qcpmg_dialog.py:161` | Typing "293" acts on "29" and clamps the echo top; one point of top moved T₂ by up to 7400 % |
 | **`PARAM_COLUMNS` must keep its automatic fallback column** | `table.py:102` | Without it a model's parameters become fitted-but-invisible, as Amorphous ΔC_Q was |
-| **`load_any` returns `(ppm, amp, recipe, meta, warnings)`** | `app.py:2331`, `app.py:2889` | It was once unpacked as `(recipe, ppm, amp, …)`; every overlay format except raw Bruker silently failed. The same slip survived in `add_background_spectrum` until it was found in use: the recipe dict landed in `amp`, `np.asarray(..., float)` raised a `TypeError` out of the Qt slot, and no background/reference spectrum could ever be added. Grep every `_load_any(` call site when this shape changes |
+| **`load_any` returns `(ppm, amp, recipe, meta, warnings)`** | `desktop/mw_files.py` `_load_source_body`, `mw_overlays.py` `_read_overlay_source`, `mw_editing.py` `add_background_spectrum`, `mw_cofit.py` `_cofit_load` | It was once unpacked as `(recipe, ppm, amp, …)`; every overlay format except raw Bruker silently failed. The same slip survived in `add_background_spectrum` until it was found in use: the recipe dict landed in `amp`, `np.asarray(..., float)` raised a `TypeError` out of the Qt slot, and no background/reference spectrum could ever be added. Grep every `_load_any(` call site when this shape changes |
 | **Never embed 2D arrays in a project bundle** — a 2D entry is a source path (+ project-relative path) plus the view's op log | `project.py` (`entry_2d`, `view2d_persisted`), `twod_view.py` (`_ops`) | A 2rr is 10⁵–10⁶ points, four quadrants when hypercomplex; the bundle would dwarf the data it references, and the recorded ops replay exactly (`twod.replay_ops` dispatches to the same functions the view calls live) |
 | **Every `Contour2DView` method that replaces `_orig` / `_committed` must append to `_ops`**; the phase-Reset rule lives in one place (`_ops_after_reset`: drop phases after the last rebasing op, keep shifts) | `twod_view.py` | `replay_ops` raises on an unknown op, but an operation that never logs itself reopens as a map that silently differs from what was saved. `_shift_axes` relabels `_orig` and `_committed` without rebasing, so a phase before a calibrate is still undone by Reset while the shift survives |
 | **v2 2D / figure / batch bundle entries carry no `exp_ppm`** | `batch.py` (`load_entries`), `project.py` | The batch report's bundle reader skips them through its existing `not ppm` guard; giving them arrays would turn them into phantom fits. `load_bundle` refuses a JSON object without a `workspaces` list so a recipe file never migrates into an empty project |
 | **Phase pivot fraction is computed on the frequency axis** (`SpectrumView._freq_x`), never on the displayed trace | `plot.py` `phase_pivot_frac` / `show_phase_pivot` / `_snap_peak` | With the FID or the imaginary channel shown, `_exp.xData` is milliseconds or the wrong channel: every live tick would phase about a garbage pivot |
 | **`op_ift` derives `sw_Hz` and parks the axis in `x_ppm_hold`; `op_ft` anchors on `hold[n//2]`** (the fftshift zero bin), not the mid-span | `processing.py` `op_ift` / `op_ft` | A `from_processed` spectrum has `sw_Hz = 0` (every window then divides by zero, silently — numpy gives inf/NaN) and the ift→ft round trip landed at 0 ppm; the mid-span centre is half a bin off for even n |
-| **Capturing a pipeline stage needs `dataclasses.replace(s, y=s.y.copy())`** | `app.py` `apply_processing` | Ops mutate the `Spectrum1D` in place and `op_ft` reassigns `y` / `x_ppm` / `domain` on the same object — a plain reference to the "FID" becomes the spectrum |
+| **Capturing a pipeline stage needs `dataclasses.replace(s, y=s.y.copy())`** | `desktop/mw_processing.py` `apply_processing` | Ops mutate the `Spectrum1D` in place and `op_ft` reassigns `y` / `x_ppm` / `domain` on the same object — a plain reference to the "FID" becomes the spectrum |
 | **`hilbert` must precede `ift` before any window** on a real-only spectrum | `desktop/panels.py` `_emit` (forced and locked in re-apodize mode) | The IFT of a real spectrum is two-sided (hermitian); a one-sided EM window damps the mirrored half, loses ~half the signal and distorts the line — the whole-echo trap in a new guise |
 | **`FidDialog` puts `ft` BEFORE the `phase` step** | `fid_dialog.py` `_chain` | `fourier.ft1d` appends `ft` at the END when none is given; with the phase op ahead of it every non-zero p0 / p1 made the preview fail on time-domain data |
-| **A reopened `.json` recipe seeds `_proc_base` from `load_any(path, replay=False)`** | `app.py` `_load_source_body` | The exp arrays arrive ALREADY replayed; seeding the live pipeline's base from them compounds the recorded chain on the first panel touch (p0 40 became 80) |
+| **A reopened `.json` recipe seeds `_proc_base` from `load_any(path, replay=False)`** | `desktop/mw_files.py` `_load_source_body` | The exp arrays arrive ALREADY replayed; seeding the live pipeline's base from them compounds the recorded chain on the first panel touch (p0 40 became 80) |
 
 ---
 
@@ -241,7 +250,7 @@ omissions in items 2–4 and 6 of the list above are no longer possible.
 
 7. **Model-name tuples NOT covered by the partition tests** — each is a
    hand-maintained allowlist that degrades silently when a new model is
-   left out: `app.py` `_seed_nucleus_defaults` (per-nucleus σ/dCS seeds),
+   left out: `desktop/mw_editing.py` `_seed_nucleus_defaults` (per-nucleus σ/dCS seeds),
    `_sim_busy_on` (kernel-build wait message), `show_czjzek_dist` and the
    `czjzek_dist_dialog.py` site filter (P(C_Q) dialog), `_MODELS_2D` (2D
    fit refusal list); `engine._KERNEL_AXIS_MODELS` (`needs_kernel`);
@@ -308,7 +317,7 @@ Ordered by how likely they are to mislead someone.
    (against `Isotope.B0_to_ref_freq`, NOT `larmor_MHz` — 0.08 % apart),
    and a test asserts `make_context` never calls `build_kernel`.
 3. **QCPMG provenance is dropped on "Send to fit".** The dialog emits 21
-   `qcpmg_*` keys; the only receiver (`app._fid_to_workbench`) reads five of
+   `qcpmg_*` keys; the only receiver (`mw_files._fid_to_workbench`) reads five of
    them and `Recipe` has no field to hold the rest. The processing record
    survives only through "Copy CSV" — which itself omits `p2_deg`, the split
    offset and the realign flag.
@@ -378,8 +387,9 @@ Ordered by how likely they are to mislead someone.
     silently absent from every Czjzek / Amorphous fit's Report header.
     `fithealth.assess` interpolates the model onto the data axis first
     (`x_fit` + `ppm`). `MainWindow._residual_noise_ratio` is now a two-line
-    delegate to `fithealth.residual_noise_ratio`, to remove when `app.py` is
-    split.
+    delegate to `fithealth.residual_noise_ratio`; it stayed on
+    `desktop/mw_fitting.py` through the G5 split because tests call it on the
+    class, and removing it is a separate small item.
 16. **`MainWindow._data2d` (what `run_fit_2d` fits) is the as-loaded map**
     and does not follow the view's phase / shear / calibrate; the 2D page's
     footer Compute is a no-op (`_simulate_now` returns early for the 2D
@@ -388,9 +398,10 @@ Ordered by how likely they are to mislead someone.
     overlay — the MQMAS kernel build takes seconds and is memory-cached
     only, so the notes box says to run Fit.
 
-Genuinely open work is in `docs/roadmap.md`. The largest structural items:
-`app.py` is a 4.7k-line monolith, and there is no CI — so every "suite green"
-claim is one machine, one environment, with the real-data tests present.
+Genuinely open work is in `docs/roadmap.md`. The largest structural item left
+is that there is no CI — so every "suite green" claim is one machine, one
+environment, with the real-data tests present. (The 6.7k-line `app.py`
+monolith was split in G5; see §11.)
 
 ---
 
@@ -461,3 +472,59 @@ plots actually draw the first 60.
   confirm the real-data tests ran rather than skipped. For anything touching
   the engine, kernel, fit or QCPMG paths, re-check the 12-sample ³⁵Cl
   acceptance test and the two shipped example fits.
+
+---
+
+## 11 · Main-window layout (after G5)
+
+`MainWindow` is assembled from mixins:
+`class MainWindow(_MenusMixin, _ChromeMixin, _FilesMixin, _SessionMixin,
+_OverlaysMixin, _EditingMixin, _SidebandsMixin, _FittingMixin,
+_ProcessingMixin, _CofitMixin, _ToolsMixin, QMainWindow)`. Every method was
+moved verbatim from the pre-split `app.py`; nothing user-visible changed, and
+`win.<method>` / `MainWindow.<staticmethod>` / `from larmor.desktop.app import
+…` all resolve as before.
+
+| Module (lines) | Owns |
+|---|---|
+| `desktop/app.py` (387) | the facade: `MainWindow.__init__` (window state and build order), `keyPressEvent`, `closeEvent`, `ClickableLabel`, `asset_path`, `main()`; re-exports through `__all__` |
+| `desktop/workers.py` (226) | `FitWorker`, `Fit2DWorker`, `SimWorker`, `KernelWarmWorker`, `_emit_progress`, `humanize_error`, `_fit_tol` |
+| `desktop/mw_menus.py` (920) | menu bar, toolbar, sidebar, `_add()`, recent / apply-recipe rebuilders, theme / text-size / axis-unit / Czjzek-display submenus and setters, `_update_enabled`, Help slots, `TUTORIALS` |
+| `desktop/mw_chrome.py` (392) | dock builders, `_fit_to_screen`, progress bar with Stop / Cancel, experiment and MAS status labels, zoom / autoscale / toggles, copy and save plot |
+| `desktop/mw_files.py` (772) | open dialogs, `load_source`, explorer and 2D navigation, File > Watch, `_warm_kernel`, save recipe / fit / spectrum / figure; module functions `_load_any`, `_nmrdata_to_data2d` |
+| `desktop/mw_session.py` (597) | workspaces, `.larproj.json` save / open, figure and batch session rows, the crash-recovery session file |
+| `desktop/mw_overlays.py` (207) | Datasets-dock overlays, 1D-on-2D projections, `PROJ_COLOR` |
+| `desktop/mw_editing.py` (704) | undo / redo, add-line mode, `_NUCLEUS_START` seeding, every `add_*`, site structure edits, paddles, static-CT and Herzfeld-Berger seeds |
+| `desktop/mw_sidebands.py` (423) | manual `add_sidebands` and the F3 auto-detect offer (`_ssb_*`, `detect_sidebands`, the banner) |
+| `desktop/mw_fitting.py` (552) | simulation debounce, 1D / 2D fit runs and completions, `_health_*`, quantify, CSV / LaTeX / Methods, publication bundle, auto fit |
+| `desktop/mw_processing.py` (737) | `apply_processing`, FID / channel display refresh, drag-to-phase, calibrate / measure / reset, baseline tools, zones, experiment parameters, WURST, subtract |
+| `desktop/mw_cofit.py` (471) | the co-fit page and its state machine |
+| `desktop/mw_tools.py` (624) | dialog launchers of the Tools / Analysis menus and the small recipe edits they hand back |
+
+**Where a new `MainWindow` method goes.** In the mixin that owns the state it
+reads or writes (the module docstrings list the owned attributes); a slot that
+only opens a dialog goes in `mw_tools.py`; a new QThread goes in
+`workers.py`. `app.py` receives nothing but construction — a "quick fix"
+landed there fails `test_facade_holds_only_construction_and_qt_overrides`.
+
+**Mixin rules** (PySide6 multiple inheritance), enforced by
+`tests/test_app_split.py`: a mixin defines no `__init__`, no `Signal` and no
+Qt event override (`keyPressEvent` / `closeEvent` stay in `app.py`); mixin
+method names are pairwise disjoint (a duplicate would be shadowed silently by
+MRO order); a mixin never imports `larmor.desktop.app` (app imports the mixins
+at module level); module-level names live where they are used and `app.py`
+re-exports them through `__all__` (`_load_any` in `mw_files.py`, `TUTORIALS`
+in `mw_menus.py`, the workers). The same test file freezes the member
+surface, checks that every `self.X(` call resolves, and pins the menu tree,
+the shortcut set and the toolbar action count of an offscreen window. When a
+label or shortcut changes on purpose, paste the fresh `GOLDEN_MENU` /
+`SHORTCUTS` that the failure message prints.
+
+**Noticed during the split, deliberately not changed** (every G5 commit is a
+provable move): `apply_manual_baseline` takes no `snapshot()` while
+`apply_twopoint_bg` does, so a manual baseline is not undoable; `save_recipe`
+emits two status-bar messages back to back; the new-site `params` literal
+(`{p.name: {"value": p.default, "stderr": None, "vary": p.vary, …} for p in
+model_registry.get(name).params}`) is written out six times in
+`mw_editing.py` although `mw_sidebands.py` already has it as
+`_fresh_params(model_name)`.
