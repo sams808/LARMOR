@@ -147,6 +147,18 @@ class InfiniteFieldResult:
     warning: str = ""
     lever_arm: float = 0.0            # (x.max - x.min) / x.max in 1/ν0²
     weighted: bool = True             # False: equal weights (a sigma was missing)
+    # ---- goodness of fit (n >= 3 has redundancy; n == 2 is exact) ----------
+    residuals_ppm: tuple = ()         # y - a - b x per point
+    chi2: float = 0.0                 # sum w (y - a - b x)^2
+    dof: int = 0                      # n - 2
+    chi2_red: float = float("nan")    # chi2 / dof (NaN when dof == 0)
+    p_value: float = float("nan")     # survival probability of chi2 at dof
+    #: +- scaled by sqrt(chi2_red) when the a-priori errors under-predict the
+    #: scatter (never scaled down); equal to the a-priori values otherwise
+    delta_iso_err_scaled_ppm: float = float("nan")
+    cq_err_scaled_MHz: float = float("nan")
+    #: True when no input sigma was usable and the +- come from the scatter
+    errors_from_scatter: bool = False
 
     def line(self, inv_nu2: np.ndarray) -> np.ndarray:
         """δcg on the fit line for given 1/ν0² values (for plotting)."""
@@ -156,6 +168,19 @@ class InfiniteFieldResult:
     def cq_is_bound(self) -> bool:
         """True when C_Q is reported as an upper bound, not a value."""
         return self.cq_upper_2sigma_MHz > 0.0 and self.cq_MHz == 0.0
+
+    @property
+    def scaled(self) -> bool:
+        """True when the scaled +- differ from the a-priori ones (chi2_red > 1
+        with real input errors)."""
+        return (np.isfinite(self.delta_iso_err_scaled_ppm)
+                and np.isfinite(self.delta_iso_err_ppm)
+                and self.delta_iso_err_scaled_ppm > self.delta_iso_err_ppm * (1 + 1e-9))
+
+    @property
+    def misfit(self) -> bool:
+        """True when the scatter about the line is improbable (p < 0.01)."""
+        return bool(np.isfinite(self.p_value) and self.p_value < 0.01)
 
 
 def _quad_A(spin: float, eta: float) -> float:
@@ -235,12 +260,22 @@ def infinite_field_diso(points: list[FieldPoint], spin: float,
     # parameter variances of the weighted fit (unit-variance weights)
     var_a = max(sxx / denom, 0.0)
     var_b = max(sw / denom, 0.0)
+    chi2_red = chi2 / dof if dof > 0 else float("nan")
+    p_value = float("nan")
+    if dof > 0 and weighted:
+        from scipy.stats import chi2 as _chi2_dist
+        p_value = float(_chi2_dist.sf(chi2, dof))
+    errors_from_scatter = False
+    scale = 1.0
     if weighted:
         sig_a, sig_b = float(np.sqrt(var_a)), float(np.sqrt(var_b))
+        if dof > 0 and chi2_red > 1.0:
+            scale = float(np.sqrt(chi2_red))          # never scaled down
     elif dof > 0:
         s2 = chi2 / dof                       # OLS residual variance
         sig_a, sig_b = float(np.sqrt(var_a * s2)), float(np.sqrt(var_b * s2))
         notes.append("no input errors given: +- from scatter about the line")
+        errors_from_scatter = True
     else:
         sig_a = sig_b = float("nan")          # exact line, nothing to estimate
 
@@ -288,13 +323,23 @@ def infinite_field_diso(points: list[FieldPoint], spin: float,
                 f"of the {sep:.1f} ppm separation between the fields -- the window "
                 "cuts the pattern")
 
+    if dof > 0 and weighted and np.isfinite(p_value) and p_value < 0.01:
+        warnings.append(
+            f"scatter about the line is improbable (chi2/dof = {chi2:.3g}/{dof}, "
+            f"p = {p_value:.2g}): an outlier, a window that caught a sideband or "
+            "a mode mismatch -- the scaled +- are quoted alongside")
     return InfiniteFieldResult(
         delta_iso_ppm=float(a), delta_iso_err_ppm=sig_a,
         cq_MHz=cq, cq_err_MHz=cq_err, pq_MHz=pq, eta=eta, spin=spin,
         slope=float(b), intercept=float(a), points=list(points),
         slope_err=sig_b, cq_upper_2sigma_MHz=cq_upper,
         note="; ".join(notes), warning="; ".join(warnings),
-        lever_arm=xr, weighted=weighted)
+        lever_arm=xr, weighted=weighted,
+        residuals_ppm=tuple(float(v) for v in resid), chi2=chi2, dof=dof,
+        chi2_red=chi2_red, p_value=p_value,
+        delta_iso_err_scaled_ppm=sig_a * scale if np.isfinite(sig_a) else float("nan"),
+        cq_err_scaled_MHz=cq_err * scale if np.isfinite(cq_err) else float("nan"),
+        errors_from_scatter=errors_from_scatter)
 
 
 #: plausible static-field range for a solid-state NMR magnet (tesla): 4 T
@@ -653,10 +698,20 @@ def _pm(value: float, digits: int) -> str:
     return f"+- {value:.{digits}f}" if np.isfinite(value) else "+- --"
 
 
+def _pm_scaled(value: float, scaled: float, digits: int, unit: str) -> str:
+    """'+- 1.36 ppm (a priori) / +- 8.82 (scaled by sqrt(chi2/dof))' when the
+    scatter exceeds the input errors, else the plain '+- 1.36 ppm'."""
+    base = f"{_pm(value, digits)} {unit}"
+    if np.isfinite(scaled) and np.isfinite(value) and scaled > value * (1 + 1e-9):
+        return f"{base} (a priori) / +- {scaled:.{digits}f} (scaled by sqrt(chi2/dof))"
+    return base
+
+
 def fmt_result_lines(res: InfiniteFieldResult) -> list[str]:
     """The fitted-number lines of one sample, shared by the report and the
     dialogs so the two can never disagree on how a bound is worded."""
-    out = [f"delta_iso = {res.delta_iso_ppm:.2f} {_pm(res.delta_iso_err_ppm, 2)} ppm"]
+    out = [f"delta_iso = {res.delta_iso_ppm:.2f} "
+           f"{_pm_scaled(res.delta_iso_err_ppm, res.delta_iso_err_scaled_ppm, 2, 'ppm')}"]
     if res.cq_is_bound or (res.cq_MHz == 0.0 and res.note):
         up = res.cq_upper_2sigma_MHz
         bound = f"<= {up:.3f} MHz (2-sigma upper bound)" if up > 0 else "not determined"
@@ -664,12 +719,21 @@ def fmt_result_lines(res: InfiniteFieldResult) -> list[str]:
         pq_up = up * float(np.sqrt(1.0 + res.eta ** 2 / 3.0))
         out.append(f"P_Q {'<= ' + format(pq_up, '.3f') + ' MHz (2-sigma upper bound)' if up > 0 else 'not determined'}")
     else:
-        out.append(f"C_Q = {res.cq_MHz:.3f} {_pm(res.cq_err_MHz, 3)} MHz   "
+        out.append(f"C_Q = {res.cq_MHz:.3f} "
+                   f"{_pm_scaled(res.cq_err_MHz, res.cq_err_scaled_MHz, 3, 'MHz')}   "
                    f"(eta = {res.eta:g} assumed)")
         out.append(f"P_Q = {res.pq_MHz:.3f} MHz")
     out.append(f"slope = {res.slope:.6g} {_pm(res.slope_err, 0)} ppm.MHz^2"
                if np.isfinite(res.slope_err) else
                f"slope = {res.slope:.6g} +- -- ppm.MHz^2")
+    if res.dof > 0:
+        p_txt = f" (p = {res.p_value:.2g})" if np.isfinite(res.p_value) else ""
+        out.append(f"chi2/dof = {res.chi2:.3g}/{res.dof}{p_txt}"
+                   + ("   ! improbable scatter" if res.misfit else "")
+                   + ("   (no input errors: +- from the scatter)"
+                      if res.errors_from_scatter else ""))
+    else:
+        out.append("chi2/dof = exact (2 points, no redundancy)")
     return out
 
 
@@ -705,13 +769,15 @@ def report_text(results: dict, spin: float, eta: float, nucleus: str = "",
 
     for sample, res in ok:
         lines.append(f"--- {sample or '(unnamed)'} " + "-" * max(0, 60 - len(sample)))
-        lines.append("    nu0 (MHz)      dcg (ppm)   +- err   mode        "
+        lines.append("    nu0 (MHz)      dcg (ppm)   +- err    resid   mode        "
                      "CT-selective (declared)")
-        for p in res.points:
+        for i, p in enumerate(res.points):
             sel = "?" if p.ct_selective is None else ("yes" if p.ct_selective else "no")
             err = f"{p.dcg_err_ppm:7.2f}" if p.has_err else f"{'n/a':>7s}"
+            resid = (f"{res.residuals_ppm[i]:7.2f}" if i < len(res.residuals_ppm)
+                     else f"{'':7s}")
             lines.append(f"    {p.larmor_MHz:10.4f}  {p.dcg_ppm:11.2f}  "
-                         f"{err}   {mode_label(p.magnitude):10s}  {sel}")
+                         f"{err}  {resid}  {mode_label(p.magnitude):10s}  {sel}")
             for fl in p.flags:
                 lines.append(f"                 {fl}")
             if p.cg_sequence:

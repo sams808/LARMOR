@@ -887,3 +887,69 @@ def test_fields_dialog_width_split_takes_all_rows_sorted(qapp):
     assert "3 fields" in dlg.wresult.text() and "CSA" in dlg.wresult.text()
     assert "20.0 ppm" in dlg.wresult.text()
     dlg.close()
+
+
+# ---------------------------------------------------------------- fix 13
+def test_three_field_misfit_is_measured_and_scales_the_errors():
+    """Fields 58.79 / 78.354 / 107.811 MHz from delta_iso -70, C_Q 3.0 with
+    the middle point displaced +8 ppm, all sigma 1 ppm: the a-priori +-
+    (1.36 ppm) put -70 at 2.8 sigma; chi2 = 41.8 for 1 dof and the scaled
+    +- (8.8 ppm) covers it."""
+    from larmor.qcpmg_fields import report_text
+
+    nus = (58.79, 78.354, 107.811)
+    pts = [FieldPoint(n, dcg_at_field(-70.0, 3.0, n, 1.5, 0.7) + (8.0 if i == 1 else 0.0), 1.0)
+           for i, n in enumerate(nus)]
+    res = infinite_field_diso(pts, 1.5, 0.7)
+    assert res.delta_iso_ppm == pytest.approx(-66.21, abs=0.01)
+    assert res.delta_iso_err_ppm == pytest.approx(1.364, abs=0.01)
+    assert res.chi2 == pytest.approx(41.8, rel=1e-2) and res.dof == 1
+    assert res.chi2_red == pytest.approx(41.8, rel=1e-2)
+    assert res.delta_iso_err_scaled_ppm == pytest.approx(8.8, abs=0.2)
+    assert abs(res.delta_iso_ppm + 70.0) < res.delta_iso_err_scaled_ppm
+    assert res.cq_err_scaled_MHz == pytest.approx(res.cq_err_MHz * np.sqrt(res.chi2_red))
+    assert res.residuals_ppm == pytest.approx((-1.98, 5.23, -3.25), abs=0.01)
+    assert res.p_value < 1e-6 and res.misfit and res.scaled
+    w = 1.0 / np.array([p.dcg_err_ppm for p in pts]) ** 2
+    assert abs((w * np.array(res.residuals_ppm)).sum()) < 1e-9     # weighted residuals sum to 0
+    txt = report_text({"s": res}, 1.5, 0.7)
+    assert "chi2/dof = 41.8/1" in txt and "p = " in txt
+    assert "(a priori) / +- 8.8" in txt
+    assert "resid" in txt and "5.23" in txt
+    assert "improbable" in res.warning
+    # perfectly linear three points: chi2 ~ 0, +- unscaled
+    lin = [FieldPoint(n, dcg_at_field(-70.0, 3.0, n, 1.5, 0.7), 1.0) for n in nus]
+    r2 = infinite_field_diso(lin, 1.5, 0.7)
+    assert r2.chi2 < 1e-9 and not r2.scaled and not r2.misfit
+    assert r2.delta_iso_err_scaled_ppm == pytest.approx(r2.delta_iso_err_ppm)
+    # two points: exact, chi2 0, chi2_red NaN, said so
+    r3 = infinite_field_diso(pts[1:], 1.5, 0.7)
+    assert r3.chi2 == pytest.approx(0.0, abs=1e-12) and r3.dof == 0
+    assert np.isnan(r3.chi2_red) and np.isnan(r3.p_value)
+    assert "exact (2 points, no redundancy)" in report_text({"s": r3}, 1.5, 0.7)
+    # no input errors: the scatter IS the estimate, flagged as such
+    r4 = infinite_field_diso([FieldPoint(p.larmor_MHz, p.dcg_ppm, 0.0) for p in pts], 1.5, 0.7)
+    assert r4.errors_from_scatter and np.isfinite(r4.delta_iso_err_ppm)
+    assert r4.delta_iso_err_ppm == pytest.approx(8.8, abs=0.2)     # same scale
+    assert "+- from the scatter" in report_text({"s": r4}, 1.5, 0.7)
+
+
+def test_dialog_label_shows_the_chi2_line(qapp):
+    from PySide6.QtWidgets import QTableWidgetItem
+
+    from larmor.desktop.qcpmg_fields_dialog import QcpmgFieldsDialog
+
+    dlg = QcpmgFieldsDialog(None, "35Cl", None)
+    nus = (58.79, 78.354, 107.811)
+    for r, n in enumerate(nus):
+        if r >= dlg.table.rowCount():
+            dlg._add_row()
+        dcg = dcg_at_field(-70.0, 3.0, n, 1.5, 0.7) + (8.0 if r == 1 else 0.0)
+        dlg.table.setItem(r, 0, QTableWidgetItem(f"{n}"))
+        dlg.table.setItem(r, 1, QTableWidgetItem(f"{dcg:.3f}"))
+        dlg.table.setItem(r, 2, QTableWidgetItem("1"))
+    dlg._compute()
+    assert "chi2/dof = 41.8/1" in dlg.result.text()
+    assert "#c0392b" in dlg.result.text()                 # misfit colour
+    assert "scaled by sqrt(chi2/dof)" in dlg.result.text()
+    dlg.close()

@@ -688,6 +688,10 @@ class QcpmgFieldsDialog(QDialog):
                 f"(intercept, 1/ν₀²→0)   ·   "
                 + "   ·   ".join(ln.replace("eta", "η") for ln in lines[1:3]))
         extra = []
+        chi_line = [ln for ln in lines if ln.startswith("chi2/dof")]
+        if chi_line:
+            colour = "#c0392b" if res.misfit else "#7f8c8d"
+            extra.append(f"<span style='color:{colour}'>{chi_line[0]}</span>")
         if res.note:
             extra.append(f"<span style='color:#c0392b'>{res.note}</span>")
         if res.warning:
