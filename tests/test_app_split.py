@@ -62,7 +62,7 @@ HOMES = {"FitWorker": "larmor.desktop.workers",
 #: which LARMOR_NO_SESSION does not gate, so they vary per machine
 EXCLUDE_CHILDREN = frozenset({"Open &recent", "&Apply recipe"})
 
-# 313 MainWindow members
+# 315 MainWindow members
 SURFACE = (
     '__init__', '_build_menus', '_menu', '_add', '_MODEL_GROUPS',
     '_rebuild_recent', '_add_recent',
@@ -76,7 +76,8 @@ SURFACE = (
     'open_command_palette', '_open_tutorial', '_about', '_show_more',
     '_build_toolbar', '_build_sidebar', '_toggle_scroll_nudge',
     '_toggle_ref_ranges', '_update_ref_ranges', '_build_czjzek_display_menu',
-    '_set_czjzek_display', '_build_explorer_dock', '_build_workspaces_dock',
+    '_set_czjzek_display', '_build_explorer_dock', '_open_source_paths',
+    '_on_explorer_renamed', '_build_workspaces_dock',
     '_build_datasets_dock', '_build_bottom_docks', '_build_right_dock',
     '_fit_to_screen', '_build_panels_menu', '_toggle_health_strip',
     '_update_enabled', '_build_axis_unit_menu', '_set_axis_unit',

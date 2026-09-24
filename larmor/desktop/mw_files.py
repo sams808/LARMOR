@@ -21,6 +21,7 @@ import numpy as np
 from PySide6.QtCore import QSettings
 from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
+from larmor import aliases as _aliases
 from larmor.desktop.workers import KernelWarmWorker, humanize_error
 from larmor.recipe import Recipe
 
@@ -432,7 +433,7 @@ class _FilesMixin:
         self.undo_stack.clear()
         self.redo_stack.clear()
         QSettings("LARMOR", "app").setValue("lastDir", str(Path(path).parent))
-        self.setWindowTitle(f"LARMOR — {Path(path).name}")
+        self.setWindowTitle(f"LARMOR — {_aliases.window_label(path)}")
         self.view.set_experiment(ppm, amp)
         if not self.recipe["sites"]:
             # drop any model curve left over from the previous spectrum
@@ -472,7 +473,7 @@ class _FilesMixin:
 
         self.source_path = path
         QSettings("LARMOR", "app").setValue("lastDir", str(Path(path).parent))
-        self.setWindowTitle(f"LARMOR — {Path(path).name}")
+        self.setWindowTitle(f"LARMOR — {_aliases.window_label(path)}")
 
         if data.ndim == 2 and data.domain == "freq":
             self._show_2d(_nmrdata_to_data2d(data), Path(path).name,

@@ -6,7 +6,9 @@
     proc (both on by default);
   * folders can be **pinned** so they come back next session;
   * double-clicking a spectrum opens it — an experiment with several procs asks
-    which proc to fit on.
+    which proc to fit on;
+  * right-click ▸ **Rename…** on a sample folder or an EXPNO gives it a display
+    name kept by LARMOR (``larmor.aliases``) or renames the folder on disk.
 """
 from __future__ import annotations
 
@@ -15,13 +17,17 @@ from pathlib import Path
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
-    QCheckBox, QHBoxLayout, QInputDialog, QLineEdit, QMenu, QPushButton,
-    QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
+    QCheckBox, QDialog, QDialogButtonBox, QHBoxLayout, QInputDialog, QLabel,
+    QLineEdit, QMenu, QPushButton, QRadioButton, QTreeWidget, QTreeWidgetItem,
+    QVBoxLayout, QWidget,
 )
+
+from larmor import aliases
 
 _ROLE_PATH = Qt.UserRole
 _ROLE_OPEN = Qt.UserRole + 1        # the openable data path (None for folders)
 _ROLE_KIND = Qt.UserRole + 2        # exp|proc|fit|folder + ph_proc|ph_fit placeholders
+_ROLE_BASE = Qt.UserRole + 3        # the row's text without any alias (relabelling)
 
 _FIT_EXT = {".json": "LARMOR recipe", ".fxml": "dmfit fit", ".fxmla": "dmfit fit"}
 
@@ -71,10 +77,14 @@ class ExplorerPanel(QWidget):
     batch_requested = Signal(list)      # openable paths for a batch fit
     inventory_requested = Signal(str)   # a month or sample folder -> Session inventory
     overlay_requested = Signal(str)     # an EXPNO -> overlay on the active spectrum
+    renamed = Signal(str, str)          # (old path, new path) -- equal for an alias
 
     def __init__(self):
         super().__init__()
         from PySide6.QtCore import QSettings
+        #: the data paths open in LARMOR (the window sets this) -- a folder
+        #: holding one of them is never renamed on disk
+        self.open_paths = lambda: []
         v = QVBoxLayout(self)
         v.setContentsMargins(4, 4, 4, 4)
         v.setSpacing(4)
@@ -168,7 +178,9 @@ class ExplorerPanel(QWidget):
 
     # ---------------- pins ----------------
     def _pin_label(self, path: str) -> str:
-        return self._pin_names.get(path) or Path(path).name
+        """The pin's own name, else the folder's LARMOR display name (an
+        alias set with Rename…), else the folder name."""
+        return self._pin_names.get(path) or aliases.display_name(path)
 
     def _save_pin_names(self):
         import json
@@ -252,6 +264,9 @@ class ExplorerPanel(QWidget):
             m.addAction("Session inventory…  (production picks for every sample)",
                         lambda: self.inventory_requested.emit(path))
             m.addSeparator()
+        if aliases.is_expno(path) or self._is_sample(path):
+            m.addAction("Rename…", lambda: self.rename_item(path))
+            m.addSeparator()
         if path in self._pinned:
             m.addAction("Rename pin…", lambda: self._rename_pin(path))
             m.addAction("Unpin folder", lambda: self._unpin(path))
@@ -318,9 +333,12 @@ class ExplorerPanel(QWidget):
         from larmor.io import scan
         self.tree.clear()
         self._readd_pins()
-        root = QTreeWidgetItem([Path(folder).name])
+        root = QTreeWidgetItem([aliases.display_name(folder)])
         root.setData(0, _ROLE_PATH, folder)
         root.setData(0, _ROLE_KIND, "folder")
+        root.setData(0, _ROLE_BASE, "")
+        if aliases.alias_for(folder):
+            root.setToolTip(0, folder)
         f = root.font(0); f.setBold(True); root.setFont(0, f)
         self.tree.addTopLevelItem(root)
         for info in scan.scan_sample(folder):
@@ -338,10 +356,11 @@ class ExplorerPanel(QWidget):
 
     # ---------------- items ----------------
     def _experiment_item(self, info) -> QTreeWidgetItem:
-        it = QTreeWidgetItem([info.label])
+        it = QTreeWidgetItem([self._exp_text(info.label, info.path)])
         it.setData(0, _ROLE_PATH, info.path)
         it.setData(0, _ROLE_OPEN, info.openable)
         it.setData(0, _ROLE_KIND, "exp")
+        it.setData(0, _ROLE_BASE, info.label)
         it.setForeground(0, QBrush(QColor(_NUC_COLOR.get(info.nucleus, "#16202a"))))
         tip = (f"{info.nucleus} · {'2D' if info.ndim == 2 else '1D'} · {info.kind}\n"
                f"pulse: {info.pulse_program}")
@@ -370,10 +389,13 @@ class ExplorerPanel(QWidget):
     def _folder_item(self, name: str, path: str, is_sample=False,
                      is_expno=False, pinned=False) -> QTreeWidgetItem:
         prefix = "📌 " if pinned else ("🧪 " if is_sample else "📁 ")
+        if not pinned:
+            name = aliases.display_name(path)     # the LARMOR display name
         it = QTreeWidgetItem([prefix + name])
         it.setData(0, _ROLE_PATH, path)
         it.setData(0, _ROLE_KIND, "pin" if pinned else "folder")
-        if pinned:      # a renamed pin should still say where it points
+        it.setData(0, _ROLE_BASE, prefix)
+        if pinned or name != Path(path).name:   # an aliased row says where it points
             it.setToolTip(0, path)
         if not is_expno:
             it.addChild(QTreeWidgetItem(["…"]))    # lazy placeholder
@@ -449,8 +471,9 @@ class ExplorerPanel(QWidget):
             if entry.is_expno and entry.info is not None:
                 item.addChild(self._experiment_item(entry.info))
             elif entry.is_expno:
-                child = QTreeWidgetItem([entry.name])
+                child = QTreeWidgetItem([aliases.display_name(entry.path)])
                 child.setData(0, _ROLE_PATH, entry.path)
+                child.setData(0, _ROLE_BASE, entry.name)
                 item.addChild(child)
             else:
                 item.addChild(self._folder_item(entry.name, entry.path,
@@ -519,3 +542,167 @@ class ExplorerPanel(QWidget):
 
         for i in range(self.tree.topLevelItemCount()):
             match(self.tree.topLevelItem(i))
+
+    # ---------------- rename (alias or on disk) ----------------
+    @staticmethod
+    def _exp_text(base: str, path: str) -> str:
+        """An experiment row: ``<expno> · <nucleus> …`` or, aliased,
+        ``<alias> (<expno>) · <nucleus> …`` -- the number stays visible."""
+        alias = aliases.alias_for(path)
+        if not alias:
+            return base
+        expno = Path(path).name
+        if base.startswith(expno):
+            return f"{alias} ({expno})" + base[len(expno):]
+        return f"{alias} ({base})"
+
+    def _relabel(self, path: str):
+        """Rewrite the text of every row that shows ``path`` (an alias was
+        set or cleared)."""
+        for it in self._iter_items():
+            if it.data(0, _ROLE_PATH) != path:
+                continue
+            kind = it.data(0, _ROLE_KIND)
+            base = it.data(0, _ROLE_BASE) or ""
+            if kind == "exp":
+                it.setText(0, self._exp_text(base, path))
+            elif kind in ("folder", "pin"):
+                name = (self._pin_label(path) if kind == "pin"
+                        else aliases.display_name(path))
+                it.setText(0, base + name)
+                it.setToolTip(0, path if name != Path(path).name else "")
+            elif kind is None and base:                  # an EXPNO without info
+                it.setText(0, aliases.display_name(path))
+
+    def _retarget(self, old: str, new: str):
+        """After a rename on disk: every stored path under ``old`` now lives
+        under ``new`` (rows, openables, pins), and the renamed row is
+        relabelled."""
+        def moved(p):
+            if not p:
+                return p
+            if p == old:
+                return new
+            for sep in ("\\", "/"):
+                if p.startswith(old + sep):
+                    return new + p[len(old):]
+            return p
+
+        for it in self._iter_items():
+            for role in (_ROLE_PATH, _ROLE_OPEN):
+                v = it.data(0, role)
+                if isinstance(v, str) and moved(v) != v:
+                    it.setData(0, role, moved(v))
+            if it.data(0, _ROLE_PATH) == new:
+                kind = it.data(0, _ROLE_KIND)
+                base = it.data(0, _ROLE_BASE) or ""
+                if kind == "exp":
+                    it.setData(0, _ROLE_BASE, base.replace(Path(old).name, Path(new).name, 1))
+                elif kind is None and base:
+                    it.setData(0, _ROLE_BASE, Path(new).name)
+        if any(moved(p) != p for p in self._pinned):
+            from PySide6.QtCore import QSettings
+            self._pinned = [moved(p) for p in self._pinned]
+            QSettings("LARMOR", "app").setValue("pinnedFolders", self._pinned)
+            self._pin_names = {moved(k): v for k, v in self._pin_names.items()}
+            self._save_pin_names()
+        self._relabel(new)
+
+    def rename_item(self, path: str):
+        """Right-click ▸ Rename… on a sample folder or an EXPNO: a display
+        name kept by LARMOR (an alias), or the folder renamed on disk after
+        an explicit confirmation that states both paths."""
+        from PySide6.QtWidgets import QMessageBox
+
+        dlg = RenameDialog(self, path)
+        if dlg.exec() != RenameDialog.Accepted:
+            return
+        name = dlg.name()
+        if not dlg.on_disk():
+            aliases.set_alias(path, name)
+            self._relabel(path)
+            self.renamed.emit(path, path)
+            return
+        try:
+            target = aliases.check_rename(path, name, open_paths=self.open_paths())
+        except aliases.RenameError as exc:
+            QMessageBox.warning(self, "Rename on disk", str(exc))
+            return
+        kind = "EXPNO" if aliases.is_expno(path) else "sample folder"
+        ans = QMessageBox.question(
+            self, "Rename on disk",
+            f"Rename this {kind} on disk?\n\n{path}\n→ {target}\n\n"
+            "The move is logged in LARMOR's rename log; nothing inside the "
+            "folder is changed.",
+            QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel)
+        if ans != QMessageBox.Yes:
+            return
+        try:
+            target = aliases.rename_folder(path, name, open_paths=self.open_paths())
+        except (aliases.RenameError, OSError) as exc:
+            QMessageBox.warning(self, "Rename on disk", str(exc))
+            return
+        self._retarget(path, str(target))
+        self.renamed.emit(path, str(target))
+
+
+class RenameDialog(QDialog):
+    """One small dialog, two choices: a display name in LARMOR only, or the
+    folder renamed on disk (an EXPNO must stay a number)."""
+
+    def __init__(self, parent, path: str):
+        super().__init__(parent)
+        self.path = path
+        self._is_expno = aliases.is_expno(path)
+        self.setWindowTitle(f"Rename {Path(path).name}")
+        v = QVBoxLayout(self)
+        v.addWidget(QLabel(f"<b>{Path(path).name}</b><br>"
+                           f"<span style='color:#7a8089'>{Path(path).parent}</span>"))
+        self.edit = QLineEdit(aliases.display_name(path))
+        self.edit.selectAll()
+        self.edit.setPlaceholderText("new name")
+        v.addWidget(self.edit)
+        self.rbAlias = QRadioButton("Display name in LARMOR only")
+        self.rbAlias.setToolTip("kept by LARMOR (aliases.json), used by the "
+                                "Explorer, the window title, the Datasets dock, "
+                                "the recipe's sample and batch labels; the "
+                                "folder on disk is untouched. Leave the folder's "
+                                "own name to remove an alias.")
+        self.rbDisk = QRadioButton("Rename the folder on disk")
+        self.rbDisk.setToolTip("os.rename of the folder after a confirmation "
+                               "that states both paths; refused when the target "
+                               "exists or a file inside is open in LARMOR; "
+                               "logged in rename_log.jsonl")
+        self.rbAlias.setChecked(True)
+        v.addWidget(self.rbAlias)
+        v.addWidget(self.rbDisk)
+        self.hint = QLabel("")
+        self.hint.setWordWrap(True)
+        self.hint.setStyleSheet("color:#7a8089;")
+        v.addWidget(self.hint)
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.accepted.connect(self.accept)
+        bb.rejected.connect(self.reject)
+        v.addWidget(bb)
+        self.rbDisk.toggled.connect(self._update_hint)
+        self.edit.textChanged.connect(self._update_hint)
+        self._update_hint()
+
+    def _update_hint(self, *_):
+        if self.rbDisk.isChecked():
+            if self._is_expno:
+                self.hint.setText("An EXPNO folder must stay a number so TopSpin "
+                                  "still reads it; for a descriptive name use "
+                                  "the display name instead.")
+            else:
+                self.hint.setText(f"The folder becomes "
+                                  f"{Path(self.path).with_name(self.name() or '…')}.")
+        else:
+            self.hint.setText("Shown everywhere in LARMOR; the folder keeps its "
+                              "name on disk.")
+
+    def name(self) -> str:
+        return self.edit.text().strip()
+
+    def on_disk(self) -> bool:
+        return self.rbDisk.isChecked()

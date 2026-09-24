@@ -80,6 +80,19 @@ nucleus, 1D/2D, and kind (single pulse, MQMAS, satrec, QCPMG…) — by reading
 `acqus` and the pulse program, so you can see at a glance what an EXPNO holds
 before opening it. **File ▸ Open sample** points it at a folder.
 
+**Renaming (right-click ▸ Rename…).** A sample folder or an EXPNO can be given
+a better name in two ways, chosen in one small dialog. *Display name in LARMOR
+only* keeps an alias in `%LOCALAPPDATA%/LARMOR/aliases.json`, keyed by the
+folder path: the Explorer, the window title, the Datasets dock, the recipe's
+sample and the batch / sequential labels all use it (the command line too),
+and the folder on disk is untouched — typing the folder's own name removes the
+alias. *Rename the folder on disk* moves the folder after a confirmation that
+states both paths; it is refused when the target exists, when a file inside
+is open in LARMOR, or when an EXPNO would stop being a number (TopSpin needs
+the number), and every move is appended to
+`%LOCALAPPDATA%/LARMOR/rename_log.jsonl` so it stays traceable. Aliases keyed
+under a moved folder follow it. Open documents relabel at once in both cases.
+
 **Session inventory (Series ▸ Session inventory…).** One month folder read into
 a sample × nucleus grid. Every EXPNO gets a role — production, candidate,
 short, setup, failed, arrayed, 2D, reference, unprocessed — and the production
