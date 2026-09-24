@@ -80,7 +80,20 @@ nucleus, 1D/2D, and kind (single pulse, MQMAS, satrec, QCPMG…) — by reading
 `acqus` and the pulse program, so you can see at a glance what an EXPNO holds
 before opening it. **File ▸ Open sample** points it at a folder.
 
-**Session inventory (Tools ▸ Session inventory…).** One month folder read into
+**Renaming (right-click ▸ Rename…).** A sample folder or an EXPNO can be given
+a better name in two ways, chosen in one small dialog. *Display name in LARMOR
+only* keeps an alias in `%LOCALAPPDATA%/LARMOR/aliases.json`, keyed by the
+folder path: the Explorer, the window title, the Datasets dock, the recipe's
+sample and the batch / sequential labels all use it (the command line too),
+and the folder on disk is untouched — typing the folder's own name removes the
+alias. *Rename the folder on disk* moves the folder after a confirmation that
+states both paths; it is refused when the target exists, when a file inside
+is open in LARMOR, or when an EXPNO would stop being a number (TopSpin needs
+the number), and every move is appended to
+`%LOCALAPPDATA%/LARMOR/rename_log.jsonl` so it stays traceable. Aliases keyed
+under a moved folder follow it. Open documents relabel at once in both cases.
+
+**Session inventory (Series ▸ Session inventory…).** One month folder read into
 a sample × nucleus grid. Every EXPNO gets a role — production, candidate,
 short, setup, failed, arrayed, 2D, reference, unprocessed — and the production
 spectrum of each block is pre-picked by the operator's rule: the highest EXPNO
@@ -128,8 +141,9 @@ other — with a description as tooltip; the quick buttons beside it are the
 most used ones), and shows `placing … Esc to stop` while a mode is on; the
 **Fit-Parameters** table at the bottom is a dmfit-style spreadsheet with
 paddles on the plot (right-click a row for the line actions — sidebands,
-duplicate, fix / free all, remove the selected lines); the **Tools** and
-**Decomposition** menus hold the experiment-specific machinery.
+duplicate, fix / free all, remove the selected lines); the **Edit** menu
+builds the model, **Fit** runs and checks it, **Series** and **Tools** hold
+the experiment-specific machinery (see the menu map below).
 Under the spectrum, a **fit-health strip** states whether the last fit's
 numbers can be read as they stand: green `Fit OK`, amber `Fit: check` for
 things to look at (a structured residual — often sidebands or phasing —, a
@@ -170,6 +184,23 @@ Each experiment has its own manual with worked steps and the science behind it:
 
 All are under **? ▸ User manuals**; the reference documents are direct **?**-menu
 items. Every tool with a **Help** button opens the matching section.
+
+## 5 · Menu map
+
+Nine menus, each split into groups; every row shows its explanation as a
+tooltip, and **? ▸ Command palette…** (Ctrl + Shift + P) searches all of them.
+
+| Menu | Groups |
+|---|---|
+| **File** | Open (spectrum, sample, EXPNO, FID, Varian, recent) · Overlay a spectrum, Watch the source file · Open / Save project · Save fit, Save fit as, **Export ▸** (spectrum as CSV, figure, plot image, copy plot, report table as CSV, LaTeX table, publication bundle) · Quit |
+| **Edit** | Undo, Redo · New fit · **Add line ▸** (Simple · Quadrupolar · Disordered · CSA · Other), Add a line at every peak, Add function line, Add background spectrum, **Apply recipe ▸** · **Spinning sidebands ▸** (detect, add manifold, add a shifted copy, offer on load) · **Constraints ▸** (label from literature ranges, restrict around current values, save / apply a constraint set) · Add fit zone, Clear zones |
+| **Process** | Experiment parameters, Processing steps, Show processing panel · **Phase ▸** (autophase, drag to phase) · **Baseline ▸** (polynomial, iterative, 2-point, subtract averages) · **Reference ▸** (calibrate axis, measure Δ, referencing audit) · **Region / algebra ▸** (integrals & measurements, subtract a spectrum, WURST profile, stitch VOCS) · FID ⇄ spectrum, **Display channel ▸** · Reset to original |
+| **Fit** | Simulate (F9), Fit (F5), Auto fit · Report (F6), Fit health details (F7), **Errors ▸** (χ² profile, Monte-Carlo, parameter correlations, χ² map), Compare with a saved fit · Co-fit datasets, Predict at another field, **MQMAS ▸** (2D viewer / fit, F1 reference), **Fit settings ▸** (computing parameters, completion threshold, animate fits) |
+| **Series** | Batch fit spectra, Sequential fit, Batch fit report · Session inventory, Experimental section, Compare acquisition parameters |
+| **Tools** | NMR table, Conversion tools · Herzfeld–Berger, Read static pattern, Czjzek distribution · Import DFT tensors, **Relaxation ▸** (T1/T2 series, per-site, variable temperature), **QCPMG ▸** (echo train → spectrum, infinite-field δiso, batch), REDOR |
+| **View** | Residual, Components, Component labels, Paddles, Overlays, Clear overlays, Literature shift ranges, Scroll nudges fit values · **Zoom ▸** (full, sites, back to 2D map) · **Axis unit ▸**, **Czjzek width display ▸** · **Panels ▸**, **Theme ▸**, **Text size ▸** |
+| **Plotting** | Plotting studio, Plot current spectrum, New 2D contour plot |
+| **Help (?)** | Command palette · **User manuals ▸**, **Tutorials ▸** · About LARMOR, More… |
 
 ---
 

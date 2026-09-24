@@ -277,7 +277,7 @@ a single field where a full lineshape fit is not, and a good cross-check on
 
 **Intensity across the sweep** (WCPMG): the swept pulse also imprints an
 *amplitude* weighting — near-flat mid-band, rolling off at the sweep edges.
-After sending the spectrum to the workbench, **Process ▸ WURST excitation
+After sending the spectrum to the workbench, **Process ▸ Region / algebra ▸ WURST excitation
 profile…** divides the computed WURST-N weighting out (enter the sweep width,
 e.g. 2000 kHz; the correction is clamped at a floor so edge noise is not
 amplified). Do this before quantifying anything across a wide pattern.
@@ -325,7 +325,7 @@ two δcg are then not the same observable (different processing mode, window
 or referencing) — and the tool reports only a 2σ **upper bound** on $C_Q$
 instead of a value, together with the slope and its σ.
 
-**Tools ▸ QCPMG: infinite-field δiso** opens the extrapolation. Enter each
+**Tools ▸ QCPMG ▸ Infinite-field δiso** opens the extrapolation. Enter each
 field's Larmor frequency and its δcg (type it, or **grab it from the open
 spectrum's visible range** — zoom to the CT band first), set η, and
 **Compute**. It reports δiso ± σ, $P_Q$ ± σ (η-independent: $C_Q^2(3+\eta^2)
@@ -345,8 +345,8 @@ is a **spikelet comb**: the first-minima window would stop at the first
 spikelet gap (measured: δcg −105.1 ppm against −112.8 ppm from the sum echo
 of the same EXPNO, 8.6 ppm on δiso through the low-field lever). The comb is
 detected from the data, the window is seeded from the envelope over one
-spikelet period, and the row is flagged — process the `fid` in *Tools ▸
-QCPMG* and use *Save as dataset…* / *→ infinite-field δiso…* instead. A
+spikelet period, and the row is flagged — process the `fid` in *Tools ▸ QCPMG ▸
+QCPMG (echo train → spectrum)* and use *Save as dataset…* / *→ infinite-field δiso…* instead. A
 `1r` processed with `mc` (procs `PH_mod = 2`) is recorded as magnitude.
 
 **Window modes (MAS data).** Each dataset row or batch cell has a window
@@ -422,7 +422,7 @@ are fixed in Hz).
 
 ### Many samples at once
 
-**Tools ▸ QCPMG: batch infinite-field δiso…** opens a grid: set how many
+**Tools ▸ QCPMG ▸ Batch infinite-field δiso…** opens a grid: set how many
 samples and how many fields, then **drop the processed spectra straight onto
 the cells** (the `.csv` files stage 5 writes with *Save as dataset…*), or
 double-click a cell to browse. Dropping several files at once fills a row

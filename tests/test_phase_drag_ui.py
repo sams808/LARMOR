@@ -124,11 +124,27 @@ def _expected(win, base_x, base_amp, p0, p1, frac):
 
 
 def _process_action(win, prefix):
+    """The Process-menu action (any depth: Phase ▸, Baseline ▸ …) whose label
+    starts with ``prefix``."""
+    from PySide6.QtWidgets import QMenu
+
+    def walk(menu):
+        for a in menu.actions():
+            if a.text().startswith(prefix):
+                return a
+            sub = next((m for m in menu.findChildren(QMenu)
+                        if m.menuAction() == a), None)
+            if sub is not None:
+                hit = walk(sub)
+                if hit is not None:
+                    return hit
+        return None
+
     for top in win.menuBar().actions():
         if top.text() == "&Process":
-            for a in top.menu().actions():
-                if a.text().startswith(prefix):
-                    return a
+            hit = walk(top.menu())
+            if hit is not None:
+                return hit
     raise AssertionError(f"no Process action starting with {prefix!r}")
 
 

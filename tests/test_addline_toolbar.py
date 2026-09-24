@@ -121,14 +121,16 @@ def test_split_button_shows_the_current_model_and_the_placing_state(qapp, win):
     QSettings("LARMOR", "app").remove("addLine/model")
 
 
-def test_palette_lists_every_model_once_through_the_decomposition_menu(qapp, win):
+def test_palette_lists_every_model_once_through_the_edit_menu(qapp, win):
+    """The split button and Edit > Add line share ONE QAction per model, so
+    the palette lists each model exactly once, under Edit > Add line."""
     from larmor.desktop.palette_dialog import collect_commands
 
     cmds = collect_commands(win)
     for name, act in win._model_actions.items():
         hits = [c for c in cmds if c.action is act]
         assert len(hits) == 1, (name, len(hits))
-        assert hits[0].path[0].startswith("Decomposition"), hits[0].path
+        assert tuple(hits[0].path[:2]) == ("Edit", "Add line"), hits[0].path
 
 
 def test_theme_switch_restyles_the_button(qapp, win):

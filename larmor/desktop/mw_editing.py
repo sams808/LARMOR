@@ -570,7 +570,7 @@ class _EditingMixin:
         self._update_enabled()
         self.statusBar().showMessage(
             f"added {name} at F1≈{f1_ppm:.1f} ppm — click to add more, or click "
-            f"{name} again (Esc) to stop; Decomposition ▸ Fit to fit the 2D")
+            f"{name} again (Esc) to stop; Fit ▸ Fit to fit the 2D")
 
     def on_site_structure(self, idx: int, action: str):
         if self.recipe is None:

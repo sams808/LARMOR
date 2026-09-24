@@ -151,7 +151,7 @@ def load_any(path: str | Path, replay: bool = True):
         if data.ndim == 2:
             what = "arrayed/relaxation" if data.is_pseudo2d else "2D"
             raise ValueError(
-                f"this is a {what} dataset — open it with Tools ▸ 2D MQMAS "
+                f"this is a {what} dataset — open it with Fit ▸ MQMAS ▸ 2D MQMAS "
                 "viewer (or Tools ▸ Relaxation for a series)")
         if data.domain == "time":
             raise ValueError(

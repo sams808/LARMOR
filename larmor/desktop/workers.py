@@ -65,7 +65,7 @@ def humanize_error(msg) -> str:
         return m
     if "no experimental data" in low:
         return ("This dmfit file holds a model but no spectrum — open it onto a "
-                "spectrum (File ▸ Open a spectrum first, then Decomposition ▸ "
+                "spectrum (File ▸ Open a spectrum first, then Fit ▸ "
                 "Apply recipe) or pick data when prompted.")
     return m
 

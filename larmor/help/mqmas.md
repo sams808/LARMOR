@@ -110,7 +110,7 @@ It is **independent** of $\delta_\text{iso}$ (which also moves F2, so F2 anchors
 it) and it is **auto-fitted** and reported after every 2D fit.
 
 > **If a Czjzek 2D fit is well-shaped but sits off in F1, this is the knob.**
-> To pin it (dmfit-style manual referencing): **Decomposition ▸ MQMAS F1
+> To pin it (dmfit-style manual referencing): **Fit ▸ MQMAS ▸ MQMAS F1
 > reference…**; re-run with Cancel to return to auto-fit. The offset is held when
 > you pin it and reported in the fit summary.
 

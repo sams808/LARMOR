@@ -91,7 +91,7 @@ check.
 
 1. **Measure the references** under the *same referencing* as the sample
    (the same ¹H adamantane reference at 1.82 ppm through the indirect Ξ, the
-   same SR; see **Tools ▸ Referencing audit**). Literature shifts are a
+   same SR; see **Process ▸ Reference ▸ Referencing audit**). Literature shifts are a
    fallback, not a substitute: the 2026-03 CaF₂ and NaF standards both read
    +1.7 ppm relative to the literature values, an offset that the measured
    line absorbs into $b$ and a literature line does not.

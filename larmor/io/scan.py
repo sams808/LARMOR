@@ -336,13 +336,21 @@ def sample_name(expno_dir, title: str = "") -> SampleName:
         EXPNO-per-sample layout);
     (d) else the title's first non-empty line, else the folder name.
 
-    Rules (a) and (b) never consult the title; its first line is recorded in
-    ``title_first`` for provenance in every case."""
+    A display name given to the sample folder in LARMOR (``larmor.aliases``,
+    the Explorer's Rename…) comes before every rule, with ``source ==
+    "alias"``. Rules (a) and (b) never consult the title; its first line is
+    recorded in ``title_first`` for provenance in every case."""
+    from larmor import aliases
+
     p = Path(expno_dir)
     folder = p.parent
     lines = [ln.strip() for ln in (title or "").splitlines()]
     first = next((ln for ln in lines if ln), "")
     parts = name_parts(folder.name)
+    alias = aliases.alias_for(folder)
+    if alias:
+        return SampleName(alias, folder.name, parts.date, parts.rotor,
+                          parts.suffix, first, "alias")
     if parts.from_folder:
         return SampleName(parts.key, folder.name, parts.date, parts.rotor,
                           parts.suffix, first, "folder")
@@ -391,13 +399,20 @@ def sample_label(path, rec) -> str:
     ``sample_name`` when the EXPNO is on disk, else from the first path
     segment that is not a proc/EXPNO number, tokenised by ``name_parts`` -- so
     a title of "31P" becomes the real sample name and a Bruker file is never
-    labelled "1r"."""
+    labelled "1r". A display name given in LARMOR to the EXPNO, else to its
+    sample folder (``larmor.aliases``), comes before the recipe's sample."""
+    from larmor import aliases
+
     rec = rec or {}
     nucleus = (rec.get("nucleus") or "").strip()
     name = (rec.get("sample") or "").strip()
+    expno_dir = _expno_dir_of(path)
+    if expno_dir is not None:
+        alias = aliases.alias_for(expno_dir) or aliases.alias_for(expno_dir.parent)
+        if alias:
+            return alias
     if name and name.lower() != nucleus.lower():
         return name
-    expno_dir = _expno_dir_of(path)
     if expno_dir is not None:
         return sample_name(expno_dir, _read_title(expno_dir)).key
     parts = Path(str(path)).parts

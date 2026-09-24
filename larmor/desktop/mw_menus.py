@@ -42,116 +42,86 @@ class _MenusMixin:
 
     # ------------------------------------------------------------- menus
     def _build_menus(self):
-        mb = self.menuBar()
-
-        m_file = mb.addMenu("&File")
-        self._add(m_file, "&Open…  (spectrum / recipe / 1r / 2rr)",
-                  self.open_file, "Ctrl+O")
-        self._add(m_file, "Open &sample…  (list all its spectra)",
-                  self.open_sample, "Ctrl+Shift+S")
-        self._add(m_file, "Open &EXPNO / folder…", self.open_expno,
-                  "Ctrl+Shift+O")
-        self.m_recent = m_file.addMenu("Open &recent")
-        self._rebuild_recent()
-        self._add(m_file, "Open &FID…  (process before FT)", self.open_fid,
-                  "Ctrl+F")
-        self._add(m_file, "Open &Varian / Agilent…  (.fid folder)",
-                  self.open_varian)
-        self._add(m_file, "O&verlay a spectrum…  (compare on top of the active one, "
-                          "keeps the fit; Shift + drop does the same)",
-                  self.add_overlay_dialog, "Ctrl+Shift+A")
-        self.actWatch = self._add(
-            m_file, "&Watch the source file  (auto-reload when it changes, "
-                    "keep the fit)", self._toggle_watch, checkable=True)
-        self.actWatch.setToolTip(
-            "re-open the current spectrum whenever its file is rewritten -- "
-            "e.g. while acquiring on the spectrometer -- keeping the fit "
-            "model so it follows the growing signal")
-        m_file.addSeparator()
-        self._add(m_file, "Open pro&ject…  (spectra, 2D maps, figures, batch fits)",
-                  self.open_project)
-        self._add(m_file, "Save projec&t…  (whole session: spectra, 2D maps, "
-                          "figures, batch fits)",
-                  self.save_project, "Ctrl+Alt+S")
-        m_file.addSeparator()
-        self.actSave = self._add(m_file, "&Save recipe", self.save_recipe, "Ctrl+S")
-        self._add(m_file, "Save fit &as…  (txt / csv / json / dmfit)",
-                  self.save_fit_as, "Ctrl+Shift+E")
-        self._add(m_file, "Save s&pectrum as…  (CSV, reopenable in LARMOR)",
-                  self.save_spectrum)
-        m_file.addSeparator()
-        self._add(m_file, "&Copy plot to clipboard  (with all lines)",
-                  self.copy_plot, "Ctrl+Shift+C")
-        self._add(m_file, "Save plot &image…  (png / svg)", self.save_plot_image)
-        self._add(m_file, "Figure…", self.open_figure_dialog)
-        m_file.addSeparator()
-        self._add(m_file, "E&xit", self.close)
-
-        m_proc = mb.addMenu("&Process")
-        self.actExp = self._add(m_proc, "&Experiment parameters… (νrot, B0, nucleus)",
-                                self.edit_experiment)
-        m_proc.addSeparator()
-        self._add(m_proc, "Show processing panel",
-                  lambda: self.proc_dock.show())
-        # display projections of the pipeline result (F6): the FID the
-        # transform sees, and the real / imaginary / |S| channel
+        """Nine menus a student can scan: File · Edit · Process · Fit · Series
+        · Tools · View · Plotting · Help. Labels are short; the explainer of
+        every row lives in its tooltip / status tip (menus show tooltips, the
+        command palette lists them). Families sit in submenus, groups are
+        separated. Every QAction keeps its slot, attribute name and shortcut
+        (tests/test_app_split.py pins the tree and the shortcut set)."""
         from PySide6.QtGui import QActionGroup
 
-        self.actTimeDomain = self._add(
-            m_proc, "&FID ⇄ spectrum  (time ↔ frequency, re-apodize)",
-            self._toggle_time_domain, "Ctrl+T", checkable=True)
-        self.actTimeDomain.setToolTip(
-            "show the windowed FID the transform sees and re-apply the window "
-            "functions live; press again to return to the spectrum")
-        m_chan = m_proc.addMenu("Display &channel")
-        chan_group = QActionGroup(self)
-        chan_group.setExclusive(True)
-        self.actChannel = {}
-        for name, label in (
-                ("real", "&Real"),
-                ("imag", "&Imaginary  (inspect while phasing)"),
-                ("magnitude", "&Magnitude  |S|  (display only — the pipeline "
-                              "op is the panel checkbox)")):
-            a = self._add(m_chan, label,
-                          lambda _=False, n=name: self._set_channel(n),
-                          checkable=True, checked=(name == "real"))
-            chan_group.addAction(a)
-            self.actChannel[name] = a
-        m_chan.addSeparator()
-        self._add(m_chan, "C&ycle channel  (real → imag → |S|)",
-                  self._cycle_channel, "Ctrl+I")
-        self._add(m_proc, "Processing s&teps…  (remove a step)",
-                  self.edit_processing_steps)
-        self._add(m_proc, "Autophase (ACME)",
-                  lambda: self.apply_processing([{"op": "autophase"}], False))
-        # non-checkable: the panel's Drag-to-phase button is the single
-        # source of truth for the mode, this entry toggles it
-        self._add(m_proc, "&Drag to phase  (← → p0, ↑ ↓ p1 about the pivot)",
-                  self.start_phase_drag, "Ctrl+P")
-        self._add(m_proc, "2-point background…  (pick two flat points)",
-                  self.start_twopoint_bg)
-        self._add(m_proc, "Baseline auto (order 3)",
-                  lambda: self.apply_processing([{"op": "baseline", "order": 3}], False))
-        self._add(m_proc, "Baseline iterative (dead-time; Yon 2020)…",
-                  self.apply_iterbaseline)
-        self._add(m_proc, "Subtract &averages  (offset from the edges)",
-                  lambda: self.apply_processing([{"op": "subtract_avg"}], False))
-        self._add(m_proc, "Reset to original", self.reset_processing)
-        m_proc.addSeparator()
-        self._add(m_proc, "&Calibrate axis…  (click a peak, set its ppm)",
-                  self.start_calibrate)
-        self.actMeasure = self._add(m_proc, "&Measure Δ (ppm / Hz)",
-                                    self.toggle_measure, checkable=True)
-        m_proc.addSeparator()
-        self._add(m_proc, "Subtract a spectrum (&background)…",
-                  self.open_subtract)
-        self._add(m_proc, "&WURST excitation profile…  (divide out the sweep)",
-                  self.open_wurst_correct)
+        mb = self.menuBar()
 
-        m_dec = mb.addMenu("&Decomposition")
-        # --- build the model ---
-        self._add(m_dec, "&New fit (clear lines)", self.new_fit)
-        m_models = m_dec.addMenu("Add &line  (pick a model)")
+        # ------------------------------------------------------------ File
+        m_file = self._menu(mb, "&File")
+        self._add(m_file, "&Open…", self.open_file, "Ctrl+O",
+                  tip="open a spectrum, a saved fit, a 1r / 2rr or a project")
+        self._add(m_file, "Open &sample…", self.open_sample, "Ctrl+Shift+S",
+                  tip="list every spectrum of a sample folder in the Explorer")
+        self._add(m_file, "Open &EXPNO / folder…", self.open_expno, "Ctrl+Shift+O",
+                  tip="open one Bruker experiment folder")
+        self._add(m_file, "Open &FID…", self.open_fid, "Ctrl+F",
+                  tip="process a raw fid / ser before the Fourier transform")
+        self._add(m_file, "Open &Varian / Agilent…", self.open_varian,
+                  tip="a Varian / Agilent .fid folder")
+        self.m_recent = self._menu(m_file, "Open &recent")
+        self._rebuild_recent()
+        m_file.addSeparator()
+        self._add(m_file, "O&verlay a spectrum…", self.add_overlay_dialog,
+                  "Ctrl+Shift+A",
+                  tip="compare a spectrum on top of the active one; the fit is "
+                      "kept (Shift + drop on the plot does the same)")
+        self.actWatch = self._add(
+            m_file, "&Watch the source file", self._toggle_watch, checkable=True,
+            tip="re-open the current spectrum whenever its file is rewritten -- "
+                "e.g. while acquiring on the spectrometer -- keeping the fit "
+                "model so it follows the growing signal")
+        m_file.addSeparator()
+        self._add(m_file, "Open pro&ject…", self.open_project,
+                  tip="a whole session: spectra, 2D maps, figures, batch fits")
+        self._add(m_file, "Save projec&t…", self.save_project, "Ctrl+Alt+S",
+                  tip="save the whole session: spectra, 2D maps, figures, batch fits")
+        m_file.addSeparator()
+        self.actSave = self._add(m_file, "&Save fit", self.save_recipe, "Ctrl+S",
+                                 tip="write the fit recipe (.recipe.json) next to "
+                                     "the data -- the reproducible analysis")
+        self._add(m_file, "Save fit &as…", self.save_fit_as, "Ctrl+Shift+E",
+                  tip="txt / csv / json / dmfit .fxmla")
+        m_export = self._menu(m_file, "E&xport",
+                              tip="figures, tables and spectra out of LARMOR")
+        self._add(m_export, "Save s&pectrum as CSV…", self.save_spectrum,
+                  tip="the processed spectrum as a CSV with a metadata header, "
+                      "reopenable in LARMOR")
+        self._add(m_export, "&Figure…", self.open_figure_dialog,
+                  tip="a publication figure of the current fit")
+        self._add(m_export, "Save plot &image…", self.save_plot_image,
+                  tip="png / svg of the plot as shown")
+        self._add(m_export, "&Copy plot to clipboard", self.copy_plot, "Ctrl+Shift+C",
+                  tip="the plot with all its lines, as an image")
+        m_export.addSeparator()
+        self._add(m_export, "Copy report &table as CSV", self.copy_csv,
+                  tip="the last Report's table (positions, integrals, fractions)")
+        self._add(m_export, "Copy &LaTeX table", self.copy_latex,
+                  tip="the fit as a LaTeX table with uncertainties")
+        self._add(m_export, "&Publication bundle…", self.export_publication_bundle,
+                  tip="figure + LaTeX table + CSV + methods sentence + report.md "
+                      "into one folder")
+        m_file.addSeparator()
+        self._add(m_file, "&Quit", self.close)
+
+        # ------------------------------------------------------------ Edit
+        m_edit = self._menu(mb, "&Edit")
+        self.actUndo = self._add(m_edit, "↩  Undo", self.undo, "Ctrl+Z",
+                                 tip="undo the last model or processing change")
+        self.actRedo = self._add(m_edit, "↪  Redo", self.redo, "Ctrl+Y",
+                                 tip="redo the change just undone")
+        m_edit.addSeparator()
+        self._add(m_edit, "&New fit", self.new_fit,
+                  tip="clear every line and start the model again")
+        m_edit.addSeparator()
+        m_models = self._menu(m_edit, "Add &line",
+                              tip="pick a lineshape model, then click on the "
+                                  "spectrum to place the line")
         self._model_actions = {}
         for m in model_registry.describe_all():
             if m["name"] == "spectrum":
@@ -162,105 +132,208 @@ class _MenusMixin:
             a.triggered.connect(
                 lambda checked, name=m["name"]: self._set_add_mode(
                     name if checked else None))
-            m_models.addAction(a)
             self._model_actions[m["name"]] = a
-        self.m_apply = m_dec.addMenu("&Apply recipe  (a recent fit → this data)")
+        for section, names in self._MODEL_GROUPS:
+            m_models.addSection(section)
+            for name in names:
+                if name in self._model_actions:
+                    m_models.addAction(self._model_actions[name])
+        grouped = {n for _, names in self._MODEL_GROUPS for n in names}
+        rest = [n for n in self._model_actions if n not in grouped]
+        if rest:                  # a model the groups do not know yet
+            m_models.addSection("More")
+            for name in rest:
+                m_models.addAction(self._model_actions[name])
+        self._add(m_edit, "Add a line at every &peak…", self.autopick_lines,
+                  tip="auto peak-pick, one line per maximum")
+        self._add(m_edit, "Add f&unction line…", self.add_function_line,
+                  tip="y = f(x; a, b, c, d) -- a free function as a line")
+        self._add(m_edit, "Add background &spectrum…", self.add_background_spectrum,
+                  tip="fit another spectrum as a scaled component")
+        self.m_apply = self._menu(m_edit, "&Apply recipe",
+                                  tip="re-use a recent fit's model on this data")
         self._rebuild_apply_recipe()
-        self._add(m_dec, "Add a line at every &peak…  (auto peak-pick)",
-                  self.autopick_lines)
-        self._add(m_dec, "&Label lines from literature ranges  (Al[4], BO3, …)",
-                  self.label_from_literature)
-        self._add(m_dec, "Add spinning &sidebands…  (of a fitted line)",
-                  self.add_sidebands)
+        m_edit.addSeparator()
+        m_ssb = self._menu(m_edit, "Spinning &sidebands",
+                           tip="find and model the ±νrot repeats of a spectrum")
         self.actDetectSsb = self._add(
-            m_dec, "&Detect spinning sidebands  (find the ±νrot repeat)",
-            self.detect_sidebands, "Ctrl+Shift+D")
-        self.actDetectSsb.setToolTip(
-            "look for the repeat of the spectrum at ±νrot (around the "
-            "recorded rate, then 1–80 kHz) and offer a linked sideband "
-            "manifold or a shifted copy of the spectrum in one click")
-        self._add(m_dec, "Add f&unction line…  (y = f(x; a,b,c,d))",
-                  self.add_function_line)
-        self._add(m_dec, "Add background &spectrum…  (fit another spectrum)",
-                  self.add_background_spectrum)
-        self._add(m_dec, "Add a &copy of this spectrum…  (shifted — satellite "
-                         "/ sideband manifold)",
-                  self.add_current_spectrum_line)
-        self._add(m_dec, "Add fit &zone", self.add_zone)
-        self._add(m_dec, "Clear zones", self.clear_zones)
-        m_dec.addSeparator()
-        # --- run ---
-        self._add(m_dec, "&Simulate  (recompute the model)",
-                  self.request_simulation, "F9")
-        self.actFit = self._add(m_dec, "&Fit", self.run_fit, "F5")
-        self.actAuto = self._add(m_dec, "&Auto Fit (multi-start)…",
-                                 self.run_auto_fit)
-        m_dec.addSeparator()
-        # --- analyze ---
-        self.actQuant = self._add(m_dec, "&Report (quantify)", self.run_quantify, "F6")
+            m_ssb, "&Detect spinning sidebands", self.detect_sidebands, "Ctrl+Shift+D",
+            tip="look for the repeat of the spectrum at ±νrot (around the "
+                "recorded rate, then 1–80 kHz) and offer a linked sideband "
+                "manifold or a shifted copy of the spectrum in one click")
+        self._add(m_ssb, "Add spinning &sidebands…", self.add_sidebands,
+                  tip="a linked ±νrot manifold of a fitted line")
+        self._add(m_ssb, "Add a &copy of this spectrum…",
+                  self.add_current_spectrum_line,
+                  tip="a shifted copy of the spectrum itself -- a satellite or "
+                      "sideband manifold")
+        m_ssb.addSeparator()
+        self.actSsbOffer = QAction("&Offer spinning-sideband detection on load",
+                                   self)
+        self.actSsbOffer.setCheckable(True)
+        self.actSsbOffer.setToolTip(
+            "when a loaded 1D spectrum repeats at ±νrot, a banner over the "
+            "plot offers the linked manifold or a shifted copy in one click; "
+            "turn off for spectra whose periodic structure is not sidebands "
+            "(Detect spinning sidebands still works on demand)")
+        self.actSsbOffer.setChecked(bool(QSettings("LARMOR", "app").value(
+            "ssbAutoOffer", True, type=bool)))
+        self.actSsbOffer.toggled.connect(self._toggle_ssb_offer)
+        m_ssb.addAction(self.actSsbOffer)
+        m_con = self._menu(m_edit, "&Constraints",
+                           tip="what the fit may vary: literature ranges, "
+                               "glass protocol, saved link / bound sets")
+        self._add(m_con, "&Label lines from literature ranges",
+                  self.label_from_literature,
+                  tip="name each line by the species whose δiso range it falls "
+                      "in (Al[4], BO3, …)")
+        self._add(m_con, "&Restrict around current values…",
+                  self.restrict_glass_protocol,
+                  tip="bound every parameter around its current value -- the "
+                      "glass protocol (Edén 2023)")
+        self._add(m_con, "Save &constraints as…", self.save_constraint_set,
+                  tip="a reusable link / bound set")
+        self._add(m_con, "Apply saved co&nstraints…", self.apply_constraint_set,
+                  tip="a link / bound set saved earlier")
+        m_edit.addSeparator()
+        self._add(m_edit, "Add fit &zone", self.add_zone,
+                  tip="a ppm window the fit is restricted to")
+        self._add(m_edit, "Clear zones", self.clear_zones)
+
+        # --------------------------------------------------------- Process
+        m_proc = self._menu(mb, "&Process")
+        self.actExp = self._add(m_proc, "&Experiment parameters…", self.edit_experiment,
+                                tip="νrot, B0, nucleus, 90° pulse -- and where "
+                                    "each value came from")
+        self._add(m_proc, "Processing s&teps…", self.edit_processing_steps,
+                  tip="the recorded processing chain; remove a step")
+        self._add(m_proc, "Show processing &panel",
+                  lambda: self.proc_dock.show(),
+                  tip="source, display, phase, baseline and reference controls")
+        m_proc.addSeparator()
+        m_phase = self._menu(m_proc, "&Phase")
+        self._add(m_phase, "&Autophase (ACME)",
+                  lambda: self.apply_processing([{"op": "autophase"}], False),
+                  tip="automatic p0 / p1 by entropy minimisation")
+        # non-checkable: the panel's Drag-to-phase button is the single
+        # source of truth for the mode, this entry toggles it
+        self._add(m_phase, "&Drag to phase", self.start_phase_drag, "Ctrl+P",
+                  tip="TopSpin-style: drag on the spectrum -- ← → p0, ↑ ↓ p1 "
+                      "about the pivot line")
+        m_base = self._menu(m_proc, "&Baseline")
+        self._add(m_base, "&Polynomial (order 3)",
+                  lambda: self.apply_processing([{"op": "baseline", "order": 3}], False),
+                  tip="automatic polynomial baseline; the panel sets the order")
+        self._add(m_base, "&Iterative (dead-time; Yon 2020)…", self.apply_iterbaseline,
+                  tip="the dead-time baseline roll removed iteratively")
+        self._add(m_base, "&2-point background…", self.start_twopoint_bg,
+                  tip="pick two flat points; the straight line through them "
+                      "is subtracted")
+        self._add(m_base, "Subtract &averages",
+                  lambda: self.apply_processing([{"op": "subtract_avg"}], False),
+                  tip="remove the offset read from the spectrum edges")
+        m_ref = self._menu(m_proc, "&Reference")
+        self._add(m_ref, "&Calibrate axis…", self.start_calibrate,
+                  tip="click a peak and type its ppm; the fit follows")
+        self.actMeasure = self._add(m_ref, "&Measure Δ (ppm / Hz)",
+                                    self.toggle_measure, checkable=True,
+                                    tip="drag between two points to read their "
+                                        "distance")
+        self._add(m_ref, "Referencing a&udit…", self.open_referencing_audit,
+                  tip="the SR of a whole session against its ¹H adamantane "
+                      "reference")
+        m_alg = self._menu(m_proc, "Re&gion / algebra",
+                           tip="measure regions, combine spectra")
+        self._add(m_alg, "&Integrals && measurements…", self.open_integrals,
+                  tip="integral, %, FWHM and centre of mass of dragged regions")
+        self._add(m_alg, "Subtract a spectrum (&background)…", self.open_subtract,
+                  tip="remove a measured background spectrum")
+        self._add(m_alg, "&WURST excitation profile…", self.open_wurst_correct,
+                  tip="divide out the sweep's amplitude envelope")
+        self._add(m_alg, "Stitch frequency-stepped (&VOCS) spectra…", self.open_vocs,
+                  tip="one pattern from several offset acquisitions")
+        m_proc.addSeparator()
+        # display projections of the pipeline result: the FID the transform
+        # sees, and the real / imaginary / |S| channel
+        self.actTimeDomain = self._add(
+            m_proc, "&FID ⇄ spectrum", self._toggle_time_domain, "Ctrl+T",
+            checkable=True,
+            tip="show the windowed FID the transform sees and re-apply the window "
+                "functions live; press again to return to the spectrum")
+        m_chan = self._menu(m_proc, "Display &channel",
+                            tip="which channel of the complex spectrum the plot "
+                                "shows -- display only, the fit uses the real part")
+        chan_group = QActionGroup(self)
+        chan_group.setExclusive(True)
+        self.actChannel = {}
+        for name, label, tip in (
+                ("real", "&Real", "the real channel -- what the fit uses"),
+                ("imag", "&Imaginary", "inspect the dispersion while phasing"),
+                ("magnitude", "&Magnitude |S|",
+                 "display only -- the destructive pipeline op is the panel's "
+                 "checkbox")):
+            a = self._add(m_chan, label,
+                          lambda _=False, n=name: self._set_channel(n),
+                          checkable=True, checked=(name == "real"), tip=tip)
+            chan_group.addAction(a)
+            self.actChannel[name] = a
+        m_chan.addSeparator()
+        self._add(m_chan, "C&ycle channel", self._cycle_channel, "Ctrl+I",
+                  tip="real → imaginary → |S| → real")
+        m_proc.addSeparator()
+        self._add(m_proc, "Reset to &original", self.reset_processing,
+                  tip="drop every processing step and reload the source")
+
+        # ------------------------------------------------------------- Fit
+        m_fit = self._menu(mb, "F&it")
+        self._add(m_fit, "&Simulate", self.request_simulation, "F9",
+                  tip="recompute the model without fitting")
+        self.actFit = self._add(m_fit, "&Fit", self.run_fit, "F5",
+                                tip="least-squares fit of the free parameters")
+        self.actAuto = self._add(m_fit, "&Auto fit…", self.run_auto_fit,
+                                 tip="multi-start refits from randomised starting "
+                                     "values; keeps the best")
+        m_fit.addSeparator()
+        self.actQuant = self._add(m_fit, "&Report", self.run_quantify, "F6",
+                                  tip="quantify: integrals, fractions and "
+                                      "uncertainties of every line")
         # F5 Fit / F6 Report / F7 Health form one cluster
-        self.actHealth = self._add(m_dec, "Fit &health details…  (why this verdict)",
-                                   self.show_fit_health, "F7")
-        self.actErrors = self._add(m_dec, "&Errors Analysis (χ² profile)…",
-                                   self.run_errors_analysis)
+        self.actHealth = self._add(m_fit, "Fit &health details…", self.show_fit_health,
+                                   "F7", tip="why the fit-health strip says what "
+                                             "it says")
+        m_err = self._menu(m_fit, "&Errors",
+                           tip="uncertainties beyond the covariance matrix")
+        self.actErrors = self._add(m_err, "χ² &profile…", self.run_errors_analysis,
+                                   tip="Errors Analysis: refit while one parameter "
+                                       "is stepped -- its confidence interval")
         # kept as attributes: the fit-health strip's menu lists these SAME
         # QAction objects (no duplicated labels or slots)
-        self.actMC = self._add(m_dec, "Monte-&Carlo errors…  (synthetic-noise refits)",
-                               self.run_monte_carlo)
-        self.actCorr = self._add(m_dec, "Parameter correlations…  (from the last fit)",
-                                 self.show_correlations)
-        self._add(m_dec, "Compare with a saved fit…  (parameter diff)",
-                  self.compare_with_saved_fit)
-        self._add(m_dec, "Czjzek distribution P(C_Q)…  (what σ stands for)",
-                  self.show_czjzek_dist)
-        self.actChi2 = self._add(m_dec, "χ² map (parameter pair)…  (is the pair determined?)",
-                                 self.show_chi2_map)
-        m_dec.addSeparator()
-        # --- advanced / configuration (rarely touched) ---
-        m_adv = m_dec.addMenu("Ad&vanced")
-        self._add(m_adv, "Co-&fit datasets…  (shared model, 1D + MQMAS)",
-                  self.open_cofit)
-        self._add(m_adv, "Computing &parameters…  (kernel resolution)",
-                  self.edit_computing_params)
-        self._add(m_adv, "Fit completion &threshold…  (Δσ % to stop)",
-                  self.edit_fit_tol)
-        m_adv.addSeparator()
-        self._add(m_adv, "Restrict around current values…  (glass protocol, "
-                  "Edén 2023)", self.restrict_glass_protocol)
-        self._add(m_adv, "Save &constraints as…  (reusable link/bound set)",
-                  self.save_constraint_set)
-        self._add(m_adv, "Apply saved co&nstraints…", self.apply_constraint_set)
-        self._add(m_adv, "MQMAS F1 &reference…  (isotropic-axis align)",
-                  self.edit_mqmas_f1_ref)
-        self._add(m_adv, "Predict at another &field…  (what at X T?)",
-                  self.predict_at_field)
-
-        m_view = mb.addMenu("&View")
-        self.m_view = m_view                 # panels submenu filled once docks exist
-        self.actResid = self._add(m_view, "Residual", self._toggle_resid,
-                                  checkable=True, checked=True)
-        self.actComp = self._add(m_view, "Components", self._toggle_comp,
-                                 checkable=True, checked=True)
-        self.actOverlaysVisible = self._add(
-            m_view, "O&verlays  (the compared spectra)", self._toggle_overlays_visible,
-            "Ctrl+Shift+V", checkable=True, checked=True)
-        self.actOverlaysVisible.setToolTip(
-            "show or hide every compared spectrum at once; add one with "
-            "File > Overlay a spectrum, Shift + drop on the plot, or the "
-            "Explorer's right-click")
-        self._add(m_view, "Clear overlays", self.clear_overlays)
-        self.actLabels = self._add(
-            m_view, "Component &labels  (pin names on the plot)",
-            self._toggle_labels, checkable=True,
-            checked=bool(QSettings("LARMOR", "app").value(
-                "compLabels", False, type=bool)))
-        self.actLabels.setToolTip(
-            "write each component's letter and name at its maximum; when "
-            "off, hovering a component still shows its name")
-        self.view.set_show_labels(self.actLabels.isChecked())
-        self.actPaddles = self._add(m_view, "Show paddles", self._toggle_paddles,
-                                    checkable=True, checked=True)
-        self.actAnimateFit = QAction("Animate fits", self)
+        self.actMC = self._add(m_err, "Monte-&Carlo errors…", self.run_monte_carlo,
+                               tip="synthetic-noise refits -- a parametric bootstrap")
+        self.actCorr = self._add(m_err, "Parameter correlations…",
+                                 self.show_correlations,
+                                 tip="the correlation matrix of the last fit")
+        self.actChi2 = self._add(m_err, "χ² map (parameter pair)…", self.show_chi2_map,
+                                 tip="χ² over a plane of two parameters -- is the "
+                                     "pair determined?")
+        self._add(m_fit, "Compare with a saved fit…", self.compare_with_saved_fit,
+                  tip="parameter-by-parameter diff against a saved recipe")
+        m_fit.addSeparator()
+        self._add(m_fit, "Co-&fit datasets…", self.open_cofit,
+                  tip="one shared model over several datasets, 1D + MQMAS")
+        self._add(m_fit, "&Predict at another field…", self.predict_at_field,
+                  tip="re-simulate the current model at another B0")
+        m_mq = self._menu(m_fit, "&MQMAS")
+        self._add(m_mq, "2D MQMAS &viewer / fit…", self.open_twod,
+                  tip="the 2D contour viewer and its fit")
+        self._add(m_mq, "MQMAS F1 &reference…", self.edit_mqmas_f1_ref,
+                  tip="pin the isotropic-axis alignment (dmfit style)")
+        m_set = self._menu(m_fit, "Fit se&ttings")
+        self._add(m_set, "Computing &parameters…", self.edit_computing_params,
+                  tip="kernel resolution and simulation grid")
+        self._add(m_set, "Fit completion &threshold…", self.edit_fit_tol,
+                  tip="the Δσ % below which a fit stops")
+        self.actAnimateFit = QAction("&Animate fits", self)
         self.actAnimateFit.setCheckable(True)
         self.actAnimateFit.setToolTip("draw the model curve as it converges during "
                                       "a 1D fit (a fading trail shows the last few "
@@ -269,7 +342,101 @@ class _MenusMixin:
             "animateFit", True, type=bool)))
         self.actAnimateFit.toggled.connect(
             lambda on: QSettings("LARMOR", "app").setValue("animateFit", bool(on)))
-        m_view.addAction(self.actAnimateFit)
+        m_set.addAction(self.actAnimateFit)
+
+        # ---------------------------------------------------------- Series
+        m_ser = self._menu(mb, "&Series")
+        self._add(m_ser, "Batch &fit spectra…",
+                  lambda: self.explorer._batch_clicked(),
+                  tip="one shared model over the spectra selected in the "
+                      "Explorer (1D)")
+        self._add(m_ser, "Se&quential fit…", self.run_seq_fit,
+                  tip="a forward–backward sweep along a series, each fit "
+                      "starting from its neighbour (1D)")
+        self._add(m_ser, "&Batch fit report…", self.run_batch_report,
+                  tip="publication table and plots from a batch fit")
+        m_ser.addSeparator()
+        self._add(m_ser, "&Session inventory…", self.open_session_inventory,
+                  tip="a month folder as a sample × nucleus grid, with the "
+                      "production EXPNO picked per block")
+        self._add(m_ser, "E&xperimental section…", self.open_acquisition_table,
+                  tip="a methods paragraph and Table S1 from acqus / procs / title")
+        self._add(m_ser, "&Compare acquisition parameters…", self.compare_overlays,
+                  tip="acqus / procs of the active spectrum and every overlay "
+                      "side by side")
+
+        # ----------------------------------------------------------- Tools
+        m_tools = self._menu(mb, "&Tools")
+        self._add(m_tools, "&NMR table…", self.open_nmr_table,
+                  tip="Larmor frequencies, spins and abundances")
+        self._add(m_tools, "&Conversion tools…", self.open_convert,
+                  tip="shift, Cq and dipolar conversions")
+        m_tools.addSeparator()
+        self._add(m_tools, "&Herzfeld–Berger sideband analysis…",
+                  self.open_herzfeld_berger,
+                  tip="ζ and η of the CSA from spinning-sideband intensities")
+        self._add(m_tools, "&Read static pattern (C_Q, η)…", self.open_staticct,
+                  tip="three markers on a static lineshape, no fit")
+        self._add(m_tools, "Czjzek &distribution P(C_Q)…", self.show_czjzek_dist,
+                  tip="what a Czjzek σ stands for, drawn")
+        m_tools.addSeparator()
+        self._add(m_tools, "Import &DFT tensors (.magres)…", self.open_magres,
+                  tip="shielding and EFG tensors from a DFT run, calibrated to "
+                      "shifts")
+        m_rel = self._menu(m_tools, "Re&laxation")
+        self._add(m_rel, "Relaxation / series (T1, T2)…", self.open_satrec,
+                  tip="a guided saturation-recovery / echo-train workflow")
+        self._add(m_rel, "Per-site relaxation…", self.open_per_site_relaxation,
+                  tip="T1 of each fitted line, using the current model")
+        self._add(m_rel, "Variable temperature (Arrhenius / VFT)…", self.open_vt,
+                  tip="activation energy from a τ(T) series")
+        m_qc = self._menu(m_tools, "&QCPMG")
+        self._add(m_qc, "QCPMG (echo train → spectrum)…", self.open_qcpmg,
+                  tip="process an echo train into a spikelet or envelope spectrum")
+        self._add(m_qc, "Infinite-field δiso (2 fields)…", self.open_qcpmg_fields,
+                  tip="extrapolate δiso from two fields")
+        self._add(m_qc, "Batch infinite-field δiso…", self.open_qcpmg_batch_fields,
+                  tip="the two-field extrapolation for a whole series")
+        self._add(m_tools, "R&EDOR (dipolar coupling)…", self.open_redor,
+                  tip="dipolar coupling from a REDOR dephasing curve")
+
+        # ------------------------------------------------------------ View
+        m_view = self._menu(mb, "&View")
+        self.m_view = m_view
+        self.actResid = self._add(m_view, "Residual", self._toggle_resid,
+                                  checkable=True, checked=True,
+                                  tip="the data − model trace under the spectrum")
+        self.actComp = self._add(m_view, "Components", self._toggle_comp,
+                                 checkable=True, checked=True,
+                                 tip="each line's own curve")
+        self.actLabels = self._add(
+            m_view, "Component &labels", self._toggle_labels, checkable=True,
+            checked=bool(QSettings("LARMOR", "app").value(
+                "compLabels", False, type=bool)),
+            tip="write each component's letter and name at its maximum; when "
+                "off, hovering a component still shows its name")
+        self.view.set_show_labels(self.actLabels.isChecked())
+        self.actPaddles = self._add(m_view, "&Paddles", self._toggle_paddles,
+                                    checkable=True, checked=True,
+                                    tip="the on-spectrum handles that move a line")
+        self.actOverlaysVisible = self._add(
+            m_view, "O&verlays", self._toggle_overlays_visible,
+            "Ctrl+Shift+V", checkable=True, checked=True,
+            tip="show or hide every compared spectrum at once; add one with "
+                "File ▸ Overlay a spectrum, Shift + drop on the plot, or the "
+                "Explorer's right-click")
+        self._add(m_view, "Clear overlays", self.clear_overlays,
+                  tip="drop every compared spectrum")
+        self.actRefRanges = QAction("&Literature shift ranges", self)
+        self.actRefRanges.setCheckable(True)
+        self.actRefRanges.setToolTip(
+            "shade the typical literature δiso range of each species for the "
+            "current nucleus (labels carry the P_Q/C_Q ranges) — an "
+            "assignment guide, sourced from Edén 2023")
+        self.actRefRanges.setChecked(bool(QSettings("LARMOR", "app").value(
+            "refRanges", False, type=bool)))
+        self.actRefRanges.toggled.connect(self._toggle_ref_ranges)
+        m_view.addAction(self.actRefRanges)
         self.actScrollNudge = QAction("Scroll &nudges fit values", self)
         self.actScrollNudge.setCheckable(True)
         self.actScrollNudge.setToolTip("when on, scrolling over a parameter cell "
@@ -284,95 +451,40 @@ class _MenusMixin:
         _table.set_scroll_nudge(self.actScrollNudge.isChecked())
         self.actScrollNudge.toggled.connect(self._toggle_scroll_nudge)
         m_view.addAction(self.actScrollNudge)
-        self.actRefRanges = QAction("&Literature shift ranges  (Edén 2023)",
-                                    self)
-        self.actRefRanges.setCheckable(True)
-        self.actRefRanges.setToolTip(
-            "shade the typical literature δiso range of each species for the "
-            "current nucleus (labels carry the P_Q/C_Q ranges) — an "
-            "assignment guide, sourced from Edén 2023")
-        self.actRefRanges.setChecked(bool(QSettings("LARMOR", "app").value(
-            "refRanges", False, type=bool)))
-        self.actRefRanges.toggled.connect(self._toggle_ref_ranges)
-        m_view.addAction(self.actRefRanges)
-        self.actSsbOffer = QAction("&Offer spinning-sideband detection on load",
-                                   self)
-        self.actSsbOffer.setCheckable(True)
-        self.actSsbOffer.setToolTip(
-            "when a loaded 1D spectrum repeats at ±νrot, a banner over the "
-            "plot offers the linked manifold or a shifted copy in one click; "
-            "turn off for spectra whose periodic structure is not sidebands "
-            "(Decomposition ▸ Detect spinning sidebands still works on demand)")
-        self.actSsbOffer.setChecked(bool(QSettings("LARMOR", "app").value(
-            "ssbAutoOffer", True, type=bool)))
-        self.actSsbOffer.toggled.connect(self._toggle_ssb_offer)
-        m_view.addAction(self.actSsbOffer)
-        self._build_czjzek_display_menu(m_view)
         m_view.addSeparator()
-        self._build_theme_menu(m_view)
-        self._build_textsize_menu(m_view)
+        m_zoom = self._menu(m_view, "&Zoom")
+        self._add(m_zoom, "&Full spectrum", self.zoom_full)
+        self._add(m_zoom, "Zoom to &sites", self.zoom_sites,
+                  tip="the fitted region")
+        self._add(m_zoom, "&Back to 2D map", self.back_to_2d, "Ctrl+2",
+                  tip="return to the parent 2D map of an extracted trace")
         m_view.addSeparator()
         self._build_axis_unit_menu(m_view)
+        self._build_czjzek_display_menu(m_view)
         m_view.addSeparator()
-        self._add(m_view, "&Back to 2D map", self.back_to_2d, "Ctrl+2")
-        self._add(m_view, "Zoom to sites", self.zoom_sites)
-        self._add(m_view, "Full spectrum", self.zoom_full)
+        # filled by _build_panels_menu once the docks exist
+        self.m_panels = self._menu(m_view, "&Panels",
+                                   tip="show or hide each dock")
+        self._build_theme_menu(m_view)
+        self._build_textsize_menu(m_view)
 
-        m_tools = mb.addMenu("&Tools")
-        m_tools.addSection("Analysis")
-        self._add(m_tools, "&Integrals && measurements…  (integral, %, FWHM, CoM)",
-                  self.open_integrals)
-        self._add(m_tools, "&Batch fit report…  (publication table + plots)",
-                  self.run_batch_report)
-        self._add(m_tools, "E&xperimental section…  (paragraph + Table S1 from acqus / "
-                           "procs / title)", self.open_acquisition_table)
-        self._add(m_tools, "&Session inventory…  (a month folder as a sample × nucleus "
-                           "grid; production EXPNO picks)", self.open_session_inventory)
-        self._add(m_tools, "Batch &fit spectra…  (one shared model, 1D)",
-                  lambda: self.explorer._batch_clicked())
-        self._add(m_tools, "Se&quential fit…  (forward–backward series sweep, 1D)",
-                  self.run_seq_fit)
-        self._add(m_tools, "Relaxation / series (T1, T2)…", self.open_satrec)
-        self._add(m_tools, "Per-site relaxation…  (uses the current fit)",
-                  self.open_per_site_relaxation)
-        m_tools.addSection("Advanced experiments")
-        self._add(m_tools, "QCPMG (echo train → spectrum)…", self.open_qcpmg)
-        self._add(m_tools, "Stitch frequency-stepped (&VOCS) spectra…",
-                  self.open_vocs)
-        self._add(m_tools, "&Herzfeld–Berger sideband analysis (ζ, η)…  (CSA from "
-                           "sideband intensities)", self.open_herzfeld_berger)
-        self._add(m_tools, "Referencing a&udit…  (SR of a session against its "
-                           "¹H adamantane reference)", self.open_referencing_audit)
-        self._add(m_tools, "&Read static pattern (C_Q, η)…  (three markers, "
-                           "no fit)", self.open_staticct)
-        self._add(m_tools, "QCPMG: infinite-field δiso (2 fields)…",
-                  self.open_qcpmg_fields)
-        self._add(m_tools, "QCPMG: batch infinite-field δiso…",
-                  self.open_qcpmg_batch_fields)
-        self._add(m_tools, "Variable temperature (Arrhenius / VFT)…", self.open_vt)
-        self._add(m_tools, "REDOR (dipolar coupling)…", self.open_redor)
-        m_tools.addSection("Import & 2D")
-        self._add(m_tools, "Import DFT tensors (.magres)…", self.open_magres)
-        self._add(m_tools, "2D MQMAS viewer/fit…", self.open_twod)
-        self._add(m_tools, "Multi-dataset fit (CLI): larmor multifit a.json b.json",
-                  lambda: None).setEnabled(False)
-        m_tools.addSection("Reference")
-        self._add(m_tools, "&NMR table…  (Larmor frequencies)", self.open_nmr_table)
-        self._add(m_tools, "&Conversion tools…  (shift / Cq / dipolar)",
-                  self.open_convert)
-
-        m_plot = mb.addMenu("&Plotting")
-        self._add(m_plot, "Plotting &studio…  (build any figure)",
-                  self.open_plotting_studio)
-        self._add(m_plot, "Plot &current spectrum…", self.plot_current_spectrum)
+        # -------------------------------------------------------- Plotting
+        m_plot = self._menu(mb, "&Plotting")
+        self._add(m_plot, "Plotting &studio…", self.open_plotting_studio,
+                  tip="build any figure from open spectra, fits and series")
+        self._add(m_plot, "Plot &current spectrum…", self.plot_current_spectrum,
+                  tip="the spectrum on screen, in the studio")
         self._add(m_plot, "New &2D contour plot…",
                   lambda: self.open_plotting_studio({"kind": "2d", "path": ""}))
 
-        m_help = mb.addMenu("&Help")
-        self.actPalette = self._add(m_help, "&Command palette…  (find any menu entry)",
-                                    self.open_command_palette, "Ctrl+Shift+P")
+        # ------------------------------------------------------------ Help
+        m_help = self._menu(mb, "&Help")
+        self.actPalette = self._add(m_help, "&Command palette…",
+                                    self.open_command_palette, "Ctrl+Shift+P",
+                                    tip="find and run any menu entry by typing "
+                                        "part of its name")
         m_help.addSeparator()
-        m_man = m_help.addMenu("User &manuals")
+        m_man = self._menu(m_help, "User &manuals")
         for name, title in (
                 ("getting-started", "Getting started"),
                 ("spectra-1d", "1D spectra — processing & fitting"),
@@ -389,19 +501,43 @@ class _MenusMixin:
                 ("dft-tensors", "DFT tensors — import & shift calibration")):
             self._add(m_man, title,
                       lambda _=False, n=name, t=title: self._open_manual(n, t))
-        m_tut = m_help.addMenu("&Tutorials")
+        m_tut = self._menu(m_help, "&Tutorials")
         for name, title in TUTORIALS:
             self._add(m_tut, title,
                       lambda _=False, n=name, t=title: self._open_tutorial(n, t))
+        m_help.addSeparator()
         self._add(m_help, "About LARMOR", self._about)
         self._add(m_help, "More…", self._show_more)
 
-    def _add(self, menu, text, slot, shortcut=None, checkable=False, checked=False):
+    #: Edit ▸ Add line sections, by model name (registry order inside each)
+    _MODEL_GROUPS = (
+        ("Simple", ("gauss_lor", "gl_norm", "voigt", "jmultiplet")),
+        ("Quadrupolar", ("quad_ct", "quad_first", "quad_csa")),
+        ("Disordered", ("czjzek", "ext_czjzek", "czjzek_d", "czjzek_corr",
+                        "amorphous")),
+        ("CSA", ("csa_mas", "csa_czjzek")),
+        ("Other", ("sidebands", "exchange2", "function")),
+    )
+
+    def _menu(self, parent, title, tip=None):
+        """A (sub)menu that shows its rows' tooltips on hover."""
+        m = parent.addMenu(title)
+        m.setToolTipsVisible(True)
+        if tip:
+            m.menuAction().setToolTip(tip)
+            m.menuAction().setStatusTip(tip)
+        return m
+
+    def _add(self, menu, text, slot, shortcut=None, checkable=False, checked=False,
+             tip=None):
         a = QAction(text, self)
         if shortcut:
             a.setShortcut(QKeySequence(shortcut))
         a.setCheckable(checkable)
         a.setChecked(checked)
+        if tip:
+            a.setToolTip(tip)
+            a.setStatusTip(tip)
         a.triggered.connect(slot)
         menu.addAction(a)
         return a
@@ -575,14 +711,15 @@ class _MenusMixin:
         tb.setMovable(False)
         tb.setIconSize(tb.iconSize())
         self.addToolBar(tb)
-        self.actUndo = QAction("↩  Undo", self)
-        self.actUndo.setShortcut(QKeySequence("Ctrl+Z"))
-        self.actUndo.setToolTip("undo (Ctrl+Z)")
-        self.actUndo.triggered.connect(self.undo)
-        self.actRedo = QAction("↪  Redo", self)
-        self.actRedo.setShortcut(QKeySequence("Ctrl+Y"))
-        self.actRedo.setToolTip("redo (Ctrl+Y)")
-        self.actRedo.triggered.connect(self.redo)
+        if not hasattr(self, "actUndo"):        # Edit ▸ Undo / Redo own them
+            self.actUndo = QAction("↩  Undo", self)
+            self.actUndo.setShortcut(QKeySequence("Ctrl+Z"))
+            self.actUndo.setToolTip("undo (Ctrl+Z)")
+            self.actUndo.triggered.connect(self.undo)
+            self.actRedo = QAction("↪  Redo", self)
+            self.actRedo.setShortcut(QKeySequence("Ctrl+Y"))
+            self.actRedo.setToolTip("redo (Ctrl+Y)")
+            self.actRedo.triggered.connect(self.redo)
         tb.addAction(self.actUndo)
         tb.addAction(self.actRedo)
         tb.addSeparator()
@@ -715,8 +852,10 @@ class _MenusMixin:
 
     def _build_panels_menu(self):
         """View ▸ Panels: show / hide (and reopen) every dock. Each dock also has
-        its own close ✕ now, so a panel can be dismissed and brought back."""
-        m = self.m_view.addMenu("&Panels")
+        its own close ✕ now, so a panel can be dismissed and brought back. The
+        submenu itself is created by _build_menus (so it sits with Theme and
+        Text size); this fills it once the docks exist."""
+        m = self.m_panels
         for dock in (self.explorer_dock, self.datasets_dock, self.ws_dock,
                      self.lines_dock, self.results_dock, self.proc_dock):
             m.addAction(dock.toggleViewAction())

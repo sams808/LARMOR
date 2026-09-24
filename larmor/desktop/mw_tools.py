@@ -219,7 +219,7 @@ class _ToolsMixin:
         self.statusBar().showMessage(f"applied “{name}” to {len(applied)} parameter(s)")
 
     def restrict_glass_protocol(self):
-        """Decomposition ▸ Advanced ▸ Restrict around current values — apply
+        """Edit ▸ Constraints ▸ Restrict around current values — apply
         Edén 2023 §8.3's restricted-range recommendation in one step:
         δiso ± a window around the current value for every site, a physical
         FWHM floor for analytic (spin-½ style) peaks, amplitudes left free.

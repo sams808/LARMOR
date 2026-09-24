@@ -66,9 +66,74 @@ class _ChromeMixin:
         self.explorer.batch_requested.connect(self.run_batch_fit)
         self.explorer.inventory_requested.connect(self.open_session_inventory)
         self.explorer.overlay_requested.connect(self.add_overlay_path)
+        self.explorer.open_paths = self._open_source_paths
+        self.explorer.renamed.connect(self._on_explorer_renamed)
         self.explorer_dock.setWidget(self.explorer)
         self.explorer_dock.setMinimumWidth(230)
         self.addDockWidget(Qt.LeftDockWidgetArea, self.explorer_dock)
+
+    def _open_source_paths(self) -> list[str]:
+        """Every data path LARMOR holds open: the active document, each
+        workspace snapshot and every overlay -- a folder containing one of
+        them is refused a rename on disk."""
+        paths = [getattr(self, "source_path", None)]
+        for ws in getattr(self, "workspaces", []) or []:
+            snap = ws.get("snap") or {}
+            paths.append(snap.get("source_path"))
+            paths += [ov.get("source") for ov in snap.get("overlays", []) or []]
+        paths += [ov.get("source") for ov in getattr(self, "_overlays", []) or []]
+        return [p for p in paths if p]
+
+    def _on_explorer_renamed(self, old: str, new: str):
+        """The Explorer renamed a sample folder or an EXPNO -- an alias (old
+        == new) or on disk: retarget the open paths, then relabel the title
+        bar, the plot title, the Datasets dock and the Workspaces rows from
+        the alias-aware ``scan.sample_label``."""
+        from larmor import aliases
+        from larmor.io import scan
+
+        def moved(p):
+            if not p or old == new:
+                return p
+            if p == old:
+                return new
+            for sep in ("\\", "/"):
+                if p.startswith(old + sep):
+                    return new + p[len(old):]
+            return p
+
+        def within(p):
+            q = moved(p)
+            return bool(q) and (q == new or q.startswith(new + "\\")
+                                or q.startswith(new + "/"))
+
+        touched = 0
+        for ws in getattr(self, "workspaces", []) or []:
+            snap = ws.get("snap") or {}
+            src = snap.get("source_path")
+            if within(src):
+                snap["source_path"] = moved(src)
+                rec = snap.get("recipe")
+                if isinstance(rec, dict):
+                    rec["sample"] = scan.sample_label(snap["source_path"], {})
+                    if snap.get("kind") == "1d":
+                        ws["title"] = rec["sample"]
+                touched += 1
+        if within(self.source_path):
+            self.source_path = moved(self.source_path)
+            self.setWindowTitle(f"LARMOR — {aliases.window_label(self.source_path)}")
+            if isinstance(self.recipe, dict):
+                self.recipe["sample"] = scan.sample_label(self.source_path, {})
+                self.view.set_title(self.recipe["sample"])
+            touched += 1
+        if touched:
+            self._sync_active()
+            self._refresh_ws_panel()
+            self._refresh_overlays()
+        what = "display name set" if old == new else "renamed on disk"
+        self.statusBar().showMessage(
+            f"{Path(new).name}: {what}" + (f" — {touched} open document(s) "
+                                           "relabelled" if touched else ""))
 
     def _build_workspaces_dock(self):
         from larmor.desktop.workspaces import WorkspacePanel
@@ -460,7 +525,7 @@ class _ChromeMixin:
     def _progress_tick(self, it: int, rms: float):
         # dmfit-style live read-out: the residual stdev and its % change per
         # iteration (varsdev%). Convergence stops the fit once |Δσ%| drops below
-        # the completion threshold (Decomposition ▸ Advanced).
+        # the completion threshold (Fit ▸ Fit settings).
         prev = getattr(self, "_prog_prev_sdev", None)
         if prev and prev > 0 and rms == rms:
             dpct = 100.0 * (rms - prev) / prev

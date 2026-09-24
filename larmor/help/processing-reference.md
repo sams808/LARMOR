@@ -68,7 +68,7 @@ $$S_\text{corr}(\nu) = S(\nu)\,e^{i(\phi_0+\phi_1(\nu-\nu_\text{pivot})/\text{SW
 - **Pivot** ($\nu_\text{pivot}$) — a draggable line (default: the tallest peak,
   shown while the Processing panel is open) about which p1 rotates, TopSpin-style,
   so the peak under it stays in phase.
-- **Drag to phase** — *Drag to phase* in the panel or *Process ▸ Drag to phase*
+- **Drag to phase** — *Drag to phase* in the panel or *Process ▸ Phase ▸ Drag to phase*
   (**Ctrl+P**): a horizontal drag on the spectrum changes p0 (0.25° per pixel), a
   vertical drag changes p1 (1° per pixel, up = positive) about the pivot; each
   drag locks to the direction it starts in; **Shift** = fine (×0.1), **Ctrl+drag**
@@ -93,8 +93,8 @@ $$S_\text{corr}(\nu) = S(\nu)\,e^{i(\phi_0+\phi_1(\nu-\nu_\text{pivot})/\text{SW
 - **Manual baseline (PCHIP, dmfit-style anchors)** — click **Pick anchors**, drop
   as many points as needed (drag to shape); a shape-preserving monotone cubic
   previews live and is **subtracted automatically when you exit anchor mode**.
-- **Iterative baseline (dead-time; Yon et al. 2020)** — *Process ▸ Baseline
-  iterative*. For the **rolling baseline caused by receiver dead time** in
+- **Iterative baseline (dead-time; Yon et al. 2020)** — *Process ▸ Baseline ▸
+  Iterative*. For the **rolling baseline caused by receiver dead time** in
   pulse-acquire (single-pulse) MAS, where a polynomial or arPLS fails. It builds
   the baseline **iteratively**: at each pass a **histogram filter** picks the
   noise/baseline points automatically (the noise band around the histogram mode —
@@ -131,18 +131,18 @@ $$S_\text{corr}(\nu) = S(\nu)\,e^{i(\phi_0+\phi_1(\nu-\nu_\text{pivot})/\text{SW
 - **combine / align / subtract averages** — algebra between spectra: add, align by
   cross-correlation, or subtract an average reference (ssNake *Subtract
   Averages*). Full background subtraction with least-squares scaling is
-  **Process ▸ Subtract a spectrum** (see **Multi-dataset**).
+  **Process ▸ Region / algebra ▸ Subtract a spectrum** (see **Multi-dataset**).
 - `wurst_correct` — divide out a WURST/chirp sweep's excitation profile
-  (centre, sweep width, order N, floor); **Process ▸ WURST excitation
+  (centre, sweep width, order N, floor); **Process ▸ Region / algebra ▸ WURST excitation
   profile…**. The amplitude half of swept-pulse physics — autophase's p2
   handles the phase half.
-- Patterns wider than one acquisition window: **Tools ▸ Stitch
+- Patterns wider than one acquisition window: **Process ▸ Region / algebra ▸ Stitch
   frequency-stepped (VOCS) spectra…** combines sub-spectra acquired at
   stepped transmitter offsets (skyline or coverage-weighted average, with a
   per-edge trim for the excitation roll-off) into one spectrum, and records
   the sources in the recipe's provenance.
 - **pick peaks** — threshold + parabolic interpolation → peak list, and
-  *Decomposition ▸ Add a line at every peak*.
+  *Edit ▸ Add a line at every peak*.
 
 ---
 

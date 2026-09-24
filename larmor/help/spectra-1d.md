@@ -77,7 +77,7 @@ entropy of the real part (the **ACME** criterion of Chen *et al.* 2002), finding
 p0 **and** p1 robustly even on crowded spectra.
 
 **Drag to phase (TopSpin gesture):** press *Drag to phase* in the panel (or
-**Ctrl+P**, *Process ▸ Drag to phase*) and drag on the spectrum — left/right
+**Ctrl+P**, *Process ▸ Phase ▸ Drag to phase*) and drag on the spectrum — left/right
 turns p0 (0.25°/px), up/down turns p1 (1°/px, up = positive) about the pivot; a
 drag locks to whichever direction it starts in, **Shift** makes it fine (×0.1),
 **Ctrl+drag** (or the middle button) still pans, and **Esc** leaves the mode.
@@ -146,7 +146,7 @@ the preview into a working spectrum).
 
 ### Referencing (SR / Calibrate)
 
-Type a spectral-reference **SR** (Hz), or **Process ▸ Calibrate**, click a peak
+Type a spectral-reference **SR** (Hz), or **Process ▸ Reference ▸ Calibrate axis**, click a peak
 (it snaps to the local maximum), and set its known ppm — LARMOR reports the
 resulting SR. Double-click the **experiment strip** to edit nucleus / field /
 νrot / SR, or copy the SR from another spectrum. For a spectrum read from an
@@ -157,7 +157,7 @@ session** applies the confirmed rate to the session's other spectra with the
 same source values (see *Getting started*, MAS-rate check). All referencing is
 a rigid ppm shift of the axis; the raw data is untouched.
 
-**Referencing audit (Tools ▸ Referencing audit…).** Checks a whole session at
+**Referencing audit (Process ▸ Reference ▸ Referencing audit…).** Checks a whole session at
 once. Point it at one month folder of the data tree (`…/DATA/2026-05`): it lists
 the ¹H spectra that carry a reference (adamantane at 1.82 ppm by default;
 the tallest line of each is checked against that value), then compares every
@@ -229,7 +229,7 @@ command line: `larmor srcheck <session folder> --csv audit.csv`.
    Lines that belong to one structural species can be tagged in the **family**
    column of the Fit-Parameters table (the last column; right-click a row ▸
    **Family** for the presets of the nucleus — BO3/BO4, Al(IV)/Al(V)/Al(VI),
-   Q0–Q4 — or type any name; **Decomposition ▸ Label lines from literature
+   Q0–Q4 — or type any name; **Edit ▸ Constraints ▸ Label lines from literature
    ranges** fills it for ²⁷Al and ¹¹B). The Report then adds a bold **Σ** row
    per family and the named ratios of the nucleus (N4 = BO4/(BO3+BO4), ⟨CN⟩ Al,
    ⟨n⟩); their uncertainty propagates the covariance between the line
@@ -256,7 +256,7 @@ Under the spectrum, a one-line strip states whether the last fit's numbers can
 be read as they stand. It is filled after every **Fit** and **Auto Fit** and
 re-evaluated as values change: a coloured pill, the RMSD and $\chi^2_r$ of the
 fit, then one chip per flag. A click on a chip opens the matching detail;
-**F7** (Decomposition ▸ Fit health details…) or a click on the pill lists every
+**F7** (Fit ▸ Fit health details…) or a click on the pill lists every
 flag together with the analysis tools. The colours classify the *kind* of
 flag, not the quality of the fit — LARMOR does not grade a fit, and a fit
 that is merely not accounting for sidebands or a phasing error is never
@@ -304,7 +304,7 @@ hides the strip.
 only where the model is valid and let peaks outside float frozen. **Auto Fit**
 does a multi-start search to escape local minima.
 
-**Three ways to get errors** (Decomposition ▸ Analyze), in increasing rigour and
+**Three ways to get errors** (Fit ▸ Errors), in increasing rigour and
 cost — the strip's `no error bars` chip opens the second one, the rescue when
 the covariance failed:
 
@@ -342,8 +342,7 @@ the covariance failed:
 The full physics, equations and literature for each are in the **Lineshapes —
 models & physics** reference (**? ▸ Lineshapes**).
 
-**Spectrum components have two entry points**, both on the **Decomposition**
-menu:
+**Spectrum components have two entry points**, both on the **Edit** menu:
 
 - **Add background spectrum…** — a spectrum from disk (an empty rotor, an
   impurity, a separately measured phase).
@@ -402,18 +401,18 @@ never written — when the measured and recorded rates disagree by more than
 0.5 % the banner shows **⚠ acquisition says …** and the experiment strip is
 the place to fix it — except for the `sidebands` model line, which has no
 spacing of its own and needs the rate to sit on the teeth.
-**Decomposition ▸ Detect spinning sidebands** (Ctrl+Shift+D) runs the same
+**Edit ▸ Spinning sidebands ▸ Detect spinning sidebands** (Ctrl+Shift+D) runs the same
 search on demand, scanning when the recorded rate yields nothing, and reports
-the reason in the status bar when it finds no repeat. **View ▸ Offer
+the reason in the status bar when it finds no repeat. **Edit ▸ Spinning sidebands ▸ Offer
 spinning-sideband detection on load** turns the automatic offer off.
 
 ---
 
 ## 4 · Measure & export
 
-- **Tools ▸ Integrals & measurements** — drag regions → integral, %, centre of
+- **Process ▸ Region / algebra ▸ Integrals & measurements** — drag regions → integral, %, centre of
   mass, FWHM; **Copy CSV**.
-- **File ▸ Copy plot** (with all fitted lines) / **Save plot image** (PNG/SVG)
+- **File ▸ Export ▸ Copy plot to clipboard** (with all fitted lines) / **Export ▸ Save plot image** (PNG/SVG)
   for slides and papers.
 - **File ▸ Save fit as** — `txt` / `csv` / `json` / **dmfit `.fxmla`**; writes the
   data, model, residual and every component (the dmfit export round-trips the
@@ -429,7 +428,7 @@ spinning-sideband detection on load** turns the automatic offer off.
   right for a saved fit reopened years later and clears itself on the next
   edit — nothing to switch on. The status bar reports the count
   (`marked: 1 fixed · 2 at a bound`).
-- **File ▸ Save spectrum as** — a reopenable CSV with a metadata header.
+- **File ▸ Export ▸ Save spectrum as CSV** — a reopenable CSV with a metadata header.
 - **Provenance.** A saved recipe carries `acquisition` (the block read from
   acqus / procs / title, with the procno), `software` (the versions that
   produced the fit, stamped at every Fit) and `source_sha256` (the hash of the

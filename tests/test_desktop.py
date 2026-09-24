@@ -1564,15 +1564,13 @@ def test_sideband_offer_escape_dismiss_and_workspace_switch(win, qapp, tmp_path)
     assert _banner_shown(win) and "⚠" in win.ssb_banner.label.text()
 
     # menu presence and the shortcut
-    dec = next(m for m in win.menuBar().findChildren(QMenu)
-               if m.title() == "&Decomposition")
-    act = next(a for a in dec.actions()
+    ssb = next(m for m in win.menuBar().findChildren(QMenu)
+               if m.title() == "Spinning &sidebands")       # Edit ▸
+    act = next(a for a in ssb.actions()
                if a.text().startswith("&Detect spinning sidebands"))
     assert act.shortcut() == QKeySequence("Ctrl+Shift+D")
     assert act is win.actDetectSsb
-    view = next(m for m in win.menuBar().findChildren(QMenu)
-                if m.title() == "&View")
-    toggle = next(a for a in view.actions()
+    toggle = next(a for a in ssb.actions()
                   if a.text() == "&Offer spinning-sideband detection on load")
     assert toggle.isCheckable() and toggle is win.actSsbOffer
 

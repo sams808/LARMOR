@@ -17,13 +17,13 @@ how differently they can answer.
 | Estimator | Where | Cost | Assumes | Fails when |
 |---|---|---|---|---|
 | Covariance | printed after every **Fit** (F5), `± error` column | none | χ² is locally quadratic and well conditioned | parameters are strongly correlated or pinned at a bound; sometimes unavailable |
-| χ² profile | **Decomposition > Errors Analysis (χ² profile)…** | 15 refits per parameter | nothing about the shape; one parameter at a time | the scan range is wrong for the parameter |
-| Monte-Carlo | **Decomposition > Monte-Carlo errors…** | 200 refits | the model is right and the residual is white noise at its measured level | the residual is structured, or a bound truncates the trials |
+| χ² profile | **Fit > Errors > χ² profile…** | 15 refits per parameter | nothing about the shape; one parameter at a time | the scan range is wrong for the parameter |
+| Monte-Carlo | **Fit > Errors > Monte-Carlo errors…** | 200 refits | the model is right and the residual is white noise at its measured level | the residual is structured, or a bound truncates the trials |
 
 dmfit's *Errors Analysis* is the χ² profile; its *Monte Carlo* is the third
-row. Two further views support them: **Decomposition > Parameter
+row. Two further views support them: **Fit > Errors > Parameter
 correlations…** shows which pairs the data cannot separate, and
-**Decomposition > χ² map (parameter pair)…** draws χ² over a plane of two
+**Fit > Errors > χ² map (parameter pair)…** draws χ² over a plane of two
 parameters.
 
 ## 2. Covariance — what every fit prints
@@ -99,7 +99,7 @@ re-labels it "Model … edited since fit" until the next Fit.
 
 ## 3. Correlations — where the covariance comes from
 
-**Decomposition > Parameter correlations…** opens the correlation matrix of
+**Fit > Errors > Parameter correlations…** opens the correlation matrix of
 the last fit (red +1, blue −1). Below it:
 
 ```
@@ -121,7 +121,7 @@ a constraint from independent information.
 
 ## 4. The χ² profile
 
-**Decomposition > Errors Analysis (χ² profile)…** opens *Errors Analysis —
+**Fit > Errors > χ² profile…** opens *Errors Analysis —
 χ² profile*. Choose site `s2 — AlO$_6$` and parameter
 `isotropic_chemical_shift_ppm`, then **Scan**. The parameter is fixed at 15
 values spanning ±3 standard errors around the fitted value (here
@@ -162,7 +162,7 @@ to be tens of ppm long. The honest statement remains the one of §3.
 
 ## 5. Monte-Carlo errors
 
-**Decomposition > Monte-Carlo errors…** opens *Monte-Carlo errors —
+**Fit > Errors > Monte-Carlo errors…** opens *Monte-Carlo errors —
 synthetic-noise refits*: `trials` 200 and `seed` 0 by default. **Run** first
 refits the recipe to fix the best fit, measures the noise as the standard
 deviation of the residual over the window, then refits 200 synthetic spectra
@@ -218,7 +218,7 @@ it answers "how would the parameters scatter if the model were right", not
 
 ## 6. The χ² map
 
-**Decomposition > χ² map (parameter pair)…** draws χ² over a 15 × 15 grid
+**Fit > Errors > χ² map (parameter pair)…** draws χ² over a 15 × 15 grid
 (`grid:` box) spanning ±25 % of each of two parameters' fitted values; pick
 them as `X:` and `Y:` and press **Compute**, **Export figure…** saves the
 image. Two maps of the fit above:
@@ -263,13 +263,13 @@ normalized RMSD: 0.0037
 The fit is excellent (RMSD 0.0037, twelve times lower than the ²⁷Al one) and
 the recipe was already converged, so the optimizer barely moves — and lmfit
 cannot form a covariance from a Jacobian at the starting point. The
-`± error` column stays empty, and **Decomposition > Parameter correlations…**
+`± error` column stays empty, and **Fit > Errors > Parameter correlations…**
 answers `No covariance available — run a fit first (a fit pinned at bounds or
 with fixed parameters may not report one).` LARMOR retries the covariance
 with a second algorithm before giving up; when that fails too, the two other
 estimators still work.
 
-The χ² profile does: **Decomposition > Errors Analysis (χ² profile)…**, site
+The χ² profile does: **Fit > Errors > χ² profile…**, site
 `s2 — BO$_4$`, parameter `isotropic_chemical_shift_ppm`, **Scan**. With no
 standard error to set the range, the scan spans ±25 % of the value
 (−0.54 … −0.08 ppm), and the profile is a clean parabola that rises to 40
@@ -299,7 +299,7 @@ it agrees with the profile.
   value, and every exported table marks the value with ‡ (fixed values †,
   linked values §) with a footnote naming the bound. Loosen the bound or fix
   the parameter deliberately, then refit.
-- **Decomposition > Report (quantify)** (F6) integrates each site over the
+- **Fit > Report** (F6) integrates each site over the
   window and reports populations `± error`; those errors are first-order
   propagation of the amplitude covariance and inherit its limitations.
 - The Report's family sums and named ratios (the Σ rows and N₄ of lines

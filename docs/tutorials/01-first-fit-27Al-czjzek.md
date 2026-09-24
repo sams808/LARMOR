@@ -101,7 +101,7 @@ after **F5** on this dataset the fit-health strip under the spectrum reads
 `s2` is the AlO₆ site, whose position and Czjzek width trade off perfectly —
 and an amber `residual: structure left` chip from the runs test. Every value
 is physical, so the pill is never red here. Clicking the degenerate chip
-opens the correlation matrix (Decomposition ▸ Parameter correlations);
+opens the correlation matrix (Fit ▸ Errors ▸ Parameter correlations);
 **F7** lists every flag.
 
 Tutorial 2 shows how to add exactly those constraints.

@@ -266,8 +266,8 @@ class _SidebandsMixin:
             "spinning-sideband offer: "
             + ("ON — a banner appears when a loaded spectrum repeats at ±νrot"
                if on else
-               "off (Decomposition ▸ Detect spinning sidebands still works on "
-               "demand)"))
+               "off (Edit ▸ Spinning sidebands ▸ Detect spinning sidebands still "
+               "works on demand)"))
         self._maybe_offer_sidebands()
 
     @staticmethod

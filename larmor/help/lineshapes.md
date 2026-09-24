@@ -141,7 +141,7 @@ sideband-intensity analysis of MAS.
 **Use it for** a quick empirical description of a sideband pattern when you don't
 need to invert it to a full CSA/quadrupolar tensor. For a *physical* sideband
 manifold from a shielding tensor, use **CSA powder** instead, which generates the
-sidebands from ζ and η. **Decomposition ▸ Detect spinning sidebands** (or the
+sidebands from ζ and η. **Edit ▸ Spinning sidebands ▸ Detect spinning sidebands** (or the
 automatic offer that appears when a loaded spectrum repeats at ±ν_rot) can seed
 this model from the measured manifold — `n_ssb` from the highest matched order,
 `r` from the measured height ratios — through the banner's *as one `sidebands`
@@ -166,7 +166,7 @@ comes out is the amount of that reference present, not a set of NMR parameters.
 The amplitude is **unbounded, so it may be negative** — the case that needs it is
 a shifted copy of the spectrum itself, used to cancel a satellite-transition or
 spinning-sideband manifold that repeats at the MAS rate (shift = ν_rot / SFO ppm).
-**Decomposition ▸ Add a copy of this spectrum…** does exactly that from the trace
+**Edit ▸ Spinning sidebands ▸ Add a copy of this spectrum…** does exactly that from the trace
 on screen, at ±νrot. Two cautions with a copy of the *same* data: it is degenerate
 with the rest of the model if both its amplitude and its shift are free (the copy
 alone can reproduce the whole spectrum at amplitude 1, shift 0), so the shift is

@@ -453,8 +453,8 @@ def _message(rule: KeyRule, rep: KeyReport, params: list) -> str:
             txt += f" ({'/'.join(wins)})"
     if rule.key == "SF" and len(reps) >= 2:
         lo, hi = min(reps), max(reps)
-        txt += (f" — {(hi - lo) * 1e6 / hi:.2f} ppm apart; see Tools ▸ Referencing "
-                "audit")
+        txt += (f" — {(hi - lo) * 1e6 / hi:.2f} ppm apart; see Process ▸ "
+                "Reference ▸ Referencing audit")
     if rep.tie and not rep.varies:
         txt += " (tie: first spectrum taken as reference)"
     return txt

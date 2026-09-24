@@ -37,7 +37,8 @@ TUTORIALS = [
     ("07-static-81Br-wcpmg", "7 · Static wideline — ⁸¹Br WURST-CPMG"),
 ]
 STEMS = [s for s, _ in TUTORIALS]
-TOP_MENUS = {"File", "Process", "Decomposition", "View", "Tools", "Plotting", "Help"}
+TOP_MENUS = {"File", "Edit", "Process", "Fit", "Series", "Tools", "View",
+             "Plotting", "Help"}
 
 
 # ------------------------------------------------------------------ helpers
