@@ -35,6 +35,7 @@ from typing import Callable
 
 import numpy as np
 
+from larmor import display
 from larmor import recipe as _recipe
 
 #: bundle schema version written by :func:`build_bundle`. v1: 1D workspaces
@@ -179,6 +180,16 @@ def view2d_persisted(state: dict) -> dict:
     }
 
 
+def num_or(value, default: float) -> float:
+    """A finite float, else ``default`` -- a missing or unreadable overlay
+    display field (scale / shift / yoff) of a bundle."""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return float(default)
+    return v if np.isfinite(v) else float(default)
+
+
 def entry_1d(ws: dict) -> dict | None:
     """A 1D workspace: spectrum arrays, processing recipe, fit, and its
     overlays by reference. None when the snapshot holds no spectrum."""
@@ -190,9 +201,13 @@ def entry_1d(ws: dict) -> dict | None:
     # everything else in this codebase (Recipe, batch CSVs, ...); an overlay
     # with no source (e.g. one hand-typed from an in-memory array with nothing
     # on disk) can't be restored and is dropped rather than erroring.
+    # ... plus each overlay's display transform (scale x, shift ppm, y
+    # offset as a fraction of the active span) -- larmor.display.OVERLAY_DEFAULTS
+    # when absent, so a bundle written before they existed reads the same
     overlays = [{"label": o.get("label", ""), "color": o.get("color", ""),
                  "visible": bool(o.get("visible", True)),
-                 "source": o.get("source", "")}
+                 "source": o.get("source", ""),
+                 **{k: num_or(o.get(k), d) for k, d in display.OVERLAY_DEFAULTS.items()}}
                 for o in snap.get("overlays", []) if o.get("source")]
     return {
         "kind": "1d",

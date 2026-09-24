@@ -164,7 +164,7 @@ SURFACE = (
     'closeEvent', '_restore_session', 'on_family_changed',
 )
 
-# 214 menu rows: (menu path, text, shortcut, checkable, has submenu)
+# 219 menu rows: (menu path, text, shortcut, checkable, has submenu)
 GOLDEN_MENU = (
     ((), '&File', '', False, True),
     (('&File',), '&Open…', 'Ctrl+O', False, False),
@@ -315,6 +315,11 @@ GOLDEN_MENU = (
     (('&View', 'Axis &unit'), 'δ (&ppm)', '', True, False),
     (('&View', 'Axis &unit'), '&kHz  (offset from 0 ppm)', '', True, False),
     (('&View', 'Axis &unit'), '&MHz  (offset from 0 ppm)', '', True, False),
+    (('&View',), '&Y axis', '', False, True),
+    (('&View', '&Y axis'), '&Raw intensity', '', True, False),
+    (('&View', '&Y axis'), 'Normalise to &maximum', '', True, False),
+    (('&View', '&Y axis'), 'Normalise to &area', '', True, False),
+    (('&View', '&Y axis'), 'Normalise to area of a &region…', '', True, False),
     (('&View',), 'Czjzek &width display', '', False, True),
     (('&View', 'Czjzek &width display'), 'σ(Cq)  —  the fitted Czjzek distribution width (mrsimulator σ)', '', True, False),
     (('&View', 'Czjzek &width display'), "Cq ≈ 2σ  —  dmfit's sCZ_CQ = the Czjzek-paper σ_Cz (2σ)", '', True, False),

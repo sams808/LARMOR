@@ -8,7 +8,7 @@ import pyqtgraph as pg
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
 
-from larmor import cellparse
+from larmor import cellparse, display
 from larmor.desktop import theme
 from larmor.desktop.axes import plain_units
 from larmor.phasedrag import DragGesture
@@ -90,6 +90,34 @@ class AnchoredViewBox(pg.ViewBox):
     #: callable(MouseDragEvent) armed by SpectrumView.set_phase_drag_mode;
     #: None = the ViewBox pans/zooms as usual
     phase_drag_handler = None
+    #: callable((x_a, x_b)) -> ((xlo, xhi), (ylo, yhi)) | None, armed by
+    #: SpectrumView: given the x range a caller REQUESTS it returns the Full
+    #: view to set instead when that request no longer shows the data at all
+    #: or is wider than SNAP_WIDTH_FACTOR data spans (larmor.display.snap_back),
+    #: None to let the request through. Every mouse pan / wheel zoom / axis
+    #: drag and every programmatic setXRange funnels through setRange, and
+    #: the request is inspected BEFORE pyqtgraph clamps it to setLimits (a
+    #: range-changed signal only ever sees the clamped result, which always
+    #: overlaps the data once limits exist).
+    snap_guard = None
+
+    def setRange(self, rect=None, xRange=None, yRange=None, padding=None,
+                 update=True, disableAutoRange=True):
+        guard = self.snap_guard
+        if guard is not None:
+            req = None
+            if rect is not None:
+                req = (rect.left(), rect.right())
+            elif xRange is not None:
+                req = (xRange[0], xRange[1])
+            full = guard(req) if req is not None else None
+            if full is not None:
+                (xlo, xhi), (ylo, yhi) = full
+                super().setRange(xRange=(xlo, xhi), yRange=(ylo, yhi), padding=0,
+                                 update=update, disableAutoRange=True)
+                return
+        super().setRange(rect=rect, xRange=xRange, yRange=yRange, padding=padding,
+                         update=update, disableAutoRange=disableAutoRange)
 
     def phase_drag_takes(self, ev, axis=None) -> bool:
         """Does this drag belong to the phase gesture (left button on the
@@ -155,6 +183,19 @@ class SpectrumView(pg.PlotWidget):
         pi.invertX(True)                              # ppm convention
         self._axis_unit = "ppm"                       # display unit only
         self._axis_sfo_MHz = 0.0
+        # display Y transform (View > Y axis): ONE factor, computed from the
+        # active real spectrum by larmor.display.y_factor, multiplies
+        # everything drawn for it (_disp); the inverse maps the interactive
+        # handles -- paddles, click-to-add, baseline anchors -- back to raw
+        # amplitudes. Overlays are normalised by their own trace in
+        # mw_overlays._refresh_overlays through the same helper.
+        self._y_mode = "raw"
+        self._y_region = None
+        self._y_scale = 1.0
+        self._trace_raw_y = None        # raw y of the displayed ppm trace
+        self._model_args = None         # the last set_model call (replayed)
+        self._paddle_states = []        # the last set_paddles call (rescaled)
+        self._limits = None             # the setLimits envelope in force
         tick_font = QFont()
         tick_font.setPointSize(9)
         for name in ("bottom", "left"):
@@ -255,6 +296,8 @@ class SpectrumView(pg.PlotWidget):
             attach_plot_menu(self, title="spectrum")
         except Exception:
             pass
+        # a pan or zoom that loses the spectrum comes back to the Full view
+        pi.getViewBox().snap_guard = self._snap_guard
 
     #: fraction of the data span drawn beyond each end of the experiment
     #: when the model is masked to the data (a small margin, so a curve that
@@ -285,6 +328,87 @@ class SpectrumView(pg.PlotWidget):
         if mask is None:
             return arrays
         return tuple(None if a is None else np.asarray(a)[mask] for a in arrays)
+
+    # ---------------------------------------------------------------- Y transform
+    def y_mode(self) -> tuple:
+        """(mode, region) of View > Y axis -- "raw" / "max" / "area" /
+        "region" and the (hi, lo) ppm region of the last (else None)."""
+        return self._y_mode, self._y_region
+
+    def y_scale(self) -> float:
+        """display y = raw y * y_scale() for everything drawn for the active
+        spectrum (1.0 in raw mode); the inverse takes a handle's position
+        back to a raw amplitude."""
+        return self._y_scale
+
+    def set_y_mode(self, mode: str, region=None):
+        """Switch the plotting area's Y display. The factor is recomputed
+        from the active real spectrum (larmor.display.y_factor) and every
+        item redrawn -- experiment, model, components, residual, paddles,
+        baseline anchors -- with the current zoom following in normalised
+        coordinates and the axis label saying what the numbers are.
+        Display only: nothing stored changes, and the factor follows the
+        next spectrum that arrives."""
+        mode = mode if mode in display.Y_MODES else "raw"
+        if mode == "region" and region is None:
+            mode = "raw"
+        self._y_mode = mode
+        self._y_region = ((max(region), min(region)) if mode == "region"
+                          else None)
+        self._apply_y_scale()
+
+    def _recompute_y_scale(self) -> float:
+        if self._freq_y is None:
+            return 1.0
+        return display.y_factor(self._y_mode, self._freq_x, self._freq_y,
+                                self._y_region)
+
+    def _disp(self, y):
+        """Raw -> display y (the array itself when the factor is 1)."""
+        f = self._y_scale
+        if y is None or f == 1.0:
+            return y
+        return np.asarray(y, float) * f
+
+    def _apply_y_scale(self):
+        old = self._y_scale
+        self._y_scale = new = self._recompute_y_scale()
+        r = new / old if old else 1.0
+        # the zoom to carry over, read BEFORE the redraw: the new limits
+        # envelope (display units) would clamp the old-unit range first
+        vb = self.getPlotItem().getViewBox()
+        _xr, (y0, y1) = vb.viewRange()
+        if self._trace_raw_y is not None and self._domain == "freq":
+            self._exp.setData(self._freq_x, self._disp(self._trace_raw_y))
+        if self._model_args is not None:
+            self.set_model(*self._model_args)
+        for pad, st in zip(self._paddles, self._paddle_states):
+            _idx, pos, amp, fwhm, _movable = st
+            pad.set_state(pos, amp * new, fwhm)
+        for anchor in self._bl_anchors:             # anchors sit at display y
+            p = anchor.pos()
+            anchor.setPos(p.x(), p.y() * r)
+        self._update_baseline_curve()
+        # a fit in flight: its trail is in the old scale, the next frame is not
+        self._anim_hist = []
+        for it in (*self._anim_ghosts, self._anim_main):
+            if it is not None:
+                it.setData([], [])
+        self._update_limits()
+        if r != 1.0 and np.isfinite(r) and self._domain == "freq":
+            vb.setYRange(y0 * r, y1 * r, padding=0)       # the zoom follows
+        self._apply_y_label()
+
+    def _apply_y_label(self):
+        t = theme.active()
+        text = ("intensity" if self._domain == "time"
+                else display.y_axis_label(self._y_mode, self._y_region))
+        self.setLabel("left", text, color=t.axis, **{"font-size": "10pt"})
+
+    def _paddle_moved_raw(self, idx, pos, amp, fwhm):
+        """A paddle reports its DISPLAY amplitude; the workbench edits raw."""
+        self.paddle_moved.emit(int(idx), float(pos), float(amp) / self._y_scale,
+                               float(fwhm))
 
     # ---------------------------------------------------------------- fit animation
     def start_fit_animation(self):
@@ -322,6 +446,7 @@ class SpectrumView(pg.PlotWidget):
         from PySide6.QtGui import QColor
         x = np.asarray(x, float); y = np.asarray(y, float)
         x, y = self._masked(self._model_mask(x), x, y)     # data range only
+        y = self._disp(y)                                  # the plot's Y transform
         self._anim_hist.append((x, y))
         self._anim_hist = self._anim_hist[-4:]      # main + up to 3 ghosts
         ghosts = self._anim_hist[:-1]
@@ -381,7 +506,7 @@ class SpectrumView(pg.PlotWidget):
         # it from apply_theme() while a +-6000 ppm spectrum was shown froze a
         # "k" prefix -- ticks 6 ... -6 under a "(kppm)" label (Sam, 2026-09-24)
         plain_units(pi, axes=("bottom",))
-        self.setLabel("left", "intensity", **label_style)
+        self._apply_y_label()
         self.showGrid(x=True, y=True, alpha=t.grid_alpha)
         self._exp.setPen(pg.mkPen(t.experiment, width=1.4))
         self._model.setPen(pg.mkPen(t.model, width=1.8))
@@ -418,6 +543,7 @@ class SpectrumView(pg.PlotWidget):
             ax.set_factor(axis_factor(self._axis_unit, self._axis_sfo_MHz))
         t = theme.active()
         self._apply_axis_label({"color": t.axis, "font-size": "10pt"})
+        self._update_limits()
 
     @property
     def domain(self) -> str:
@@ -527,7 +653,9 @@ class SpectrumView(pg.PlotWidget):
             ev.accept()
             return
         if self._add_mode is not None:
-            self.add_requested.emit(float(p.x()), abs(float(p.y())))
+            # the click is in display units; the new line's amplitude is raw
+            self.add_requested.emit(float(p.x()),
+                                    abs(float(p.y())) / self._y_scale)
             ev.accept()
 
     # ---------- calibrate (reference a peak) ----------
@@ -683,7 +811,9 @@ class SpectrumView(pg.PlotWidget):
         self._update_baseline_curve()
 
     def baseline_anchors(self) -> list[tuple[float, float]]:
-        return sorted(((float(t.pos().x()), float(t.pos().y()))
+        """(x, y) of the anchors in RAW units (they sit at display y)."""
+        f = self._y_scale
+        return sorted(((float(t.pos().x()), float(t.pos().y()) / f)
                        for t in self._bl_anchors), key=lambda a: a[0])
 
     def clear_baseline(self):
@@ -715,7 +845,7 @@ class SpectrumView(pg.PlotWidget):
         if y is None:
             self._bl_curve.setData([], [])
         else:
-            self._bl_curve.setData(x, y)
+            self._bl_curve.setData(x, self._disp(y))
 
     # ---------- fit zones ----------
     def set_zones(self, zones: list, on_change=None):
@@ -882,7 +1012,10 @@ class SpectrumView(pg.PlotWidget):
                 # data arriving while drag-to-phase is armed: the dock is
                 # already visible, so nothing else would create the pivot
                 self.show_phase_pivot(True)     # no-op once it exists
-        self._exp.setData(x, y)
+        self._trace_raw_y = y
+        self._y_scale = self._recompute_y_scale()   # the active spectrum changed
+        self._exp.setData(x, self._disp(y))
+        self._update_limits()
         self.set_trace_label("experiment")
         self.experiment_set.emit()
 
@@ -892,7 +1025,9 @@ class SpectrumView(pg.PlotWidget):
         calibrate snapping keep using it) and experiment_set is not emitted."""
         if self._domain == "time":
             self._leave_time_domain()
-        self._exp.setData(self._freq_x, y)
+        self._trace_raw_y = y
+        self._exp.setData(self._freq_x, self._disp(y))
+        self._update_limits()
         self.set_trace_label(label)
 
     def set_fid(self, t_ms: np.ndarray, y: np.ndarray, label: str):
@@ -912,9 +1047,15 @@ class SpectrumView(pg.PlotWidget):
                 ax.set_factor(1.0)
             th = theme.active()
             self._apply_axis_label({"color": th.axis, "font-size": "10pt"})
+            self._apply_y_label()           # the FID is drawn raw
             self._set_freq_items_visible(False)
             self._arm_phase_drag()          # no phasing of a FID: left drag pans
+        # the FID is drawn raw (the Y transform belongs to the spectrum); the
+        # pan envelope follows the ms axis so the auto range below is not
+        # clamped to the ppm one
+        self._trace_raw_y = None
         self._exp.setData(t_ms, np.asarray(y, float))
+        self._update_limits()
         self.set_trace_label(label)
         if entering or self._fid_aq != aq:      # new AQ (zf / TDeff): refit
             pi.enableAutoRange()
@@ -930,6 +1071,11 @@ class SpectrumView(pg.PlotWidget):
         self.set_axis_unit(self._axis_unit, self._axis_sfo_MHz)
         self._set_freq_items_visible(True)
         self._arm_phase_drag()              # the gesture is back with the ppm axis
+        self._apply_y_label()
+        # the ms-axis envelope must not clamp the ppm window being restored;
+        # the ppm trace drawn next (set_experiment / set_channel_trace)
+        # installs the spectrum's own
+        self._clear_limits()
         if self._freq_ranges is not None:
             (x0, x1), (y0, y1) = self._freq_ranges
             pi.setXRange(min(x0, x1), max(x0, x1), padding=0)
@@ -968,14 +1114,19 @@ class SpectrumView(pg.PlotWidget):
     def set_model(self, x, total, per_site, labels, hidden: set[int],
                   exp_x=None, exp_y=None):
         if x is None:
+            self._model_args = None
             self._model.setData([], [])
             self._resid.setData([], [])
+            self._resid_zero.setVisible(False)
             for c in self._components:
                 self.removeItem(c)
             self._components.clear()
             self._comp_data = []
             self._refresh_comp_labels()
+            self._update_limits()
             return
+        # remembered so a change of the Y display mode redraws the same model
+        self._model_args = (x, total, per_site, labels, hidden, exp_x, exp_y)
         # the model is simulated on the (wider) kernel axis: draw it only
         # across the experiment (+ a small margin) so nothing model-side ever
         # reaches past the data -- the view range is the data's and the user's
@@ -984,14 +1135,15 @@ class SpectrumView(pg.PlotWidget):
             mask = None                      # nothing of the model in range
         x, total = self._masked(mask, x, total)
         per_site = list(self._masked(mask, *per_site)) if per_site else []
-        self._model.setData(x, total)
+        self._model.setData(x, self._disp(total))
 
-        # residual, offset below zero as a dedicated strip
+        # residual, offset below zero as a dedicated strip (raw arithmetic,
+        # then the plot's Y transform)
         if self.show_residual and exp_x is not None and len(exp_x):
             yi = np.interp(exp_x, x, total)
             offset = -0.10 * float(np.max(exp_y)) if len(exp_y) else 0.0
-            self._resid.setData(exp_x, (exp_y - yi) + offset)
-            self._resid_zero.setPos(offset)
+            self._resid.setData(exp_x, self._disp((exp_y - yi) + offset))
+            self._resid_zero.setPos(offset * self._y_scale)
             self._resid_zero.setVisible(True)
         else:
             self._resid_zero.setVisible(False)
@@ -1015,15 +1167,16 @@ class SpectrumView(pg.PlotWidget):
                 col = pg.mkColor(site_color(i))
                 item.setPen(pg.mkPen(col, width=1.3, style=Qt.DashLine))
                 fill = pg.mkColor(col); fill.setAlpha(28)
-                item.setData(x, ys, fillLevel=0.0, fillBrush=pg.mkBrush(fill))
+                ya = np.asarray(self._disp(ys), float)
+                item.setData(x, ya, fillLevel=0.0, fillBrush=pg.mkBrush(fill))
                 name = labels[i] if i < len(labels) and labels[i] else ""
                 text = cellparse.index_to_letter(i) + (f" \u00b7 {name}" if name else "")
-                ya = np.asarray(ys, float)
                 if ya.shape == xa.shape and ya.size:
                     self._comp_data.append((i, xa[order], ya[order], text))
             else:
                 item.setData([], [])
         self._refresh_comp_labels()
+        self._update_limits()
 
     # ---------- component labels ----------
     def set_show_labels(self, on: bool):
@@ -1091,6 +1244,7 @@ class SpectrumView(pg.PlotWidget):
             item.setZValue(-10)
             item.setVisible(self._domain == "freq" and not self._overlays_hidden)
             self._overlay_items.append(item)
+        self._update_limits()
 
     def set_overlays_hidden(self, hidden: bool):
         """View > Overlays: hide or show every compared spectrum at once
@@ -1098,6 +1252,7 @@ class SpectrumView(pg.PlotWidget):
         self._overlays_hidden = bool(hidden)
         for it in self._overlay_items:
             it.setVisible(self._domain == "freq" and not self._overlays_hidden)
+        self._update_limits()
 
     # ---------- markers (legacy InfiniteLine API kept for tests) ----------
     def set_markers(self, positions: list[tuple[int, float, bool]]):
@@ -1129,19 +1284,129 @@ class SpectrumView(pg.PlotWidget):
         for p in self._paddles:
             self.removeItem(p)
         self._paddles.clear()
+        self._paddle_states = [tuple(s) for s in states]
+        f = self._y_scale
         for idx, pos, amp, fwhm, movable in states:
-            pad = Paddle(idx, site_color(idx), pos, amp, fwhm, movable)
-            pad.moved.connect(self.paddle_moved)
+            # the paddle lives in DISPLAY units; its drags come back raw
+            # through _paddle_moved_raw
+            pad = Paddle(idx, site_color(idx), pos, amp * f, fwhm, movable)
+            pad.moved.connect(self._paddle_moved_raw)
             pad.released.connect(self.paddle_released)
             # a paddle is a model handle: it must not pull the auto range
             # (a linked sideband copy can sit outside the data)
             self.getPlotItem().addItem(pad, ignoreBounds=True)
             pad.setVisible(self._domain == "freq")
             self._paddles.append(pad)
+        self._update_limits()
 
     def show_paddles(self, on: bool):
         for p in self._paddles:
             p.setVisible(on and self._domain == "freq")
+
+    # ---------- the Full view, the pan envelope and the snap-back ----------
+    def zoom_full(self):
+        """View > Zoom > Full spectrum and the sidebar's Full: the x range is
+        the displayed trace's extent (+ FULL_MARGIN_FRAC of its span on each
+        side, high -> low ppm on the inverted axis), the y range its
+        min...max with room for the residual strip below zero -- from the
+        data arrays (larmor.display.full_extents), never from pyqtgraph's
+        auto-range, which the model items would widen. The same on the
+        FID's ms axis. Auto-range stays off afterwards: the view holds."""
+        ext = self._full_extents()
+        pi = self.getPlotItem()
+        if ext is None:
+            pi.enableAutoRange()
+            return
+        (xlo, xhi), (ylo, yhi) = ext
+        pi.getViewBox().setRange(xRange=(xlo, xhi), yRange=(ylo, yhi), padding=0)
+
+    def _display_arrays(self):
+        """(x, y) of the trace on the canvas: the FID on the ms axis, else
+        the ppm axis with the displayed channel (falling back to the scaled
+        real trace while a domain switch is half-way)."""
+        if self._domain == "time":
+            return self._exp.xData, self._exp.yData
+        x = self._freq_x
+        if x is None or not len(x):
+            return None, None
+        y = self._exp.yData
+        if y is None or len(y) != len(x):
+            y = self._disp(self._freq_y)
+        return x, y
+
+    def _full_extents(self):
+        x, y = self._display_arrays()
+        if x is None or y is None:
+            return None
+        return display.full_extents(x, y)
+
+    @staticmethod
+    def _bounds_of(arrays):
+        lo, hi = [], []
+        for arr in arrays:
+            if arr is None or not len(arr):
+                continue
+            a = np.asarray(arr, float)
+            if np.isfinite(a).any():
+                lo.append(float(np.nanmin(a)))
+                hi.append(float(np.nanmax(a)))
+        return lo, hi
+
+    def _drawn_x_bounds(self):
+        """(lo, hi) in axis units of everything the user may want to reach:
+        the trace, the visible overlays and the visible paddles (a linked
+        sideband copy can sit outside the data); None without data."""
+        x, _ = self._display_arrays()
+        lo, hi = self._bounds_of(
+            [x] + [it.xData for it in self._overlay_items if it.isVisible()])
+        for pad in self._paddles:
+            if pad.isVisible():
+                lo.append(float(pad._pos))
+                hi.append(float(pad._pos))
+        if not lo:
+            return None
+        return min(lo), max(hi)
+
+    def _drawn_y_bounds(self):
+        lo, hi = self._bounds_of(
+            [self._exp.yData,
+             self._model.yData if self._model.isVisible() else None]
+            + [it.yData for it in self._overlay_items if it.isVisible()])
+        for pad in self._paddles:
+            if pad.isVisible():
+                lo.append(min(0.0, float(pad._amp)))
+                hi.append(max(0.0, float(pad._amp)))
+        if not lo:
+            return None
+        return min(lo), max(hi)
+
+    def _update_limits(self):
+        """ViewBox.setLimits: LIMIT_X_SPANS data spans beyond the drawn x
+        extent and LIMIT_Y_SPANS beyond the drawn y extent, so the mouse
+        cannot pan into nowhere. Refreshed by every load, overlay, paddle,
+        model, unit or Y-mode change; a no-op when the envelope is
+        unchanged."""
+        xb, yb = self._drawn_x_bounds(), self._drawn_y_bounds()
+        if xb is None or yb is None:
+            lim = {"xMin": None, "xMax": None, "yMin": None, "yMax": None}
+        else:
+            lim = display.view_limits(xb, yb)
+        if lim != self._limits:
+            self._limits = lim
+            self.getPlotItem().getViewBox().setLimits(**lim)
+
+    def _clear_limits(self):
+        self._limits = {"xMin": None, "xMax": None, "yMin": None, "yMax": None}
+        self.getPlotItem().getViewBox().setLimits(**self._limits)
+
+    def _snap_guard(self, requested):
+        """AnchoredViewBox.snap_guard: the Full view when a REQUESTED x range
+        leaves the drawn data entirely or spans more than SNAP_WIDTH_FACTOR
+        data spans; None (let it through) for any zoom inside the data."""
+        bounds = self._drawn_x_bounds()
+        if bounds is None or not display.snap_back(requested, bounds):
+            return None
+        return self._full_extents()
 
     def current_xrange(self) -> tuple[float, float]:
         """(hi, lo) of the displayed frequency window in ppm -- while the FID

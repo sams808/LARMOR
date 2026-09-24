@@ -13,6 +13,7 @@ Owned state: the docks and their panels (``explorer``, ``ws_panel``,
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import numpy as np
@@ -166,7 +167,13 @@ class _ChromeMixin:
         self.datasets_panel.color_changed.connect(self.overlay_set_color)
         self.datasets_panel.offset_changed.connect(lambda _: self._refresh_overlays())
         self.datasets_panel.compare_requested.connect(self.compare_overlays)
-        self.datasets_panel.match_changed.connect(lambda _: self._refresh_overlays())
+        self.datasets_panel.match_changed.connect(self.overlay_match_height)
+        # the per-overlay display transform (scale x, shift ppm, y offset)
+        # and the row's right-click Reset
+        self.datasets_panel.scale_changed.connect(self.overlay_set_scale)
+        self.datasets_panel.shift_changed.connect(self.overlay_set_shift)
+        self.datasets_panel.yoff_changed.connect(self.overlay_set_yoff)
+        self.datasets_panel.reset_requested.connect(self.overlay_reset)
         self.datasets_dock.setWidget(self.datasets_panel)
         self.addDockWidget(Qt.LeftDockWidgetArea, self.datasets_dock)
         # stack the left docks as tabs so they share one footprint (kinder on
@@ -399,7 +406,12 @@ class _ChromeMixin:
 
     # ------------------------------------------------------------- view ops
     def zoom_full(self):
-        self.view.getPlotItem().enableAutoRange()
+        """View > Zoom > Full spectrum and the sidebar's Full: the data
+        extent -- x with a small margin, y with room for the residual strip
+        -- computed from the arrays, never pyqtgraph's auto-range (which the
+        model items would widen), on the ppm axis and on the FID's ms axis
+        alike (SpectrumView.zoom_full)."""
+        self.view.zoom_full()
 
     def zoom_sites(self):
         if self.view.domain == "time":       # a ppm window on the ms axis
@@ -439,7 +451,8 @@ class _ChromeMixin:
                 lo = min(lo, float(np.min(my[msel])))
         lo = min(lo, -0.12 * hi)          # room for the offset residual
         pad = 0.08 * (hi - lo or 1.0)
-        self.view.setYRange(lo - pad, hi + pad, padding=0)
+        f = self.view.y_scale()           # raw -> the plot's Y display units
+        self.view.setYRange((lo - pad) * f, (hi + pad) * f, padding=0)
 
     def _toggle_resid(self, on):
         self.view.show_residual = on
@@ -455,6 +468,65 @@ class _ChromeMixin:
 
     def _toggle_paddles(self, on):
         self.view.show_paddles(on)
+
+    # ------------------------------------------------------------- Y axis display
+    def _set_y_mode(self, mode: str):
+        """View > Y axis: raw intensity / normalise to maximum / to area / to
+        the area of a region... One display factor from the active spectrum
+        for everything drawn for it (SpectrumView.set_y_mode); compared
+        spectra are normalised by their own trace (_refresh_overlays). The
+        recipe, the fit and every export stay in raw units. Remembered in
+        QSettings (not under LARMOR_NO_SESSION)."""
+        from larmor import display
+
+        region = None
+        if mode == "region":
+            region = self._ask_y_region()
+            if region is None:                 # cancelled: keep the current mode
+                self._sync_y_axis_actions()
+                return
+        self.view.set_y_mode(mode, region)
+        mode, region = self.view.y_mode()
+        if not os.environ.get("LARMOR_NO_SESSION"):
+            s = QSettings("LARMOR", "app")
+            s.setValue("yAxisMode", mode)
+            s.setValue("yAxisRegion",
+                       "" if region is None else f"{region[0]:g},{region[1]:g}")
+        self._sync_y_axis_actions()
+        self._refresh_overlays()
+        if mode == "raw":
+            self.statusBar().showMessage("Y axis: raw intensity")
+        else:
+            self.statusBar().showMessage(
+                f"Y axis: {display.y_axis_label(mode, region)} — display only, "
+                "the fit and every export stay in raw units")
+
+    def _ask_y_region(self):
+        """The ppm region for View > Y axis > Normalise to area of a
+        region...: typed, or taken from the fit zones / the current view.
+        None when the dialog is cancelled."""
+        from PySide6.QtWidgets import QDialog
+
+        from larmor.desktop.ynorm_dialog import RegionDialog
+
+        _mode, current = self.view.y_mode()
+        zones = self.view.zone_values()
+        if not zones and self.recipe and self.recipe.get("fit_window_ppm"):
+            w = self.recipe["fit_window_ppm"]
+            zones = [[max(w), min(w)]]
+        view_range = self.view.current_xrange()
+        dlg = RegionDialog(self, current or view_range, zones=zones,
+                           view_range=view_range)
+        if dlg.exec() != QDialog.Accepted:
+            return None
+        return dlg.region()
+
+    def _sync_y_axis_actions(self):
+        """The View > Y axis radio follows the view's mode (a cancelled
+        region dialog, a fallback to raw)."""
+        mode, _region = self.view.y_mode()
+        for key, act in getattr(self, "_y_axis_actions", {}).items():
+            act.setChecked(key == mode)
 
     # ------------------------------------------------------------- progress
     def _build_progress(self):

@@ -30,6 +30,42 @@ a raw `fid`, a dmfit `.fxmla`, a LARMOR `.json` recipe, or a two-column
 and phase **before** the transform. (See **Getting started** for the full import
 matrix.)
 
+### The plotting area — zoom, the Full view and the Y axis
+
+The wheel zooms about the cursor (over an axis: that axis only) and a left
+drag pans. **Full** (the sidebar button, *View ▸ Zoom ▸ Full spectrum*) resets
+the view to the **data**: the x axis spans exactly the acquired spectrum, high
+→ low ppm with a 2 % margin, and the y axis runs from the data minimum to its
+maximum with room for the residual strip below zero. The range is computed
+from the spectrum's own arrays, never from the drawn items, so a model
+simulated on the wider Czjzek kernel axis, a fit in progress or a linked
+sideband paddle outside the data cannot widen it; on the FID display
+(**Ctrl+T**) the same button spans the acquisition time. The view then holds:
+a simulation or a fit result never moves it.
+
+Panning or zooming cannot leave the spectrum behind. The view is bounded to
+one data span beyond each end, and a pan or zoom-out that would no longer show
+any of the spectrum — or would span more than three times its width — comes
+back to the Full view instead; a zoom inside the data is never touched.
+
+**View ▸ Y axis** changes how the plotting area scales intensities, for
+display only: **Raw intensity** (the default), **Normalise to maximum** (the
+active spectrum's maximum reads 1), **Normalise to area** (unit trapezoid area
+over the whole axis) or **Normalise to area of a region…** (unit area over a
+typed ppm range, the fit zones or the current view). One factor, computed from
+the active spectrum, applies to everything drawn for it — experiment, model,
+components, residual, the live fit animation and the paddles, whose drags
+still write raw amplitudes into the recipe — while the recipe, the fit, the
+Report and every data export keep the raw units. Compared spectra (Datasets
+dock, see *Multi-dataset*) are normalised by their **own** maximum or area
+under the same mode, so lineshapes compare across spectra of very different
+intensity; their per-row × scale then acts on top. The y-axis label names the
+mode (*intensity (normalised to area 100…−20 ppm)*), the status bar's y
+readout shows the displayed value, and the choice is remembered between
+sessions. *Export figure…* and *Send to Plotting studio* on the plot's
+right-click menu reproduce the plot as displayed; **File ▸ Save fit as**,
+**Save spectrum as CSV** and the Publication bundle write raw intensities.
+
 ---
 
 ## 2 · Process (the live right-hand panel)
