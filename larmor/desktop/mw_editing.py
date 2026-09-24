@@ -312,7 +312,7 @@ class _EditingMixin:
         self.statusBar().showMessage(f"added {len(peaks)} lines at peaks")
 
     def label_from_literature(self):
-        """Decomposition > Label lines from literature ranges: name every
+        """Edit > Constraints > Label lines from literature ranges: name every
         auto-labelled line after the literature species whose band holds its
         position (View > Literature shift ranges data); user-typed labels are
         kept and reported."""

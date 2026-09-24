@@ -9,7 +9,7 @@ used models, and a "placing … click on the spectrum, Esc to stop" label that
 shows while a placing mode is on.
 
 The menu and the quick buttons hold the SAME checkable ``QAction`` objects as
-``MainWindow._model_actions`` (built with the Decomposition ▸ Add line
+``MainWindow._model_actions`` (built with the Edit ▸ Add line
 submenu), so ``_set_add_mode``, the command palette, the self-test and every
 test that checks a model action keep working unchanged; this module only
 arranges them. The current model is remembered per nucleus in QSettings

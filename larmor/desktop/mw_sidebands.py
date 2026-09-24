@@ -129,7 +129,7 @@ class _SidebandsMixin:
 
     def add_sidebands_for_line(self, idx: int):
         """The fit table's right-click ▸ Add spinning sidebands…: the same
-        dialog as Decomposition ▸ Add spinning sidebands…, line ``idx``
+        dialog as Edit ▸ Spinning sidebands ▸ Add spinning sidebands…, line ``idx``
         preselected."""
         self._ssb_preselect = int(idx)
         self.add_sidebands()
@@ -211,7 +211,7 @@ class _SidebandsMixin:
             self._dismiss_sideband_offer(remember=False)
 
     def detect_sidebands(self):
-        """Decomposition > Detect spinning sidebands: the offer on demand --
+        """Edit > Spinning sidebands > Detect: the offer on demand --
         the ±2 % window around the recorded rate, then a 1–80 kHz scan -- or
         the reason nothing was found, in the status bar."""
         if self.recipe is None or self.exp_amp is None or self.exp_amp.size < 2:
