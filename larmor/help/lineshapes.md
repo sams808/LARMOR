@@ -740,6 +740,24 @@ documented in the MQMAS manual (**? ▸ User manuals ▸ MQMAS**).
 
 ---
 
+### Computing cost, linked copies and Stop
+
+The (C_Q, η) kernel behind the Czjzek family is simulated once per nucleus,
+field, spin rate and window (880 tensors on the default grid; a few seconds cold,
+cached on disk afterwards) in chunks of about a hundred tensors, so **Stop** in
+the status bar is honoured between chunks; a second request for the same kernel
+from another thread (the pre-build at load and the first line's simulation)
+waits for the first instead of simulating it again. Within a fit every site is
+rendered in turn and the stop request is checked between renders. Lines that
+are linked to one parent — a spinning-sideband manifold — share the σ- (and
+d-) dependent reweighting of the kernel per evaluation; only the translation,
+broadening and scaling are done per copy, so five copies cost little more than
+the centreband. A Gaussian broadening the optimiser tries that is wider than
+the simulated axis is clamped to the axis span: the rendered plateau is the
+same, and one evaluation stays bounded (an early trust-region step on a
+spectrum with amplitudes of 10⁶ once asked for a 3·10⁶ ppm width, which took
+minutes per site). Fitted values are unchanged by any of this.
+
 ## Engine & primary references
 
 - **mrsimulator** — solid-state NMR spectrum simulation engine (D. J. Srivastava,

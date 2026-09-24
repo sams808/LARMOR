@@ -66,6 +66,9 @@ class _ProcessingMixin:
                 if self.recipe.get("sites"):
                     self.lines_table.rebuild(self.recipe, self.hidden)
                     self.request_simulation()
+            if self._refresh_sideband_exprs():   # linked copies follow νrot
+                self.lines_table.rebuild(self.recipe, self.hidden)
+                self._update_paddles()
             self._update_exp_label()
             self._maybe_offer_sidebands()     # νrot / SR may have changed
             from larmor.sidebands import format_hz
@@ -220,10 +223,15 @@ class _ProcessingMixin:
         if self.exp_ppm is None or self.exp_amp is None:
             self.statusBar().showMessage("open a spectrum first")
             return
+        from PySide6.QtWidgets import QDialog
+
         from larmor.desktop.baseline_dialog import BaselineDialog
 
         dlg = BaselineDialog(self, self.exp_ppm, self.exp_amp)
-        if dlg.exec() != dlg.Accepted:
+        # QDialog.Accepted on the CLASS: the enum is not reachable through
+        # the instance in PySide6 6.x (AttributeError), so Apply crashed the
+        # moment the dialog closed -- caught by the dialog's first test
+        if dlg.exec() != QDialog.Accepted:
             return
         self.apply_processing(
             [{"op": "iterbaseline", **dlg.params()}], False)

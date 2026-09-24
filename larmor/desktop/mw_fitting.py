@@ -74,14 +74,21 @@ class _FittingMixin:
         from PySide6.QtWidgets import QApplication
 
         self._busy = True
-        QApplication.setOverrideCursor(QCursor(Qt.WaitCursor))
+        # BusyCursor (arrow + hourglass), not WaitCursor: the simulation runs
+        # in a worker and the window stays live -- the new line's row and
+        # paddle are already there, the curve follows. The plain hourglass
+        # read as "frozen" during the seconds of a cold kernel build
+        # (measured 6-8 s for the 880-tensor 27Al basis), which is what
+        # "starting a new line takes some seconds to initialize" described.
+        QApplication.setOverrideCursor(QCursor(Qt.BusyCursor))
         sites = (self.recipe.get("sites") if self.recipe else None) or []
         needs_kernel = any(s.get("model") in ("czjzek", "czjzek_d", "czjzek_corr",
                                               "ext_czjzek", "amorphous")
                            for s in sites)
         self.statusBar().showMessage(
-            "building the lineshape kernel (first Czjzek/Amorphous fit is slow, "
-            "then instant)…" if needs_kernel else "computing…")
+            "building the lineshape kernel in the background (once per "
+            "nucleus / field / spin rate / window; the line is placed, its "
+            "curve follows)…" if needs_kernel else "computing…")
 
     def _sim_busy_off(self):
         self._busy_timer.stop()

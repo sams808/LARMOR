@@ -17,6 +17,7 @@ from PySide6.QtCore import QSettings
 from PySide6.QtWidgets import QLabel, QMessageBox
 
 from larmor import models as model_registry
+from larmor import sidebands as _sb
 
 
 class _SidebandsMixin:
@@ -96,11 +97,15 @@ class _SidebandsMixin:
         for sign, cnt in ((1, fwd.value()), (-1, bwd.value())):
             for k in range(1, cnt + 1):
                 s = copy.deepcopy(base)
+                s.pop("sideband", None)
                 s["label"] = f"{bname}{sign * k:+d}sb"
                 pos = s["params"]["isotropic_chemical_shift_ppm"]
                 pos["value"] = float(pos["value"] + sign * k * nur_ppm)
                 pos["stderr"] = None
                 if link.isChecked():
+                    # the order is remembered so the copy follows a later
+                    # change of νrot (sidebands.refresh_linked)
+                    s["sideband"] = {"parent": int(base_i), "k": int(sign * k)}
                     for pname, p in s["params"].items():
                         p["stderr"] = None
                         if pname == "amplitude":
@@ -108,9 +113,8 @@ class _SidebandsMixin:
                             p["vary"] = True
                             p["value"] = float(p["value"]) * 0.3 ** k
                         elif pname == "isotropic_chemical_shift_ppm":
-                            p["expr"] = (f"s{base_i}.isotropic_chemical_shift_ppm"
-                                         f" {'+' if sign > 0 else '-'} "
-                                         f"{k * nur_ppm:.6g}")
+                            p["expr"] = _sb.linked_position_expr(
+                                base_i, sign * k, nur_ppm)
                         else:
                             p["expr"] = f"s{base_i}.{pname}"
                 added.append(s)
@@ -289,8 +293,22 @@ class _SidebandsMixin:
             return False
         self.recipe["spin_rate_Hz"] = float(round(det.nu_rot_Hz))
         self.recipe["mas_uncertain"] = False
+        self._refresh_sideband_exprs()
         self._update_exp_label()
         return True
+
+    def _refresh_sideband_exprs(self) -> int:
+        """Move every linked sideband copy to the recipe's CURRENT νrot (the
+        one place every writer of spin_rate_Hz calls: the Experiment dialog,
+        the detector's Use, a kept fit carried onto a new spectrum). Returns
+        the number of copies moved; the caller refreshes table / paddles /
+        simulation as it does for any structure change."""
+        if not self.recipe or not self.recipe.get("sites"):
+            return 0
+        return _sb.refresh_linked(
+            self.recipe["sites"],
+            float(self.recipe.get("larmor_frequency_MHz", 0.0) or 0.0),
+            float(self.recipe.get("spin_rate_Hz", 0.0) or 0.0))
 
     def _apply_sideband_choice(self, choice: str, det=None):
         """All three banner actions ('linked' / 'copy' / 'model'): ONE
@@ -379,6 +397,7 @@ class _SidebandsMixin:
             off = float(o.k * det.spacing_ppm)
             s = copy.deepcopy(parent)
             s["label"] = f"{base_name}{o.k:+d}sb"
+            s["sideband"] = {"parent": int(p_idx), "k": int(o.k)}
             for name, prm in s["params"].items():
                 prm["stderr"] = None
                 if name == "amplitude":
@@ -390,8 +409,8 @@ class _SidebandsMixin:
                     prm["value"] = p_amp * float(frac)
                 elif name == "isotropic_chemical_shift_ppm":
                     prm["value"] = p_pos + off
-                    prm["expr"] = (f"s{p_idx}.isotropic_chemical_shift_ppm "
-                                   f"{'+' if off >= 0 else '-'} {abs(off):.6g}")
+                    prm["expr"] = _sb.linked_position_expr(
+                        p_idx, o.k, det.spacing_ppm)
                 else:
                     prm["expr"] = f"s{p_idx}.{name}"
             added.append(s)

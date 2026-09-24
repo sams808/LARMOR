@@ -1857,3 +1857,205 @@ def test_datasets_compare_button_and_overlay_marker(qapp, win, monkeypatch):
     win.compare_overlays()
     assert "no Bruker acquisition files" in win.statusBar().currentMessage()
     assert len(seen) == 1
+
+
+def test_fit_worker_stop_and_cancel_return_within_a_second_mid_evaluation(qapp, monkeypatch):
+    """WA: Stop / Cancel during a LONG residual evaluation (six slow sites,
+    0.48 s per evaluation) come back within a second -- the cancel hook the
+    worker registers is checked between site renders; the latency is one
+    render to notice plus the final full-grid render of the kept point (six
+    renders again), so the sleeps stay short. Stop returns a result
+    (parameters kept), Cancel reports its mode (the app reverts)."""
+    import dataclasses
+    import time
+
+    from larmor.desktop.app import FitWorker
+    from larmor.engine import make_context, simulate_site
+    from larmor.models import base as mbase
+    from larmor.recipe import Param, Recipe, SiteModel
+
+    model = mbase.REGISTRY["gauss_lor"]
+    orig = model.render
+
+    def slow(values, ctx):
+        time.sleep(0.08)
+        return orig(values, ctx)
+
+    monkeypatch.setitem(mbase.REGISTRY, "gauss_lor",
+                        dataclasses.replace(model, render=slow))
+    x = np.linspace(-20.0, 120.0, 300)
+    r = Recipe(nucleus="27Al", larmor_frequency_MHz=130.3, sites=[
+        SiteModel(model="gauss_lor", label=f"p{i}", params={
+            "isotropic_chemical_shift_ppm": Param(20.0 + 15.0 * i, min=-50, max=150),
+            "shift_fwhm_ppm": Param(6.0, min=1, max=40),
+            "gl": Param(0.5, vary=False),
+            "amplitude": Param(1e6, min=0)}) for i in range(6)])
+    ctx = make_context(r, exp_ppm=x)
+    y = 1.3 * np.sum([simulate_site(s, ctx) for s in r.sites], axis=0)
+
+    for mode in ("stop", "cancel"):
+        fw = FitWorker(r.to_dict(), x, y, (120.0, -20.0))
+        got, ticks = {}, []
+        fw.done.connect(lambda res, m, got=got: got.update(res=res, mode=m))
+        fw.failed.connect(lambda msg, got=got: got.update(failed=msg))
+        fw.progress.connect(lambda it, rms, ticks=ticks: ticks.append(time.perf_counter()))
+        fw.start()
+        t0 = time.perf_counter()
+        while len(ticks) < 2 and time.perf_counter() - t0 < 60:
+            qapp.processEvents()
+        assert len(ticks) >= 2
+        # 0.2 s into an evaluation (three of its six renders still to come)
+        while time.perf_counter() - ticks[-1] < 0.2:
+            qapp.processEvents()
+        t_req = time.perf_counter()
+        fw.request_stop(mode)
+        while fw.isRunning() and time.perf_counter() - t_req < 30:
+            qapp.processEvents()
+        latency = time.perf_counter() - t_req
+        fw.wait()
+        qapp.processEvents()
+        assert latency < 1.0, latency
+        assert "failed" not in got, got
+        assert got.get("mode") == mode
+        assert got.get("res") is not None and got["res"].lmfit_result.aborted
+
+
+def test_linked_sidebands_follow_a_change_of_spin_rate(qapp, win, monkeypatch):
+    """WA: sidebands added at 20 kHz move to +-22000/nu0 ppm when nu_rot
+    becomes 22 kHz -- through the Experiment dialog, the detector's Use and
+    a direct refresh -- constraint, value and drawn paddle alike."""
+    from PySide6.QtWidgets import QDialog
+
+    from larmor import sidebands as sb
+    from larmor.desktop import dialogs as _dialogs
+
+    win.load_source(str(require(CAALGLASS)), keep_fit=False)
+    qapp.processEvents()
+    lar = float(win.recipe["larmor_frequency_MHz"])
+    win.recipe["spin_rate_Hz"] = 20000.0
+    win.recipe["mas_uncertain"] = False
+    win.recipe["sites"] = []
+    win._model_actions["gauss_lor"].setChecked(True)
+    win.add_site_at(60.0, 1000.0)
+    qapp.processEvents()
+
+    # Add spinning sidebands... (its dialog accepted with the defaults: one
+    # forward, one backward, linked)
+    monkeypatch.setattr(QDialog, "exec", lambda self: QDialog.Accepted)
+    win.add_sidebands()
+    qapp.processEvents()
+    assert len(win.recipe["sites"]) == 3
+    d20 = 20000.0 / lar
+    copies = {s["sideband"]["k"]: s for s in win.recipe["sites"][1:]}
+    assert set(copies) == {1, -1}
+    for k, s in copies.items():
+        p = s["params"]["isotropic_chemical_shift_ppm"]
+        assert s["sideband"]["parent"] == 0
+        assert p["expr"] == sb.linked_position_expr(0, k, d20)
+        assert p["value"] == pytest.approx(60.0 + k * d20)
+
+    def drawn():
+        return {p.index: p._pos for p in win.view._paddles}
+
+    assert drawn()[1] == pytest.approx(60.0 + d20)
+
+    # 1) the Experiment dialog: OK with nu_rot typed as 22 kHz
+    def fake_exec(self):
+        self.mas.setValue(22000.0)
+        self._accept()
+        return QDialog.Accepted
+
+    monkeypatch.setattr(_dialogs.ExperimentDialog, "exec", fake_exec)
+    win.edit_experiment()
+    qapp.processEvents()
+    d22 = 22000.0 / lar
+    assert win.recipe["spin_rate_Hz"] == 22000.0
+    for k, s in copies.items():
+        p = s["params"]["isotropic_chemical_shift_ppm"]
+        assert p["expr"] == sb.linked_position_expr(0, k, d22)
+        assert p["value"] == pytest.approx(60.0 + k * d22)
+    pos = drawn()
+    assert pos[1] == pytest.approx(60.0 + d22) and pos[2] == pytest.approx(60.0 - d22)
+    # the table shows the new offset in the letter form
+    from larmor import cellparse
+    assert cellparse.format_link(copies[1]["params"]["isotropic_chemical_shift_ppm"]["expr"],
+                                 "isotropic_chemical_shift_ppm") == f"A+{d22:.6g}"
+    # the simulated components sit on the new comb
+    from larmor import engine
+    from larmor.recipe import Recipe
+    x, total, per_site = engine.simulate(Recipe.from_dict(win.recipe),
+                                         exp_ppm=win.exp_ppm)
+    for i, k in ((1, 1), (2, -1)):           # within the axis step (~0.5 ppm)
+        assert x[int(np.argmax(per_site[i]))] == pytest.approx(60.0 + k * d22, abs=1.0)
+    # Ctrl+Z brings the 20 kHz comb back together with the rate
+    win.undo()
+    assert win.recipe["spin_rate_Hz"] == 20000.0
+    assert win.recipe["sites"][1]["params"]["isotropic_chemical_shift_ppm"]["expr"] == \
+        sb.linked_position_expr(0, 1, d20)
+
+    # 2) the detector's rate write (an uncertain recorded rate answered by
+    #    the data) moves them too
+    class _Det:
+        nu_rot_Hz = 24000.0
+    win.recipe["mas_uncertain"] = True
+    assert win._ssb_set_rate_if_due(_Det()) is True
+    d24 = 24000.0 / lar
+    assert win.recipe["sites"][2]["params"]["isotropic_chemical_shift_ppm"]["expr"] == \
+        sb.linked_position_expr(0, -1, d24)
+
+    # 3) a recipe without the marker (made before it existed) keeps its
+    #    constant offsets
+    win.recipe["sites"][1].pop("sideband")
+    win.recipe["spin_rate_Hz"] = 26000.0
+    assert win._refresh_sideband_exprs() == 1          # only the marked copy
+    assert win.recipe["sites"][1]["params"]["isotropic_chemical_shift_ppm"]["expr"] == \
+        sb.linked_position_expr(0, 1, d24)
+
+
+def test_baseline_iterative_dialog_constructs_previews_and_its_buttons_work(
+        qapp, win, monkeypatch):
+    """The 'Baseline iterative' dialog (Yon et al. 2020) crashed on open for
+    months (PlotItem has no getPlotItem) and no test caught it: construct it
+    on real data, check the live preview, the parameter change path, Apply
+    (accept) and Cancel (reject), and the params it hands back -- and the
+    workbench action behind it (which compared against ``dlg.Accepted`` on
+    the INSTANCE, an AttributeError in PySide6 6.x, so Apply crashed after
+    the dialog closed; found by this test)."""
+    from PySide6.QtWidgets import QDialog, QDialogButtonBox
+
+    from larmor.desktop.baseline_dialog import BaselineDialog
+
+    win.load_source(str(require(BRUKER_1R)), keep_fit=False)
+    qapp.processEvents()
+    dlg = BaselineDialog(win, win.exp_ppm, win.exp_amp)
+    qapp.processEvents()
+    # the preview ran on construction: three curves on the two plots
+    assert dlg.c_raw.xData is not None and len(dlg.c_raw.xData) == win.exp_ppm.size
+    assert dlg.c_base.yData is not None and np.isfinite(dlg.c_base.yData).all()
+    assert dlg.c_corr.yData is not None and len(dlg.c_corr.yData) == win.exp_ppm.size
+    assert "iterations" in dlg.status.text()
+    assert dlg.params() == {"dead_time_pts": 0, "smoothness": 1.0,
+                            "threshold_factor": 1.0}
+    # a spinbox edit re-previews (debounced) with the new parameters
+    dlg.sp_smooth.setValue(4.0)
+    dlg.sp_thr.setValue(0.6)
+    dlg._timer.stop()
+    dlg._preview()
+    assert dlg.params()["smoothness"] == 4.0 and dlg.params()["threshold_factor"] == 0.6
+    assert np.isfinite(dlg.c_base.yData).all()
+    # the buttons: Apply accepts, Cancel rejects
+    bb = dlg.findChild(QDialogButtonBox)
+    bb.button(QDialogButtonBox.Apply).click()
+    assert dlg.result() == QDialog.Accepted
+    dlg2 = BaselineDialog(win, win.exp_ppm, win.exp_amp)
+    bb2 = dlg2.findChild(QDialogButtonBox)
+    bb2.button(QDialogButtonBox.Cancel).click()
+    assert dlg2.result() == QDialog.Rejected
+    # and the workbench action applies the step as recorded processing
+    before = win.exp_amp.copy()
+    monkeypatch.setattr(BaselineDialog, "exec", lambda self: QDialog.Accepted)
+    win.apply_iterbaseline()
+    qapp.processEvents()
+    ops = win.recipe.get("processing") or []
+    assert any(op.get("op") == "iterbaseline" for op in ops)
+    assert not np.array_equal(before, win.exp_amp)

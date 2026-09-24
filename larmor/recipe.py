@@ -95,6 +95,14 @@ class SiteModel:
     #: LARMOR versions (their SiteModel rejects unknown site keys). Last field
     #: so positional SiteModel(model, label, params) construction still works.
     family: str = ""
+    #: a LINKED spinning-sideband copy: {"parent": <site index>, "k": <order>}.
+    #: Its position constraint is parent ± k·νrot/ν0; larmor.sidebands.
+    #: refresh_linked recomputes it from the recipe's spin_rate_Hz whenever
+    #: the rate changes (Experiment dialog, the detector's Use, a kept fit
+    #: carried onto a new spectrum). None = an ordinary line, or a copy made
+    #: before the marker existed (its constant offset is left alone). Omitted
+    #: from the saved recipe when None, like ``family``.
+    sideband: dict | None = None
 
 
 @dataclass
@@ -166,6 +174,8 @@ class Recipe:
         for s in d["sites"]:
             if not s.get("family"):
                 s.pop("family", None)
+            if not s.get("sideband"):
+                s.pop("sideband", None)
         d["larmor_recipe_version"] = RECIPE_VERSION
         return d
 
