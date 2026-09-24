@@ -34,7 +34,15 @@ Workplan"; this file is the ground truth for progress.
   the installed app ran 30 s, the uninstall registration read "LARMOR
   0.14.0", and the silent uninstall left no folder and no registry key.
   Still owed: a run on a machine with no development setup (a student's
-  laptop), then a GitHub release carrying both files.
+  laptop), then a GitHub release carrying both files. Rebuilt at **0.14.2**
+  on 2026-09-24 (`dist/LARMOR-0.14.2-setup.exe` 105 MB,
+  `dist/LARMOR-0.14.2-win64.zip` 151 MB): the frozen exe passes
+  `--selftest` (core and desktop fits), the setup installed silently in
+  21 s, the installed exe passed the self-test, the Apps entry read
+  "LARMOR 0.14.2", and the silent uninstall left no folder and no key. The
+  0.14.0 and 0.14.1 files stay in `dist/` for comparison; the student's
+  machine should get the 0.14.2 setup and run `LARMOR.exe --selftest` if
+  Fit misbehaves again.
 - **Full suite**: at v0.14.0 (0de34c7), **1324 passed / 0 failed** in 20 min 39 s,
   real-data layer complete (all 19 datasets present). v0.14.1 (faab8f9) adds
   `larmor/selftest.py`, the quick overlays and their tests (scoped runs
@@ -56,6 +64,43 @@ Workplan"; this file is the ground truth for progress.
   overlays in the main window (Shift + drop, File ▸ Overlay a spectrum…
   Ctrl+Shift+A, Explorer right-click, View ▸ Overlays Ctrl+Shift+V / Clear
   overlays, "match height" in the Datasets dock).
+- **0.14.2 (2026-09-24)**: Sam's fourteen field-use items after the first
+  student session, built on three worktree branches and merged (WB 4afa9a2,
+  WC 446fcad, WA 2c92c46; release commit cc8b1ca). Fixed: the Baseline
+  iterative dialog crashed on open (`PlotItem.getPlotItem`) and its Apply
+  crashed after closing (`dlg.Accepted` on the instance); the spectrum view
+  "drifted" to thousands of ppm because pyqtgraph's auto-range unioned the
+  model drawn on the Czjzek kernel axis (≥ 150 kHz) *and* the "fitting —
+  iter n" label re-pinned to the view corner every frame (a runaway loop);
+  every model-side item is now `ignoreBounds` and masked to the data range,
+  and a fit never moves the view. Speed: a czjzek_corr fit with five linked
+  sidebands went from a 40-minute stall (1 evaluation) to 5.7 s (84
+  evaluations, error bars) — scipy's first trust-region step scaled by the
+  amplitude (~3·10⁶) sent dCS to 3·10⁶ ppm and a 2.4-million-point Gaussian
+  filter, and the error-bar rescue dithered at lmfit's default `epsfcn`;
+  per-evaluation renders shared between linked copies (czjzek 37.6 → 2.9 ms);
+  Stop returns within a second even inside a kernel build (cancel checked
+  every ≤ 96 tensors and between site renders). Adding a line takes 15–50 ms;
+  the "seconds" were the cold kernel build in the SimWorker, now announced
+  with a busy cursor and built once for both threads. Linked sidebands carry
+  `SiteModel.sideband` (parent, order) and their exprs are recomputed when
+  the spin rate changes. Fit health: red only for impossible values (sanity
+  rules incl. C_Q > 120 MHz), amber "check" for residual structure, bounds,
+  degenerate pairs, no chip at all for an unknown T1 or tip angle; lb of the
+  Czjzek family held by default (`ParamDef.default_fixed`, dmfit's greyed
+  Lb). UI: the "＋ Add line" split button with grouped models
+  (`desktop/addline_toolbar.py`), a line right-click menu (sidebands,
+  duplicate, fix/free, remove the selection) with multi-select Remove, the
+  menu bar reorganised into File / Edit / Process / Fit / Series / Tools /
+  View / Plotting / Help (214 golden rows, every doc path rewritten, a Menu
+  map in getting-started.md), the Processing panel in five titled groups
+  that fit 1080 px without scrolling, Explorer ▸ Rename… (alias kept by
+  LARMOR in `%LOCALAPPDATA%/LARMOR/aliases.json`, or the folder renamed on
+  disk after confirmation, logged to `rename_log.jsonl`). Follow-ups:
+  nmrglue `read_jcamp` loops forever on a truncated JCAMP array (a corrupt
+  acqus would hang the app — guard it); the `LinesTable` embedded in
+  `panels.SiteCard` / the sequential-fit dialog is not wired for multi-select
+  Remove.
 
 ## Done — the workplan is closed
 
