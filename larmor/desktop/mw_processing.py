@@ -223,10 +223,15 @@ class _ProcessingMixin:
         if self.exp_ppm is None or self.exp_amp is None:
             self.statusBar().showMessage("open a spectrum first")
             return
+        from PySide6.QtWidgets import QDialog
+
         from larmor.desktop.baseline_dialog import BaselineDialog
 
         dlg = BaselineDialog(self, self.exp_ppm, self.exp_amp)
-        if dlg.exec() != dlg.Accepted:
+        # QDialog.Accepted on the CLASS: the enum is not reachable through
+        # the instance in PySide6 6.x (AttributeError), so Apply crashed the
+        # moment the dialog closed -- caught by the dialog's first test
+        if dlg.exec() != QDialog.Accepted:
             return
         self.apply_processing(
             [{"op": "iterbaseline", **dlg.params()}], False)
