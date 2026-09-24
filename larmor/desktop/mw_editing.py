@@ -603,6 +603,32 @@ class _EditingMixin:
              else self.hidden.add(idx))
         self.on_structure_changed()
 
+    def remove_sites(self, indices):
+        """Remove several lines at once (the table's multi-selection Remove /
+        Delete): ONE undo snapshot, then each line popped from the highest
+        index down so the lower indices stay valid, the hidden set and every
+        constraint remapped after each pop exactly as the single-line path
+        does (a link to a removed line is dropped, never left dangling --
+        development-notes section 8)."""
+        if self.recipe is None:
+            return
+        n = len(self.recipe.get("sites", []))
+        idxs = sorted({int(i) for i in indices if 0 <= int(i) < n}, reverse=True)
+        if not idxs:
+            return
+        self.snapshot()
+        dropped = []
+        for idx in idxs:
+            self.recipe["sites"].pop(idx)
+            self.hidden.discard(idx)
+            self.hidden = {i - 1 if i > idx else i for i in self.hidden}
+            dropped += self._remap_exprs_after_delete(idx)
+        msg = f"removed {len(idxs)} lines"
+        if dropped:
+            msg += " — dropped now-invalid constraint(s): " + ", ".join(dropped)
+        self.statusBar().showMessage(msg)
+        self.on_structure_changed()
+
     def _move_site(self, idx: int, delta: int):
         """Reorder a line in the table (user comfort), remapping every constraint
         reference and the hidden set so links keep pointing at the right lines."""

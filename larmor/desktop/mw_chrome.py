@@ -120,6 +120,8 @@ class _ChromeMixin:
         self.lines_table.constraint_edited.connect(self.on_structure_changed)
         self.lines_table.family_edited.connect(self.on_family_changed)
         self.lines_table.structure.connect(self.on_site_structure)
+        self.lines_table.remove_lines.connect(self.remove_sites)
+        self.lines_table.sidebands_requested.connect(self.add_sidebands_for_line)
         self.lines_table.compute.connect(self.request_simulation)
         self.lines_table.fit.connect(self.run_fit)
         # a stack so co-fit can swap in its split 1D|2D tables in the same dock

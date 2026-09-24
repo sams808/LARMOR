@@ -194,7 +194,19 @@ command line: `larmor srcheck <session folder> --csv audit.csv`.
    - a **bound** `[0..100]` (bounded cells get a teal border),
    - a **link** to another line by its letter — `A`, `A+20`, `A+20kHz`, `0.5B` —
      with error propagation, or
-   - a **pin** ☑ to fix the parameter.
+   - a **pin** ☑ to fix the parameter (a pinned value reads dimmed, like
+     dmfit's greyed parameters; the Czjzek family's `lb` starts pinned at its
+     model default and is freed by unticking it).
+   **Right-click a row** (its letter, model or family cell, or any value) for
+   the line actions: **Add spinning sidebands…** (the Decomposition dialog
+   with this line preselected — linked copies at ±k·νrot), **Duplicate**,
+   **Rename…**, **Hide / Show on plot**, **Fix all / Free all parameters of
+   the line**, **Move up / down**, **Remove**, and the **Family ▸** presets.
+   Select several rows (Ctrl- or Shift-click their letter cells) and
+   **Remove N selected lines** — or the **Delete** key — takes them all in
+   one undo step; links between the remaining lines are renumbered and links
+   to a removed line dropped, never left dangling. The value cells keep
+   their own menus (Constrain min / max…, links, Unlink).
 3. **Fit** (F5). It minimises $\chi^2=\sum_i w_i\,[y_i - f(x_i)]^2$ by
    Levenberg–Marquardt (via **lmfit**), and every fitted value comes back with a
    **standard error** from the covariance matrix. Read **RMSD** and **S/N** next

@@ -31,6 +31,12 @@ _FAMILY_TIP = ("structural family for grouped populations (BO3/BO4, Al(IV)…, "
                "(F6), which also derives the named ratios (N4, ⟨CN⟩, ⟨n⟩).")
 
 
+#: models that render their own sideband manifold: the line menu's "Add
+#: spinning sidebands" is greyed for them (mw_sidebands._SSB_SELF_MODELS)
+_SELF_SIDEBAND_MODELS = frozenset({"sidebands", "csa_mas", "csa_czjzek",
+                                   "quad_first"})
+
+
 def set_scroll_nudge(on: bool) -> None:
     global _SCROLL_NUDGE
     _SCROLL_NUDGE = bool(on)
@@ -439,6 +445,12 @@ class LinesTable(QWidget):
 
     edited = Signal()            # any value changed -> resimulate
     structure = Signal(int, str) # (row, "remove"|"duplicate"|"visibility")
+    #: several selected lines to remove at once (sorted indices) -- one
+    #: undo snapshot, every link remapped, in the window (remove_sites)
+    remove_lines = Signal(list)
+    #: Add spinning sidebands... of this line (the Decomposition dialog with
+    #: the line preselected)
+    sidebands_requested = Signal(int)
     compute = Signal()
     fit = Signal()
     constraint_edited = Signal()
@@ -490,12 +502,14 @@ class LinesTable(QWidget):
             + ("scroll = nudge" if scroll_nudge_enabled()
                else "scroll-nudge off (View ▸ Scroll edits values)")
             + "   ·   ↑/↓ in a cell nudges 2 % (Shift 10 %, Ctrl 0.2 %)   ·   "
-            "right-click for menus   ·   Delete removes the selected line "
+            "right-click a row for line actions (sidebands, duplicate, fix / "
+            "free all, remove)   ·   Delete removes the selected line(s) "
             "(Ctrl+Z undoes)")
         self.hint.setStyleSheet(f"color: {theme.active().text_dim}; font-size: 10px; padding: 2px 4px;")
         self.hint.setWordWrap(True)
         v.addWidget(self.hint)
         self._recipe: dict | None = None
+        self._hidden: set = set()
         self._family_col = -1        # set by rebuild: the LAST column
 
     # ------------------------------------------------------------------
@@ -508,7 +522,7 @@ class LinesTable(QWidget):
             if 0 <= row < len(self._recipe.get("sites", [])):
                 key, ctrl = ev.key(), bool(ev.modifiers() & Qt.ControlModifier)
                 if key in (Qt.Key_Delete, Qt.Key_Backspace) and not ctrl:
-                    self.structure.emit(row, "remove")
+                    self._remove_selected(row)
                     return True
                 if ctrl and key == Qt.Key_D:
                     self.structure.emit(row, "duplicate")
@@ -518,8 +532,35 @@ class LinesTable(QWidget):
                     return True
         return super().eventFilter(obj, ev)
 
+    def selected_rows(self, row: int | None = None) -> list[int]:
+        """The selected line indices (sorted; whole-row selection), plus
+        ``row`` when given -- the target set of a Remove / Delete."""
+        n = len((self._recipe or {}).get("sites", []))
+        rows = set()
+        sel = self.table.selectionModel()
+        if sel is not None:
+            rows.update(ix.row() for ix in sel.selectedRows())
+            # a row whose value cells hold widgets selects through its
+            # letter / model / family items too
+            rows.update(ix.row() for ix in sel.selectedIndexes()
+                        if ix.column() in (0, 1, self._family_col))
+        if row is not None:
+            rows.add(int(row))
+        return sorted(r for r in rows if 0 <= r < n)
+
+    def _remove_selected(self, row: int):
+        """Remove every selected line (``remove_lines``) or, with a single
+        target, the one line through the ``structure`` path every embedder
+        already handles."""
+        rows = self.selected_rows(row)
+        if len(rows) > 1:
+            self.remove_lines.emit(rows)
+        elif rows:
+            self.structure.emit(rows[0], "remove")
+
     def rebuild(self, recipe: dict | None, hidden: set[int]):
         self._recipe = recipe
+        self._hidden = set(hidden or ())
         t = self.table
         t.blockSignals(True)
         t.clear()
@@ -719,8 +760,39 @@ class LinesTable(QWidget):
                     lambda _=False, pp=p: self._clear_bounds(pp))
                 menu.addAction(a_free)
             menu.addSeparator()
-        a_vis = QAction("Show / hide on plot", menu)
+        # ---- the line itself
+        letter = cellparse.index_to_letter(row)
+        menu.addSection(f"line {letter}" + (f" · {site.get('label')}"
+                                            if site.get("label") else ""))
+        a_ssb = QAction("Add spinning sidebands…  (±k·νrot, linked to this line)",
+                        menu)
+        a_ssb.setToolTip("Decomposition ▸ Add spinning sidebands… with this "
+                         "line preselected: copies at pos ± k·νrot whose shape "
+                         "follows the parent, amplitudes free")
+        a_ssb.setEnabled(site.get("model") not in _SELF_SIDEBAND_MODELS)
+        a_ssb.triggered.connect(lambda: self.sidebands_requested.emit(row))
+        a_dup = QAction("Duplicate line", menu)
+        a_dup.triggered.connect(lambda: self.structure.emit(row, "duplicate"))
+        a_ren = QAction("Rename line…", menu)
+        a_ren.triggered.connect(lambda: self._rename(row))
+        a_vis = QAction("Hide on plot" if row in self._hidden
+                        else "Hide on plot  (Ctrl+H toggles)", menu)
+        if row in self._hidden:
+            a_vis.setText("Show on plot  (Ctrl+H toggles)")
         a_vis.triggered.connect(lambda: self.structure.emit(row, "visibility"))
+        held = [k for k, p in site["params"].items()
+                if not p.get("expr") and not p.get("vary", True)]
+        free = [k for k, p in site["params"].items()
+                if not p.get("expr") and p.get("vary", True)]
+        a_fix = QAction("Fix all parameters of the line", menu)
+        a_fix.setToolTip("pin every parameter (linked ones stay linked)")
+        a_fix.setEnabled(bool(free))
+        a_fix.triggered.connect(lambda: self._set_all_vary(row, False))
+        a_free = QAction("Free all parameters of the line", menu)
+        a_free.setToolTip("unpin every parameter, the model-default ones "
+                          "(Czjzek lb) included")
+        a_free.setEnabled(bool(held))
+        a_free.triggered.connect(lambda: self._set_all_vary(row, True))
         n_rows = self.table.rowCount()
         a_up = QAction("Move line up", menu)
         a_up.setEnabled(row > 0)
@@ -728,13 +800,65 @@ class LinesTable(QWidget):
         a_down = QAction("Move line down", menu)
         a_down.setEnabled(row < n_rows - 1)
         a_down.triggered.connect(lambda: self.structure.emit(row, "move_down"))
-        a_dup = QAction("Duplicate line", menu)
-        a_dup.triggered.connect(lambda: self.structure.emit(row, "duplicate"))
-        a_del = QAction("Remove line", menu)
-        a_del.triggered.connect(lambda: self.structure.emit(row, "remove"))
-        for a in (a_vis, a_up, a_down, a_dup, a_del):
+        rows = self.selected_rows(row)
+        if len(rows) > 1:
+            letters = ", ".join(cellparse.index_to_letter(r) for r in rows)
+            a_del = QAction(f"Remove {len(rows)} selected lines  ({letters})", menu)
+            a_del.setToolTip("one undo step; links between the remaining lines "
+                             "are renumbered, links to a removed line dropped")
+            a_del.triggered.connect(lambda: self.remove_lines.emit(list(rows)))
+        else:
+            a_del = QAction("Remove line", menu)
+            a_del.triggered.connect(lambda: self.structure.emit(row, "remove"))
+        for a in (a_ssb, a_dup, a_ren, a_vis):
+            menu.addAction(a)
+        menu.addSeparator()
+        for a in (a_fix, a_free):
+            menu.addAction(a)
+        menu.addSeparator()
+        for a in (a_up, a_down, a_del):
             menu.addAction(a)
         return menu
+
+    # ------------------------------------------------------- line actions
+    def _rename(self, row: int):
+        """Rename the line (the letter cell's double-click, as a menu entry);
+        the plot legend follows through ``edited``."""
+        if not self._recipe or row >= len(self._recipe["sites"]):
+            return
+        site = self._recipe["sites"][row]
+        text, ok = QInputDialog.getText(
+            self, "Rename line", f"name of line {cellparse.index_to_letter(row)}:",
+            text=str(site.get("label") or ""))
+        if not ok:
+            return
+        site["label"] = text.strip()
+        it = self.table.item(row, 0)
+        if it is not None:
+            self.table.blockSignals(True)
+            it.setText(f"■ {cellparse.index_to_letter(row)} · {site['label']}"
+                       .rstrip(" ·"))
+            self.table.blockSignals(False)
+        self.edited.emit()
+
+    def _set_all_vary(self, row: int, vary: bool):
+        """Pin (``vary`` False) or free every non-linked parameter of the line
+        and refresh its pin boxes in place -- no rebuild, so the selection and
+        scroll position stay."""
+        if not self._recipe or row >= len(self._recipe["sites"]):
+            return
+        site = self._recipe["sites"][row]
+        for p in site["params"].values():
+            if not p.get("expr"):
+                p["vary"] = bool(vary)
+        for c in range(2, 2 + len(self._used_keys)):
+            w = self.table.cellWidget(row, c)
+            if w is not None and hasattr(w, "pin"):
+                w.pin.blockSignals(True)
+                w.pin.setChecked(not vary)
+                w.pin.blockSignals(False)
+                w._style()
+        self.edited.emit()
 
     # ------------------------------------------------------------ families
     def _family_menu(self, row: int, parent: QMenu) -> QMenu:

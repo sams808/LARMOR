@@ -61,6 +61,11 @@ class _SidebandsMixin:
         combo = QComboBox()
         for i, s in eligible:
             combo.addItem(f"s{i} — {s.get('label') or s['model']}", i)
+        # the fit table's line menu preselects its line (add_sidebands_for_line)
+        pre = getattr(self, "_ssb_preselect", None)
+        self._ssb_preselect = None
+        if pre is not None and combo.findData(pre) >= 0:
+            combo.setCurrentIndex(combo.findData(pre))
         form.addRow("line", combo)
         fwd = QSpinBox(); fwd.setRange(0, 20); fwd.setValue(1)
         form.addRow("sidebands forward (+νrot)", fwd)
@@ -117,6 +122,13 @@ class _SidebandsMixin:
             f"added {len(added)} sideband line(s) of {bname} at ±νrot"
             + (" — position and shape linked to the parent, amplitudes free"
                if link.isChecked() else ""))
+
+    def add_sidebands_for_line(self, idx: int):
+        """The fit table's right-click ▸ Add spinning sidebands…: the same
+        dialog as Decomposition ▸ Add spinning sidebands…, line ``idx``
+        preselected."""
+        self._ssb_preselect = int(idx)
+        self.add_sidebands()
 
     # -------- spinning sidebands: detect the ±νrot repeat and offer it (F3)
     #: models that render their own manifold -- never offer sidebands on top

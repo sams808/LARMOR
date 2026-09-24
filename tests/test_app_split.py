@@ -63,8 +63,9 @@ HOMES = {"FitWorker": "larmor.desktop.workers",
 EXCLUDE_CHILDREN = frozenset({"Open &recent",
                               "&Apply recipe  (a recent fit → this data)"})
 
-# 311 MainWindow members
+# 313 MainWindow members
 SURFACE = (
+    'remove_sites', 'add_sidebands_for_line',
     '__init__', '_build_menus', '_add', '_rebuild_recent', '_add_recent',
     '_add_recent_recipe', '_rebuild_apply_recipe', 'apply_recipe_browse',
     '_recipe_model_from', 'show_chi2_map', 'compare_with_saved_fit',
