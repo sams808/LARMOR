@@ -650,11 +650,13 @@ def test_saved_dataset_carries_the_rotor_rate_under_its_own_key(qapp, tmp_path,
                    "sf_MHz": 78.36217, "sr_hz": 3982.87,
                    "title": "12/09/2025\nSample LAW3CL0CA\nRotor-synchronized CPMG"})
     d._carrier, d._referenced = -102.8, True
-    out = tmp_path / "ds.csv"
+    # the chosen name is the BASE of the twin files (see
+    # test_qcpmg_dataset_pair.py): "ds.csv" -> ds_sumecho.csv + ds_spikelets.csv
     monkeypatch.setattr(
         "PySide6.QtWidgets.QFileDialog.getSaveFileName",
-        staticmethod(lambda *a, **k: (str(out), "")))
+        staticmethod(lambda *a, **k: (str(tmp_path / "ds.csv"), "")))
     d._save_dataset()
+    out = tmp_path / "ds_sumecho.csv"
     _, _, meta = spectra.read_csv(out)
     assert meta["qcpmg_rotor_Hz"] == pytest.approx(16000.0)
     assert meta["mas_uncertain"] is True

@@ -355,12 +355,23 @@ class QcpmgDialog(QDialog):
         self.magMode.toggled.connect(self._on_mag_toggled)
         self.btnSaveDs = QPushButton("Save as dataset…")
         self.btnSaveDs.setToolTip(
-            "write the processed sum-echo spectrum as a LARMOR .csv dataset — "
-            "openable, overlayable and fittable like any other spectrum")
+            "write BOTH processed spectra as LARMOR .csv datasets from one "
+            "name — <base>_sumecho.csv (the envelope to fit) and "
+            "<base>_spikelets.csv (the spikelet manifold), each on its own "
+            "ppm axis — openable, overlayable and fittable like any other "
+            "spectrum")
         self.btnSaveDs.clicked.connect(self._save_dataset)
+        self.normSave = QCheckBox("normalise to max")
+        self.normSave.setChecked(True)
+        self.normSave.setToolTip(
+            "divide each saved spectrum by its own maximum, so the two files "
+            "are directly comparable and a fit's amplitude is a fraction; the "
+            "factor divided out is kept in the header as intensity_scale "
+            "(raw = intensity × intensity_scale). Untick for a raw save")
         lv.addWidget(_row(self.showSum, self.showSpk, "  ", self.magMode,
                           "  scale", self.norm,
-                          "  zero-fill ×", self.zf, "   ", self.btnSaveDs))
+                          "  zero-fill ×", self.zf, "   ", self.btnSaveDs,
+                          self.normSave))
         self.p0 = QDoubleSpinBox(); self.p0.setRange(-720, 720)
         self.p0.setDecimals(2); self.p0.setWrapping(True)
         self.p0.valueChanged.connect(self._rephase)
@@ -1094,57 +1105,88 @@ class QcpmgDialog(QDialog):
     # --------------------------------------------------------------- output
     # ------------------------------------------------- dataset / ∞-field
     def _save_dataset(self):
-        """Write the processed sum-echo spectrum as a LARMOR .csv dataset."""
+        """Write BOTH processed spectra as LARMOR .csv datasets -- the
+        sum-echo envelope and the spikelet spectrum -- from one chosen name
+        (``<base>_sumecho.csv`` + ``<base>_spikelets.csv``, see
+        :func:`larmor.qcpmg.dataset_pair_paths`)."""
         self._flush()
         if self._spec is None or self._ppm is None:
             self.res.setText("nothing to save — process a train first")
             return
         from larmor.desktop.paths import suggest_save_dir
-        from larmor.io import spectra
         expno = self.meta.get("expno", "") or "qcpmg"
         start = suggest_save_dir(self.source, "")
         name = f"qcpmg_{expno}_sumecho.csv"
         seed = str(Path(start) / name) if start else name
         path, _ = QFileDialog.getSaveFileName(
-            self, "Save processed spectrum as dataset", seed,
-            "LARMOR spectrum (*.csv)")
+            self, "Save processed spectra as datasets (sum echo + spikelets)",
+            seed, "LARMOR spectrum (*.csv)")
         if not path:
             return
-        spectra.write_csv(path, self._ppm, self._spec, self.dataset_meta())
-        self.res.setText(f"dataset written — {Path(path).name}")
+        written = self.write_datasets(path)
+        self.res.setText("datasets written — "
+                         + " + ".join(Path(p).name for p in written.values()))
 
-    def dataset_meta(self) -> dict:
-        """The header of a saved sum-echo dataset.
+    def write_datasets(self, path) -> dict:
+        """Write the sum-echo and spikelet datasets for ``path`` (any of the
+        spellings :func:`larmor.qcpmg.dataset_pair_paths` accepts), each
+        normalised to unit maximum when *normalise to max* is ticked.
+        Returns ``{"sumecho": path, "spikelets": path}``."""
+        from larmor import qcpmg
+        if self._spk is None or self._spk_ppm is None:
+            raise ValueError("no spikelet spectrum — process a train first")
+        return qcpmg.write_dataset_pair(
+            path, self._ppm, self._spec, self._spk_ppm, self._spk,
+            self.dataset_meta("sumecho"), self.dataset_meta("spikelets"),
+            normalise=self.normSave.isChecked())
 
-        ``spin_rate_Hz`` stays 0: a sum-echo spectrum has no sideband
-        manifold for the workbench to MODEL (the loader maps that key onto
-        Recipe.spin_rate_Hz). The rotor rate the train was acquired at is
+    def dataset_meta(self, kind: str = "sumecho") -> dict:
+        """The header of a saved dataset -- the sum echo (``kind="sumecho"``,
+        the default) or its spikelet twin (``kind="spikelets"``).
+
+        ``spin_rate_Hz`` stays 0 for both: a sum-echo spectrum has no
+        sideband manifold for the workbench to MODEL (the loader maps that
+        key onto Recipe.spin_rate_Hz), and the spikelets are not sidebands
+        either -- their spacing is recorded as ``spikelet_spacing_Hz``
+        (= 1/τ_echo) instead. The rotor rate the train was acquired at is
         carried under ``qcpmg_rotor_Hz`` (with ``mas_uncertain`` from the
         acqus/title cross-check) so the multi-field tools can place the
-        sidebands and judge the window. Mode, LB, referencing (SF, SR) and
-        the source EXPNO are recorded for the report's provenance line."""
+        sidebands and judge the window. Mode, LB, referencing (SF, SR), the
+        source EXPNO and the echo-train bookkeeping (period, split offset,
+        echoes summed) are recorded for the report's provenance line. The
+        spikelet spectrum is |FT(train)|, so its mode is always magnitude."""
         from larmor import qcpmg
-        mag = self.magMode.isChecked()
+        if kind not in qcpmg.DATASET_KINDS:
+            raise ValueError(f"unknown dataset kind {kind!r}")
+        spikelets = kind == "spikelets"
+        mag = self.magMode.isChecked() or spikelets
         sr = self.meta.get("sr_hz")
         referenced = bool(qcpmg.carrier_ppm(self.meta)[1]) if self.meta else False
         if sr is not None:
             from larmor.referencing import UNREFERENCED_HZ
             referenced = referenced and abs(float(sr)) > UNREFERENCED_HZ
+        what = "spikelets" if spikelets else "sum echo"
+        lb = max(self.lb.value(), 1.0) if spikelets else self.lb.value()
         meta = {
             "nucleus": self.meta.get("nucleus", ""),
             "larmor_MHz": self.meta.get("larmor_MHz", 0.0),
             "spin_rate_Hz": 0.0,
             "sample": qcpmg.sample_name(self.meta.get("title", ""))
-            + f" · QCPMG sum echo (LB {self.lb.value():,.0f} Hz"
+            + f" · QCPMG {what} (LB {lb:,.0f} Hz"
             + (", magnitude)" if mag else ")"),
             "qcpmg_rotor_Hz": float(self.meta.get("spin_rate_Hz", 0.0) or 0.0),
             "mas_uncertain": bool(self.meta.get("mas_uncertain", False)),
-            "spectrum_mode": "magnitude(mc)" if mag else "absorption",
-            "lb_Hz": float(self.lb.value()),
+            "spectrum_mode": "magnitude" if spikelets else
+            ("magnitude(mc)" if mag else "absorption"),
+            "lb_Hz": float(lb),
             "carrier_ppm": float(self._carrier),
             "referenced": referenced,
             "source": str(self.source or self.meta.get("expno", "")),
             "title": str(self.meta.get("title", "") or ""),
+            "spikelet_spacing_Hz": float(self.periodHz.value()),
+            "echo_period_pts": int(self.period.value()),
+            "split_offset_pts": int(self.offset.value()),
+            "n_echoes": int(self.nEch.value()),
         }
         if self.meta.get("sf_MHz") is not None:
             meta["sf_MHz"] = float(self.meta["sf_MHz"])

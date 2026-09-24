@@ -169,6 +169,28 @@ p0/p1/p2, keeping the quadratic only if it cuts the negative area by more
 than 25 %); type into the phase fields or press Autophase again to override
 it at any time.
 
+**Save as dataset…** writes **both spectra**, from one Save dialog, as two
+LARMOR `.csv` files next to each other: `<base>_sumecho.csv` (the envelope to
+fit) and `<base>_spikelets.csv` (the spikelet manifold), each on its own ppm
+axis. Whatever name is typed is the *base* — `qcpmg_12.csv`,
+`qcpmg_12_sumecho.csv` and `qcpmg_12_spikelets.csv` all name the same pair —
+and the readout reports both files. With **normalise to max** ticked (the
+default) each spectrum is divided by its own maximum, so the two overlay
+directly and a fit's amplitude reads as a fraction of the tallest point; the
+factor divided out is kept in the header as `intensity_scale`, so
+`raw = intensity × intensity_scale` recovers the raw intensity
+(`intensity_scale = 1` for an unticked, raw save). Each header also says
+which spectrum it is (`spectrum_kind`), names its twin (`twin_file`), and
+carries the acquisition and processing provenance the multi-field tools read:
+`nucleus`, `larmor_MHz`, `qcpmg_rotor_Hz`, `spectrum_mode`, `lb_Hz`,
+`carrier_ppm`, `referenced`, `sf_MHz`/`sr_hz`, `spikelet_spacing_Hz`
+(= 1/τ_echo), `echo_period_pts`, `split_offset_pts` and `n_echoes`. In both
+files `spin_rate_Hz` is 0: neither has a sideband manifold for the workbench to
+model, and the spikelets are not sidebands. Either file opens with **File ▸
+Open**, overlays, and drops onto the multi-field grids — where the spikelet
+twin is recognised as the comb it is and the sum-echo file is the one to
+measure.
+
 #### When p0/p1 is not enough: the second-order phase
 
 A **frequency-swept refocusing pulse** — WURST or chirp, as in WURST-CPMG

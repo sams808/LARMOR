@@ -743,13 +743,14 @@ def point_provenance(p: FieldPoint) -> dict:
 
 
 _FIELD_TOKEN_RE = re.compile(r"[_\-\s]+\d+(?:p\d+)?_?(?:MHz|GHz|T)$", re.IGNORECASE)
-_SUMECHO_SUFFIX_RE = re.compile(r"\s*(?:·|\||-)?\s*QCPMG sum echo.*$")
+_SUMECHO_SUFFIX_RE = re.compile(r"\s*(?:·|\||-)?\s*QCPMG (?:sum echo|spikelets).*$")
 _DATE_ONLY_RE = re.compile(r"\s*\d{1,4}[/.-]\d{1,2}[/.-]\d{2,4}\s*")
 
 
 def sample_label(meta: dict | None, path: str | Path | None) -> str:
     """A sample name for a dataset: the header's sample line with the
-    ' · QCPMG sum echo (...)' suffix and a leading date token removed
+    ' · QCPMG sum echo (...)' / ' · QCPMG spikelets (...)' suffix and a
+    leading date token removed
     (qcpmg.sample_name), else the file stem with its trailing field token
     removed ('LAW0Ca-3Cl_850_MHz' -> 'LAW0Ca-3Cl')."""
     from larmor.qcpmg import sample_name
@@ -795,7 +796,10 @@ def read_field_spectrum(path: str) -> dict:
     dataset...* writes) supplies the Larmor frequency, nucleus and processing
     mode from its header; a Bruker 1r supplies them from acqus/procs (mode
     from PH_mod) and is checked for a spikelet comb, whose window is then
-    seeded from the envelope (:func:`larmor.qcpmg.seed_window`).
+    seeded from the envelope (:func:`larmor.qcpmg.seed_window`). The
+    spikelet twin of a saved dataset (``spectrum_kind=spikelets``) loads the
+    same way and is flagged as the comb it is -- the sum-echo file is the one
+    to measure.
     """
     from larmor import qcpmg
     from larmor.io import bruker
