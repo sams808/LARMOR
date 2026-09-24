@@ -27,6 +27,7 @@ from larmor.desktop.comparability_dialog import (
 from larmor.desktop.panels import PARAM_LABELS
 from larmor.desktop.plot import site_color
 from larmor.desktop.batchfit_dialog import _slug, _proc_number, _saved_tol, _save_tol
+from larmor.desktop.windowtray import show_tool_window
 from larmor.io.scan import disambiguate, sample_label
 from larmor.series_table import SeriesTable
 import datetime as _dt
@@ -95,7 +96,7 @@ class SeqFitDialog(QDialog):
         # reprocessed here; the batch dialog is where that fix lives)
         self.compBar = ComparabilityBar(allow_reprocess=False)
         self.compBar.details_requested.connect(
-            lambda: ComparabilityDialog(self, self._comparison).exec())
+            lambda: show_tool_window(ComparabilityDialog(self, self._comparison)))
         self.compBar.set_comparison(self._comparison, 0)
         lv.addWidget(self.compBar)
 
@@ -613,7 +614,7 @@ class SeqFitDialog(QDialog):
             recipes=recs, labels=[d["sample"] for d in self._data],
             rmsd=list(self._live_rmsd), per_dataset=[], history=[], passes=0,
             propagated=self._propagate())
-        SeriesPlotDialog(self, res, series=self._series).exec()
+        show_tool_window(SeriesPlotDialog(self, res, series=self._series))
 
     # ------------------------------------------------------------------ series table
     def _edit_series(self):

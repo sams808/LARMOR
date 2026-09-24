@@ -97,7 +97,8 @@ class NmrTableDialog(QDialog):
                            f"{iso.abundance:.2f}% · {iso.larmor_MHz(b0):.3f} MHz")
 
     def _details(self, element: str):
-        IsotopeDetailsDialog(self, element, self.b0.value()).exec()
+        from larmor.desktop.windowtray import show_tool_window
+        show_tool_window(IsotopeDetailsDialog(self, element, self.b0.value()))
 
 
 class IsotopeDetailsDialog(QDialog):

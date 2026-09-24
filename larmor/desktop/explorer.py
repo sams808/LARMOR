@@ -314,7 +314,8 @@ class ExplorerPanel(QWidget):
         bb.accepted.connect(dlg.accept)
         bb.button(QDialogButtonBox.Close).clicked.connect(dlg.close)
         v.addWidget(bb)
-        dlg.exec()
+        from larmor.desktop.windowtray import show_tool_window
+        show_tool_window(dlg)                    # read-only: non-modal
 
     # ---------------- loading ----------------
     def _open_sample(self):

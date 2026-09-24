@@ -19,6 +19,7 @@ import numpy as np
 from PySide6.QtCore import QSettings
 from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
+from larmor.desktop.windowtray import show_tool_window
 from larmor.desktop.workers import _fit_tol
 from larmor.recipe import Recipe
 
@@ -37,8 +38,8 @@ class _ToolsMixin:
             return
         from larmor.desktop.chi2map_dialog import Chi2MapDialog
         (x0, x1), _ = self.view.getPlotItem().getViewBox().viewRange()
-        Chi2MapDialog(self, self.recipe, self.exp_ppm, self.exp_amp,
-                      (max(x0, x1), min(x0, x1))).exec()
+        show_tool_window(Chi2MapDialog(self, self.recipe, self.exp_ppm,
+                                       self.exp_amp, (max(x0, x1), min(x0, x1))))
 
     def compare_with_saved_fit(self):
         """Load a reference fit (recipe/dmfit) and show a parameter diff table."""
@@ -55,7 +56,7 @@ class _ToolsMixin:
             self.statusBar().showMessage("that file has no fitted lines")
             return
         from larmor.desktop.diff_dialog import RecipeDiffDialog
-        RecipeDiffDialog(self, self.recipe, ref, Path(path).name).exec()
+        show_tool_window(RecipeDiffDialog(self, self.recipe, ref, Path(path).name))
 
     def apply_recipe(self, path: str):
         """Load a saved recipe and drop ITS lines onto the currently open data —
@@ -89,9 +90,10 @@ class _ToolsMixin:
         if not self.exp_ppm.size:
             self.statusBar().showMessage("open a 1D spectrum first")
             return
-        IntegralsDialog(self, self.exp_ppm, self.exp_amp,
-                        sfo_MHz=float((self.recipe or {}).get(
-                            "larmor_frequency_MHz", 0.0) or 0.0)).exec()
+        show_tool_window(IntegralsDialog(
+            self, self.exp_ppm, self.exp_amp,
+            sfo_MHz=float((self.recipe or {}).get("larmor_frequency_MHz", 0.0)
+                          or 0.0)))
 
     def open_nmr_table(self):
         from larmor.desktop.utilities import NmrTableDialog
@@ -107,14 +109,14 @@ class _ToolsMixin:
                 h1 = self.recipe["larmor_frequency_MHz"] * N.GAMMA_1H / abs(iso.gamma_MHz_T)
             except Exception:
                 pass
-        NmrTableDialog(self, h1).exec()
+        show_tool_window(NmrTableDialog(self, h1))
 
     def open_convert(self):
         from larmor.desktop.utilities import ConvertDialog
 
         sfo = (self.recipe.get("larmor_frequency_MHz", 100.0)
                if self.recipe else 100.0) or 100.0
-        ConvertDialog(self, sfo).exec()
+        show_tool_window(ConvertDialog(self, sfo))
 
     def edit_computing_params(self):
         from larmor.desktop.dialogs import ComputingParamsDialog
@@ -294,7 +296,7 @@ class _ToolsMixin:
     def open_vt(self):
         from larmor.desktop.vt_dialog import VtDialog
 
-        VtDialog(self).exec()
+        show_tool_window(VtDialog(self))
 
     def show_correlations(self):
         from larmor.desktop.correlation_dialog import CorrelationDialog
@@ -303,7 +305,7 @@ class _ToolsMixin:
         if lm is None:
             self.statusBar().showMessage("run a fit first to see correlations")
             return
-        CorrelationDialog(self, lm).exec()
+        show_tool_window(CorrelationDialog(self, lm))
 
     def show_czjzek_dist(self):
         from larmor.desktop.czjzek_dist_dialog import CzjzekDistDialog
@@ -314,7 +316,7 @@ class _ToolsMixin:
                 for s in self.recipe.get("sites", []))):
             self.statusBar().showMessage("no Czjzek sites in the current fit")
             return
-        CzjzekDistDialog(self, self.recipe).exec()
+        show_tool_window(CzjzekDistDialog(self, self.recipe))
 
     def open_qcpmg_batch_fields(self):
         """Many samples x several fields in one grid: drop the processed

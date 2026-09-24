@@ -1932,10 +1932,12 @@ def test_batch_dialog_comparability_bar_marks_deviants(qapp, tmp_path, monkeypat
     assert len(ents[1][0].notes) == 1
     assert "LB 100 Hz" in ents[1][0].notes[0] and "majority 0 Hz" in ents[1][0].notes[0]
     assert ents[1][0].processing_from_raw is False
-    seen = []
-    monkeypatch.setattr(ComparabilityDialog, "exec", lambda self: seen.append(self._cmp) or 0)
+    # Details opens the comparability table as a NON-modal tool window (wip/WD)
     dlg._show_comparability()
-    assert len(seen) == 1 and seen[0].report("LB").deviants == [1]
+    seen = dlg.findChildren(ComparabilityDialog)
+    assert len(seen) == 1 and seen[0]._cmp.report("LB").deviants == [1]
+    assert not seen[0].isModal() and seen[0].isVisible()
+    seen[0].close()
     # a fit still runs and flags nothing else
     res = _fit_batch(dlg)
     assert len(res.recipes) == 2
