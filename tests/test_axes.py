@@ -269,3 +269,263 @@ def test_81br_static_spectrum_is_ticked_in_thousands_of_ppm(qapp):
     plain_units(late)
     qapp.processEvents()
     assert "(ppm)" in ax.labelString() and _tick_span(ax) >= 4000
+
+
+# --------------------------------------------------------------------------
+# every dialog that owns a plot: constructed offscreen with minimal inputs,
+# every bottom / left / labelled axis plain, the labels the walker must see
+# --------------------------------------------------------------------------
+def _csv_series(tmp_path, positions=(13.0, 15.0, 17.0)):
+    """Three 11B spectra as CSVs + the shared model (as test_seqfit_ui)."""
+    from larmor import engine
+    from larmor.recipe import Param, Recipe, SiteModel
+
+    x = np.linspace(-20, 60, 500)
+    paths = []
+    for k, pos in enumerate(positions):
+        tr = Recipe(nucleus="11B", larmor_frequency_MHz=160.0, spin_rate_Hz=0.0,
+                    sites=[SiteModel(model="gauss_lor", label="A", params={
+                        "isotropic_chemical_shift_ppm": Param(pos),
+                        "shift_fwhm_ppm": Param(6.0), "amplitude": Param(100),
+                        "gl": Param(1.0, vary=False)})])
+        _, m, _ = engine.simulate(tr, exp_ppm=x)
+        p = tmp_path / f"s{k}.csv"
+        with open(p, "w", encoding="utf-8") as f:
+            f.write("# nucleus = 11B\n# larmor_MHz = 160\n")
+            for xi, yi in zip(x, m):
+                f.write(f"{xi:.4f} {yi:.4f}\n")
+        paths.append(str(p))
+    return paths, _recipe_11b()
+
+
+def _recipe_11b():
+    return {"nucleus": "11B", "larmor_frequency_MHz": 160.0, "spin_rate_Hz": 0.0,
+            "sites": [{"model": "gauss_lor", "label": "A", "params": {
+                "isotropic_chemical_shift_ppm": {"value": 12.0, "min": 0, "max": 30},
+                "shift_fwhm_ppm": {"value": 5.0, "min": 0.1},
+                "amplitude": {"value": 80.0, "min": 0},
+                "gl": {"value": 1.0, "vary": False}}}]}
+
+
+def _map_2d():
+    from larmor import twod
+    f2 = np.linspace(-50, 50, 200); f1 = np.linspace(-30, 30, 80)
+    Z = (np.exp(-((f2[None, :] - 10) / 3) ** 2)
+         * np.exp(-((f1[:, None] - 5) / 3) ** 2))
+    return twod.Data2D(f2_ppm=f2, f1_ppm=f1, z=Z, nucleus="1H", larmor_MHz=500.0)
+
+
+def test_batchfit_grid_cells_are_plain(qapp, tmp_path):
+    from larmor.desktop.batchfit_dialog import BatchFitDialog
+    paths, model = _csv_series(tmp_path)
+    dlg = BatchFitDialog(None, paths, model)
+    try:
+        _assert_plain(dlg, n_plots=3)
+        assert _labelled(dlg) == []                 # the cells carry no axis label
+    finally:
+        dlg.close()
+
+
+def test_seqfit_dialog_plots_are_plain(qapp, tmp_path):
+    from larmor.desktop.seqfit_dialog import SeqFitDialog
+    paths, model = _csv_series(tmp_path)
+    dlg = SeqFitDialog(None, paths, model)
+    try:
+        _assert_plain(dlg, n_plots=3)               # spectrum, RMSD, trajectory
+        assert _labelled(dlg) == [("bottom", "spectrum", ""),
+                                  ("bottom", "spectrum", ""),
+                                  ("left", "RMSD", "")]
+    finally:
+        dlg.close()
+
+
+def test_cofit_dialog_result_plots_are_plain(qapp):
+    from types import SimpleNamespace
+
+    from larmor import twod
+    from larmor.desktop.cofit_dialog import CofitDialog
+    from larmor.recipe import Recipe
+
+    x = np.linspace(-50, 120, 400)
+    amp = np.exp(-0.5 * ((x - 60) / 8) ** 2)
+    base = {"kind": "1d", "label": "MAS", "ppm": x, "amp": amp,
+            "nucleus": "27Al", "larmor": 195.5}
+    f2 = np.linspace(-40, 110, 60); f1 = np.linspace(-30, 90, 50)
+    Z = np.exp(-0.5 * (((f2[None, :] - 55) / 12) ** 2
+                       + ((f1[:, None] - 60) / 10) ** 2))
+    d2 = twod.Data2D(f2_ppm=f2, f1_ppm=f1, z=Z, nucleus="27Al", larmor_MHz=195.5)
+    recipe = {"nucleus": "27Al", "larmor_frequency_MHz": 195.5, "sites": [
+        {"model": "czjzek", "label": "AlIV", "params": {
+            "isotropic_chemical_shift_ppm": {"value": 60.0, "vary": True,
+                                             "min": 0, "max": 120},
+            "sigma_Cq_MHz": {"value": 2.0, "vary": True, "min": 0.2, "max": 8},
+            "shift_fwhm_ppm": {"value": 12.0, "vary": True, "min": 1, "max": 30},
+            "line_fwhm_ppm": {"value": 4.0, "vary": True, "min": 0},
+            "amplitude": {"value": 1.0, "vary": True, "min": 0}}}]}
+    dlg = CofitDialog(None, recipe, base)
+    try:
+        dlg.datasets = [base, {"kind": "2d", "label": "MQMAS", "data2d": d2,
+                               "nucleus": "27Al", "larmor": 195.5}]
+        dlg._result = SimpleNamespace(
+            recipes=[Recipe.from_dict(recipe)], rmsd=[0.031, 0.048],
+            per_dataset=[{"kind": "1d", "x": x, "y_fit": 1.05 * amp},
+                         {"kind": "2d", "f2": f2, "f1": f1, "z_fit": Z * 0.98,
+                          "per_site": [Z * 0.98]}])
+        dlg._plot_result()
+        qapp.processEvents()
+        _assert_plain(dlg, n_plots=2)
+        assert _labelled(dlg) == [("bottom", "F2 (ppm)", ""), ("bottom", "ppm", ""),
+                                  ("left", "F1 (ppm)", "")]
+    finally:
+        dlg.close()
+
+
+def test_contour_2d_view_map_projections_and_phasing_traces_are_plain(qapp):
+    """The map (F2 on the bottom, F1 on the RIGHT axis), both projections,
+    and the per-pick phasing traces the view builds on demand."""
+    from larmor.desktop.twod_view import Contour2DView
+
+    v = Contour2DView()
+    v.set_data(_map_2d().normalized(), "syn")
+    qapp.processEvents()
+    _assert_plain(v, n_plots=3)
+    assert _labelled(v) == [("bottom", "F2 (ppm)", ""), ("right", "F1", "")]
+    v._picks = [10, 20]; v._pick_axis = "f2"; v._pivot = 10.0
+    v._enter_phasing()
+    qapp.processEvents()
+    _assert_plain(v, n_plots=5)
+    assert ("bottom", "ppm", "") in _labelled(v)
+
+
+def test_twod_dialog_plots_are_plain(qapp):
+    from larmor.desktop.twod_dialog import TwoDDialog
+    dlg = TwoDDialog(None, None)
+    try:
+        _assert_plain(dlg, n_plots=3)
+        assert _labelled(dlg) == [("bottom", "F2 (ppm)", ""),
+                                  ("right", "F1 (ppm)", "")]
+    finally:
+        dlg.close()
+
+
+def test_tool_dialogs_are_plain(qapp):
+    from larmor.desktop.tool_dialogs import ErrorsDialog, RedorDialog
+    x = np.linspace(-20, 60, 500)
+    cases = ((RedorDialog(None, None),
+              [("bottom", "recoupling time / s", ""), ("left", "ΔS/S₀", "")]),
+             (ErrorsDialog(None, _recipe_11b(), x, np.ones_like(x), (60.0, -20.0)),
+              [("bottom", "parameter value", ""), ("left", "χ²", "")]))
+    for dlg, labels in cases:
+        try:
+            _assert_plain(dlg, n_plots=1)
+            assert _labelled(dlg) == labels
+        finally:
+            dlg.close()
+
+
+def test_montecarlo_dialog_is_plain(qapp):
+    from larmor.desktop.montecarlo_dialog import MonteCarloDialog
+    x = np.linspace(-20, 60, 500)
+    dlg = MonteCarloDialog(None, _recipe_11b(), x, np.ones_like(x), (60.0, -20.0))
+    try:
+        _assert_plain(dlg, n_plots=1)
+        assert _labelled(dlg) == [("bottom", "parameter value", ""),
+                                  ("left", "count", "")]
+    finally:
+        dlg.close()
+
+
+def test_series_plot_dialog_subplots_are_plain(qapp):
+    from larmor.batchfit import BatchFitResult
+    from larmor.desktop.series_plot import SeriesPlotDialog
+    from larmor.recipe import Param, Recipe, SiteModel
+
+    recs = [Recipe(nucleus="11B", larmor_frequency_MHz=160.0, spin_rate_Hz=0.0,
+                   sample=f"g{k}", sites=[
+                       SiteModel(model="gauss_lor", label="A", params={
+                           "isotropic_chemical_shift_ppm": Param(pos),
+                           "shift_fwhm_ppm": Param(6.0), "amplitude": Param(100),
+                           "gl": Param(1.0, vary=False)}),
+                       SiteModel(model="gauss_lor", label="B", params={
+                           "isotropic_chemical_shift_ppm": Param(2.0),
+                           "shift_fwhm_ppm": Param(3.0), "amplitude": Param(50),
+                           "gl": Param(1.0, vary=False)})])
+            for k, pos in enumerate((15.0, 15.3, 14.7))]
+    res = BatchFitResult(recipes=recs, labels=[f"g{k}" for k in range(3)],
+                         rmsd=[0.0] * 3, per_dataset=[], shared=(), released=())
+    dlg = SeriesPlotDialog(None, res)
+    try:
+        n = len(dlg._subplots)
+        assert n >= 4
+        _assert_plain(dlg, n_plots=n)
+        labels = _labelled(dlg)
+        assert len(labels) == n and all(o == "left" for o, _, _ in labels)
+        assert ("left", "population % (integral)", "") in labels
+    finally:
+        dlg.close()
+
+
+def test_vt_dialog_axis_stays_in_1_per_k(qapp):
+    """1000/T for a melt (T > 1000 K) lies below 1: pyqtgraph would relabel
+    the axis 'm1/K' and tick it 700 ... 900."""
+    from larmor.desktop.vt_dialog import VtDialog
+    dlg = VtDialog(None)
+    try:
+        _assert_plain(dlg, n_plots=1)
+        assert _labelled(dlg) == [("bottom", "1000/T", "1/K"),
+                                  ("left", "ln(rate)", "")]
+        inv_t = 1000.0 / np.array([1123.0, 1223.0, 1323.0, 1423.0])
+        dlg.plot.plot(inv_t, -3.0 * inv_t)
+        _shown(qapp, dlg)
+        ax = dlg.plot.getPlotItem().getAxis("bottom")
+        assert max(ax.range) < 1.0                      # the range pyqtgraph scales
+        assert "(1/K)" in ax.labelString()
+        assert _tick_span(ax) < 1.0, _tick_strings(ax)
+    finally:
+        dlg.close()
+
+
+def test_czjzek_dist_dialog_axis_stays_in_mhz(qapp):
+    """Zoomed to the sub-MHz part of a 23Na distribution the C_Q axis would
+    read 'mMHz' with ticks 100 ... 600."""
+    from larmor.desktop.axes import all_axes
+    from larmor.desktop.czjzek_dist_dialog import CzjzekDistDialog
+    r = {"nucleus": "23Na", "sites": [{"model": "czjzek", "label": "Na",
+                                       "params": {"sigma_Cq_MHz": {"value": 0.05}}}]}
+    dlg = CzjzekDistDialog(None, r)
+    try:
+        _shown(qapp, dlg)
+        _assert_plain(dlg, n_plots=1)
+        assert _labelled(dlg) == [("bottom", "C_Q", "MHz"), ("left", "P(C_Q)", "")]
+        ax = next(a for a in all_axes(dlg) if a.orientation == "bottom")
+        ax.linkedView().setXRange(0.0, 0.6, padding=0)
+        qapp.processEvents()
+        assert "(MHz)" in ax.labelString() and ax.labelUnitPrefix == ""
+        assert _tick_span(ax) < 1.0, _tick_strings(ax)
+    finally:
+        dlg.close()
+
+
+def test_satrec_dialog_plots_are_plain(qapp):
+    from larmor.desktop.satrec_dialog import SatrecDialog
+    dlg = SatrecDialog(None, None)
+    try:
+        _assert_plain(dlg, n_plots=2)                   # spectrum + build-up
+        assert _labelled(dlg) == [("bottom", "delay (s)", ""),
+                                  ("bottom", "shift", "ppm"),
+                                  ("left", "integral (norm.)", "")]
+    finally:
+        dlg.close()
+
+
+def test_baseline_dialog_plots_are_plain(qapp):
+    from larmor.desktop.baseline_dialog import BaselineDialog
+    x = np.linspace(-20, 60, 500)
+    dlg = BaselineDialog(None, x, np.exp(-((x - 15) / 4) ** 2))
+    try:
+        _assert_plain(dlg, n_plots=2)
+        assert _labelled(dlg) == [("bottom", "shift", "ppm"),
+                                  ("left", "corrected", ""),
+                                  ("left", "intensity", "")]
+    finally:
+        dlg.close()
