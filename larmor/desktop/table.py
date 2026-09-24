@@ -53,6 +53,17 @@ def _param_unit(model: str, key: str) -> str:
     return ""
 
 
+def _default_fixed(model: str, key: str) -> bool:
+    """Does the registry hold this parameter at its default unless freed
+    (``ParamDef.default_fixed`` -- the Czjzek family's lb)?"""
+    try:
+        from larmor import paramstatus
+
+        return paramstatus.is_default_fixed(model, key)
+    except Exception:
+        return False
+
+
 def _spin_of(nucleus: str | None) -> float:
     """Nuclear spin I of a nucleus string like '27Al' (defaults to 5/2)."""
     try:
@@ -177,10 +188,14 @@ class _Cell(QWidget):
 
     def __init__(self, p: dict, param_name: str, param_unit: str,
                  this_index: int, n_sites: int, larmor_MHz: float,
-                 spin: float = 2.5, site_params: dict | None = None):
+                 spin: float = 2.5, site_params: dict | None = None,
+                 default_fixed: bool = False):
         super().__init__()
         self.p = p
         self.spin = spin
+        # the registry holds this parameter at its default unless freed
+        # (dmfit's greyed CzSimple Lb): the cell says so in its tooltip
+        self.default_fixed = bool(default_fixed)
         # the whole site's params (read-only here): a derived read-out can
         # depend on a SIBLING parameter -- the Czjzek P_Q on czjzek_d's d, the
         # exchange coalescence rate on split_ppm
@@ -313,8 +328,20 @@ class _Cell(QWidget):
                         "or bounds [0..100]")
         if p.get("stderr"):
             tips.append(f"± {p['stderr'] * k:.3g}")
+        # a held value reads as held: dimmed and italic, like dmfit's greyed
+        # parameters -- the pin ☑ beside it is the switch
+        if not p.get("vary", True) and not p.get("expr"):
+            css += (f"QLineEdit {{ color: {theme.active().text_dim}; "
+                    "font-style: italic; }}")
+            tips.append("held at the model default (dmfit greys it too); "
+                        "untick the pin to fit it" if self.default_fixed
+                        else "held (pin ☑) — untick the pin to fit it")
         self.edit.setStyleSheet(css)
         self.edit.setToolTip("  ·  ".join(tips))
+
+    def is_held(self) -> bool:
+        """True when the value is pinned (not varied, not linked)."""
+        return bool(not self.p.get("vary", True) and not self.p.get("expr"))
 
     # ---- edits ----
     def _on_edit(self):
@@ -358,6 +385,7 @@ class _Cell(QWidget):
 
     def _on_pin(self, checked):
         self.p["vary"] = not checked
+        self._style()
         self.pinned.emit()
 
     def nudge(self, direction: int, frac: float = 0.02):
@@ -542,7 +570,8 @@ class LinesTable(QWidget):
                 if key in site["params"]:
                     cell = _Cell(site["params"][key], key,
                                  _param_unit(site["model"], key), i, n, larmor,
-                                 spin, site_params=site["params"])
+                                 spin, site_params=site["params"],
+                                 default_fixed=_default_fixed(site["model"], key))
                     cell.edited.connect(self.edited)
                     cell.pinned.connect(self.edited)
                     cell.error.connect(self._cell_error)

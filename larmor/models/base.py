@@ -24,6 +24,15 @@ class ParamDef:
     min: float | None = None
     max: float | None = None
     vary: bool = True
+    #: held at ``default`` unless the user frees it (dmfit's greyed CzSimple
+    #: Lb): the table shows it as a held cell, and a fit report does not list
+    #: it as a user constraint (paramstatus kind 'default'). Implies vary=False.
+    default_fixed: bool = False
+
+    def __post_init__(self):
+        if self.default_fixed and self.vary:
+            raise ValueError(
+                f"ParamDef {self.name!r}: default_fixed=True requires vary=False")
 
 
 @dataclass(frozen=True)
@@ -90,7 +99,8 @@ def describe_all() -> list[dict]:
             "params": [
                 {"name": p.name, "key": p.key, "default": p.default,
                  "unit": p.unit, "description": p.description,
-                 "min": p.min, "max": p.max, "vary": p.vary}
+                 "min": p.min, "max": p.max, "vary": p.vary,
+                 "default_fixed": p.default_fixed}
                 for p in m.params
             ],
         }

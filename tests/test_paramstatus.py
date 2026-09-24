@@ -276,3 +276,42 @@ def test_final2_recipes_derived_status_reproduces_the_fit_notes():
     assert n_at > 0 and n_fixed > 0
     assert re.fullmatch(r"\d+ fixed( · \d+ at a bound)?",
                         paramstatus.summary(Recipe.load(files[0])))
+
+
+def test_default_fixed_lb_is_the_silent_default_kind():
+    """A Czjzek lb still at its registry default (pinned, as a fresh site is
+    created) is 'default': held (no error bar) but no glyph, no footnote, not
+    counted -- a parameter fixed at its model default is not a user
+    constraint. Change its value or free it and the ordinary kinds apply."""
+    from larmor import models
+
+    assert paramstatus.is_default_fixed("czjzek", "line_fwhm_ppm")
+    assert not paramstatus.is_default_fixed("quad_ct", "line_fwhm_ppm")
+    assert not paramstatus.is_default_fixed("gauss_lor", "gl")
+    assert not paramstatus.is_default_fixed("no_such_model", "line_fwhm_ppm")
+    fresh = models.get("czjzek").defaults()
+    st = param_status("czjzek", "line_fwhm_ppm", fresh["line_fwhm_ppm"])
+    assert st.kind == "default" and st.held
+    assert (st.marker, st.latex, st.csv_flag) == ("", "", "fixed")
+    assert st.word == "held at the model default"
+    # the desktop dict shape and stderr 0.0 read the same
+    d = {"value": 0.0, "stderr": 0.0, "vary": False, "min": 0.0, "max": None,
+         "expr": None}
+    assert param_status("czjzek", "line_fwhm_ppm", d).kind == "default"
+    # moved off the default while pinned: a user's fixed value
+    assert param_status("czjzek", "line_fwhm_ppm",
+                        Param(2.0, vary=False)).kind == "fixed"
+    # freed: free, or at its bound like any other free parameter
+    assert param_status("czjzek", "line_fwhm_ppm", Param(2.0)).kind == "free"
+    assert param_status("czjzek", "line_fwhm_ppm", Param(0.0)).kind == "at_bound"
+    # gl of a Gauss/Lorentz is fixed by default too but NOT declared
+    # default_fixed: it keeps its dagger
+    assert param_status("gauss_lor", "gl", Param(1.0, vary=False)).kind == "fixed"
+    # the recipe-level views stay silent about it
+    rec = Recipe(nucleus="27Al", larmor_frequency_MHz=130.0, sites=[
+        SiteModel(model="czjzek", label="Al4", params=fresh)])
+    assert paramstatus.summary(rec) == ""
+    assert paramstatus.site_constraints(rec, 0) == {"fixed": [], "linked": [],
+                                                    "at_bound": []}
+    assert paramstatus.footnote([("Al4 lb", st)]) == ""
+    assert paramstatus.ParamStatus("fixed").held and not paramstatus.ParamStatus("free").held

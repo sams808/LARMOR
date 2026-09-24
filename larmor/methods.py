@@ -53,7 +53,9 @@ def _fmt(v, err, fmt, status=None):
     has no covariance error at all after the fit's retry, so ‡ is its
     explanation."""
     s = fmt.format(v)
-    fixed = status is not None and status.kind == "fixed"
+    # a value held at its model default (paramstatus 'default') is held too:
+    # no error bar, and no glyph either (it is not a user constraint)
+    fixed = status is not None and status.held
     if err is not None and not fixed:
         s += " ± " + fmt.format(err)
     if status is not None:
@@ -110,7 +112,7 @@ def latex_table(recipe: dict, quant: dict | None = None,
                 v = p.get("value") if isinstance(p, dict) else p
                 e = p.get("stderr") if isinstance(p, dict) else None
                 st = paramstatus.param_status(model_s, key, p)
-                if st.kind != "free":
+                if st.kind not in ("free", "default"):
                     entries.append((f"{label_s} {head}", st))
                 row.append(_fmt(float(v), e, fmt, st))
         frac, ferr = pops.get(label_s, (None, None))

@@ -6,6 +6,12 @@ of every parameter is DERIVED from what the recipe already stores -- ``vary``,
 retroactive on every saved recipe, self-clearing on edit, and needs no recipe
 schema change (``Param(**p)`` raises on unknown keys in released versions).
 
+A fifth, silent kind, ``default``, covers a parameter the model registry
+declares ``default_fixed`` (the Czjzek family's lb) that still sits at its
+registry default: held, so it prints without an error bar, but not a user
+constraint -- no glyph, no footnote entry, not counted in ``summary``. Change
+its value or free it and it becomes an ordinary fixed / free parameter.
+
 The at-bound test is the fit's own (``fit._at_bounds``): a FREE parameter
 within ``AT_BOUND_REL_TOL`` · max(1, |value|) of a finite bound, where the
 bound is the recipe's min/max or, when the recipe omits it, the model's
@@ -28,9 +34,9 @@ from larmor.recipe import Recipe
 
 __all__ = [
     "AT_BOUND_REL_TOL", "AT_BOUND_NOTE_PREFIX", "KINDS", "MARK", "LATEX",
-    "CSV_COLUMNS", "ParamStatus", "effective_bounds", "bound_side",
-    "param_status", "recipe_statuses", "site_constraints", "csv_fields",
-    "footnote", "summary",
+    "HELD_KINDS", "CSV_COLUMNS", "ParamStatus", "effective_bounds",
+    "bound_side", "is_default_fixed", "at_model_default", "param_status",
+    "recipe_statuses", "site_constraints", "csv_fields", "footnote", "summary",
 ]
 
 #: relative tolerance of the at-bound test -- the fit's own 1e-3 rule
@@ -38,12 +44,19 @@ AT_BOUND_REL_TOL = 1e-3
 #: the recipe note fit() writes (and prunes before rewriting) when
 #: parameters finished at a bound; the text after the prefix is unchanged
 AT_BOUND_NOTE_PREFIX = "parameters finished at a bound"
-KINDS = ("free", "fixed", "linked", "at_bound")
-#: the glyphs on screen and in Markdown ('' for free)
-MARK = {"free": "", "fixed": "†", "at_bound": "‡", "linked": "§"}
-#: the same glyphs as LaTeX superscripts ('' for free)
+#: ``default`` is a parameter the model registry declares ``default_fixed``
+#: (the Czjzek family's lb, dmfit's greyed CzSimple Lb) still held at its
+#: model default: not fitted, but not a user constraint either -- no glyph,
+#: no footnote, not counted in ``summary``; ``csv_fields`` still says
+#: 'fixed' because for a spreadsheet the truth is that it did not vary
+KINDS = ("free", "fixed", "linked", "at_bound", "default")
+#: the glyphs on screen and in Markdown ('' for free and default)
+MARK = {"free": "", "fixed": "†", "at_bound": "‡", "linked": "§", "default": ""}
+#: the same glyphs as LaTeX superscripts ('' for free and default)
 LATEX = {"free": "", "fixed": r"$^{\dagger}$", "at_bound": r"$^{\ddagger}$",
-         "linked": r"$^{\S}$"}
+         "linked": r"$^{\S}$", "default": ""}
+#: the kinds that print a value without an error bar (nothing was fitted)
+HELD_KINDS = ("fixed", "default")
 #: the five status columns appended to every long CSV (batch dialog, CLI)
 CSV_COLUMNS = ("vary", "min", "max", "expr", "at_bound")
 
@@ -74,13 +87,24 @@ class ParamStatus:
         glyphs, so spreadsheet filters work."""
         if self.kind == "at_bound":
             return f"at_{self.side}"
+        if self.kind == "default":
+            return "fixed"
         return self.kind if self.kind in ("fixed", "linked") else ""
 
     @property
+    def held(self) -> bool:
+        """True when the value was not fitted (fixed, or held at the model
+        default) -- a table prints it without an error bar."""
+        return self.kind in HELD_KINDS
+
+    @property
     def word(self) -> str:
-        """'held fixed' | 'at its lower bound 10.37' | 'linked: 0.19 * s0.amplitude' | ''"""
+        """'held fixed' | 'held at the model default' | 'at its lower bound
+        10.37' | 'linked: 0.19 * s0.amplitude' | ''"""
         if self.kind == "fixed":
             return "held fixed"
+        if self.kind == "default":
+            return "held at the model default"
         if self.kind == "at_bound":
             return f"at its {_SIDE_WORD.get(self.side, self.side)} bound {_g(self.bound)}"
         if self.kind == "linked":
@@ -152,12 +176,42 @@ def bound_side(value, lo, hi, tol: float = AT_BOUND_REL_TOL) -> str | None:
     return None
 
 
+def _param_def(model: str | None, pname: str):
+    try:
+        for pd in model_registry.get(model).params:
+            if pd.name == pname:
+                return pd
+    except Exception:
+        pass
+    return None
+
+
+def is_default_fixed(model: str | None, pname: str) -> bool:
+    """Does the registry declare ``pname`` of ``model`` as held at its default
+    unless freed (``ParamDef.default_fixed``)? False for unknown models."""
+    pd = _param_def(model, pname)
+    return bool(pd is not None and pd.default_fixed)
+
+
+def at_model_default(model: str | None, pname: str, p) -> bool:
+    """A ``default_fixed`` parameter still holding its registry default (to
+    1e-9 relative): the state a fresh site is created in."""
+    pd = _param_def(model, pname)
+    if pd is None or not pd.default_fixed:
+        return False
+    v = _field(p, "value")
+    if not _finite(v):
+        return False
+    return math.isclose(float(v), float(pd.default), rel_tol=1e-9, abs_tol=1e-12)
+
+
 def param_status(model: str | None, pname: str, p) -> ParamStatus:
     """Derive the status of one parameter from a recipe.Param, a
     ``{value, stderr, vary, min, max, expr}`` dict, or a bare number (which
     carries no constraint information and reads as free). Precedence:
-    linked (expr) > fixed (vary False) > at a bound (free and within the
-    tolerance of an effective bound) > free."""
+    linked (expr) > default (vary False on a ``default_fixed`` parameter still
+    at its registry default) > fixed (vary False) > at a bound (free and
+    within the tolerance of an effective bound) > free."""
     if p is None or not _is_param_like(p):
         return ParamStatus("free")
     expr = _field(p, "expr") or ""
@@ -165,6 +219,8 @@ def param_status(model: str | None, pname: str, p) -> ParamStatus:
         return ParamStatus("linked", expr=str(expr))
     vary = _field(p, "vary", True)
     if vary is not None and not vary:
+        if at_model_default(model, pname, p):
+            return ParamStatus("default")
         return ParamStatus("fixed")
     lo, hi = effective_bounds(model, pname, p)
     side = bound_side(_field(p, "value"), lo, hi)

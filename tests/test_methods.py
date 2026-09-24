@@ -301,3 +301,24 @@ def test_methods_sentence_states_the_dft_shift_conversion():
 def test_methods_phrase_for_gl_norm_is_not_the_raw_name():
     s = methods.methods_sentence(_f19_recipe())
     assert "area-normalised" in s and "gl_norm" not in s
+
+
+def test_latex_does_not_footnote_an_lb_held_at_its_model_default():
+    """A fresh Czjzek site holds lb at the registry default (dmfit's greyed
+    Lb): the table prints it as a plain held value -- no '± 0.00', no dagger,
+    no footnote row -- because a model default is not a user constraint. A
+    dagger appears only once the user pins lb at a value of their own."""
+    from larmor import models
+
+    rec = _czjzek_recipe()
+    fresh = models.get("czjzek").defaults()["line_fwhm_ppm"]
+    fresh.stderr = 0.0                              # as a saved recipe stores it
+    rec.sites[0].params["line_fwhm_ppm"] = fresh
+    tex = methods.latex_table(rec.to_dict())
+    row4 = next(ln for ln in tex.splitlines() if ln.startswith("Al(IV)"))
+    assert "0.0 &" in row4 and "0.0 ±" not in row4 and r"\dagger" not in row4
+    assert r"\multicolumn" not in tex
+    rec.sites[0].params["line_fwhm_ppm"] = Param(2.0, stderr=0.0, vary=False)
+    tex2 = methods.latex_table(rec.to_dict())
+    row4 = next(ln for ln in tex2.splitlines() if ln.startswith("Al(IV)"))
+    assert r"2.0$^{\dagger}$" in row4 and r"$\dagger$ held fixed." in tex2

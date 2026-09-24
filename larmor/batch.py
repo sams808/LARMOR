@@ -334,7 +334,8 @@ def _flag(row: dict, h: str):
     """The non-free ParamStatus of a cell (the population's is the
     amplitude's), or None. Rows built before N5 carry no flags."""
     st = row.get("pop_flag") if h == "pop (%)" else (row.get("flags") or {}).get(h)
-    return st if (st is not None and st.kind != "free") else None
+    # 'default' (held at the model default, paramstatus) is silent like free
+    return st if (st is not None and st.kind not in ("free", "default")) else None
 
 
 def _marked_kinds(t: BatchTable) -> set[str]:

@@ -130,3 +130,46 @@ def test_param_columns_have_no_dead_entries():
     dead = [key for key, _label in table.PARAM_COLUMNS
             if key not in all_params]
     assert not dead, f"PARAM_COLUMNS lists parameters no model has: {dead}"
+
+
+#: the models whose lb (line_fwhm_ppm) the registry holds at its default
+#: unless the user frees it -- dmfit's greyed CzSimple Lb: every distribution
+#: model (a Czjzek / Gaussian spread already carries the breadth, so a free
+#: lb only ends 'at bounds' in most fits). Every other model that has an lb
+#: fits it (a crystalline quad_ct has nothing else to set its width).
+DEFAULT_FIXED_LB = frozenset({"czjzek", "czjzek_d", "czjzek_corr",
+                              "ext_czjzek", "amorphous"})
+
+
+def test_default_fixed_partitions_the_models_with_a_line_width():
+    """Every model with ``line_fwhm_ppm`` states whether it is fitted by
+    default or held at its default (``ParamDef.default_fixed``), and the
+    flag never exists without ``vary=False`` behind it."""
+    with_lb = {name for name in _registry()
+               if "line_fwhm_ppm" in models.get(name).param_names}
+    assert DEFAULT_FIXED_LB <= with_lb, DEFAULT_FIXED_LB - with_lb
+    held = set()
+    for name in _registry():
+        for pd in models.get(name).params:
+            if pd.default_fixed:
+                assert not pd.vary, (name, pd.name)
+                assert pd.name == "line_fwhm_ppm", (
+                    f"{name}.{pd.name} is default_fixed: add it to this "
+                    "partition (only lb is held by default today)")
+                held.add(name)
+    assert held == DEFAULT_FIXED_LB, (
+        f"default_fixed lb differs from DEFAULT_FIXED_LB: "
+        f"+{held - DEFAULT_FIXED_LB} -{DEFAULT_FIXED_LB - held}")
+    for name in with_lb - DEFAULT_FIXED_LB:
+        pd = next(p for p in models.get(name).params if p.name == "line_fwhm_ppm")
+        assert pd.vary, f"{name}.line_fwhm_ppm is fixed without default_fixed"
+    # a fresh site of a held-lb model comes out pinned, at the default
+    for name in DEFAULT_FIXED_LB:
+        p = models.get(name).defaults()["line_fwhm_ppm"]
+        assert p.vary is False
+        assert p.value == next(pd.default for pd in models.get(name).params
+                               if pd.name == "line_fwhm_ppm")
+    # the JSON dump carries the flag for the web UI
+    dumped = {m["name"]: m for m in models.describe_all()}
+    assert {n for n, m in dumped.items()
+            if any(p["default_fixed"] for p in m["params"])} == DEFAULT_FIXED_LB
