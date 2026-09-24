@@ -10,6 +10,7 @@ from PySide6.QtGui import QFont
 
 from larmor import cellparse
 from larmor.desktop import theme
+from larmor.desktop.axes import plain_units
 from larmor.phasedrag import DragGesture
 
 #: fallback categorical palette (used before a theme is applied / in headless code)
@@ -375,7 +376,11 @@ class SpectrumView(pg.PlotWidget):
         label_style = {"color": t.axis, "font-size": "10pt"}
         self._apply_axis_label(label_style)
         # never let pyqtgraph SI-prefix a ppm axis ("kppm" is not a unit)
-        pi.getAxis("bottom").enableAutoSIPrefix(False)
+        # plain_units, not enableAutoSIPrefix(False): pyqtgraph recomputes the
+        # prefix INSIDE that call and never again once off, so re-applying
+        # it from apply_theme() while a +-6000 ppm spectrum was shown froze a
+        # "k" prefix -- ticks 6 ... -6 under a "(kppm)" label (Sam, 2026-09-24)
+        plain_units(pi, axes=("bottom",))
         self.setLabel("left", "intensity", **label_style)
         self.showGrid(x=True, y=True, alpha=t.grid_alpha)
         self._exp.setPen(pg.mkPen(t.experiment, width=1.4))

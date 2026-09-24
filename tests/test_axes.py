@@ -199,13 +199,6 @@ def test_spectrum_view_shows_a_wideline_spectrum_in_thousands_of_ppm(qapp):
     assert _tick_span(ax) >= 4000, _tick_strings(ax)
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "larmor/desktop/plot.py SpectrumView.apply_theme() re-calls "
-    "enableAutoSIPrefix(False) on the bottom axis; run after a wideline "
-    "spectrum is displayed (every theme switch, mw_menus._apply_theme_live) "
-    "that call freezes the 'k' prefix: ticks 6 ... -6 under 'chemical shift "
-    "(kppm)'. Fix: replace the call with plain_units(self) from "
-    "larmor.desktop.axes (resets the scale), then drop this marker."))
 def test_spectrum_view_keeps_thousands_of_ppm_after_a_theme_reapply(qapp):
     from larmor.desktop.plot import SpectrumView
 
