@@ -73,6 +73,15 @@ class _CofitMixin:
             tbl.edited.connect(lambda w=which: self._cofit_on_edit(w))
             tbl.constraint_edited.connect(lambda w=which: self._cofit_on_edit(w))
             tbl.structure.connect(lambda r, a, w=which: self._cofit_struct(w, r, a))
+            # a multi-selection Remove / Delete: highest row first, so the
+            # lower indices stay valid, through the same per-row path
+            tbl.remove_lines.connect(
+                lambda rows, w=which: [self._cofit_struct(w, r, "remove")
+                                       for r in sorted(rows, reverse=True)])
+            # sidebands act on the workbench recipe, not on a co-fit copy
+            tbl.sidebands_requested.connect(lambda _i: self.statusBar().showMessage(
+                "co-fit tables keep both recipes identical — add sidebands on "
+                "the workbench fit, then open the co-fit again"))
             tbl.compute.connect(lambda: self._cofit_simulate())   # footer Compute
             tbl.fit.connect(self.run_cofit_fit)                   # footer Fit
 

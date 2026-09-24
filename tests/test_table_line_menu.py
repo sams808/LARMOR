@@ -236,3 +236,25 @@ def test_line_menu_sidebands_preselects_the_line(qapp, win, monkeypatch):
     # the plain menu entry still defaults to the first eligible line
     win.add_sidebands()
     assert any(s["label"] == "L0+1sb" for s in win.recipe["sites"])
+
+
+def test_cofit_tables_honour_the_multi_selection_removal(qapp, win):
+    """The co-fit tables (two recipes kept identical) take a multi-selection
+    Remove through their per-row path, highest row first; the sidebands
+    entry only explains where sidebands are added."""
+    import json
+
+    _window_with_lines(win, 4)
+    r = json.loads(json.dumps(win.recipe))
+    win._cofit = {"d1": None, "d2": None, "home": None, "tie": set(),
+                  "r1": json.loads(json.dumps(r)), "r2": json.loads(json.dumps(r))}
+    win._cofit_rebuild_tables()
+    win.cofit_table1d.remove_lines.emit([0, 2])
+    for key in ("r1", "r2"):
+        assert [s["label"] for s in win._cofit[key]["sites"]] == ["L1", "L3"]
+    assert win.cofit_table1d.table.rowCount() == 2
+    assert win.cofit_table2d.table.rowCount() == 2
+    win.cofit_table2d.sidebands_requested.emit(0)
+    assert "co-fit tables keep both recipes identical" in win.statusBar().currentMessage()
+    assert len(win._cofit["r1"]["sites"]) == 2            # nothing added
+    win._cofit = None
