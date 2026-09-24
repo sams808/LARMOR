@@ -92,17 +92,25 @@ def _restore_code(md: str, blocks: list[str]) -> str:
     return re.sub(r"\x00(\d+)\x00", lambda m: blocks[int(m.group(1))], md)
 
 
-def render_help_html(md: str) -> str:
-    """Markdown (with LaTeX math) -> styled HTML with typeset equations."""
+def render_help_html(md: str, scale: float = 1.0) -> str:
+    """Markdown (with LaTeX math) -> styled HTML with typeset equations.
+
+    ``scale`` is the help window's text-size factor (1.0 = the application
+    font): the equation images are sized to ``scale`` x their on-screen
+    target and the body font ``toHtml`` writes (an absolute pt size that wins
+    over any stylesheet rule) is multiplied by it, so text and equations grow
+    together. The PNGs are rendered once at high resolution and cached, so a
+    re-render at another size costs only the Markdown pass."""
     from PySide6.QtGui import QTextDocument
 
+    scale = float(scale) if scale and scale > 0 else 1.0
     md, blocks = _protect_code(md)
 
     inline_map: dict[str, str] = {}
     display_map: dict[str, str] = {}
 
     def display(m):
-        tag = _img_tag(m.group(1).strip(), _DISPLAY_PX, inline=False)
+        tag = _img_tag(m.group(1).strip(), _DISPLAY_PX * scale, inline=False)
         if not tag:
             return m.group(0)
         tok = f"MDMATHD{len(display_map)}X"
@@ -110,7 +118,7 @@ def render_help_html(md: str) -> str:
         return f"\n\n{tok}\n\n"
 
     def inline(m):
-        tag = _img_tag(m.group(1).strip(), _INLINE_PX, inline=True)
+        tag = _img_tag(m.group(1).strip(), _INLINE_PX * scale, inline=True)
         if not tag:
             return m.group(0)
         tok = f"MDMATHI{len(inline_map)}X"
@@ -123,7 +131,7 @@ def render_help_html(md: str) -> str:
     md = _restore_code(md, blocks)
 
     doc = QTextDocument()
-    doc.setDefaultStyleSheet(HELP_CSS)
+    doc.setDefaultStyleSheet(help_css(scale))
     doc.setMarkdown(md, QTextDocument.MarkdownDialectGitHub)
     html = doc.toHtml()
 
@@ -137,21 +145,44 @@ def render_help_html(md: str) -> str:
         html = html.replace(tok, tag)
     for tok, tag in inline_map.items():
         html = html.replace(tok, tag)
+    if scale != 1.0:
+        html = _scale_body_font(html, scale)
     return html
 
 
-HELP_CSS = f"""
-    body {{ color: {_INK}; font-size: 14px; line-height: 155%; }}
-    h1 {{ color: {_BRAND}; font-size: 25px; }}
-    h2 {{ color: {_BRAND}; font-size: 19px; }}
-    h3 {{ color: {_BRAND}; font-size: 15px; }}
+_BODY_PT = re.compile(r"(<body[^>]*?font-size:)([0-9.]+)(pt)")
+
+
+def _scale_body_font(html: str, scale: float) -> str:
+    """``toHtml`` writes ``<body style="... font-size:9pt ...">`` -- the
+    document's default (application) font as an absolute size, which the
+    browser's stylesheet cannot override -- so the text-size zoom rewrites
+    it; headings (relative sizes) and the paragraphs follow."""
+    return _BODY_PT.sub(
+        lambda m: f"{m.group(1)}{float(m.group(2)) * scale:.2f}{m.group(3)}",
+        html, count=1)
+
+
+def help_css(scale: float = 1.0) -> str:
+    """The manuals' stylesheet, every pixel size multiplied by ``scale``."""
+    def px(v: float) -> str:
+        return f"{max(1, round(v * scale))}px"
+
+    return f"""
+    body {{ color: {_INK}; font-size: {px(14)}; line-height: 155%; }}
+    h1 {{ color: {_BRAND}; font-size: {px(25)}; }}
+    h2 {{ color: {_BRAND}; font-size: {px(19)}; }}
+    h3 {{ color: {_BRAND}; font-size: {px(15)}; }}
     a  {{ color: #0a5a62; text-decoration: none; }}
-    code {{ font-family: Consolas, "Courier New", monospace; font-size: 12px;
+    code {{ font-family: Consolas, "Courier New", monospace; font-size: {px(12)};
             background: #eef2ef; color: #16202a; }}
-    pre {{ font-family: Consolas, "Courier New", monospace; font-size: 12px;
-           background: #f4f6f4; color: #16202a; padding: 8px; }}
-    th {{ background: #e7ece8; color: {_BRAND}; padding: 4px 8px;
+    pre {{ font-family: Consolas, "Courier New", monospace; font-size: {px(12)};
+           background: #f4f6f4; color: #16202a; padding: {px(8)}; }}
+    th {{ background: #e7ece8; color: {_BRAND}; padding: {px(4)} {px(8)};
           text-align: left; }}
-    td {{ padding: 4px 8px; }}
+    td {{ padding: {px(4)} {px(8)}; }}
     blockquote {{ color: #4a5560; font-style: italic; }}
 """
+
+
+HELP_CSS = help_css(1.0)

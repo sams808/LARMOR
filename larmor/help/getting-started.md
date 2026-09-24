@@ -185,6 +185,29 @@ Each experiment has its own manual with worked steps and the science behind it:
 All are under **? ▸ User manuals**; the reference documents are direct **?**-menu
 items. Every tool with a **Help** button opens the matching section.
 
+**Help windows.** A manual or tutorial opens in its own window that does not
+block the program: the workbench (or the tool the Help button sits in) stays
+usable while the page is open, several pages can be open side by side, and
+choosing an open page again brings its window to the front. The **A−** /
+**A+** / **Reset** buttons in the window's toolbar (Ctrl + −, Ctrl + = and
+Ctrl + 0, or Ctrl + mouse wheel) change the text size, equations included;
+the chosen size applies to every help window, open or opened later, and is
+kept for the next launch. The read-only viewers and calculators — NMR table,
+Conversion tools, Parameter correlations, Czjzek distribution, Compare fits,
+χ² map, Integrals & measurements, Variable temperature, About — open the same
+way, as windows that can be minimised and left aside.
+
+**Open windows.** Every tool window of the session — QCPMG processing,
+Referencing audit, Session inventory, Experimental section, help pages, the
+viewers above… — is listed at the bottom of the left sidebar under a
+**"N windows open"** header, oldest first, so a second copy of a tool started
+by mistake is visible at a glance. Click an entry to bring that window to the
+front; right-click for **Restore / Minimise / Close / Close all**. A minimised
+tool window does not shrink to a floating title bar at the bottom of the
+screen: it is hidden and its entry is drawn dimmed until it is restored. The
+list disappears when nothing is open; modal dialogs (the ones that must be
+answered before continuing) are not listed.
+
 ## 5 · Menu map
 
 Nine menus, each split into groups; every row shows its explanation as a
