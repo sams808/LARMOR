@@ -289,19 +289,19 @@ def test_mainwindow_palette_entry_coverage_and_shortcut_uniqueness(qapp, monkeyp
         assert len(cmds) >= 110, len(cmds)
         assert all(c.path and c.label for c in cmds)
         by = {(c.path, c.label): c for c in cmds}
-        fit = by[(("Decomposition",), "Fit")]
+        fit = by[(("Fit",), "Fit")]
         assert fit.shortcut == "F5" and fit.enabled is False    # no data yet
-        undo = by[(("Toolbar",), "↩  Undo")]
+        undo = by[(("Edit",), "↩  Undo")]             # menu path wins over Toolbar
         assert undo.shortcut == "Ctrl+Z"
         assert by[(("View", "Panels"), "Explorer")].checkable
         assert (("Help", "User manuals"), "QCPMG") in by
-        assert (("Decomposition", "Apply recipe"), "Browse for recipe…") in by
+        assert (("Edit", "Apply recipe"), "Browse for recipe…") in by
         assert by[(("View",), "Residual")].checked is True
-        assert by[(("Help",), "Command palette…  (find any menu entry)"
-                   )].shortcut == "Ctrl+Shift+P"
+        assert by[(("Help",), "Command palette…")].shortcut == "Ctrl+Shift+P"
+        assert by[(("Help",), "Command palette…")].tooltip     # explainer = tooltip
         gauss = [c for c in cmds if c.label == "Gauss/Lorentz"]
         assert len(gauss) == 1                                  # toolbar dedupe
-        assert gauss[0].path == ("Decomposition", "Add line")
+        assert gauss[0].path == ("Edit", "Add line")
         assert not any(c.label.startswith("(") for c in cmds)
         shortcuts = [c.shortcut for c in cmds if c.shortcut]
         dupes = sorted({s for s in shortcuts if shortcuts.count(s) > 1})

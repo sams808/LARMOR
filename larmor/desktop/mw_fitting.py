@@ -362,7 +362,7 @@ class _FittingMixin:
         self._health_show()
 
     def show_fit_health(self, *_):
-        """Decomposition ▸ Fit health details (F7) and the pill click: every
+        """Fit ▸ Fit health details (F7) and the pill click: every
         flag plus the analysis tools, anchored under the pill; with a sibling
         T1 EXPNO known, the per-site T1 measurement and the Relaxation tool
         on that EXPNO."""

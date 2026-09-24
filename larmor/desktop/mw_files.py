@@ -479,7 +479,7 @@ class _FilesMixin:
                           "2D spectrum")
             kind = "arrayed/relaxation" if data.is_pseudo2d else "MQMAS 2D"
             self.statusBar().showMessage(
-                f"{kind} displayed — Tools ▸ 2D MQMAS to fit · Tools ▸ "
+                f"{kind} displayed — Fit ▸ MQMAS to fit · Tools ▸ "
                 "Relaxation for a series · or send a 1D trace to fitting below")
             return True
 

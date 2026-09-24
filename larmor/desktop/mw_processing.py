@@ -353,7 +353,7 @@ class _ProcessingMixin:
 
     # ------------------------------------------------------- drag to phase (F2)
     def start_phase_drag(self):
-        """Process ▸ Drag to phase (Ctrl+P): reveal the Processing panel and
+        """Process ▸ Phase ▸ Drag to phase (Ctrl+P): reveal the Processing panel and
         toggle its Drag-to-phase button -- the single source of truth for the
         mode; its toggled signal runs _phase_drag_mode."""
         self.proc_dock.show()
@@ -768,7 +768,7 @@ class _ProcessingMixin:
         self._update_sn(); self._refresh_overlays()
         self.statusBar().showMessage(
             f"WURST profile divided out ({sweep.value():.0f} kHz sweep, "
-            f"N={order.value():.0f}) — File ▸ Save spectrum as… to keep it")
+            f"N={order.value():.0f}) — File ▸ Export ▸ Save spectrum as CSV… to keep it")
 
     def open_subtract(self):
         from larmor.desktop.subtract_dialog import SubtractDialog
@@ -799,4 +799,4 @@ class _ProcessingMixin:
             self.request_simulation()
         self._update_sn(); self._refresh_overlays()
         self.statusBar().showMessage(
-            "background subtracted — File ▸ Save spectrum as… to keep the result")
+            "background subtracted — File ▸ Export ▸ Save spectrum as CSV… to keep the result")

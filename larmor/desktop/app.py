@@ -1,7 +1,7 @@
 """LARMOR desktop: main window, laid out after dmfit.
 
 Structure (mirroring dmfit's decomposition interface):
-  - menu bar: File / Process / Decomposition / View / Models / ?
+  - menu bar: File / Edit / Process / Fit / Series / Tools / View / Plotting / ?
   - thin top toolbar: zoom shortcuts, undo/redo, add-line model buttons
   - narrow LEFT sidebar: quick view buttons (Full, Sites, Y auto, parts, pad)
   - central spectrum canvas with dmfit-style paddles (drag the square top

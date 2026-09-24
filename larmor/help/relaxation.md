@@ -2,7 +2,7 @@
 
 > A relaxation experiment is a **pseudo-2D**: the same spectrum, re-acquired at a
 > list of delays (`vdlist`/`vclist`), so an integral builds up or decays with the
-> delay. **Tools ▸ Relaxation** opens a guided, TopSpin-style workflow — process
+> delay. **Tools ▸ Relaxation ▸ Relaxation / series** opens a guided, TopSpin-style workflow — process
 > the slices, drag integration zones, and fit the build-up to a relaxation model
 > with an uncertainty on every τ.
 
@@ -61,7 +61,7 @@ where a single $T_1$ is a fiction. The fitted formula is shown above the curve.
 
 ## 3 · Beyond a single series
 
-- **Per-site relaxation** (Tools ▸ Per-site relaxation) — instead of integrating a
+- **Per-site relaxation** (Tools ▸ Relaxation ▸ Per-site relaxation) — instead of integrating a
   region, decompose *every slice* on the **current fit's lineshapes** (NNLS on the
   fixed model) and follow each **site's** amplitude → a $T_1$/$T_2$ per resolved
   site, even where the sites overlap.
@@ -71,7 +71,7 @@ where a single $T_1$ is a fiction. The fitted formula is shown above the curve.
   delay; a click on that chip opens this tool on the relaxation EXPNO, and the
   **F7** menu's *Measure T1 per site from EXPNO N* runs the per-site decomposition
   above on the current fit and feeds its $T_1$ back into the chip.
-- **Variable temperature** (Tools ▸ Variable temperature) — feed a τ(T) series and
+- **Variable temperature** (Tools ▸ Relaxation ▸ Variable temperature) — feed a τ(T) series and
   fit an **Arrhenius** $\tau = \tau_0\,e^{E_a/RT}$ or **Vogel–Fulcher–Tammann**
   $\tau = \tau_0\,e^{B/(T-T_0)}$ law to extract an activation energy $E_a$ (VFT for
   the super-Arrhenius slowing near a glass transition).

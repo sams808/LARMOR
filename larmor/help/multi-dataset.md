@@ -56,7 +56,7 @@ box rather than silently dropped; the fitted 2D model overlay is redrawn by
 
 ## 2 · Background subtraction (a related but different tool)
 
-**Process ▸ Subtract a spectrum (background)** removes a *measured* background
+**Process ▸ Region / algebra ▸ Subtract a spectrum (background)** removes a *measured* background
 (an empty rotor, a probe/impurity signal) from the sample:
 
 $$S_\text{clean}(\nu) = S_\text{sample}(\nu) - k\,S_\text{bg}(\nu),$$
@@ -70,7 +70,7 @@ a background's amplitude as one term of a model — see the Lineshapes reference
 
 ## 3 · Co-fitting
 
-**Decomposition ▸ Co-fit** puts the workspace into a **split view**: the 1D panel
+**Fit ▸ Co-fit datasets** puts the workspace into a **split view**: the 1D panel
 and the 2D panel side by side, each with **its own parameter table**. You add the
 second dataset with **＋ Add / replace dataset** (a 1D or a 2D/MQMAS file).
 
@@ -121,7 +121,7 @@ as in the normal Fit-Parameters spreadsheet (see **1D spectra**).
 
 ## 4 · Predicting another field
 
-**Decomposition ▸ Predict at another field** re-simulates the current model at a
+**Fit ▸ Predict at another field** re-simulates the current model at a
 target ¹H frequency into a new workspace — useful to plan an experiment, or to
 sanity-check that a fit's $C_Q$/$\delta_\text{iso}$ split behaves correctly when
 you change $B_0$ (the quadrupolar shift moving as $1/\nu_0^2$).
@@ -131,7 +131,7 @@ you change $B_0$ (the quadrupolar shift moving as $1/\nu_0^2$).
 ## 5 · Batch fit report (publication table + plots)
 
 Once you have a **set of finished fits** — a whole glass series fitted the same
-way — **Tools ▸ Batch fit report** turns them into a paper-ready package in one
+way — **Series ▸ Batch fit report** turns them into a paper-ready package in one
 pass, so you never hand-copy numbers.
 
 1. **Add fits.** Point it at the saved fits: LARMOR `.recipe.json`, dmfit
@@ -177,7 +177,7 @@ For a **series measured the same way** (a composition series, a time course),
 you often want *one* set of lineshape/position parameters describing every
 spectrum, with only the **amplitudes** free — the sites are the same, their
 populations change. **Ctrl/Shift-click** the spectra in the Explorer and press
-**Batch fit selected…** (or *Tools ▸ Batch fit spectra*). Tutorial 4
+**Batch fit selected…** (or *Series ▸ Batch fit spectra*). Tutorial 4
 (Help ▸ Tutorials) runs this on a five-glass composition series and on a
 synthetic series from the command line.
 
@@ -229,7 +229,7 @@ than EM — the reprocess form is the place to apply it to the whole series at
 once.
 
 **Which EXPNO is the spectrum?** For a month of instrument folders,
-**Tools ▸ Session inventory…** reads every EXPNO into a sample × nucleus grid,
+**Series ▸ Session inventory…** reads every EXPNO into a sample × nucleus grid,
 pre-picks the production spectrum of each block (the highest EXPNO with a
 `pdata/1/1r`, demoted for a short NS or a setup / failed title) and
 **Batch fit picks…** hands the picks over in sample order, named by sample
@@ -411,7 +411,7 @@ manual, §2, describes the rule and the flags.
    included) instead of only having the CSV's bare values to work from.
    Every saved individual fit carries the source kind, the SHA-256 of its
    data file and the acquisition block of its spectrum. **Acquisition
-   table…** needs no fit: it opens the same window as **Tools ▸ Experimental
+   table…** needs no fit: it opens the same window as **Series ▸ Experimental
    section…** over the loaded spectra — Table S1 with every parameter that
    varies across the series highlighted, the Experimental paragraph with
    those parameters as ranges, **Copy paragraph** / **Copy LaTeX table** /
@@ -475,12 +475,12 @@ manual, §2, describes the rule and the flags.
    across independent fits, see the **Batch fit report** tool.)
 
 It builds on the same co-fit engine (§3), so the shared parameters carry full
-uncertainties. The completion threshold is global (set it under **Decomposition ▸
-Advanced ▸ Fit completion threshold**) and honoured by every fit in LARMOR.
+uncertainties. The completion threshold is global (set it under **Fit ▸
+Fit settings ▸ Fit completion threshold**) and honoured by every fit in LARMOR.
 
 ## 7 · Plotting studio — publication figures from a batch
 
-The **Plotting studio** (any *Send to Plotting studio*, or *Tools ▸ Plotting
+The **Plotting studio** (any *Send to Plotting studio*, or *Plotting ▸ Plotting
 studio*) builds a figure as a plain, reloadable spec — style, labels, ticks,
 legend and size are shared across every plot kind. Two kinds are purpose-built
 for a **whole series at once**, so a batch fit (§6) becomes a submission-ready
@@ -547,7 +547,7 @@ figure without hand-assembling panels:
    re-renders once so it never shows a stale preview.
 5. **2D publication figures** (the "2D contour" kind). **Nucleus** and
    **Larmor (MHz)** drive axis labels *and* the computed reference lines
-   below. **Fit overlay** takes a saved 2D fit (`Decomposition ▸ Fit` on an
+   below. **Fit overlay** takes a saved 2D fit (`Fit ▸ Fit` on an
    MQMAS map, then save the recipe) and draws it as a dashed contour over the
    experimental one, at the **MQMAS method** you fit it with (not stored on
    the recipe itself — pick the one you used). **Add iso/quad line…** now
@@ -563,7 +563,7 @@ figure without hand-assembling panels:
 The batch tool (§6) assumes one *shared* model. Some series don't work that way:
 the lineshape **evolves smoothly** from one end-member to the other (a
 composition or temperature series), and each spectrum deserves its own fit — just
-one that starts from where its neighbour ended. **Tools ▸ Sequential fit** does
+one that starts from where its neighbour ended. **Series ▸ Sequential fit** does
 exactly that. Ctrl/Shift-select the series in the Explorer in any order —
 **Series table…** sets the sweep order and the names (§6, step 3) — open it,
 and you get a **one-spectrum-at-a-time** workbench:

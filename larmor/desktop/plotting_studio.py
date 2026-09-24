@@ -352,7 +352,7 @@ class PlottingStudio(QDialog):
         fr2l.addWidget(self.fitRecipe2d, 1); fr2l.addWidget(b_pickfit2)
         b2.addRow("Fit overlay", fr2row)
         self.fitRecipe2d.setToolTip(
-            "a saved 2D fit (.recipe.json from Decomposition ▸ Fit on a 2D "
+            "a saved 2D fit (.recipe.json from Fit ▸ Fit on a 2D "
             "map) — overlays it as a dashed contour on the experimental map, "
             "for a publication figure that shows both")
         self.mqmasMethod = QComboBox()

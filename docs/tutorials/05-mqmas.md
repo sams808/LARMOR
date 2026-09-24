@@ -50,7 +50,7 @@ routes it to the contour view, titled `2D spectrum — 3620`, with the status
 bar reading:
 
 ```
-MQMAS 2D displayed — Tools ▸ 2D MQMAS to fit · Tools ▸ Relaxation for a series · or send a 1D trace to fitting below
+MQMAS 2D displayed — Fit ▸ MQMAS to fit · Tools ▸ Relaxation for a series · or send a 1D trace to fitting below
 ```
 
 Conventions: F2 (horizontal) is the MAS dimension in ppm, high ppm to the
@@ -102,14 +102,14 @@ with the 1D, quantify from `3616`, not from the map (§10).
 
 ## 6. Place and fit the three sites
 
-1. **Decomposition > Add line > Czjzek (quad. distribution)**. The action
+1. **Edit > Add line > Czjzek (quad. distribution)**. The action
    stays checked: every click on the map now adds a site.
 2. Click the map once on each ridge: AlO₄ (F1 near the 1D position of the
    main site), AlO₅, then AlO₆. Each click seeds the site's isotropic shift
    from the clicked F1 position and reports:
 
    ```
-   added czjzek at F1≈63.8 ppm — click to add more, or click czjzek again (Esc) to stop; Decomposition ▸ Fit to fit the 2D
+   added czjzek at F1≈63.8 ppm — click to add more, or click czjzek again (Esc) to stop; Fit ▸ Fit to fit the 2D
    ```
 
    (the number is the F1 value under the cursor). Press Esc, or click the
@@ -140,7 +140,7 @@ from the three ridge clicks should land within a few ppm of those values for
 the two strong sites; the AlO₆ position is set far better by the 2D than by
 the 1D because the ridge is resolved in F1.
 
-The kernel resolution is under **Decomposition > Advanced > Computing
+The kernel resolution is under **Fit > Fit settings > Computing
 parameters…**: the *MQMAS kernel* block defaults to 192 F2 points, 96 F1
 points, 40 C_Q steps, 6 η steps and a C_Q maximum of 16 MHz. Larger values
 cost time on every first fit; smaller ones make the ridges blocky.
@@ -151,7 +151,7 @@ The kernel's F1 axis follows the isotropic-shift convention (chemical shift on
 the diagonal); an experimental F1 axis differs by a referencing offset that
 depends on how the map was processed. The fit determines this offset as one
 extra parameter, which is why the strip reports `F1 ref`. To hold it at a
-known value instead (dmfit style), use **Decomposition > Advanced > MQMAS F1
+known value instead (dmfit style), use **Fit > MQMAS > MQMAS F1
 reference…**: entering a value and pressing OK fixes it — the status bar reads
 `MQMAS F1 reference fixed at … ppm — Fit to apply` — while Cancel returns it to
 auto-fitting. A fixed reference is reported as `(held fixed)` in the *Report*
@@ -175,14 +175,14 @@ Any 1D trace can be pulled out of the map into a new fitting workspace:
 **row at cursor →** after dragging the dashed line onto a row). The trace
 opens as a new workspace — status
 `F2 skyline — new workspace; add lines and Fit` — and the map stays open in
-its own. **View > Back to 2D map** (Ctrl+2) returns to it; the *Workspaces*
+its own. **View > Zoom > Back to 2D map** (Ctrl+2) returns to it; the *Workspaces*
 dock lists both. A row through one ridge is the cleanest way to read that
 site's C_Q distribution in isolation.
 
 ## 10. Co-fit with the quantitative 1D
 
 The 2D map fixes positions and quadrupolar parameters; the single-pulse
-spectrum carries the populations. **Decomposition > Advanced > Co-fit
+spectrum carries the populations. **Fit > Co-fit
 datasets…** fits both at once with one physical model:
 
 1. The dialog *Co-fit datasets (shared model)* starts from the current fit's
@@ -205,7 +205,7 @@ datasets…** fits both at once with one physical model:
 
 ## 11. Save and draw
 
-**File > Save recipe** (Ctrl+S) writes the 2D fit — including the F1
+**File > Save fit** (Ctrl+S) writes the 2D fit — including the F1
 reference and the kernel method — as an ordinary recipe next to the data.
 Tutorial 3, §3, shows the 2D figure spec for this dataset (path
 `examples/pCABS2-4/3620`, the `3616` overlay on the top projection, per-site
@@ -219,7 +219,7 @@ pick `examples/pCABS2-4/3620/ser`; the F1 mode for this acquisition is
 `States-TPPI` (acqu2s FnMODE 4). **Transform preview** shows the processed
 map; **Use this spectrum →** opens it in the *2D MQMAS* viewer (levels,
 `floor ×σ`, shear and **Apply shear**), which displays but does not fit — the
-same viewer as **Tools > 2D MQMAS viewer/fit…**. Fitting is done on a
+same viewer as **Fit > MQMAS > 2D MQMAS viewer / fit…**. Fitting is done on a
 processed `2rr` in the main window, as above.
 
 ## Where to read more

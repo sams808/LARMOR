@@ -20,12 +20,12 @@ command line.
 
 Two tools in LARMOR fit a series; they answer different questions.
 
-- **Batch fit** (**Tools > Batch fit spectra…**, or the Explorer's
+- **Batch fit** (**Series > Batch fit spectra…**, or the Explorer's
   **Batch fit selected…**): one shared model, every lineshape parameter held
   at its recipe value, amplitudes free per spectrum. Parameters that are
   known to drift can be *released* within a ±fraction. Use it when the sites
   are the same in every sample and only their populations change.
-- **Sequential fit** (**Tools > Sequential fit…**, `larmor seqfit`):
+- **Sequential fit** (**Series > Sequential fit…**, `larmor seqfit`):
   independent fits, each warm-started from its fitted neighbour, in forward
   and backward passes. Use it when positions or widths march along the
   series and a shared value would be wrong for every member.
@@ -139,24 +139,23 @@ larmor desktop
    already open. Keep the current lines and fit them against the new
    spectrum? Yes = keep the lines · No = start empty". Answer **Yes**: the
    three lines stay, and the nucleus, Larmor frequency and spin rate are
-   taken from the new EXPNO. (The alternative route is **Decomposition >
+   taken from the new EXPNO. (The alternative route is **Edit >
    Apply recipe > Browse for recipe…** after opening the EXPNO first.)
 3. Open **Process > Experiment parameters…** to see the three sources side
    by side (acqus 4 200 Hz outvoted by the title and the booking sidecar at
    35 714 Hz); nothing to confirm here, the rate is already settled.
 4. **Fit** (F5), then read the results strip (`RMSD … · χ²ᵣ …`, with the
    flags described in Tutorial 6, §2) and the `± error` column.
-5. **File > Save recipe** (Ctrl+S) as `base0Ca_11B.recipe.json` next to the
+5. **File > Save fit** (Ctrl+S) as `base0Ca_11B.recipe.json` next to the
    data. This file is the shared model for the batch.
 
 No fitted values are quoted for this step: the fit was not re-run for this
 tutorial. The result to expect is the two BO₃ lines near 16 and 11 ppm and
-the BO₄ line near 0 ppm, with the BO₄ fraction read from **Decomposition >
-Report (quantify)** (F6).
+the BO₄ line near 0 ppm, with the BO₄ fraction read from **Fit > Report** (F6).
 
 ## 4. Batch fit in the app
 
-1. **Tools > Session inventory…**, **Browse…** to the `2026-01` folder and
+1. **Series > Session inventory…**, **Browse…** to the `2026-01` folder and
    press **Scan**. The grid lists one row per sample folder — `Base0Ca` …
    `Base4Ca`, named after the folder rather than the shared title — and one
    column per nucleus. Choose `11B` as the hand-off nucleus and check that
@@ -165,7 +164,7 @@ Report (quantify)** (F6).
    the first column overrides a pick). Press **Batch fit picks…**. The
    Explorer route is the one-step alternative: **Browse…**, expand the five
    sample folders, Ctrl-click their EXPNO `24` rows (Shift-click selects a
-   range) and press **Batch fit selected…** (**Tools > Batch fit spectra…**
+   range) and press **Batch fit selected…** (**Series > Batch fit spectra…**
    is the same action); selecting fewer than two leaves the status bar
    saying `Ctrl/Shift-select at least two spectra in the Explorer first`.
 2. Either route opens the dialog *Batch fit — one shared model, amplitudes
@@ -229,7 +228,7 @@ runs anywhere.
   with the remedy in its tooltip.
 - **Families and N4:** tag BO₃ and BO₄ once in the model — the `family`
   column of the Fit-parameters table (right-click ▸ **Family**), or
-  **Decomposition > Label lines from literature ranges**, which fills it for
+  **Edit > Constraints > Label lines from literature ranges**, which fills it for
   ¹¹B — before F5, and the same tables gain a `family_pct` row per family
   and a `ratio` row for N₄ per glass (site ids `f0`, `r0`), the results table
   its `Σ BO4 / family %` and `N4 / ratio` columns, and the Series plot and
@@ -244,7 +243,7 @@ runs anywhere.
   by default. **Save individual fits…** writes one recipe per spectrum; each
   carries the source path, the SHA-256 of its 1r and the acquisition block
   read from acqus / procs / title.
-- **Acquisition table…** (no fit needed; the same window as **Tools >
+- **Acquisition table…** (no fit needed; the same window as **Series >
   Experimental section…**) lists the five EXPNO 24 acquisitions and
   highlights what varies across them: D1 (12.5–36 s), LB (0/100 Hz) and the
   rotor named in the titles (SR31649 for Base0Ca, SR31648 for the others).
@@ -276,7 +275,7 @@ Two more tools read what the batch wrote. **Plotting > Plotting studio…**
 has templates for a series — `Stacked series`, `Deconvolution grid`,
 `Composition series (shaded component)`, `Composition trend` and
 `Species distribution` — that take the saved table and the recipes next to
-it. **Tools > Batch fit report…** (*Batch fit report — publication table,
+it. **Series > Batch fit report…** (*Batch fit report — publication table,
 plots & report*) takes any set of saved fits (**Add fits…**), re-fits them
 for fresh errors and writes `table.csv`, `table.tex`, `report.md` and one
 overlay figure per fit to a folder.
@@ -400,7 +399,7 @@ larmor seqfit <the five EXPNO 24 paths> --model base0Ca_11B.recipe.json --window
 
 (`--window` is high ppm then low ppm; the model recipe's own window is used
 when it is omitted). The outputs are the same `batch_table.csv` /
-`seq_table.csv` and one recipe per spectrum, ready for **Tools > Batch fit
+`seq_table.csv` and one recipe per spectrum, ready for **Series > Batch fit
 report…** and the Plotting studio.
 
 ## 7. What a shared model can and cannot claim
@@ -413,7 +412,7 @@ member's RMSD stands out, or a released parameter ends at the edge of its
 range, the hypothesis failed for that member — and the honest answers are a
 sequential fit (positions and widths free, populations no longer strictly
 comparable) or a co-fit that ties only the parameters physics says are
-shared (**Decomposition > Advanced > Co-fit datasets…**, Tutorial 5, §10).
+shared (**Fit > Co-fit datasets…**, Tutorial 5, §10).
 
 ## Where to read more
 

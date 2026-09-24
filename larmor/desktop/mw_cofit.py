@@ -227,7 +227,7 @@ class _CofitMixin:
 
     def _on_central_changed(self, *_):
         """Leaving the co-fit page (loading data, switching workspace, …) exits
-        co-fit mode. The datasets are stashed so Decomposition ▸ Co-fit resumes
+        co-fit mode. The datasets are stashed so Fit ▸ Co-fit datasets resumes
         without re-picking the files."""
         if getattr(self, "_cofit", None) is None:
             return
@@ -237,7 +237,7 @@ class _CofitMixin:
         self._cofit_last = self._cofit
         self._cofit = None
         self.statusBar().showMessage(
-            "co-fit paused (another dataset is showing) — Decomposition ▸ "
+            "co-fit paused (another dataset is showing) — Fit ▸ "
             "Co-fit datasets returns to it with both datasets still loaded")
 
     def _cofit_split_even(self):

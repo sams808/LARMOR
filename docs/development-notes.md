@@ -382,7 +382,7 @@ Ordered by how likely they are to mislead someone.
     (²⁷Al σ ≈ 1.5, ¹¹B σ ≈ 1: 10σ ≤ 25) keep their kernel and their RMSDs.
 13. ~~`_last_lmfit` survived load / workspace switch / 2D~~ **fixed with the
     fit-health strip (F7)**: the covariance of the previous fit was only ever
-    written by `_fit_done`, so Decomposition ▸ Parameter correlations could
+    written by `_fit_done`, so Fit ▸ Errors ▸ Parameter correlations could
     show another spectrum's matrix. `_health_reset()` now drops verdict and
     covariance together in `_update_sn` (the active-1D-document funnel),
     `_show_2d` and `_apply_doc`'s 2D branch; workspace snapshots carry them

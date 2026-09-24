@@ -46,7 +46,7 @@ each peak's FWHM — the rest is a Gaussian shift distribution (§8.3). So:
 3. only then continue with (near-)purely Gaussian shapes.
 
 Related processing rule from the same section: apodize glass spectra with a
-**Gaussian window (Process ▸ GM)**, not exponential/EM — Lorentzian
+**Gaussian window (GM in the Processing panel)**, not exponential/EM — Lorentzian
 broadening measurably degrades deconvolution accuracy. For a series, the
 batch fit's comparability line (*Multi-dataset*, §6) reports members apodised
 differently, and **Reprocess all from fid…** applies one Gaussian window to
@@ -60,7 +60,7 @@ parameter ranges**, and it stresses that restricted-range fitting *"is to
 our knowledge not supported by most currently available public
 deconvolution software."* It is first-class in LARMOR — **type `[lo..hi]`
 into any fit-table cell**, or use
-**Decomposition ▸ Advanced ▸ Restrict around current values (glass
+**Edit ▸ Constraints ▸ Restrict around current values (glass
 protocol)…** to apply the review's default ranges to every site in one
 step:
 
@@ -79,7 +79,7 @@ called out as something *"never to be utilized"*.
 ## 4 · Verify starting-point independence
 
 A best fit must not depend on where the optimiser started (§8.3). That is
-**Decomposition ▸ Auto Fit** — multi-start refits from randomized starting
+**Fit ▸ Auto fit** — multi-start refits from randomized starting
 points inside the bounds; if restarts land on different answers with
 comparable rms, the decomposition is under-determined and the honest next
 step is fewer components or better constraints, not a nicer-looking single
@@ -130,7 +130,7 @@ A **family** is the tag that groups lines. Three ways to set it: type it in
 the **family** column of the Fit-parameters table (the last column); pick it
 from the right-click **Family** submenu (the presets of the nucleus —
 BO3/BO4, Al(IV)/Al(V)/Al(VI), Q0–Q4, the 31P scheme — plus any tag already
-in use, plus **Other…** for free text); or let **Decomposition ▸ Label lines
+in use, plus **Other…** for free text); or let **Edit ▸ Constraints ▸ Label lines
 from literature ranges** fill it for ²⁷Al and ¹¹B (only empty tags are
 filled; a line dropped inside one of those bands is pre-tagged the same
 way). Untagged lines stay in the total but belong to no family.
@@ -151,7 +151,7 @@ Methods sentence):
   are evaluated with the full covariance between the amplitudes (lmfit's
   correlated values; linked amplitudes exact). Lineshape covariance is
   neglected, as for the site rows.
-- **Monte-Carlo** — after **Errors ▸ Monte-Carlo errors ▸ Use as fit
+- **Monte-Carlo** — after **Fit ▸ Errors ▸ Monte-Carlo errors ▸ Use as fit
   errors**: every synthetic refit is re-integrated, the family sum and the
   ratio are recomputed per trial, and the spread of those per-trial values
   is the error. This is the only basis that also carries the lineshape
@@ -186,7 +186,7 @@ only proportional to populations under specific excitation conditions
 If your `zg` used a longer pulse, sites with different C_Q were excited
 with different efficiency and the fitted populations are biased — no fit
 can repair that afterwards. Also verify **full relaxation** (recycle delay
-vs the *longest* T₁ — measure it with **Tools ▸ Relaxation**, don't assume
+vs the *longest* T₁ — measure it with **Tools ▸ Relaxation ▸ Relaxation / series**, don't assume
 it) before treating any integral as quantitative.
 
 **What LARMOR checks for you.** After a fit of a Bruker dataset the
@@ -254,7 +254,7 @@ the Methods text.
   fill), TopSpin processing and the LARMOR steps, then the fit sentence with
   the software versions. Check every `[bracket]` before pasting — a bracket
   marks what the files do not prove;
-- for a series, **Tools ▸ Experimental section…** (or the **Acquisition
+- for a series, **Series ▸ Experimental section…** (or the **Acquisition
   table…** button of Batch fit / Sequential fit) builds Table S1 and
   highlights every parameter that varies across the set, printing it as a
   range — a recycle delay written once for a series acquired at 12.5–36 s

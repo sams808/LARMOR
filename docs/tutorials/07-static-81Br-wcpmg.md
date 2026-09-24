@@ -52,7 +52,7 @@ rate of 0 Hz.
 larmor desktop
 ```
 
-**Tools > QCPMG (echo train → spectrum)…** opens *QCPMG processing — guided
+**Tools > QCPMG > QCPMG (echo train → spectrum)…** opens *QCPMG processing — guided
 sum-echo workflow*, a non-modal window that stays open beside the main one.
 **Open echo-train FID…** and pick `30/fid` (with the EXPNO already loaded,
 its `fid` is chosen automatically). The six tabs are the six stages.
@@ -179,11 +179,11 @@ its provenance, so a saved fit records how the spectrum was made.
 **View > Axis unit > kHz** shows the axis as an offset in kHz, the natural
 unit for a pattern this wide; every internal value stays in ppm.
 
-**Process > WURST excitation profile…** divides out the amplitude envelope of
+**Process > Region / algebra > WURST excitation profile…** divides out the amplitude envelope of
 the WURST sweep. Set `sweep centre (carrier)` to the carrier, `sweep width`
 to 2000 kHz (the pulse program's 2 MHz sweep), `WURST order N` 80 and
 `correction floor` 10 %; the status bar confirms `WURST profile divided out
-(2000 kHz sweep, N=80) — File ▸ Save spectrum as… to keep it`. On this
+(2000 kHz sweep, N=80) — File ▸ Export ▸ Save spectrum as CSV… to keep it`. On this
 dataset the correction changes nothing visible: a WURST-80 profile is flat
 over about 90 % of its sweep, and the 2 MHz sweep spans ±4 600 ppm while
 the pattern occupies about 1 800 ppm around the carrier. It matters for a
@@ -235,13 +235,13 @@ window: δiso, C_Q, η, a Gaussian broadening and the amplitude. A static
 pattern half a megahertz wide is a heavy simulation, so the first fit builds
 its kernel before iterating; **Stop** keeps the latest values. Read the
 results strip (`RMSD … · χ²ᵣ …` with the flags of Tutorial 6, §2), the
-`± error` column, **Decomposition > Parameter correlations…** for the
+`± error` column, **Fit > Errors > Parameter correlations…** for the
 δiso ↔ C_Q trade-off that a single field never fully breaks, and
-**Decomposition > Report (quantify)** (F6).
+**Fit > Report** (F6).
 
 No fitted values are quoted: the fit was not run for this tutorial. On a
 glass like this one expect a structured residual under the single-site
-model; the physically right description is **Decomposition > Add line >
+model; the physically right description is **Edit > Add line >
 Czjzek (quad. distribution)** — the QCPMG manual recommends it for glasses —
 and the reading of §9 gives the scale of C_Q to start it from.
 
@@ -262,7 +262,7 @@ centre of gravity. **Tools > Conversion tools…** computes it: in the
 216.007 and type the fitted `Cq (MHz)` and `η`; the line
 `PQ = … MHz · νQ = … kHz · CT 2nd-order shift = … ppm` gives the number to
 compare with. This is arithmetic on the fitted values, not an independent
-measurement. **Decomposition > Advanced > Predict at another field…**
+measurement. **Fit > Predict at another field…**
 (*Target ¹H frequency*: the dialog proposes the present field, 800 MHz;
 enter 1100) opens a new workspace with the same model simulated at the
 higher field: the pattern narrows and its centre of gravity moves towards
@@ -333,7 +333,7 @@ width (shift distribution *and* CSA — an upper bound on shift disorder);
 **Export report…** and **Export figure…** write the record (the figure with
 a `.json` sidecar listing every point's window, mode and source).
 
-**A whole series at once.** **Tools > QCPMG: batch infinite-field δiso…**
+**A whole series at once.** **Tools > QCPMG > Batch infinite-field δiso…**
 opens *QCPMG — batch infinite-field δiso*: set the grid to five samples and
 two fields and drop the ten `.csv` files written earlier with **Save as
 dataset…** onto the cells (`<NMR>/MagLab/DATA/LAW{0-4}Ca-3Cl_850_MHz.csv` —
@@ -400,7 +400,7 @@ a number.
 
 ## 13. Save
 
-**File > Save recipe** (Ctrl+S) stores the fit with its QCPMG provenance
+**File > Save fit** (Ctrl+S) stores the fit with its QCPMG provenance
 next to the data; **File > Save project…** keeps every open workspace
 (the QCPMG spectrum, the WURST-corrected copy, the predicted-field
 simulation) in one file. The other four bromide glasses (EXPNOs 31–34)

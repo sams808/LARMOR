@@ -458,7 +458,7 @@ class _ChromeMixin:
     def _progress_tick(self, it: int, rms: float):
         # dmfit-style live read-out: the residual stdev and its % change per
         # iteration (varsdev%). Convergence stops the fit once |Δσ%| drops below
-        # the completion threshold (Decomposition ▸ Advanced).
+        # the completion threshold (Fit ▸ Fit settings).
         prev = getattr(self, "_prog_prev_sdev", None)
         if prev and prev > 0 and rms == rms:
             dpct = 100.0 * (rms - prev) / prev
