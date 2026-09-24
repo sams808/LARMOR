@@ -85,6 +85,7 @@ class _OverlaysMixin:
         comparability table (larmor.comparability)."""
         from larmor import comparability
         from larmor.desktop.comparability_dialog import ComparabilityDialog
+        from larmor.desktop.windowtray import show_tool_window
 
         paths, labels = self._overlay_sources()
         cmp = comparability.compare(
@@ -93,7 +94,9 @@ class _OverlaysMixin:
             self.statusBar().showMessage(
                 "no Bruker acquisition files among these spectra — nothing to compare")
             return
-        ComparabilityDialog(self, cmp).exec()
+        # a read-only table: a tool window, so the workbench stays usable
+        # (the batch and sequential dialogs open the same table this way)
+        show_tool_window(ComparabilityDialog(self, cmp))
 
     def _overlay_sources(self):
         """(paths, labels) of the active spectrum then every overlay, in the
