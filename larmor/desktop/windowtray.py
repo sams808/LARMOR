@@ -160,6 +160,11 @@ class _BarStrip(QWidget):
 
     def remove_button(self, btn: QToolButton):
         self._buttons = [b for b in self._buttons if b is not btn]
+        # a tracked window's destroyed() can fire AFTER the main window (and
+        # this strip's layout) is gone -- at application exit or when a test
+        # closes the window first; nothing is left to update then
+        if not shiboken6.isValid(self._lay) or not shiboken6.isValid(btn):
+            return
         self._lay.removeWidget(btn)
         btn.hide()
         btn.setParent(None)
