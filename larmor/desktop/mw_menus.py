@@ -694,7 +694,8 @@ class _MenusMixin:
         ok.clicked.connect(dlg.accept)
         row.addWidget(ok)
         v.addLayout(row)
-        dlg.exec()
+        from larmor.desktop.windowtray import show_tool_window
+        show_tool_window(dlg)                    # read-only: non-modal
 
     def _show_more(self):
         """Open the 'More…' card."""
@@ -765,6 +766,11 @@ class _MenusMixin:
         self.sbScroll.setToolTip(self.actScrollNudge.toolTip())
         self.sbScroll.toggled.connect(self.actScrollNudge.setChecked)
         sb.addAction(self.sbScroll)
+        # the "open windows" bar (larmor/desktop/windowtray.py): a strip under
+        # a stretch at the very bottom of the sidebar -- one text-less widget
+        # action -- plus the application-level filter that feeds it
+        from larmor.desktop.windowtray import install_tray
+        self._window_bar = install_tray(self, sb)
 
     def _toggle_scroll_nudge(self, on: bool):
         from larmor.desktop import table as _table
