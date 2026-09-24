@@ -174,6 +174,8 @@ class _BarStrip(QWidget):
         return list(self._buttons)
 
     def set_count(self, n: int):
+        if not (shiboken6.isValid(self.panel) and shiboken6.isValid(self.header)):
+            return                          # the strip is gone (application exit)
         if n <= 0:
             self.panel.hide()
             return
