@@ -5,7 +5,8 @@ from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QDoubleValidator
 from PySide6.QtWidgets import (
     QButtonGroup, QCheckBox, QComboBox, QDoubleSpinBox, QFrame, QGridLayout,
-    QHBoxLayout, QLabel, QLineEdit, QPushButton, QRadioButton, QScrollArea,
+    QGroupBox, QHBoxLayout, QLabel, QLineEdit, QPushButton, QRadioButton,
+    QScrollArea,
     QSizePolicy, QSlider, QSpinBox, QToolButton, QVBoxLayout, QWidget,
 )
 
@@ -249,126 +250,129 @@ class ProcessingPanel(QWidget):
         #: forced re-apply keeps them (see sync_from_ops)
         self._carried_ops: list[dict] = []
         self._hilbert_before_reapod = False
-        # All controls live inside a scroll area so this panel can be made
-        # narrow without forcing the main window wider than the screen (a wide
-        # row scrolls instead of pushing the whole window past the monitor).
+        # Five titled groups (Source · Display · Phase · Baseline · Reference)
+        # in a scroll area that is only a safety net for very short screens:
+        # with the two advanced sections collapsed the whole panel fits a
+        # 1080-px screen at the default dock width. live / Apply / Reset sit
+        # BELOW the scroll area, so they are always visible.
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(4)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        outer.addWidget(scroll)
+        outer.addWidget(scroll, 1)
         content = QWidget()
         scroll.setWidget(content)
         self.setMinimumWidth(280)                # usable floor, well under a screen
         v = QVBoxLayout(content)
+        v.setContentsMargins(6, 6, 6, 2)
+        v.setSpacing(6)
         v.setAlignment(Qt.AlignTop)
 
-        self.rb_pdata = QRadioButton("TopSpin-processed (pdata)")
-        self.rb_raw = QRadioButton("raw fid (EM → ZF → FT)")
+        # ------------------------------------------------------------ Source
+        g_src = QGroupBox("Source")
+        src = QVBoxLayout(g_src)
+        src.setContentsMargins(8, 4, 8, 6)
+        src.setSpacing(4)
+        srow = QHBoxLayout()
+        self.rb_pdata = QRadioButton("TopSpin pdata")
+        self.rb_pdata.setToolTip("start from the processed spectrum TopSpin "
+                                 "wrote (1r)")
+        self.rb_raw = QRadioButton("raw fid")
+        self.rb_raw.setToolTip("start from the instrument fid: window "
+                               "functions → zero-fill → FT here")
         self.rb_pdata.setChecked(True)
-        v.addWidget(self.rb_pdata)
-        v.addWidget(self.rb_raw)
+        srow.addWidget(self.rb_pdata)
+        srow.addWidget(self.rb_raw)
+        srow.addStretch(1)
+        src.addLayout(srow)
 
         # raw-FID window functions are advanced: collapsed by default so pdata
         # users are not faced with them; auto-expands when 'raw fid' is picked
-        self.adv_toggle = QToolButton()
-        self.adv_toggle.setText("▸ Raw-FID window functions (advanced)")
-        self.adv_toggle.setCheckable(True)
-        self.adv_toggle.setStyleSheet(
-            "QToolButton { border: none; font-weight: 600; }")
-        v.addWidget(self.adv_toggle)
-        self._adv = QWidget()
-        self._adv.setVisible(False)
-        adv = QVBoxLayout(self._adv)
+        self.adv_toggle, self._adv = self._collapsible(
+            "Raw-FID window functions (advanced)", "advWindow")
+        src.addWidget(self.adv_toggle)
+        adv = QGridLayout(self._adv)
         adv.setContentsMargins(8, 0, 0, 0)
-        v.addWidget(self._adv)
+        adv.setHorizontalSpacing(6)
+        adv.setVerticalSpacing(4)
+        src.addWidget(self._adv)
 
-        # TopSpin-style window function block
-        wdw = QHBoxLayout()
-        wdw.addWidget(QLabel("WDW"))
+        # TopSpin-style window function block: WDW LB GB SSB / TDeff ZF FCOR offset
         self.wdw = QComboBox()
         self.wdw.addItems(["none", "EM", "GM", "SINE", "QSINE", "TRAF"])
         self.wdw.setCurrentText("EM")
-        wdw.addWidget(self.wdw)
-        wdw.addWidget(QLabel("LB"))
         self.lb = QDoubleSpinBox(); self.lb.setRange(-1e5, 1e5); self.lb.setValue(50)
         self.lb.setToolTip("Hz; negative for GM (Lorentz-to-Gauss)")
-        wdw.addWidget(self.lb)
-        wdw.addWidget(QLabel("GB"))
         self.gb = QDoubleSpinBox(); self.gb.setRange(0.001, 1.0); self.gb.setDecimals(3)
         self.gb.setValue(0.1); self.gb.setToolTip("GM: Gaussian max position (0..1)")
-        wdw.addWidget(self.gb)
-        wdw.addWidget(QLabel("SSB"))
         self.ssb = QDoubleSpinBox(); self.ssb.setRange(0, 64); self.ssb.setValue(2)
         self.ssb.setToolTip("SINE/QSINE: 2 = cosine bell, 0 = pure sine")
-        wdw.addWidget(self.ssb)
-        adv.addLayout(wdw)
-
-        raw = QHBoxLayout()
-        raw.addWidget(QLabel("TDeff"))
         self.tdeff = QSpinBox(); self.tdeff.setRange(0, 10_000_000)
         self.tdeff.setToolTip("use only the first TDeff fid points (0 = all)")
-        raw.addWidget(self.tdeff)
-        raw.addWidget(QLabel("ZF ×"))
         self.zf = QSpinBox(); self.zf.setRange(1, 16); self.zf.setValue(2)
-        raw.addWidget(self.zf)
-        raw.addWidget(QLabel("FCOR"))
+        self.zf.setToolTip("zero-fill factor")
         self.fcor = QDoubleSpinBox(); self.fcor.setRange(0.0, 2.0)
         self.fcor.setDecimals(2); self.fcor.setValue(0.5)
-        raw.addWidget(self.fcor)
-        raw.addWidget(QLabel("offset (ppm)"))
+        self.fcor.setToolTip("first-point scaling (TopSpin FCOR)")
         self.off = QDoubleSpinBox(); self.off.setRange(-1e5, 1e5)
-        raw.addWidget(self.off)
-        adv.addLayout(raw)
+        self.off.setToolTip("carrier offset of the transformed axis (ppm)")
+        for r, cells in enumerate((
+                (("WDW", self.wdw), ("LB", self.lb), ("GB", self.gb), ("SSB", self.ssb)),
+                (("TDeff", self.tdeff), ("ZF ×", self.zf), ("FCOR", self.fcor),
+                 ("offset", self.off)))):
+            for c, (label, widget) in enumerate(cells):
+                lab = QLabel(label)
+                lab.setBuddy(widget)
+                adv.addWidget(lab, r, 2 * c)
+                adv.addWidget(widget, r, 2 * c + 1)
+        for c in range(4):
+            adv.setColumnStretch(2 * c + 1, 1)
+        # eight cells share the dock width: the boxes compress to what the
+        # grid gives them (their range-based sizeHint would force a
+        # horizontal scrollbar at the default width)
+        for w in (self.wdw, self.lb, self.gb, self.ssb, self.tdeff, self.zf,
+                  self.fcor, self.off):
+            w.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+            w.setMinimumWidth(44)
 
         # re-apodize a spectrum that did NOT come from a raw fid (TopSpin 1r,
         # CSV, the FID / QCPMG / VOCS dialogs' output): Hilbert -> IFT -> the
         # window block above -> FT, still applied from the unprocessed base
-        self.chkReapod = QCheckBox(
-            "re-apodize this spectrum  (Hilbert → IFT → window → FT)")
+        self.chkReapod = QCheckBox("re-apodize this spectrum")
         self.chkReapod.setToolTip(
-            "for a TopSpin-processed 1r, a CSV, or a spectrum sent from the "
-            "FID / QCPMG / VOCS dialogs: rebuild the imaginary channel, go back "
-            "to the FID, apply the window functions above, transform again — "
-            "a reconstruction that compounds with whatever window was already "
-            "applied; the raw-fid mode restarts from the instrument file and "
-            "is exact. Hilbert first is mandatory (the IFT of a real-only "
-            "spectrum is two-sided) and stays locked while this is on.")
-        adv.addWidget(self.chkReapod)
+            "Hilbert → IFT → window → FT. For a TopSpin-processed 1r, a CSV, "
+            "or a spectrum sent from the FID / QCPMG / VOCS dialogs: rebuild "
+            "the imaginary channel, go back to the FID, apply the window "
+            "functions above, transform again — a reconstruction that "
+            "compounds with whatever window was already applied; the raw-fid "
+            "mode restarts from the instrument file and is exact. Hilbert "
+            "first is mandatory (the IFT of a real-only spectrum is two-sided) "
+            "and stays locked while this is on.")
+        adv.addWidget(self.chkReapod, 2, 0, 1, 8)
+        v.addWidget(g_src)
 
-        srrow = QHBoxLayout()
-        srrow.addWidget(QLabel("<b>SR</b> (Hz)"))
-        self.sr = QDoubleSpinBox(); self.sr.setRange(-1e6, 1e6); self.sr.setDecimals(2)
-        self.sr.setToolTip("spectral reference: shifts the ppm axis by SR/SFO1")
-        srrow.addWidget(self.sr)
-        self.chkMag = QCheckBox("magnitude")
-        self.chkMag.setToolTip("phase-insensitive |S| display")
-        srrow.addWidget(self.chkMag)
-        self.chkHilbert = QCheckBox("Hilbert first")
-        self.chkHilbert.setToolTip("rebuild the imaginary part of pdata (1r) "
-                                   "so phase correction works on it")
-        srrow.addWidget(self.chkHilbert)
-        v.addLayout(srrow)
-
-        # Display: which projection of the pipeline result the canvas shows.
-        # The FID button flips to the windowed, zero-filled FID the transform
-        # sees (window / LB / GB / ZF re-apply live there); the radios pick the
+        # ----------------------------------------------------------- Display
+        # which projection of the pipeline result the canvas shows. The FID
+        # button flips to the windowed, zero-filled FID the transform sees
+        # (window / LB / GB / ZF re-apply live there); the radios pick the
         # real, imaginary or magnitude channel. Display only: the fit, S/N,
         # save and overlays always use the real frequency-domain spectrum.
-        v.addWidget(QLabel("<b>Display</b>"))
-        disp = QHBoxLayout()
+        g_disp = QGroupBox("Display")
+        disp = QHBoxLayout(g_disp)
+        disp.setContentsMargins(8, 4, 8, 6)
         self.btnDomain = QPushButton("FID ⇄ spectrum")
         self.btnDomain.setCheckable(True)
         self.btnDomain.setToolTip(
             "show the windowed FID the transform sees — WDW / LB / GB / ZF "
             "re-apply live; press again for the spectrum (Ctrl+T)")
         disp.addWidget(self.btnDomain)
-        # REQUIRED: rb_pdata / rb_raw are plain radios on the same content
-        # widget and Qt auto-groups sibling radios -- without an explicit
-        # group, checking 'imag' would un-check the source radio and flip the
-        # pipeline to raw. Buttons in a QButtonGroup leave the sibling group.
+        disp.addSpacing(8)
+        # REQUIRED: rb_pdata / rb_raw are plain radios on their own group box
+        # and Qt auto-groups sibling radios -- an explicit group keeps the
+        # channel radios independent of any sibling set for good.
         self._chan_group = QButtonGroup(self)
         self.rb_real = QRadioButton("real")
         self.rb_imag = QRadioButton("imag")
@@ -378,16 +382,23 @@ class ProcessingPanel(QWidget):
                                 "phasing (dispersion should vanish under the "
                                 "pivot when p0 / p1 are right); Ctrl+I cycles")
         self.rb_mag.setToolTip("|S| for display only — the destructive "
-                               "'magnitude' pipeline op is the checkbox above")
+                               "'magnitude' pipeline op is under Phase ▸ "
+                               "Signal (advanced)")
         for i, rb in enumerate((self.rb_real, self.rb_imag, self.rb_mag)):
             self._chan_group.addButton(rb, i)
             disp.addWidget(rb)
         self.rb_real.setChecked(True)
         disp.addStretch(1)
-        v.addLayout(disp)
+        v.addWidget(g_disp)
 
-        v.addWidget(QLabel("<b>Phase</b>"))
+        # ------------------------------------------------------------- Phase
+        g_ph = QGroupBox("Phase")
+        ph = QGridLayout(g_ph)
+        ph.setContentsMargins(8, 4, 8, 6)
+        ph.setHorizontalSpacing(6)
+        ph.setVerticalSpacing(4)
         self.btnAuto = QPushButton("Autophase (ACME)")
+        self.btnAuto.setToolTip("automatic p0 / p1 by entropy minimisation")
         # TopSpin drag-to-phase: a checkable mode the workbench arms on the
         # plot (see MainWindow._phase_drag_mode); this button is the single
         # source of truth for the mode, the Process-menu entry toggles it
@@ -398,76 +409,138 @@ class ProcessingPanel(QWidget):
             "up/down = p1 (1°/px) about the pivot line; Shift = fine ×0.1, "
             "Ctrl+drag = pan; start the drag on empty canvas (items keep their "
             "own drags); Esc or click again to stop "
-            "(Process ▸ Drag to phase, Ctrl+P)")
-        phb = QHBoxLayout()
-        phb.addWidget(self.btnAuto)
-        phb.addWidget(self.btnDrag)
-        v.addLayout(phb)
-        ph0 = QHBoxLayout()
-        ph0.addWidget(QLabel("p0"))
+            "(Process ▸ Phase ▸ Drag to phase, Ctrl+P)")
+        ph.addWidget(self.btnAuto, 0, 0, 1, 2)
+        ph.addWidget(self.btnDrag, 0, 2, 1, 2)
         self.p0 = QSlider(Qt.Horizontal); self.p0.setRange(-180, 180)
         self.p0v = QDoubleSpinBox(); self.p0v.setRange(-180, 180)
+        self.p0v.setSuffix("°")
         self.p0.valueChanged.connect(
             lambda v_: self._slider_to_spin(self.p0v, v_))
         self.p0v.valueChanged.connect(lambda v_: self.p0.setValue(int(v_)))
-        ph0.addWidget(self.p0); ph0.addWidget(self.p0v)
-        v.addLayout(ph0)
-        ph1 = QHBoxLayout()
-        ph1.addWidget(QLabel("p1"))
         self.p1 = QSlider(Qt.Horizontal); self.p1.setRange(-720, 720)
         self.p1v = QDoubleSpinBox(); self.p1v.setRange(-720, 720)
+        self.p1v.setSuffix("°")
         self.p1.valueChanged.connect(
             lambda v_: self._slider_to_spin(self.p1v, v_))
         self.p1v.valueChanged.connect(lambda v_: self.p1.setValue(int(v_)))
-        ph1.addWidget(self.p1); ph1.addWidget(self.p1v)
-        v.addLayout(ph1)
-
+        for r, (name, slider, spin, tip) in enumerate((
+                ("p0", self.p0, self.p0v, "zero-order phase (the whole spectrum)"),
+                ("p1", self.p1, self.p1v, "first-order phase (linear about the "
+                                          "pivot line)")), start=1):
+            lab = QLabel(name)
+            lab.setToolTip(tip)
+            slider.setToolTip(tip)
+            spin.setToolTip(tip)
+            ph.addWidget(lab, r, 0)
+            ph.addWidget(slider, r, 1, 1, 2)
+            ph.addWidget(spin, r, 3)
         # TopSpin-style quick zero-order phase steps
-        quick = QHBoxLayout()
-        quick.addWidget(QLabel("p0 step"))
+        ph.addWidget(QLabel("p0 step"), 3, 0)
+        steps = QHBoxLayout()
+        steps.setSpacing(4)
         for lbl, d in (("−90°", -90.0), ("+90°", 90.0), ("180°", 180.0)):
             b = QPushButton(lbl)
             b.setToolTip("add to the zero-order phase (wraps to ±180°)")
             b.clicked.connect(lambda _=False, d=d: self._nudge_p0(d))
-            quick.addWidget(b)
-        quick.addStretch(1)
-        v.addLayout(quick)
+            steps.addWidget(b)
+        ph.addLayout(steps, 3, 1, 1, 3)
+        ph.setColumnStretch(1, 1)
+        ph.setColumnStretch(2, 1)
+        # the complex signal the phase acts on: destructive pipeline ops,
+        # rarely touched -- collapsed
+        self.sig_toggle, self._sig = self._collapsible("Signal (advanced)",
+                                                        "advSignal")
+        ph.addWidget(self.sig_toggle, 4, 0, 1, 4)
+        sig = QHBoxLayout(self._sig)
+        sig.setContentsMargins(8, 0, 0, 0)
+        self.chkHilbert = QCheckBox("Hilbert first")
+        self.chkHilbert.setToolTip("rebuild the imaginary part of pdata (1r) "
+                                   "so phase correction works on it")
+        self.chkMag = QCheckBox("magnitude")
+        self.chkMag.setToolTip("phase-insensitive |S| as the pipeline result "
+                               "(the fit sees |S|)")
+        sig.addWidget(self.chkHilbert)
+        sig.addWidget(self.chkMag)
+        sig.addStretch(1)
+        ph.addWidget(self._sig, 5, 0, 1, 4)
+        v.addWidget(g_ph)
 
-        # 2-point background: pick two baseline points, subtract the straight line
-        # through them (removes a flat/tilted background before the auto baseline)
-        tp = QHBoxLayout()
-        tp.addWidget(QLabel("<b>2-point background</b>"))
+        # ---------------------------------------------------------- Baseline
+        g_bl = QGroupBox("Baseline")
+        bl = QGridLayout(g_bl)
+        bl.setContentsMargins(8, 4, 8, 6)
+        bl.setHorizontalSpacing(6)
+        bl.setVerticalSpacing(4)
+        # row 0: the automatic polynomial
+        lab = QLabel("Polynomial")
+        lab.setToolTip("fit and subtract a polynomial baseline")
+        bl.addWidget(lab, 0, 0)
+        order_row = QHBoxLayout()
+        order_row.setSpacing(4)
+        order_row.addWidget(QLabel("order"))
+        self.blOrder = QSpinBox(); self.blOrder.setRange(0, 9); self.blOrder.setValue(3)
+        order_row.addWidget(self.blOrder)
+        order_row.addStretch(1)
+        bl.addLayout(order_row, 0, 1)
+        self.btnBaseline = QPushButton("Correct")
+        self.btnBaseline.setToolTip("subtract the polynomial of that order")
+        bl.addWidget(self.btnBaseline, 0, 2)
+        # rows 1-3: the two point-picking tools side by side
+        # 2-point background: pick two baseline points, subtract the straight
+        # line through them (removes a flat/tilted background before the auto
+        # baseline); manual anchors: dmfit-style draggable anchor points
+        h2 = QLabel("<b>2-point line</b>")
+        h2.setToolTip("two clicked points; the straight line through them is "
+                      "subtracted")
+        h3 = QLabel("<b>Manual anchors</b>")
+        h3.setToolTip("dmfit-style: click anchor points, drag them to shape "
+                      "the baseline")
+        bl.addWidget(h2, 1, 0, 1, 2)
+        bl.addWidget(h3, 1, 2, 1, 2)
         self.btnTpPick = QPushButton("Pick 2 points"); self.btnTpPick.setCheckable(True)
         self.btnTpPick.setToolTip("click two baseline points on the spectrum "
                                   "(one each side of the peaks); the straight line "
                                   "through them is subtracted — turn off to apply")
         self.btnTpApply = QPushButton("Subtract")
         self.btnTpClear = QPushButton("Clear")
-        tp.addWidget(self.btnTpPick); tp.addWidget(self.btnTpApply)
-        tp.addWidget(self.btnTpClear)
-        v.addLayout(tp)
-
-        bl = QHBoxLayout()
-        bl.addWidget(QLabel("<b>Baseline auto</b> order"))
-        self.blOrder = QSpinBox(); self.blOrder.setRange(0, 9); self.blOrder.setValue(3)
-        bl.addWidget(self.blOrder)
-        self.btnBaseline = QPushButton("Correct")
-        bl.addWidget(self.btnBaseline)
-        v.addLayout(bl)
-
-        v.addWidget(QLabel("<b>Baseline manual</b> (dmfit-style anchors)"))
-        blm = QHBoxLayout()
         self.btnBlPick = QPushButton("Pick anchors")
         self.btnBlPick.setCheckable(True)
         self.btnBlPick.setToolTip("click on the spectrum to place anchor "
                                   "points; drag them to shape the baseline")
         self.btnBlApply = QPushButton("Subtract")
         self.btnBlClear = QPushButton("Clear")
-        blm.addWidget(self.btnBlPick)
-        blm.addWidget(self.btnBlApply)
-        blm.addWidget(self.btnBlClear)
-        v.addLayout(blm)
+        bl.addWidget(self.btnTpPick, 2, 0, 1, 2)
+        bl.addWidget(self.btnBlPick, 2, 2, 1, 2)
+        tp_row = QHBoxLayout(); tp_row.setSpacing(4)
+        tp_row.addWidget(self.btnTpApply); tp_row.addWidget(self.btnTpClear)
+        bl.addLayout(tp_row, 3, 0, 1, 2)
+        blm_row = QHBoxLayout(); blm_row.setSpacing(4)
+        blm_row.addWidget(self.btnBlApply); blm_row.addWidget(self.btnBlClear)
+        bl.addLayout(blm_row, 3, 2, 1, 2)
+        for c in range(4):
+            bl.setColumnStretch(c, 1)
+        v.addWidget(g_bl)
 
+        # --------------------------------------------------------- Reference
+        g_ref = QGroupBox("Reference")
+        ref = QHBoxLayout(g_ref)
+        ref.setContentsMargins(8, 4, 8, 6)
+        lab = QLabel("SR (Hz)")
+        lab.setToolTip("spectral reference: shifts the ppm axis by SR/SFO1")
+        ref.addWidget(lab)
+        self.sr = QDoubleSpinBox(); self.sr.setRange(-1e6, 1e6); self.sr.setDecimals(2)
+        self.sr.setToolTip("spectral reference: shifts the ppm axis by SR/SFO1 "
+                           "(Process ▸ Reference ▸ Calibrate axis sets it from "
+                           "a clicked peak)")
+        ref.addWidget(self.sr, 1)
+        ref.addStretch(1)
+        v.addWidget(g_ref)
+
+        # ----------------------------------------------- always-visible foot
+        foot = QVBoxLayout()
+        foot.setContentsMargins(6, 0, 6, 6)
+        foot.setSpacing(2)
         actions = QHBoxLayout()
         self.chkLive = QCheckBox("live")
         self.chkLive.setChecked(True)
@@ -477,14 +550,16 @@ class ProcessingPanel(QWidget):
         self.btnApply = QPushButton("Apply processing")
         self.btnApply.setDefault(True)
         self.btnReset = QPushButton("Reset to original")
-        actions.addWidget(self.btnApply); actions.addWidget(self.btnReset)
-        v.addLayout(actions)
-
-        note = QLabel("Processing never writes to instrument files — the "
-                      "pipeline is applied in memory and the fit uses the result.")
+        self.btnReset.setToolTip("drop every processing step and reload the "
+                                 "source")
+        actions.addWidget(self.btnApply, 1); actions.addWidget(self.btnReset, 1)
+        foot.addLayout(actions)
+        note = QLabel("Instrument files are never modified — processing is "
+                      "applied in memory and the fit uses the result.")
         note.setWordWrap(True)
         note.setStyleSheet(f"color: {theme.active().text_dim};")
-        v.addWidget(note)
+        foot.addWidget(note)
+        outer.addLayout(foot)
 
         self.btnApply.clicked.connect(lambda: self._emit([]))
         self.btnAuto.clicked.connect(lambda: self._emit([{"op": "autophase"}]))
@@ -519,6 +594,7 @@ class ProcessingPanel(QWidget):
         # the instrument fid directly)
         self.rb_raw.toggled.connect(lambda on: self.chkReapod.setEnabled(not on))
         self.adv_toggle.toggled.connect(self._toggle_adv)
+        self.sig_toggle.toggled.connect(self._toggle_sig)
         # picking raw-FID mode reveals the window-function controls it needs
         self.rb_raw.toggled.connect(
             lambda on: self.adv_toggle.setChecked(True) if on else None)
@@ -527,10 +603,49 @@ class ProcessingPanel(QWidget):
         self._chan_group.idToggled.connect(
             lambda _id, on: self._emit_view() if on else None)
 
+    # ------------------------------------------------------- collapsibles
+    _SETTINGS_PREFIX = "procPanel/"
+
+    def _collapsible(self, title: str, key: str):
+        """A '▸ title' toggle button and the (hidden) body it reveals. The
+        open / closed state a USER left is remembered in QSettings under
+        ``procPanel/<key>`` (programmatic opens -- picking raw fid, a synced
+        chain -- are not recorded; LARMOR_NO_SESSION disables both ends)."""
+        import os
+
+        from PySide6.QtCore import QSettings
+
+        btn = QToolButton()
+        btn.setCheckable(True)
+        btn.setStyleSheet("QToolButton { border: none; font-weight: 600; }")
+        btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        btn.setProperty("collapsibleTitle", title)
+        body = QWidget()
+        body.setVisible(False)
+        btn.setText("▸ " + title)
+        if not os.environ.get("LARMOR_NO_SESSION"):
+            remembered = QSettings("LARMOR", "app").value(
+                self._SETTINGS_PREFIX + key, False, type=bool)
+            if remembered:
+                btn.setChecked(True)      # toggled is connected later: sync now
+                body.setVisible(True)
+                btn.setText("▾ " + title)
+            btn.clicked.connect(
+                lambda on, k=key: QSettings("LARMOR", "app").setValue(
+                    self._SETTINGS_PREFIX + k, bool(on)))
+        return btn, body
+
+    @staticmethod
+    def _set_collapsed(btn: QToolButton, body: QWidget, on: bool):
+        body.setVisible(on)
+        btn.setText(("▾ " if on else "▸ ") + str(btn.property("collapsibleTitle")))
+
     def _toggle_adv(self, on: bool):
-        self._adv.setVisible(on)
-        self.adv_toggle.setText(("▾ " if on else "▸ ")
-                                + "Raw-FID window functions (advanced)")
+        self._set_collapsed(self.adv_toggle, self._adv, on)
+
+    def _toggle_sig(self, on: bool):
+        self._set_collapsed(self.sig_toggle, self._sig, on)
 
     def _schedule_live(self, *_):
         if self.chkLive.isChecked():
@@ -617,6 +732,7 @@ class ProcessingPanel(QWidget):
             self._hilbert_before_reapod = self.chkHilbert.isChecked()
             self.chkHilbert.setChecked(True)
             self.chkHilbert.setEnabled(False)
+            self.sig_toggle.setChecked(True)     # show the locked box
         else:
             self.chkHilbert.setEnabled(True)
             self.chkHilbert.setChecked(self._hilbert_before_reapod)
@@ -650,6 +766,7 @@ class ProcessingPanel(QWidget):
             self.chkHilbert.setChecked(True)
         finally:
             self.chkHilbert.blockSignals(False)
+        self.sig_toggle.setChecked(True)
         self._live_timer.stop()
 
     def sync_from_ops(self, ops: list[dict], use_raw: bool) -> bool:
@@ -750,6 +867,8 @@ class ProcessingPanel(QWidget):
                     self._carried_ops.append({"op": name, **o})
             if use_raw or self.chkReapod.isChecked():
                 self.adv_toggle.setChecked(True)
+            if self.chkHilbert.isChecked() or self.chkMag.isChecked():
+                self.sig_toggle.setChecked(True)
         finally:
             for w in widgets:
                 w.blockSignals(False)
