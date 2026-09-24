@@ -168,15 +168,25 @@ class SpectrumView(pg.PlotWidget):
 
         self._exp = self.plot([], [], pen=pg.mkPen(t.experiment, width=1.4),
                               name="experiment", antialias=True)
-        self._model = self.plot([], [], pen=pg.mkPen(t.model, width=1.8),
-                                name="model", antialias=True)
-        self._resid = self.plot([], [], pen=pg.mkPen(t.resid, width=1.0),
-                                name="residual", antialias=True)
+        # Every MODEL-side item (model, residual, components, fit animation,
+        # paddles, markers) is added with ignoreBounds=True: pyqtgraph's
+        # auto-range unions the bounds of every added item, and the model is
+        # simulated on the Czjzek KERNEL axis (engine.make_context: at least
+        # 150 kHz wide, 1.25x the data span otherwise), so each simulation
+        # or fit result used to stretch the x axis past the data -- and the
+        # fit-animation label, pinned to the view corner, fed the range back
+        # into itself frame after frame (2500, 5000, 7000 ppm on a long fit).
+        # Only the experiment (and compared overlays) define the auto range;
+        # the model is also drawn only across the data (_model_mask).
+        self._model = self._add_model_curve(pen=pg.mkPen(t.model, width=1.8),
+                                            name="model")
+        self._resid = self._add_model_curve(pen=pg.mkPen(t.resid, width=1.0),
+                                            name="residual")
         # faint zero line for the offset residual strip
         self._resid_zero = pg.InfiniteLine(
             angle=0, pen=pg.mkPen(t.resid_zero, width=1, style=Qt.DotLine))
         self._resid_zero.setVisible(False)
-        self.addItem(self._resid_zero)
+        pi.addItem(self._resid_zero, ignoreBounds=True)
         pi.getAxis("left").setStyle(tickTextWidth=48, autoExpandTextSpace=False)
         # peak-mode downsampling + clip-to-view: a zero-filled wideline
         # spectrum is 64k points, and repainting every one of them on every
@@ -245,6 +255,36 @@ class SpectrumView(pg.PlotWidget):
         except Exception:
             pass
 
+    #: fraction of the data span drawn beyond each end of the experiment
+    #: when the model is masked to the data (a small margin, so a curve that
+    #: spills just past the last point is not cut visibly)
+    MODEL_MARGIN_FRAC = 0.02
+
+    def _add_model_curve(self, pen=None, name=None, **kw) -> pg.PlotDataItem:
+        """A curve that never takes part in auto-range (see __init__)."""
+        item = pg.PlotDataItem([], [], pen=pen, name=name, antialias=True, **kw)
+        self.getPlotItem().addItem(item, ignoreBounds=True)
+        return item
+
+    def _model_mask(self, x, exp_x=None):
+        """Boolean mask of the model points inside the experiment's x range
+        (plus MODEL_MARGIN_FRAC of its span on each side); None when there is
+        no experiment to mask against."""
+        ref = exp_x if exp_x is not None and len(exp_x) else self._freq_x
+        if ref is None or not len(ref) or x is None:
+            return None
+        ref = np.asarray(ref, float)
+        lo, hi = float(np.min(ref)), float(np.max(ref))
+        m = self.MODEL_MARGIN_FRAC * (hi - lo)
+        xa = np.asarray(x, float)
+        return (xa >= lo - m) & (xa <= hi + m)
+
+    @staticmethod
+    def _masked(mask, *arrays):
+        if mask is None:
+            return arrays
+        return tuple(None if a is None else np.asarray(a)[mask] for a in arrays)
+
     # ---------------------------------------------------------------- fit animation
     def start_fit_animation(self):
         """Prepare the animated-fit overlay (call before a fit begins)."""
@@ -254,15 +294,17 @@ class SpectrumView(pg.PlotWidget):
         if self._anim_main is None:
             self._anim_ghosts = []
             for _ in range(3):                      # a short fading trail
-                g = self.plot([], [], pen=pg.mkPen(t.accent, width=1))
+                g = self._add_model_curve(pen=pg.mkPen(t.accent, width=1))
                 g.setZValue(40)
                 self._anim_ghosts.append(g)
-            self._anim_main = self.plot(
-                [], [], pen=pg.mkPen(t.accent, width=2.2), antialias=True)
+            self._anim_main = self._add_model_curve(
+                pen=pg.mkPen(t.accent, width=2.2))
             self._anim_main.setZValue(45)
             self._anim_label = pg.TextItem(color=t.accent, anchor=(0, 0))
             self._anim_label.setZValue(46)
-            self.addItem(self._anim_label)
+            # pinned to the view corner each frame: with bounds it drove the
+            # auto-range feedback loop described in __init__
+            self.getPlotItem().addItem(self._anim_label, ignoreBounds=True)
         self._anim_hist = []
         self._anim_label.setText("")
         for it in (*self._anim_ghosts, self._anim_main):
@@ -278,6 +320,7 @@ class SpectrumView(pg.PlotWidget):
             self.start_fit_animation()
         from PySide6.QtGui import QColor
         x = np.asarray(x, float); y = np.asarray(y, float)
+        x, y = self._masked(self._model_mask(x), x, y)     # data range only
         self._anim_hist.append((x, y))
         self._anim_hist = self._anim_hist[-4:]      # main + up to 3 ghosts
         ghosts = self._anim_hist[:-1]
@@ -926,6 +969,14 @@ class SpectrumView(pg.PlotWidget):
             self._comp_data = []
             self._refresh_comp_labels()
             return
+        # the model is simulated on the (wider) kernel axis: draw it only
+        # across the experiment (+ a small margin) so nothing model-side ever
+        # reaches past the data -- the view range is the data's and the user's
+        mask = self._model_mask(x, exp_x)
+        if mask is not None and mask.sum() < 2:
+            mask = None                      # nothing of the model in range
+        x, total = self._masked(mask, x, total)
+        per_site = list(self._masked(mask, *per_site)) if per_site else []
         self._model.setData(x, total)
 
         # residual, offset below zero as a dedicated strip
@@ -942,7 +993,7 @@ class SpectrumView(pg.PlotWidget):
         # components: reuse items, add/remove as needed (created hidden while
         # the FID is displayed -- every simulation allocates new ones)
         while len(self._components) < len(per_site):
-            item = self.plot([], [])
+            item = self._add_model_curve()
             self._tune_curve(item)
             item.setVisible(self._domain == "freq")
             self._components.append(item)
@@ -1056,7 +1107,7 @@ class SpectrumView(pg.PlotWidget):
             line.site_index = idx
             if draggable:
                 line.sigPositionChangeFinished.connect(self._marker_done)
-            self.addItem(line)
+            self.getPlotItem().addItem(line, ignoreBounds=True)
             line.setVisible(self._domain == "freq")
             self._markers.append(line)
 
@@ -1075,7 +1126,9 @@ class SpectrumView(pg.PlotWidget):
             pad = Paddle(idx, site_color(idx), pos, amp, fwhm, movable)
             pad.moved.connect(self.paddle_moved)
             pad.released.connect(self.paddle_released)
-            self.addItem(pad)
+            # a paddle is a model handle: it must not pull the auto range
+            # (a linked sideband copy can sit outside the data)
+            self.getPlotItem().addItem(pad, ignoreBounds=True)
             pad.setVisible(self._domain == "freq")
             self._paddles.append(pad)
 
