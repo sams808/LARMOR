@@ -23,12 +23,33 @@ CQ_MAX_MHZ = 120.0
 from larmor.models.analytic import FWHM_TO_SIGMA
 
 
+def _clamp_fwhm(x: np.ndarray, fwhm_ppm: float) -> float:
+    """A Gaussian broadening is never wider than the axis it is applied on.
+
+    The optimiser's trial steps are not physical: scipy's trust-region
+    (least_squares "trf") opens its first radius at the largest parameter
+    magnitude -- the AMPLITUDE, ~3e6 on a Bruker spectrum -- so the first
+    step can move a width by that much. Measured on the 27Al example with a
+    czjzek_corr line and five linked sideband copies: the second residual
+    evaluation asked for dCS = 3.15e6 ppm, a 2.4-million-point Gaussian on a
+    2560-point axis, and gaussian_filter1d (cost ~ npts x 8 sigma) ran for
+    more than 40 minutes on ONE evaluation -- the "long to compute" report,
+    and why Stop could not get a word in. A broadening wider than the axis
+    is already a flat smear that _finish renormalises to a plateau; clamping
+    it to the axis span leaves that outcome and every physical width (a
+    fraction of the span) untouched, and bounds one evaluation to
+    ~4 npts^2 operations (~20 ms at 2560 points)."""
+    if x.size < 2:
+        return fwhm_ppm
+    return min(float(fwhm_ppm), abs(float(x[-1]) - float(x[0])))
+
+
 def _broaden_shift(x: np.ndarray, y: np.ndarray, pos_ppm: float,
                    fwhm_ppm: float) -> np.ndarray:
     """Translate a delta_iso=0 lineshape to pos and apply Gaussian broadening."""
     y = np.interp(x - pos_ppm, x, y, left=0.0, right=0.0)
     dppm = abs(x[1] - x[0])
-    sigma_pts = fwhm_ppm * FWHM_TO_SIGMA / dppm
+    sigma_pts = _clamp_fwhm(x, fwhm_ppm) * FWHM_TO_SIGMA / dppm
     if sigma_pts > 0.05:
         from scipy.ndimage import gaussian_filter1d   # deferred: startup cost
         y = gaussian_filter1d(y, sigma_pts, mode="constant")
@@ -85,7 +106,8 @@ def _broaden_shift_pv(x: np.ndarray, y: np.ndarray, pos_ppm: float,
     gl = float(np.clip(gl, 0.0, 1.0))
     lor_fwhm_ppm = max(lor_fwhm_ppm, 0.0)          # negative lb (dmfit resolution
     #                                                enhancement) is not a convolution
-    g_fwhm = float(np.hypot(max(gauss_fwhm_ppm, 0.0), gl * lor_fwhm_ppm))
+    g_fwhm = _clamp_fwhm(x, float(np.hypot(max(gauss_fwhm_ppm, 0.0),
+                                           gl * lor_fwhm_ppm)))
     sigma_pts = g_fwhm * FWHM_TO_SIGMA / dppm
     if sigma_pts > 0.05:
         from scipy.ndimage import gaussian_filter1d   # deferred: startup cost
@@ -147,6 +169,33 @@ def _kernel_for(ctx: SimContext, needed_cq_MHz: float):
         n_eta=int(engine.KERNEL_SETTINGS["n_eta"]))
 
 
+#: per-kernel memo of the (sigma[, d])-dependent reweighting, the part of a
+#: Czjzek-family render that does NOT depend on position or amplitude. A
+#: fit with linked spinning-sideband copies renders the same shape five or
+#: six times per residual evaluation at different positions; the copies now
+#: share one w @ K (czjzek, czjzek_d) or one eta-summed basis (czjzek_corr)
+#: per evaluation instead of each redoing the 880 x npts multiply. The memo
+#: lives on the kernel object (it dies with it; no id() reuse hazard) and
+#: holds the last few entries -- a Jacobian probe alternates a handful of
+#: parameter sets. Results are bit-identical: the cached array IS the array
+#: the uncached render would have computed.
+_REWEIGHT_MEMO_SIZE = 8
+
+
+def _reweight(kernel, key: tuple, compute):
+    """``compute()`` memoised on ``kernel`` under ``key``."""
+    memo = kernel.__dict__.get("_reweight_memo")
+    if memo is None:
+        memo = kernel.__dict__["_reweight_memo"] = {}
+    hit = memo.get(key)
+    if hit is None:
+        hit = compute()
+        if len(memo) >= _REWEIGHT_MEMO_SIZE:
+            memo.pop(next(iter(memo)))           # oldest insertion
+        memo[key] = hit
+    return hit
+
+
 def _finish(kernel, y: np.ndarray, v: dict, ctx: SimContext) -> np.ndarray:
     """Peak-normalise to the site amplitude and move from the kernel axis to
     the context axis (no interpolation when they coincide)."""
@@ -161,7 +210,9 @@ def _finish(kernel, y: np.ndarray, v: dict, ctx: SimContext) -> np.ndarray:
 def _render_czjzek(v: dict, ctx: SimContext) -> np.ndarray:
     kernel = _kernel_for(
         ctx, CZJZEK_KERNEL_HEADROOM * float(v.get("sigma_Cq_MHz", 2.0)))
-    y = kernel.weights(v["sigma_Cq_MHz"]) @ kernel.K
+    sigma = float(v["sigma_Cq_MHz"])
+    y = _reweight(kernel, ("czjzek", sigma),
+                  lambda: kernel.weights(sigma) @ kernel.K)
     y = _broaden_shift(kernel.x_ppm, y, v["isotropic_chemical_shift_ppm"],
                        _czjzek_fwhm(v))
     return _finish(kernel, y, v, ctx)
@@ -266,10 +317,15 @@ def _render_czjzek_d(v: dict, ctx: SimContext) -> np.ndarray:
     from larmor import czjzek_dist
 
     sigma = float(v.get("sigma_Cq_MHz", 2.0))
+    d = float(v.get("czjzek_d", 5.0))
     kernel = _kernel_for(ctx, CZJZEK_KERNEL_HEADROOM * sigma)
-    w = czjzek_dist.czjzek_weights(sigma, float(v.get("czjzek_d", 5.0)),
-                                   kernel.cq_grid_MHz, kernel.eta_grid)
-    y = w @ kernel.K
+
+    def _basis():
+        w = czjzek_dist.czjzek_weights(sigma, d, kernel.cq_grid_MHz,
+                                       kernel.eta_grid)
+        return w @ kernel.K
+
+    y = _reweight(kernel, ("czjzek_d", sigma, d), _basis)
     y = _broaden_shift(kernel.x_ppm, y, v["isotropic_chemical_shift_ppm"],
                        _czjzek_fwhm(v))
     return _finish(kernel, y, v, ctx)
@@ -327,6 +383,9 @@ def _shift_sum(x: np.ndarray, Y: np.ndarray, shifts: np.ndarray,
     if weights is not None:
         weights = np.asarray(weights, float)
         keep = weights >= tol * (weights.max() if weights.size else 0.0)
+    # a per-row np.interp loop: a vectorised searchsorted + fancy-indexing
+    # version reproduced it bit for bit but ran 6x SLOWER (31 vs 4.7 ms for
+    # 80 rows x 2048 points), so the plain loop stays
     out = np.zeros(x.shape[0])
     for q in np.flatnonzero(keep):
         out += np.interp(x - shifts[q], x, Y[q], left=0.0, right=0.0)
@@ -337,12 +396,17 @@ def _render_czjzek_corr(v: dict, ctx: SimContext) -> np.ndarray:
     sigma = float(v.get("sigma_Cq_MHz", 2.0))
     kernel = _kernel_for(ctx, CZJZEK_KERNEL_HEADROOM * sigma)
     n_eta, n_cq = kernel.eta_grid.size, kernel.cq_grid_MHz.size
-    # kernel rows follow np.meshgrid(cq, eta, indexing='xy').ravel(): eta-major
-    W = kernel.weights(sigma).reshape(n_eta, n_cq)
-    # one eta-summed subspectrum per C_Q: the shift correlates with C_Q only
-    Y = np.einsum("eq,eqx->qx", W, kernel.K.reshape(n_eta, n_cq, -1))
-    wq = W.sum(axis=0)
-    cq_mean = float(wq @ kernel.cq_grid_MHz)
+
+    def _basis():
+        # kernel rows follow np.meshgrid(cq, eta, indexing='xy').ravel():
+        # eta-major. One eta-summed subspectrum per C_Q: the shift
+        # correlates with C_Q only.
+        W = kernel.weights(sigma).reshape(n_eta, n_cq)
+        Y = np.einsum("eq,eqx->qx", W, kernel.K.reshape(n_eta, n_cq, -1))
+        wq = W.sum(axis=0)
+        return Y, wq, float(wq @ kernel.cq_grid_MHz)
+
+    Y, wq, cq_mean = _reweight(kernel, ("czjzek_corr", sigma), _basis)
     pos = float(v["isotropic_chemical_shift_ppm"])
     slope = float(v.get("shift_slope_ppm_per_MHz", 0.0))
     # pivot at <C_Q>: pos stays the ensemble-MEAN shift for any slope and the

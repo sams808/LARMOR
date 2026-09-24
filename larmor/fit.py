@@ -17,8 +17,9 @@ import lmfit
 
 from larmor import models as model_registry
 from larmor.paramstatus import AT_BOUND_NOTE_PREFIX, bound_side, effective_bounds
-from larmor.engine import (grid_restrictable, make_context, simulate_site,
-                           site_width_margin)
+from larmor.engine import (KernelBuildCancelled, cancel_registered,
+                           check_cancel, grid_restrictable, make_context,
+                           simulate_site, site_width_margin)
 from larmor.provenance import software_stamp
 from larmor.recipe import Recipe
 
@@ -223,9 +224,17 @@ def _apply_params(recipe: Recipe, params: lmfit.Parameters) -> None:
 
 
 def _model(recipe: Recipe, params: lmfit.Parameters, ctx,
-           ) -> tuple[np.ndarray, list[np.ndarray]]:
+           cancellable: bool = False) -> tuple[np.ndarray, list[np.ndarray]]:
+    """Render every site on ``ctx``. With ``cancellable`` the registered stop
+    hook (engine.kernel_build_feedback) is consulted between site renders,
+    so a Stop pressed during a long residual evaluation is honoured within
+    one render rather than one full evaluation (six wide Czjzek sites)."""
     _apply_params(recipe, params)
-    per_site = [simulate_site(s, ctx) for s in recipe.sites]
+    per_site = []
+    for s in recipe.sites:
+        if cancellable:
+            check_cancel("between site renders")
+        per_site.append(simulate_site(s, ctx))
     return np.sum(per_site, axis=0), per_site
 
 
@@ -314,13 +323,33 @@ def fit(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
             if amp.vary:
                 amp.value *= scale
 
+    # A Stop / Cancel from the app arrives through the cancel hook the worker
+    # registered (engine.kernel_build_feedback) AND through iter_cb. The hook
+    # is checked between site renders and between kernel chunks; when it
+    # fires inside an evaluation the evaluation is abandoned, the previous
+    # residual is handed back and the callback aborts the minimiser -- and
+    # the LAST COMPLETE parameter set is restored afterwards, so "Stop
+    # (keep)" keeps an evaluated point, never the half-evaluated trial one
+    # (whose kernel may not even exist yet).
+    _stop = {"hit": False, "last_resid": None, "last_good": None}
+
     def residual(p):
-        y, _ = _model(recipe, p, ctx)
-        return np.interp(xw, ctx.x_ppm, y) - yw
+        try:
+            y, _ = _model(recipe, p, ctx, cancellable=True)
+        except KernelBuildCancelled:
+            _stop["hit"] = True
+            prev = _stop["last_resid"]
+            return prev if prev is not None else np.zeros_like(yw)
+        out = np.interp(xw, ctx.x_ppm, y) - yw
+        _stop["last_resid"] = out
+        _stop["last_good"] = {n: q.value for n, q in p.items() if q.vary}
+        return out
 
     _fs = {"n": 0}
 
     def _main_cb(p, it, resid, *a, **k):
+        if _stop["hit"]:
+            return True                      # abort: the evaluation was cancelled
         # emit the live model curve only every `frame_every` iterations (and the
         # first couple) — computing/redrawing every iteration would slow the fit;
         # the FINAL model is always drawn by the caller when the fit finishes
@@ -362,9 +391,16 @@ def fit(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
                                 category=RuntimeWarning)
         _ds = diff_step_for(recipe)
         _step_kws = {} if _ds is None else {"diff_step": _ds}
-        result = lmfit.minimize(residual, params, method="least_squares",
-                                iter_cb=(_main_cb if (frame_cb or iter_cb) else None),
-                                **_step_kws, **_tol_kws(tol))
+        result = lmfit.minimize(
+            residual, params, method="least_squares",
+            iter_cb=(_main_cb if (frame_cb or iter_cb or cancel_registered())
+                     else None),
+            **_step_kws, **_tol_kws(tol))
+    if _stop["hit"] and _stop["last_good"]:
+        # back to the last point that was fully evaluated (see _stop above)
+        for name, val in _stop["last_good"].items():
+            result.params[name].value = val
+        result.params.update_constraints()
 
     def _at_bounds(res) -> list[str]:
         names = []
@@ -378,7 +414,10 @@ def fit(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
         return names
 
     at_bounds_internal = _at_bounds(result)
-    if compute_errorbars and not result.errorbars:
+    # an interrupted fit gets no error-bar rescue: the retry is a whole
+    # second optimisation, and the point it would start from is the one the
+    # user just stopped at
+    if compute_errorbars and not result.errorbars and not _stop["hit"]:
         # covariance didn't come out of least_squares; Levenberg-Marquardt from
         # the solution usually recovers it
         retry_params = result.params.copy()
@@ -397,8 +436,20 @@ def fit(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
             if abs(retry_params[amp_names[i]].value) <= 1e-6 * amp_scale:
                 for pname in site.params:
                     retry_params[_lmfit_name(i, site, pname)].vary = False
+        # MINPACK probes its Jacobian with a relative step of sqrt(epsfcn) --
+        # lmfit's default 1e-10 is a 1e-5 step, pure grid noise on a
+        # kernel-simulated model (the reason the primary pass uses
+        # SIMULATED_DIFF_STEP). Measured on the 27Al example, czjzek_corr
+        # with five linked sidebands: the rescue dithered the amplitude by
+        # +-35 (1.2e-5 relative) for 22 000 evaluations (maxfev) -- ten
+        # minutes after the actual fit had converged in seconds. The same
+        # step as the primary pass (epsfcn = diff_step^2) lets it converge.
+        # ... and the SAME completion tolerances as the primary pass: MINPACK's
+        # own 1e-7 is unreachable on a grid-quantised residual, so it too ran
+        # to maxfev (270 s on the same case after the step fix alone).
+        _retry_kws = {} if _ds is None else {"epsfcn": _ds ** 2}
         retry = lmfit.minimize(residual, retry_params, method="leastsq",
-                               iter_cb=iter_cb)
+                               iter_cb=iter_cb, **_retry_kws, **_tol_kws(tol))
         if retry.errorbars:
             result = retry
     _apply_params(recipe, result.params)

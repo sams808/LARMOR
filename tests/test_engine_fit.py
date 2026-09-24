@@ -419,3 +419,217 @@ def test_kernel_build_chunked_is_identical_and_cancellable(monkeypatch):
             engine.build_kernel("27Al", 130.32, 12500.0, **args)
     # nothing half-built may enter the caches
     assert len(engine._KERNEL_CACHE) == 0
+
+
+# ---------------------------------------------------------------------------
+# WA (2026-09): the czjzek_d / czjzek_corr fits that took tens of minutes and
+# could not be stopped. Root causes, each pinned below:
+#   * the optimiser's first trust-region step (scipy trf: radius = the largest
+#     parameter, the AMPLITUDE ~3e6) asked _broaden_shift for a 3.15e6 ppm
+#     Gaussian -- a 2.4-million-point kernel on a 2560-point axis, minutes per
+#     site render;
+#   * the error-bar rescue (leastsq) probed its Jacobian at a 1e-5 relative
+#     step on a kernel-quantised model and dithered to maxfev (~22 000 evals);
+#   * Stop was checked only after a whole residual evaluation / every 8th of a
+#     kernel build.
+# ---------------------------------------------------------------------------
+
+def _small_kernel_settings(monkeypatch):
+    """A tiny kernel so the Czjzek renders below build in well under a second
+    and never touch the process-wide cache."""
+    from collections import OrderedDict
+
+    monkeypatch.setattr(engine, "_KERNEL_CACHE", OrderedDict())
+    monkeypatch.setattr(engine, "KERNEL_SETTINGS",
+                        {"npts": 256, "n_cq": 6, "n_eta": 3})
+
+
+def test_broadening_wider_than_the_axis_is_clamped_and_physical_widths_untouched():
+    import time
+
+    from scipy.ndimage import gaussian_filter1d
+
+    from larmor.models.analytic import FWHM_TO_SIGMA
+    from larmor.models.quadrupolar import _broaden_shift, _clamp_fwhm
+
+    x = np.linspace(-500.0, 500.0, 2560)
+    y = np.exp(-(x / 20.0) ** 2)
+    t0 = time.perf_counter()
+    runaway = _broaden_shift(x, y, 0.0, 3.15e6)       # the measured request
+    assert time.perf_counter() - t0 < 2.0             # was > 40 min
+    assert np.array_equal(runaway, _broaden_shift(x, y, 0.0, x[-1] - x[0]))
+    assert np.isfinite(runaway).all()
+    # a physical width is exactly what it always was
+    assert _clamp_fwhm(x, 12.0) == 12.0
+    ref = gaussian_filter1d(np.interp(x - 30.0, x, y, left=0.0, right=0.0),
+                            12.0 * FWHM_TO_SIGMA / (x[1] - x[0]), mode="constant")
+    assert np.array_equal(_broaden_shift(x, y, 30.0, 12.0), ref)
+
+
+def test_reweight_memo_shared_by_linked_copies_is_bit_identical(monkeypatch):
+    from larmor.models import quadrupolar as Q
+    from larmor.models.base import SimContext
+
+    _small_kernel_settings(monkeypatch)
+    ctx = SimContext("27Al", 130.32, 12500.0, np.linspace(-150.0, 200.0, 256))
+    calls = {"n": 0}
+    orig = engine.CzjzekKernel.weights
+
+    def counted(self, sigma):
+        calls["n"] += 1
+        return orig(self, sigma)
+
+    monkeypatch.setattr(engine.CzjzekKernel, "weights", counted)
+    v = {"isotropic_chemical_shift_ppm": 60.0, "sigma_Cq_MHz": 1.5,
+         "shift_fwhm_ppm": 8.0, "line_fwhm_ppm": 0.0, "amplitude": 2.0,
+         "shift_slope_ppm_per_MHz": 1.5, "czjzek_d": 4.0}
+    kernel = Q._kernel_for(ctx, 15.0)
+    for render, key in ((Q._render_czjzek, "czjzek"),
+                        (Q._render_czjzek_corr, "czjzek_corr")):
+        kernel.__dict__.pop("_reweight_memo", None)
+        calls["n"] = 0
+        parent = render(dict(v), ctx)
+        copies = [render({**v, "isotropic_chemical_shift_ppm": 60.0 + k * 96.0}, ctx)
+                  for k in (-2, -1, 1, 2, 3)]
+        assert calls["n"] == 1                 # one reweighting for six renders
+        assert list(kernel._reweight_memo)[0][0] == key
+        # every copy equals its own uncached render, bit for bit
+        for k, y in zip((-2, -1, 1, 2, 3), copies):
+            kernel.__dict__.pop("_reweight_memo", None)
+            fresh = render({**v, "isotropic_chemical_shift_ppm": 60.0 + k * 96.0}, ctx)
+            assert np.array_equal(y, fresh)
+        assert parent.max() == pytest.approx(2.0, rel=0.05)   # tiny kernel, interpolated
+    # czjzek_d shares the same memo, keyed on (sigma, d)
+    kernel.__dict__.pop("_reweight_memo", None)
+    a = Q._render_czjzek_d(dict(v), ctx)
+    b = Q._render_czjzek_d({**v, "isotropic_chemical_shift_ppm": 10.0}, ctx)
+    assert list(kernel._reweight_memo) == [("czjzek_d", 1.5, 4.0)]
+    kernel.__dict__.pop("_reweight_memo", None)
+    assert np.array_equal(b, Q._render_czjzek_d({**v, "isotropic_chemical_shift_ppm": 10.0}, ctx))
+    assert a.max() == pytest.approx(2.0, rel=0.05)
+
+
+def test_kernel_chunks_are_bounded_in_size():
+    assert engine._n_chunks(880) == 10            # 27Al default grid: ~0.7 s each
+    assert engine._n_chunks(15) == 8              # small builds keep 8 ticks
+    assert engine._n_chunks(14080) == 147         # the 400 MHz ladder step
+    assert engine._n_chunks(1) == 1 and engine._n_chunks(0) == 1
+
+
+def test_same_kernel_requested_from_two_threads_is_built_once(monkeypatch):
+    import threading
+
+    _small_kernel_settings(monkeypatch)
+    built = {"n": 0}
+    orig = engine._build_kernel_uncached
+
+    def counted(*a, **k):
+        built["n"] += 1
+        return orig(*a, **k)
+
+    monkeypatch.setattr(engine, "_build_kernel_uncached", counted)
+    args = dict(sw_Hz=150000.0, npts=128, ref_offset_ppm=30.0,
+                cq_max_MHz=6.0, n_cq=5, n_eta=3)
+    out = {}
+
+    def go(tag):
+        out[tag] = engine.build_kernel("27Al", 130.32, 12500.0, **args)
+
+    ts = [threading.Thread(target=go, args=(t,)) for t in ("warm", "sim")]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join(60)
+    assert built["n"] == 1                        # the race built it twice
+    assert out["warm"] is out["sim"]
+
+
+def test_waiting_for_another_build_still_honours_stop(monkeypatch):
+    import threading
+    import time
+
+    _small_kernel_settings(monkeypatch)
+    args = dict(sw_Hz=150000.0, npts=128, ref_offset_ppm=30.0,
+                cq_max_MHz=6.0, n_cq=5, n_eta=3)
+    key = ("27Al", 130.32, 12500, 150000, 128, 30.0, 6.0, 5, 3)
+    lock = engine._build_lock(key)
+    lock.acquire()                                # "another thread is building"
+    try:
+        flag = {"stop": False}
+        threading.Timer(0.3, lambda: flag.__setitem__("stop", True)).start()
+        t0 = time.perf_counter()
+        with engine.kernel_build_feedback(cancel=lambda: flag["stop"]):
+            with pytest.raises(engine.KernelBuildCancelled):
+                engine.build_kernel("27Al", 130.32, 12500.0, **args)
+        assert time.perf_counter() - t0 < 1.5
+    finally:
+        lock.release()
+
+
+def _six_slow_lines(sleep_s: float, monkeypatch):
+    """Six gauss_lor sites whose render sleeps: one residual evaluation costs
+    6 x sleep_s, the unit of Stop latency before this change."""
+    import dataclasses
+    import time
+
+    from larmor.models import base as mbase
+
+    model = mbase.REGISTRY["gauss_lor"]
+    orig = model.render
+
+    def slow(values, ctx):
+        time.sleep(sleep_s)
+        return orig(values, ctx)
+
+    monkeypatch.setitem(mbase.REGISTRY, "gauss_lor",
+                        dataclasses.replace(model, render=slow))
+    x = np.linspace(-20.0, 120.0, 300)
+    sites = [SiteModel(model="gauss_lor", label=f"p{i}", params={
+        "isotropic_chemical_shift_ppm": Param(20.0 + 15.0 * i, min=-50, max=150),
+        "shift_fwhm_ppm": Param(6.0, min=1, max=40),
+        "gl": Param(0.5, vary=False),
+        "amplitude": Param(1e6, min=0)}) for i in range(6)]
+    r = Recipe(nucleus="27Al", larmor_frequency_MHz=130.3, sites=sites)
+    ctx = engine.make_context(r, exp_ppm=x)
+    y = np.sum([engine.simulate_site(s, ctx) for s in r.sites], axis=0)
+    return r, x, y * 1.3
+
+
+def test_stop_between_site_renders_returns_within_a_second_and_keeps_the_last_point(monkeypatch):
+    import threading
+    import time
+
+    r, x, y = _six_slow_lines(0.08, monkeypatch)        # 0.48 s per evaluation
+    flag = {"stop": False, "t_req": None}
+    seen = []
+
+    def arm():
+        time.sleep(0.15)
+        flag["t_req"] = time.perf_counter()
+        flag["stop"] = True
+
+    def cb(params, it, resid, *a, **k):
+        # the parameter set of every COMPLETED evaluation
+        seen.append({n: p.value for n, p in params.items() if p.vary})
+        if len(seen) == 3:
+            # ask for the stop 0.2 s into the NEXT evaluation (mid-render)
+            threading.Thread(target=arm).start()
+        return flag["stop"] or None
+
+    with engine.kernel_build_feedback(cancel=lambda: flag["stop"]):
+        res = fitmod.fit(r, x, y, window_ppm=(120.0, -20.0), iter_cb=cb)
+    t_back = time.perf_counter()
+    assert flag["t_req"] is not None
+    # one render (0.08 s) to notice + the final full-grid render of the kept
+    # point (six renders, 0.48 s); before, a whole evaluation had to finish
+    assert t_back - flag["t_req"] < 1.0
+    assert res.lmfit_result.aborted
+    # the recipe holds the last COMPLETE evaluation's values, not the trial
+    # point whose evaluation was abandoned
+    last = seen[-1]
+    for i, s in enumerate(r.sites):
+        for pname, p in s.params.items():
+            key = fitmod._lmfit_name(i, s, pname)
+            if key in last:
+                assert p.value == pytest.approx(last[key], rel=1e-12)
+    assert np.isfinite(res.y_fit).all() and res.rmsd < 1.0

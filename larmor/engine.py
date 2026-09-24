@@ -11,6 +11,7 @@ models plug in without touching this module or the fit engine.
 """
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
 
 from collections import OrderedDict
@@ -33,6 +34,8 @@ __all__ = [
     "KERNEL_SPAN_MARGIN",
     "KernelBuildCancelled",
     "build_kernel",
+    "cancel_registered",
+    "check_cancel",
     "clear_kernel_cache",
     "gauss_lor",
     "grid_restrictable",
@@ -80,6 +83,57 @@ class KernelBuildCancelled(RuntimeError):
 #: thread was indistinguishable from a hang; the build now runs in chunks
 #: and reports between them. Set via kernel_build_feedback().
 _BUILD_FEEDBACK = {"cb": None, "cancel": None}
+
+
+#: systems simulated per chunk when feedback hooks are registered: ~7 ms
+#: per (Cq, eta) system on the 27Al example, so a chunk is ~0.7 s and a Stop
+#: pressed during a build is honoured within about that. The old fixed 8
+#: chunks made a 14 080-system build (the 400 MHz ladder step) check the
+#: flag every ~12 s.
+KERNEL_CHUNK_SYSTEMS = 96
+
+#: one in-flight build per kernel key: the KernelWarmWorker started at load
+#: and the SimWorker of the first line dropped seconds later used to build
+#: the SAME kernel side by side (the race the warm-up docstring accepted),
+#: doubling the CPU time of exactly the wait the user is watching. A second
+#: caller now waits on the first build (polling, so a Stop still cancels it)
+#: and takes the cached result.
+_BUILD_LOCKS: dict = {}
+_BUILD_LOCKS_GUARD = threading.Lock()
+
+
+def _build_lock(key: tuple) -> threading.Lock:
+    with _BUILD_LOCKS_GUARD:
+        lock = _BUILD_LOCKS.get(key)
+        if lock is None:
+            lock = _BUILD_LOCKS[key] = threading.Lock()
+        return lock
+
+
+def _n_chunks(n_systems: int) -> int:
+    """Chunks for ``n_systems`` with feedback registered: at least the
+    historical 8 (progress ticks on small builds), never more systems per
+    chunk than KERNEL_CHUNK_SYSTEMS."""
+    if n_systems <= 0:
+        return 1
+    return max(min(8, n_systems), -(-n_systems // KERNEL_CHUNK_SYSTEMS))
+
+
+def cancel_registered() -> bool:
+    """True while a cancel hook is registered on this thread's process."""
+    return _BUILD_FEEDBACK.get("cancel") is not None
+
+
+def check_cancel(where: str = "") -> None:
+    """Raise KernelBuildCancelled if the registered cancel hook has fired.
+
+    The kernel build calls it between chunks; larmor.fit calls it between
+    site renders so a Stop is honoured within one render even when no kernel
+    is being built (a residual evaluation with six wide sites is otherwise
+    the unit of latency)."""
+    cancel = _BUILD_FEEDBACK.get("cancel")
+    if cancel is not None and cancel():
+        raise KernelBuildCancelled("cancelled" + (f" {where}" if where else ""))
 
 
 class kernel_build_feedback:
@@ -228,11 +282,27 @@ def build_kernel(nucleus: str, larmor_MHz: float, spin_rate_Hz: float,
     if key in _KERNEL_CACHE:
         _KERNEL_CACHE.move_to_end(key)             # LRU freshness
         return _KERNEL_CACHE[key]
-    kernel = _disk_load(key)
-    if kernel is not None:
-        _cache_put(key, kernel)
-        return kernel
+    lock = _build_lock(key)
+    while not lock.acquire(timeout=0.2):
+        check_cancel("while waiting for a kernel build")   # a Stop still works
+    try:
+        if key in _KERNEL_CACHE:                   # built while we waited
+            _KERNEL_CACHE.move_to_end(key)
+            return _KERNEL_CACHE[key]
+        kernel = _disk_load(key)
+        if kernel is not None:
+            _cache_put(key, kernel)
+            return kernel
+        return _build_kernel_uncached(key, nucleus, larmor_MHz, spin_rate_Hz,
+                                      sw_Hz, npts, ref_offset_ppm, cq_max_MHz,
+                                      n_cq, n_eta)
+    finally:
+        lock.release()
 
+
+def _build_kernel_uncached(key, nucleus, larmor_MHz, spin_rate_Hz, sw_Hz, npts,
+                           ref_offset_ppm, cq_max_MHz, n_cq, n_eta) -> CzjzekKernel:
+    """The simulation itself (build_kernel holds the key's lock)."""
     from mrsimulator import Simulator
     from mrsimulator.method.lib import BlochDecayCTSpectrum
     from mrsimulator.method import SpectralDimension
@@ -265,7 +335,7 @@ def build_kernel(nucleus: str, larmor_MHz: float, spin_rate_Hz: float,
     # bit-identical to the old monolithic run in tests/test_engine_fit.py.
     cb = _BUILD_FEEDBACK.get("cb")
     cancel = _BUILD_FEEDBACK.get("cancel")
-    n_chunks = min(8, len(systems)) if (cb or cancel) else 1
+    n_chunks = _n_chunks(len(systems)) if (cb or cancel) else 1
     bounds = np.linspace(0, len(systems), n_chunks + 1).astype(int)
     rows, x = [], None
     for ci in range(n_chunks):
