@@ -219,6 +219,17 @@ command line: `larmor srcheck <session folder> --csv audit.csv`.
    full relaxation. No fit can repair a non-quantitative acquisition; see
    **Fitting glasses for publication** §6 for the exact conditions.
 
+**Stop / Cancel.** While a fit runs, the status bar offers **⏹ Stop (keep)**
+and **✖ Cancel (revert)**. Both take effect within about a second, also while
+a Czjzek kernel is being built (the (C_Q, η) basis is simulated in chunks of
+about a hundred tensors and the request is checked between chunks) and in the
+middle of a long residual evaluation (checked between the site renders). Stop
+keeps the last parameter set that was evaluated in full — never a half-evaluated
+trial point — and draws that model; Cancel restores the parameters from before
+the fit. A stopped fit carries no error bars. Lines linked to one parent (a
+spinning-sideband manifold) share one kernel reweighting per evaluation, so a
+manifold of five copies costs little more than the centreband alone.
+
 The Report dock's **Copy methods** gives the full Experimental paragraph —
 spectrometer and field, probe, MAS rate, pulse and flip angle, recycle delay,
 scans, referencing, TopSpin and LARMOR processing, the fit and the software
@@ -355,6 +366,16 @@ each a single undo step:
   ±Δδ with the shift held and scaled to the first sideband: the copy carries the
   whole pattern, higher orders included (the "Add a copy of this spectrum…"
   route, without the dialog).
+
+Linked copies — from the banner or from **Decomposition ▸ Add spinning
+sidebands…** with *link to the parent line* ticked — remember their order *k*.
+When ν_rot changes afterwards (the Experiment dialog, a **Use** in its MAS
+sources, the detector writing a measured rate, or a fit kept onto a spectrum
+recorded at another rate), every linked copy's constraint is recomputed as
+parent ± k·ν_rot/ν₀ and the copies move with the comb, table, paddles and
+model alike; Ctrl+Z reverts rate and comb together. A copy whose position has
+since been unlinked by hand is left where it was, and manifolds saved by
+earlier versions keep their constant offsets.
 
 LARMOR stays silent on a confirmed-static dataset (ν_rot = 0), when nothing
 repeats within ±2 % of a certain recorded rate (so a J-multiplet or two sites

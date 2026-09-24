@@ -327,3 +327,118 @@ def test_real_27Al_1r_smoke():
         assert det.confidence >= sb.MIN_CONFIDENCE
     text = sb.describe(det) if det.spacing_ppm else det.message
     assert isinstance(text, str) and text
+
+
+# ---------------------------------------------------------------- follow νrot
+# WA (2026-09): "make sure that if there are bands identified as ssb, they
+# move if I change the vrot used for fitting". A linked copy carries
+# site["sideband"] = {"parent": i, "k": order}; refresh_linked recomputes its
+# position constraint from the recipe's spin_rate_Hz.
+
+def _linked_sites(spacing=153.465):
+    def site(pos, expr=None, mark=None):
+        d = {"model": "gauss_lor", "label": "x", "params": {
+            "isotropic_chemical_shift_ppm": {"value": pos, "stderr": None,
+                                             "vary": True, "min": None,
+                                             "max": None, "expr": expr},
+            "amplitude": {"value": 1.0, "stderr": None, "vary": True,
+                          "min": 0.0, "max": None, "expr": None}}}
+        if mark:
+            d["sideband"] = dict(mark)
+        return d
+    return [
+        site(60.0),
+        site(60.0 + spacing, sb.linked_position_expr(0, 1, spacing), {"parent": 0, "k": 1}),
+        site(60.0 - 2 * spacing, sb.linked_position_expr(0, -2, spacing), {"parent": 0, "k": -2}),
+        # made before the marker existed: a constant offset that stays put
+        site(60.0 - spacing, "s0.isotropic_chemical_shift_ppm - 153.465"),
+        # unlinked by hand since: the marker is dropped, the value kept
+        site(5.0, None, {"parent": 0, "k": 3}),
+    ]
+
+
+def test_linked_position_expr_is_the_table_form():
+    assert sb.linked_position_expr(0, 1, 124.642) == \
+        "s0.isotropic_chemical_shift_ppm + 124.642"
+    assert sb.linked_position_expr(2, -2, 124.642) == \
+        "s2.isotropic_chemical_shift_ppm - 249.284"
+    from larmor import cellparse
+    assert cellparse.format_link(sb.linked_position_expr(0, 1, 124.642),
+                                 "isotropic_chemical_shift_ppm") == "A+124.642"
+
+
+def test_refresh_linked_moves_marked_copies_to_the_new_rate():
+    lar = 130.3
+    sites = _linked_sites(20000.0 / lar)
+    moved = sb.refresh_linked(sites, lar, 22000.0)
+    assert moved == 2
+    d = 22000.0 / lar
+    p1 = sites[1]["params"]["isotropic_chemical_shift_ppm"]
+    p2 = sites[2]["params"]["isotropic_chemical_shift_ppm"]
+    assert p1["expr"] == sb.linked_position_expr(0, 1, d)
+    assert p2["expr"] == sb.linked_position_expr(0, -2, d)
+    assert p1["value"] == pytest.approx(60.0 + d)
+    assert p2["value"] == pytest.approx(60.0 - 2 * d)
+    # the pre-marker constant offset is untouched
+    assert sites[3]["params"]["isotropic_chemical_shift_ppm"]["expr"] == \
+        "s0.isotropic_chemical_shift_ppm - 153.465"
+    # the hand-unlinked copy lost its marker and kept its value
+    assert "sideband" not in sites[4]
+    assert sites[4]["params"]["isotropic_chemical_shift_ppm"]["value"] == 5.0
+    # the same rate again moves nothing; a static / unknown rate moves nothing
+    assert sb.refresh_linked(sites, lar, 22000.0) == 0
+    assert sb.refresh_linked(sites, lar, 0.0) == 0
+    assert sb.refresh_linked(sites, 0.0, 22000.0) == 0
+    # the constraint evaluates in the fit engine
+    from larmor import fit as fitmod
+    from larmor.recipe import Recipe
+    rec = Recipe.from_dict({"nucleus": "27Al", "larmor_frequency_MHz": lar,
+                            "spin_rate_Hz": 22000.0, "sites": sites})
+    params = fitmod._make_params(rec)
+    assert params["s1_pos"].value == pytest.approx(60.0 + d)
+    assert params["s2_pos"].value == pytest.approx(60.0 - 2 * d)
+
+
+def test_sideband_marker_survives_the_recipe_round_trip_and_site_edits():
+    from larmor.constraints_util import (remap_exprs_after_delete,
+                                         remap_exprs_after_move)
+    from larmor.recipe import Recipe
+
+    sites = _linked_sites()
+    rec = Recipe.from_dict({"nucleus": "27Al", "larmor_frequency_MHz": 130.3,
+                            "spin_rate_Hz": 20000.0, "sites": sites})
+    assert rec.sites[1].sideband == {"parent": 0, "k": 1}
+    assert rec.sites[0].sideband is None
+    d = rec.to_dict()
+    assert d["sites"][1]["sideband"] == {"parent": 0, "k": 1}
+    assert "sideband" not in d["sites"][0]         # omitted when None
+    assert not any("unknown site fields" in n for n in rec.notes)
+
+    # delete the line before the parent: the marker's parent index shifts
+    sites = [{"model": "gauss_lor", "label": "first", "params": {
+        "isotropic_chemical_shift_ppm": {"value": 0.0, "expr": None}}}] + _linked_sites()
+    for s in sites[1:]:
+        p = s["params"]["isotropic_chemical_shift_ppm"]
+        if p.get("expr"):
+            p["expr"] = p["expr"].replace("s0.", "s1.")
+        if s.get("sideband"):
+            s["sideband"]["parent"] = 1
+    sites.pop(0)                                # the app removes, then remaps
+    remap_exprs_after_delete(sites, 0)
+    assert sites[1]["sideband"] == {"parent": 0, "k": 1}
+    assert sites[2]["sideband"] == {"parent": 0, "k": -2}
+    assert sites[1]["params"]["isotropic_chemical_shift_ppm"]["expr"].startswith("s0.")
+    # delete the parent itself: markers (and the constraints) go
+    sites = _linked_sites()
+    sites.pop(0)
+    remap_exprs_after_delete(sites, 0)
+    assert all("sideband" not in s for s in sites)
+    assert all(not s["params"]["isotropic_chemical_shift_ppm"].get("expr")
+               for s in sites)
+    # a reorder keeps the marker pointing at the parent
+    sites = _linked_sites()
+    order = [1, 0, 2, 3, 4]                     # parent moves to index 1
+    sites = [sites[i] for i in order]
+    remap_exprs_after_move(sites, {old: new for new, old in enumerate(order)})
+    assert sites[0]["sideband"] == {"parent": 1, "k": 1}
+    assert sites[2]["sideband"] == {"parent": 1, "k": -2}

@@ -66,6 +66,9 @@ class _ProcessingMixin:
                 if self.recipe.get("sites"):
                     self.lines_table.rebuild(self.recipe, self.hidden)
                     self.request_simulation()
+            if self._refresh_sideband_exprs():   # linked copies follow νrot
+                self.lines_table.rebuild(self.recipe, self.hidden)
+                self._update_paddles()
             self._update_exp_label()
             self._maybe_offer_sidebands()     # νrot / SR may have changed
             from larmor.sidebands import format_hz

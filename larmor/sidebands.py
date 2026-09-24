@@ -129,6 +129,65 @@ class SidebandDetection:
                      if any(o.matched and o.k == s for o in self.orders))
 
 
+def linked_position_expr(parent: int, k: int, spacing_ppm: float) -> str:
+    """The position constraint of a linked sideband copy of order ``k``:
+    ``s<parent>.isotropic_chemical_shift_ppm ± |k|·spacing`` -- the form the
+    table shows as ``A+124.6`` / ``A-124.6`` (cellparse.format_link)."""
+    off = float(k) * float(spacing_ppm)
+    return (f"s{int(parent)}.isotropic_chemical_shift_ppm "
+            f"{'+' if off >= 0 else '-'} {abs(off):.6g}")
+
+
+def refresh_linked(sites: list, larmor_MHz: float, spin_rate_Hz: float) -> int:
+    """Move every linked sideband copy to the CURRENT spin rate.
+
+    Recipe-dict sites carrying ``site["sideband"] = {"parent": i, "k": k}``
+    get their position constraint and value recomputed from
+    ``spin_rate_Hz / larmor_MHz``; the offset used to be a constant frozen
+    at creation, so changing νrot afterwards (Experiment dialog, the
+    detector's **Use**, a fit kept onto a new spectrum) left the copies on
+    the old comb. A copy whose position the user has since unlinked or
+    re-linked to another line loses its marker and is left alone; sites
+    without a marker are never touched. Rate or field unknown (≤ 0):
+    nothing moves. Returns the number of copies moved."""
+    import re
+
+    lar, nu = float(larmor_MHz or 0.0), float(spin_rate_Hz or 0.0)
+    if lar <= 0 or nu <= 0 or not sites:
+        return 0
+    spacing = nu / lar
+    moved = 0
+    for i, s in enumerate(sites):
+        mark = s.get("sideband") if isinstance(s, dict) else None
+        if not mark:
+            continue
+        try:
+            parent, k = int(mark["parent"]), int(mark["k"])
+        except (KeyError, TypeError, ValueError):
+            s.pop("sideband", None)
+            continue
+        pos = (s.get("params") or {}).get("isotropic_chemical_shift_ppm")
+        expr = pos.get("expr") if isinstance(pos, dict) else None
+        still_linked = (
+            parent != i and 0 <= parent < len(sites) and expr
+            and re.fullmatch(
+                rf"\s*s{parent}\.isotropic_chemical_shift_ppm\s*[-+]\s*[0-9.eE+-]+\s*",
+                expr) is not None)
+        if not still_linked:
+            s.pop("sideband", None)                 # unlinked by hand: theirs now
+            continue
+        new_expr = linked_position_expr(parent, k, spacing)
+        p_pos = (sites[parent].get("params") or {}).get(
+            "isotropic_chemical_shift_ppm", {})
+        if new_expr != expr:
+            moved += 1
+        pos["expr"] = new_expr
+        pos["stderr"] = None
+        if isinstance(p_pos, dict) and p_pos.get("value") is not None:
+            pos["value"] = float(p_pos["value"]) + k * spacing
+    return moved
+
+
 def format_hz(value: float) -> str:
     """20000 -> '20 000' (thousands separated by a space, no decimals)."""
     return f"{float(value):,.0f}".replace(",", " ")

@@ -98,6 +98,14 @@ def remap_exprs_after_delete(sites: list, deleted_idx: int) -> list[str]:
     Returns the ``"s<i>.<param>"`` labels of the dropped constraints."""
     dropped: list[str] = []
     for new_i, site in enumerate(sites):
+        # a linked sideband marker points at its parent by index too
+        mark = site.get("sideband") if isinstance(site, dict) else None
+        if mark:
+            parent = int(mark.get("parent", -1))
+            if parent == deleted_idx:
+                site.pop("sideband", None)
+            elif parent > deleted_idx:
+                mark["parent"] = parent - 1
         for pname, p in (site.get("params", {}) or {}).items():
             expr = p.get("expr") if isinstance(p, dict) else None
             if not expr:
@@ -128,6 +136,11 @@ def remap_exprs_after_move(sites: list, old_to_new: dict) -> None:
     (references just follow the sites they point at)."""
     def _map(m):
         return f"s{old_to_new.get(int(m.group(1)), int(m.group(1)))}."
+
+    for site in sites:
+        mark = site.get("sideband") if isinstance(site, dict) else None
+        if mark and "parent" in mark:
+            mark["parent"] = old_to_new.get(int(mark["parent"]), int(mark["parent"]))
 
     for site in sites:
         for p in (site.get("params", {}) or {}).values():

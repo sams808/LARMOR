@@ -410,6 +410,11 @@ class _FilesMixin:
             # carry the experiment parameters the new source knows
             for k in ("nucleus", "larmor_frequency_MHz", "spin_rate_Hz"):
                 recipe[k] = recipe.get(k) or self.recipe.get(k)
+            # linked sideband copies of the kept fit sit at the NEW rate
+            from larmor import sidebands as _sb
+            _sb.refresh_linked(recipe["sites"],
+                               float(recipe.get("larmor_frequency_MHz") or 0.0),
+                               float(recipe.get("spin_rate_Hz") or 0.0))
 
         self.source_path = path
         self._retarget_watch()
