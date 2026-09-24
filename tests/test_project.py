@@ -440,8 +440,11 @@ def test_build_bundle_remaps_active_and_counts_drops(tmp_path):
     bundle, dropped = project.build_bundle([ws_2d_gone, ws_1d, ws_fig], 1, tmp_path)
     assert dropped == 1 and bundle["active"] == 0     # the active index follows the drop
     assert [w["kind"] for w in bundle["workspaces"]] == ["1d", "figure"]
+    # the display transform rides along with neutral values when the
+    # overlay dict predates it (scale x1, no shift, no offset)
     assert bundle["workspaces"][0]["overlays"] == [
-        {"label": "k", "color": "#000", "visible": False, "source": "f.csv"}]
+        {"label": "k", "color": "#000", "visible": False, "source": "f.csv",
+         "scale": 1.0, "shift": 0.0, "yoff": 0.0}]
     assert bundle["workspaces"][1]["spec"]["figsize"] == [3, 2]
     assert bundle["larmor_project_version"] == 2
     assert project.summary(bundle) == "1 spectrum, 1 figure"

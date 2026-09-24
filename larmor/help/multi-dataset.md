@@ -13,8 +13,22 @@
 The **Datasets** dock overlays spectra behind the active one for visual
 comparison — a composition series (e.g. LAW3Cl0→4Ca), before/after processing,
 or a reference. **＋ Add spectrum to compare…** draws each overlay in its own
-colour with per-overlay **visible / colour / remove** controls and a global
-**stack offset**. **Compare acquisition…** (beside the add button, live once
+colour and gives it a row of controls: **visible**, the colour swatch, a
+**× scale** factor (0.01–1000, steps that follow the magnitude), an **x shift**
+in ppm (to line up a reference peak) and a **↑ y offset** as a fraction of the
+active spectrum's span, plus **active** and **✕ remove**; a right-click on the
+row offers **Reset scale / shift / offset**, **Make active** and **Remove**.
+The label shows the transform in force (*×2.5 · +1.2 ppm · ↑0.3*). Every
+control is display only — the stored arrays, the fit and every export are
+untouched — and the settings travel with the overlay into the workspace and
+the project file. Above the rows, the global **stack offset** spreads the
+overlays out (each row's own offset adds to it) and **match height** fills
+every row's scale with the factor that brings its maximum to the active
+spectrum's — a one-click helper that can be fine-tuned afterwards; typing a
+scale by hand unticks it, unticking it returns every scale to ×1. Under
+**View ▸ Y axis** (see *1D spectra*) each overlay is normalised by its own
+maximum or area first, so shapes compare across intensities, and the scale
+acts on top. **Compare acquisition…** (beside the add button, live once
 an overlay with a Bruker source exists) opens the comparability table of §6
 over the active spectrum and every overlay — `acqus` and `procs` side by
 side — and an overlay acquired or processed unlike the others carries a ⚠
@@ -31,17 +45,18 @@ spectrum…** (Ctrl + Shift + A), or right-click an EXPNO in the Explorer and
 choose **Overlay on the current spectrum**. **View ▸ Overlays** (Ctrl + Shift + V)
 hides and shows every compared spectrum at once without removing it — adding
 a new one turns the display back on — and **View ▸ Clear overlays** drops them
-all. In the Datasets dock, **match height** scales each overlay so its maximum
-equals the active spectrum's, so shapes compare when intensities do not
-(display only: the stored data, the fit and every export are unchanged);
-**stack offset** spreads them out instead. The status bar names what was
+all. In the Datasets dock, each row's **× scale**, **x shift** and **↑ offset**
+— or **match height** for every overlay at once — bring a compared spectrum
+onto the active one (display only: the stored data, the fit and every export
+are unchanged); **stack offset** spreads them out instead. The status bar names what was
 overlaid; a file that cannot be read as a 1D spectrum is refused in the
 status bar, never with a dialog.
 
 **File ▸ Save project…** (Ctrl + Shift + P) captures the whole session as one
 reopenable `.larproj.json` file — every row of the **Workspaces** dock, in
 order: 1D spectra with their processing, fit *and overlays* (overlays by
-reference); 2D maps **by reference** — the source path (absolute and
+reference, with their colour, scale, shift and offset); 2D maps **by
+reference** — the source path (absolute and
 project-relative) plus the recorded phase / shear / transpose / reverse /
 symmetrize / calibrate operations, the contour settings and the projection
 overlays — replayed on the freshly loaded data when the project reopens;

@@ -20,7 +20,7 @@ import numpy as np
 from PySide6.QtCore import QSettings
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
-from larmor import project
+from larmor import display, project
 from larmor.project import DOC_KINDS, SESSION_KINDS
 
 
@@ -194,6 +194,10 @@ class _SessionMixin:
             new["visible"] = bool(ov.get("visible", True))
             if ov.get("color"):
                 new["color"] = ov["color"]
+            # the display transform (scale / shift / yoff) -- neutral values
+            # for a bundle written before it existed
+            for key, default in display.OVERLAY_DEFAULTS.items():
+                new[key] = project.num_or(ov.get(key), default)
         if w.get("overlays"):
             self._refresh_overlays()          # reflect restored visible/color
         if missing_overlays:
