@@ -30,7 +30,7 @@ from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
     QFileDialog, QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea,
-    QSpinBox, QSplitter, QTabWidget, QVBoxLayout, QWidget,
+    QSpinBox, QSplitter, QTabWidget, QToolButton, QVBoxLayout, QWidget,
 )
 
 
@@ -43,10 +43,14 @@ def _plot(title: str = "", ppm_axis: bool = False, height: int | None = None,
     # keep each plot's minimum small: tabs stack up to two of them, and their
     # combined minimum is what decides how far the DIALOG can be shrunk
     pw.setMinimumHeight(90)
+    # never let pyqtgraph SI-prefix an axis: "kppm" is not a unit, and a
+    # wideline pattern (thousands of ppm wide) is exactly where it would --
+    # on EVERY plot and both axes, not only the ppm ones
+    for name in ("bottom", "left"):
+        pw.getPlotItem().getAxis(name).enableAutoSIPrefix(False)
     if ppm_axis:
         pw.getPlotItem().invertX(True)
         pw.setLabel("bottom", "shift", units="ppm")
-        pw.getPlotItem().getAxis("bottom").enableAutoSIPrefix(False)
     if height:
         pw.setMaximumHeight(height)
     if title:
@@ -392,8 +396,25 @@ class QcpmgDialog(QDialog):
         self.pstep.valueChanged.connect(self._set_pstep)
         self.btnAutophase = QPushButton("Autophase")
         self.btnAutophase.clicked.connect(self._autophase)
-        lv.addWidget(_row("p0", self.p0, "p1", self.p1, "p2", self.p2,
-                          "step", self.pstep, self.btnAutophase))
+        # phasing lives under a collapsible, COLLAPSED by default: magnitude
+        # (mc) is the recommended route and needs no phase at all, while a
+        # phased absorption sum echo stays one click away. Autophase still
+        # runs once on load, so the hidden values are never stale.
+        self.phaseToggle = QToolButton()
+        self.phaseToggle.setText("Phasing (optional)")
+        self.phaseToggle.setCheckable(True)
+        self.phaseToggle.setAutoRaise(True)
+        self.phaseToggle.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.phaseToggle.setToolTip(
+            "p0 / p1 / p2 and Autophase for a phased absorption sum echo — "
+            "optional: magnitude (mc) needs no phase. Autophase already ran "
+            "once on load; open this to inspect or override it")
+        self.phaseBox = _row("p0", self.p0, "p1", self.p1, "p2", self.p2,
+                             "step", self.pstep, self.btnAutophase)
+        self.phaseToggle.toggled.connect(self._set_phasing_open)
+        self._set_phasing_open(self._phasing_open_remembered(), remember=False)
+        lv.addWidget(self.phaseToggle)
+        lv.addWidget(self.phaseBox)
         self.p_spec = _plot("QCPMG spectrum", ppm_axis=True, parent=self)
         lv.addWidget(self.p_spec, 1)
         self.lbl5 = QLabel(""); self.lbl5.setWordWrap(True)
@@ -1008,6 +1029,40 @@ class QcpmgDialog(QDialog):
             + f" · carrier {self._carrier:.2f} ppm{ref}"
             + p1warn)
         self._update_headline()
+
+    #: QSettings key remembering whether "Phasing (optional)" was left open
+    PHASING_OPEN_KEY = "qcpmgPhasingOpen"
+
+    @classmethod
+    def _phasing_open_remembered(cls) -> bool:
+        """The remembered state of the phasing section: collapsed unless the
+        user left it open -- and always collapsed under LARMOR_NO_SESSION
+        (tests neither read nor write real settings, like the geometry)."""
+        if os.environ.get("LARMOR_NO_SESSION"):
+            return False
+        try:
+            from PySide6.QtCore import QSettings
+            val = QSettings("LARMOR", "app").value(cls.PHASING_OPEN_KEY, False)
+        except Exception:                                     # noqa: BLE001
+            return False
+        return str(val).lower() in ("true", "1", "yes")
+
+    def _set_phasing_open(self, on: bool, remember: bool = True):
+        """Expand / collapse the phasing controls (arrow down = open) and
+        remember the choice for the next open of the dialog."""
+        on = bool(on)
+        self.phaseBox.setVisible(on)
+        self.phaseToggle.setArrowType(Qt.DownArrow if on else Qt.RightArrow)
+        if self.phaseToggle.isChecked() != on:
+            self.phaseToggle.blockSignals(True)
+            self.phaseToggle.setChecked(on)
+            self.phaseToggle.blockSignals(False)
+        if remember and not os.environ.get("LARMOR_NO_SESSION"):
+            try:
+                from PySide6.QtCore import QSettings
+                QSettings("LARMOR", "app").setValue(self.PHASING_OPEN_KEY, on)
+            except Exception:                                 # noqa: BLE001
+                pass
 
     def _on_mag_toggled(self, on: bool):
         for w in (self.p0, self.p1, self.p2, self.pstep, self.btnAutophase):
