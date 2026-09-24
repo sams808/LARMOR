@@ -121,9 +121,15 @@ opens from **File ▸ Open project…** or plain **File ▸ Open…**.
 
 Once your data is open, the workflow is the same shape everywhere — process,
 then fit, then measure/export — but the details depend on the experiment. The
-**Process** panel is live (edits re-apply as you type); the **Fit-Parameters**
-table at the bottom is a dmfit-style spreadsheet with paddles on the plot; the
-**Tools** and **Decomposition** menus hold the experiment-specific machinery.
+**Process** panel is live (edits re-apply as you type); the toolbar's
+**＋ Add line** button places lines of the model it names (its arrow lists
+every model, grouped — simple lines, quadrupolar, disordered / glasses, CSA,
+other — with a description as tooltip; the quick buttons beside it are the
+most used ones), and shows `placing … Esc to stop` while a mode is on; the
+**Fit-Parameters** table at the bottom is a dmfit-style spreadsheet with
+paddles on the plot (right-click a row for the line actions — sidebands,
+duplicate, fix / free all, remove the selected lines); the **Tools** and
+**Decomposition** menus hold the experiment-specific machinery.
 Under the spectrum, a **fit-health strip** states whether the last fit's
 numbers can be read as they stand: green `Fit OK`, amber `Fit: check` for
 things to look at (a structured residual — often sidebands or phasing —, a

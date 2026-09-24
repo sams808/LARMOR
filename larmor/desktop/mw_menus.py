@@ -17,7 +17,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QSettings, Qt
 from PySide6.QtGui import QAction, QKeySequence
-from PySide6.QtWidgets import (QFileDialog, QHBoxLayout, QLabel, QMessageBox,
+from PySide6.QtWidgets import (QFileDialog, QHBoxLayout, QMessageBox,
                                QPushButton, QToolBar, QVBoxLayout)
 
 from larmor import models as model_registry
@@ -586,11 +586,10 @@ class _MenusMixin:
         tb.addAction(self.actUndo)
         tb.addAction(self.actRedo)
         tb.addSeparator()
-        lab = QLabel("  Add line ")
-        lab.setStyleSheet("font-weight:600;")     # colour from the theme palette
-        tb.addWidget(lab)
-        for name, act in self._model_actions.items():
-            tb.addAction(act)
+        # the "＋ Add line" split button, quick buttons and placing label
+        # (larmor/desktop/addline_toolbar.py) -- the same model QActions
+        from larmor.desktop.addline_toolbar import build_addline_toolbar
+        self._addline_toolbar = build_addline_toolbar(self, tb)
         self._update_enabled()
 
     def _build_sidebar(self):
@@ -895,6 +894,8 @@ class _MenusMixin:
         # signal roles; the request_simulation() below then re-runs
         # _health_live, whose signature check leaves a fit verdict untouched
         self.health_strip.apply_theme()
+        if getattr(self, "_addline_toolbar", None) is not None:
+            self._addline_toolbar.apply_theme()
         # re-theme both plot canvases
         self.view.apply_theme()
         if hasattr(self.view2d, "apply_theme"):

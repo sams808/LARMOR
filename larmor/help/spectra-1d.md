@@ -184,9 +184,21 @@ command line: `larmor srcheck <session folder> --csv audit.csv`.
 
 ## 3 · Fit
 
-1. **Pick a model** from the **Models** menu (or toolbar) and **click the
-   spectrum** to drop lines. The mode is *sticky* — place as many as you like;
-   click the model again or press **Esc** to stop.
+1. **Pick a model** with the toolbar's **＋ Add line** button and **click the
+   spectrum** to drop lines. The button names the current model (`＋ Add line:
+   Czjzek`); its main part starts placing that model, its arrow opens the
+   models grouped by use — *Simple lines* (Gauss/Lorentz, area-normalised,
+   Voigt, J-multiplet), *Quadrupolar (ordered)* (quad CT, satellites, quad +
+   CSA), *Disordered / glasses* (Czjzek, Czjzek d, Czjzek + correlation, ext.
+   Czjzek, Amorphous), *CSA* (powder, distribution), *Other* (sidebands,
+   two-site exchange, function, background spectrum) — each with a one-line
+   description and its key parameters as tooltip. The five most used models
+   sit as quick buttons beside it (Gauss/Lorentz, Czjzek, quad CT, CSA
+   powder, ext. Czjzek); every model is also under **Decomposition ▸ Add
+   line** and in the command palette. While a mode is on the toolbar reads
+   `placing Czjzek — click on the spectrum · Esc to stop`: the mode is
+   *sticky* — place as many as you like; click the button (or the model)
+   again or press **Esc** to stop. The last model is remembered per nucleus.
 2. **Adjust.** Drag the **paddles** on the plot (square = position + amplitude,
    round side-handles = width) or edit the **Fit-Parameters** spreadsheet at the
    bottom. Each site is a lettered row (`A`, `B`, …); a cell accepts

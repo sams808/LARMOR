@@ -363,7 +363,10 @@ GOLDEN_MENU = (
 )
 
 SHORTCUTS = frozenset(['Ctrl+2', 'Ctrl+Alt+S', 'Ctrl+F', 'Ctrl+I', 'Ctrl+O', 'Ctrl+P', 'Ctrl+S', 'Ctrl+Shift+A', 'Ctrl+Shift+C', 'Ctrl+Shift+D', 'Ctrl+Shift+E', 'Ctrl+Shift+O', 'Ctrl+Shift+P', 'Ctrl+Shift+S', 'Ctrl+Shift+V', 'Ctrl+T', 'Ctrl+Y', 'Ctrl+Z', 'F5', 'F6', 'F7', 'F9'])
-TOOLBAR_ACTIONS = 29
+# main toolbar: Undo, Redo, the '＋ Add line' split button (a widget action),
+# five quick model buttons, the placing label (widget action) = 9; the
+# sidebar's 9 view actions (larmor/desktop/addline_toolbar.py, wip/WB)
+TOOLBAR_ACTIONS = 18
 # QMenu count under the menu bar: 21
 
 
