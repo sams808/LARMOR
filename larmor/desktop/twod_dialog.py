@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
 
 
 from larmor.desktop import theme
+from larmor.desktop.axes import plain_units
 
 
 class TwoDDialog(QDialog):
@@ -58,10 +59,13 @@ class TwoDDialog(QDialog):
         self.glw = pg.GraphicsLayoutWidget()
         self.glw.setBackground("w")
         self.p_top = self.glw.addPlot(row=0, col=1)
+        plain_units(self.p_top)
         self.p_top.setMaximumHeight(90)
         self.p_top.hideAxis("bottom")
         self.p_main = self.glw.addPlot(row=1, col=1)
+        plain_units(self.p_main, axes=("bottom", "left", "right"))
         self.p_left = self.glw.addPlot(row=1, col=0)
+        plain_units(self.p_left)
         self.p_left.setMaximumWidth(90)
         self.p_left.hideAxis("left")
         self.p_main.setLabel("bottom", "F2 (ppm)")

@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 
 from larmor import comparability
 from larmor.desktop import theme
+from larmor.desktop.axes import plain_units
 from larmor.desktop.comparability_dialog import (
     ComparabilityBar, ComparabilityDialog, _CHECK_CSS_COLOR,
 )
@@ -176,6 +177,7 @@ class SeqFitDialog(QDialog):
         # ---------------- right: plots ----------------
         right = QWidget(); rv = QVBoxLayout(right); root.addWidget(right, 1)
         self.plot = pg.PlotWidget(background=theme.active().plot_bg)
+        plain_units(self.plot)
         self.plot.setMinimumHeight(300)
         self.plot.getPlotItem().getViewBox().setMouseEnabled(True, True)
         self.plot.getPlotItem().invertX(True)          # NMR: ppm high → low
@@ -191,6 +193,7 @@ class SeqFitDialog(QDialog):
 
         evo = QHBoxLayout()
         self.rmsPlot = pg.PlotWidget(background=theme.active().plot_bg)
+        plain_units(self.rmsPlot)
         self.rmsPlot.setLabel("bottom", "spectrum"); self.rmsPlot.setLabel("left", "RMSD")
         self.rmsPlot.showGrid(x=True, y=True, alpha=0.2)
         self._rmsCurve = self.rmsPlot.plot([], [], pen=pg.mkPen(theme.active().accent, width=2),
@@ -202,6 +205,7 @@ class SeqFitDialog(QDialog):
         prow.addWidget(self.cbTraj, 1)
         tv.addLayout(prow)
         self.trajPlot = pg.PlotWidget(background=theme.active().plot_bg)
+        plain_units(self.trajPlot)
         self.trajPlot.setLabel("bottom", "spectrum")
         self.trajPlot.showGrid(x=True, y=True, alpha=0.2)
         self._trajCurve = self.trajPlot.plot([], [], pen=pg.mkPen(theme.active().pivot, width=2),

@@ -5,6 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pyqtgraph as pg
 from larmor.desktop import theme
+from larmor.desktop.axes import plain_units
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QDialog, QFileDialog, QHBoxLayout, QLabel,
@@ -48,6 +49,7 @@ class RedorDialog(QDialog):
         v.addLayout(opts)
 
         self.plot = pg.PlotWidget(background=theme.active().plot_bg)
+        plain_units(self.plot)
         self.plot.setLabel("bottom", "recoupling time / s")
         self.plot.setLabel("left", "ΔS/S₀")
         self.plot.showGrid(x=True, y=True, alpha=0.2)
@@ -111,6 +113,7 @@ class ErrorsDialog(QDialog):
         self._fill_params()
 
         self.plot = pg.PlotWidget(background=theme.active().plot_bg)
+        plain_units(self.plot)
         self.plot.setLabel("bottom", "parameter value")
         self.plot.setLabel("left", "χ²")
         self.plot.showGrid(x=True, y=True, alpha=0.2)

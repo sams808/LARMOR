@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from larmor.desktop import theme
+from larmor.desktop.axes import plain_units
 
 
 class MonteCarloDialog(QDialog):
@@ -72,6 +73,7 @@ class MonteCarloDialog(QDialog):
         hrow.addWidget(self.pick, 1)
         v.addLayout(hrow)
         self.plot = pg.PlotWidget(background=theme.active().plot_bg)
+        plain_units(self.plot)
         self.plot.setLabel("bottom", "parameter value")
         self.plot.setLabel("left", "count")
         self.plot.showGrid(x=True, y=True, alpha=0.2)

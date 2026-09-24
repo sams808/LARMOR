@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
+from larmor.desktop.axes import plain_units
 from larmor.multifit import DEFAULT_SHARE
 
 
@@ -465,6 +466,7 @@ class CofitDialog(QDialog):
 
     def _plot_1d(self, ds, pd, title):
         pw = pg.PlotWidget(title=title)
+        plain_units(pw)
         pw.setMinimumHeight(230)
         pw.getViewBox().invertX(True)          # ppm high -> low
         pw.setLabel("bottom", "ppm")
@@ -477,6 +479,7 @@ class CofitDialog(QDialog):
 
     def _plot_2d(self, ds, pd, title):
         pw = pg.PlotWidget(title=title)
+        plain_units(pw)
         pw.setMinimumHeight(300)
         vb = pw.getViewBox()
         # standard NMR/dmfit convention: F2 high-ppm left, F1 high-ppm top

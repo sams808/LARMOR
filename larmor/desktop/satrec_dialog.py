@@ -17,6 +17,7 @@ from pathlib import Path
 import numpy as np
 import pyqtgraph as pg
 from larmor.desktop import theme
+from larmor.desktop.axes import plain_units
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFileDialog,
@@ -101,6 +102,7 @@ class SatrecDialog(QDialog):
         zrow.addStretch(1)
         sb.addLayout(zrow)
         self.spec_plot = pg.PlotWidget(background=theme.active().plot_bg)
+        plain_units(self.spec_plot)
         self.spec_plot.getPlotItem().invertX(True)
         self.spec_plot.setLabel("bottom", "shift", units="ppm")
         self.spec_plot.getPlotItem().getAxis("bottom").enableAutoSIPrefix(False)
@@ -128,6 +130,7 @@ class SatrecDialog(QDialog):
         brow.addWidget(self.btnFit); brow.addWidget(self.btnCsv)
         bb.addLayout(brow)
         self.build_plot = pg.PlotWidget(background=theme.active().plot_bg)
+        plain_units(self.build_plot)
         # NB: never pass units= on this axis. pyqtgraph's auto-SI-prefix turns
         # a log axis into nonsense ("delay (e27 s)"); keep the unit in the text.
         self.build_plot.setLabel("bottom", "delay (s)")

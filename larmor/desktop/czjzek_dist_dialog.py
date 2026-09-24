@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
 
 from larmor.czjzek_dist import marginal_cq, rms_pq, suggested_cq_axis
 from larmor.desktop import theme
+from larmor.desktop.axes import plain_units
 from larmor.desktop.plot import site_color
 
 
@@ -36,6 +37,7 @@ class CzjzekDistDialog(QDialog):
         v.itemAt(0).widget().setWordWrap(True)
 
         plot = pg.PlotWidget(background=theme.active().plot_bg)
+        plain_units(plot)
         plot.setLabel("bottom", "C_Q", units="MHz")
         plot.setLabel("left", "P(C_Q)")
         plot.showGrid(x=True, y=True, alpha=0.15)

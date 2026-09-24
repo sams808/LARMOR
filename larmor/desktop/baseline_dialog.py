@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 
 from larmor.baseline import iterative_baseline
 from larmor.desktop import theme
+from larmor.desktop.axes import plain_units
 
 
 class BaselineDialog(QDialog):
@@ -50,10 +51,12 @@ class BaselineDialog(QDialog):
         glw = pg.GraphicsLayoutWidget()
         glw.setBackground(t.plot_bg)
         self.p_top = glw.addPlot(row=0, col=0)
+        plain_units(self.p_top)
         self.p_top.showGrid(x=True, y=True, alpha=0.12)
         self.p_top.setLabel("left", "intensity")
         self.p_top.addLegend(offset=(-10, 10))
         self.p_bot = glw.addPlot(row=1, col=0)
+        plain_units(self.p_bot)
         self.p_bot.showGrid(x=True, y=True, alpha=0.12)
         self.p_bot.setLabel("left", "corrected")
         self.p_bot.setLabel("bottom", "shift", units="ppm")

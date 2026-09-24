@@ -21,6 +21,7 @@ import pyqtgraph as pg
 from PySide6.QtCore import Qt, Signal
 
 from larmor.desktop import theme
+from larmor.desktop.axes import plain_units
 from larmor.desktop.plot import site_color
 from PySide6.QtWidgets import (
     QComboBox, QDoubleSpinBox, QHBoxLayout, QLabel, QMenu, QPushButton,
@@ -318,9 +319,12 @@ class Contour2DView(QWidget):
         self.glw = pg.GraphicsLayoutWidget()
         self.glw.setBackground(theme.active().plot_bg)
         self.p_top = self.glw.addPlot(row=0, col=1)
+        plain_units(self.p_top)
         self.p_top.setMaximumHeight(80); self.p_top.hideAxis("bottom")
         self.p_main = self.glw.addPlot(row=1, col=1)
+        plain_units(self.p_main, axes=("bottom", "left", "right"))
         self.p_left = self.glw.addPlot(row=1, col=0)
+        plain_units(self.p_left)
         self.p_left.setMaximumWidth(80); self.p_left.hideAxis("left")
         self.p_main.setLabel("bottom", "F2 (ppm)")
         self.p_main.setLabel("right", "F1")
@@ -570,6 +574,7 @@ class Contour2DView(QWidget):
         for k, idx in enumerate(self._picks):
             raw = c.z[idx] if self._pick_axis == "f2" else c.z[:, idx]
             plot = self.phase_glw.addPlot(row=k, col=0)
+            plain_units(plot)
             plot.showGrid(x=True, y=True, alpha=0.12)
             plot.getViewBox().invertX(True)
             other = (c.f1_ppm if self._pick_axis == "f2" else c.f2_ppm)[idx]

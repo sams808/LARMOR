@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 
 from larmor import series_table as stab
 from larmor.desktop import theme
+from larmor.desktop.axes import plain_units
 from larmor.desktop.panels import PARAM_LABELS
 from larmor.desktop.plot import site_color
 
@@ -427,6 +428,7 @@ class SeriesPlotDialog(QDialog):
         ticks = [[(int(i), lab) for i, lab in zip(x, self._labels)]]
         for idx, spec in enumerate(self._params):
             pw = pg.PlotWidget(background=theme.active().plot_bg)
+            plain_units(pw)
             pw.setMinimumHeight(200); pw.setMinimumWidth(320)
             pw.showGrid(x=True, y=True, alpha=0.2)
             pw.addLegend(labelTextSize="8pt")

@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
 
 from larmor import comparability
 from larmor.desktop import theme
+from larmor.desktop.axes import plain_units
 from larmor.desktop.comparability_dialog import (
     ComparabilityBar, ComparabilityDialog, ReprocessDialog, _CHECK_CSS_COLOR,
     apply_reprocess, revert_reprocess,
@@ -542,6 +543,7 @@ class BatchFitDialog(QDialog):
                                  + (f" · proc {d['proc']}" if d["proc"] else "")
                                  + f" · {d['nucleus']}")
                 plot = pg.PlotWidget(background=theme.active().plot_bg)
+                plain_units(plot)
                 plot.hideAxis("left")
                 plot.getPlotItem().invertX(True)     # NMR: ppm runs high → low
                 plot.getPlotItem().getViewBox().setMouseEnabled(True, True)  # zoom
