@@ -36,7 +36,8 @@ class _OverlaysMixin:
         Explorer's right-click, File > Overlay a spectrum... The active
         spectrum and its fit stay exactly as they are; the new curve is
         drawn behind them in its own colour and listed in the Datasets
-        dock (colour, offset, match height, remove, make active)."""
+        dock (colour, scale, shift, offset, match height, remove, make
+        active)."""
         try:
             label, ppm, amp, info = self._read_overlay_source(path)
         except Exception as exc:                          # noqa: BLE001
@@ -50,7 +51,8 @@ class _OverlaysMixin:
             self.view.set_overlays_hidden(False)          # setChecked emits no triggered()
         self.statusBar().showMessage(
             f"overlaid {label} -- {len(self._overlays)} compared spectrum(s); "
-            "Datasets dock: colour, stack offset, match height, remove, make active")
+            "Datasets dock: colour, scale, shift, offset, match height, remove, "
+            "make active")
         return True
 
     def add_overlay_paths(self, paths):
@@ -169,12 +171,21 @@ class _OverlaysMixin:
                     np.asarray(d.data, float), info)
 
     def _add_overlay(self, label, ppm, amp, source="", info=None):
+        """Append a compared spectrum. Besides its arrays the dict carries
+        the display transform -- ``scale`` (x1), ``shift`` (ppm) and
+        ``yoff`` (a fraction of the active span) -- applied at draw time
+        only; with 'match height' ticked the scale starts at the matching
+        factor."""
+        from larmor import display
         from larmor.desktop.datasets import overlay_color
 
-        self._overlays.append({
-            "label": label, "ppm": np.asarray(ppm), "amp": np.asarray(amp),
-            "color": overlay_color(len(self._overlays)), "visible": True,
-            "source": source, **(info or {})})
+        ov = {"label": label, "ppm": np.asarray(ppm), "amp": np.asarray(amp),
+              "color": overlay_color(len(self._overlays)), "visible": True,
+              "source": source, **display.OVERLAY_DEFAULTS, **(info or {})}
+        match = getattr(self.datasets_panel, "match", None)
+        if match is not None and match.isChecked():
+            ov["scale"] = display.match_scale(self.exp_amp, ov["amp"])
+        self._overlays.append(ov)
         self._refresh_overlays()
         self.datasets_dock.raise_()
 
@@ -192,6 +203,57 @@ class _OverlaysMixin:
         if 0 <= i < len(self._overlays):
             self._overlays[i]["visible"] = on
             self._refresh_overlays()
+
+    def overlay_set_scale(self, i: int, value: float):
+        """Datasets row: the display scale (x). A hand-typed factor means
+        'match height' no longer describes the scales, so the box unticks."""
+        if 0 <= i < len(self._overlays):
+            self._overlays[i]["scale"] = float(value)
+            self._uncheck_match()
+            self._refresh_overlays()
+
+    def overlay_set_shift(self, i: int, ppm: float):
+        """Datasets row: shift the overlay along the axis (ppm), e.g. to
+        line up a reference peak. Display only."""
+        if 0 <= i < len(self._overlays):
+            self._overlays[i]["shift"] = float(ppm)
+            self._refresh_overlays()
+
+    def overlay_set_yoff(self, i: int, frac: float):
+        """Datasets row: raise the overlay by a fraction of the active
+        spectrum's span, on top of the global stack offset."""
+        if 0 <= i < len(self._overlays):
+            self._overlays[i]["yoff"] = float(frac)
+            self._refresh_overlays()
+
+    def overlay_reset(self, i: int):
+        """Right-click > Reset: drawn as stored again (x1, no shift, no
+        offset)."""
+        from larmor import display
+
+        if 0 <= i < len(self._overlays):
+            self._overlays[i].update(display.OVERLAY_DEFAULTS)
+            self._uncheck_match()
+            self._refresh_overlays()
+
+    def overlay_match_height(self, on: bool):
+        """Datasets > match height: ticked, every overlay's scale becomes
+        the factor that brings its maximum to the active spectrum's --
+        written into its row, editable afterwards; unticked, back to x1.
+        Display only: the stored arrays and every export are untouched."""
+        from larmor import display
+
+        for ov in self._overlays:
+            ov["scale"] = (display.match_scale(self.exp_amp, ov["amp"])
+                           if on else 1.0)
+        self._refresh_overlays()
+
+    def _uncheck_match(self):
+        m = getattr(getattr(self, "datasets_panel", None), "match", None)
+        if m is not None and m.isChecked():
+            m.blockSignals(True)
+            m.setChecked(False)
+            m.blockSignals(False)
 
     def overlay_make_active(self, i: int):
         if not (0 <= i < len(self._overlays)):
@@ -214,26 +276,26 @@ class _OverlaysMixin:
     def _refresh_overlays(self):
         if not hasattr(self, "datasets_panel"):
             return
+        from larmor import display
+
+        # every overlay is drawn through larmor.display.overlay_display --
+        # normalised by its OWN trace under View > Y axis, then its scale,
+        # shift and offsets -- the stored arrays untouched; the offsets are
+        # fractions of the active spectrum's DISPLAYED span
         span = 1.0
         if self.exp_amp.size:
             span = float(np.nanmax(self.exp_amp) - np.nanmin(self.exp_amp)) or 1.0
-        step = self.datasets_panel.offset.value() * span
-        # 'match height': every overlay scaled so its maximum equals the
-        # active spectrum's -- shapes compare, intensities do not (display
-        # only; the stored arrays and any export are untouched)
-        match = getattr(self.datasets_panel, "match", None)
-        match = bool(match is not None and match.isChecked() and self.exp_amp.size)
-        peak = float(np.nanmax(self.exp_amp)) if match else 0.0
+        span *= self.view.y_scale()
+        step = self.datasets_panel.offset.value()
+        mode, region = self.view.y_mode()
         drawn = []
         for k, ov in enumerate(self._overlays):
             if ov.get("visible", True):
-                amp = np.asarray(ov["amp"], float)
-                if match and peak > 0 and amp.size:
-                    m = float(np.nanmax(amp))
-                    if m > 0:
-                        amp = amp * (peak / m)
-                drawn.append((ov["ppm"], amp + step * (k + 1),
-                              ov["color"], ov["label"]))
+                x, y = display.overlay_display(
+                    ov["ppm"], ov["amp"], scale=ov.get("scale", 1.0),
+                    shift=ov.get("shift", 0.0), yoff=ov.get("yoff", 0.0),
+                    stack=step * (k + 1), span=span, mode=mode, region=region)
+                drawn.append((x, y, ov["color"], ov["label"]))
         self.view.set_overlays(drawn)
         label, detail = "", ""
         if self.recipe is not None:

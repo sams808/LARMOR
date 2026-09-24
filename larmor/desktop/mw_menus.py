@@ -460,6 +460,7 @@ class _MenusMixin:
                   tip="return to the parent 2D map of an extracted trace")
         m_view.addSeparator()
         self._build_axis_unit_menu(m_view)
+        self._build_y_axis_menu(m_view)
         self._build_czjzek_display_menu(m_view)
         m_view.addSeparator()
         # filled by _build_panels_menu once the docks exist
@@ -921,6 +922,59 @@ class _MenusMixin:
     def _apply_axis_unit(self):
         sfo = float((self.recipe or {}).get("larmor_frequency_MHz", 0.0) or 0.0)
         self.view.set_axis_unit(getattr(self, "_axis_unit", "ppm"), sfo)
+
+    # ------------------------------------------------------------- Y axis
+    def _saved_y_mode(self):
+        """(mode, region) of View > Y axis remembered in QSettings --
+        ("raw", None) under LARMOR_NO_SESSION or for anything unreadable."""
+        from larmor import display
+
+        if os.environ.get("LARMOR_NO_SESSION"):
+            return "raw", None
+        s = QSettings("LARMOR", "app")
+        mode = str(s.value("yAxisMode", "raw") or "raw")
+        region = display.parse_region(s.value("yAxisRegion", ""))
+        if mode not in display.Y_MODES or (mode == "region" and region is None):
+            return "raw", None
+        return mode, (region if mode == "region" else None)
+
+    def _build_y_axis_menu(self, m_view):
+        """View > Y axis: raw intensity (default), normalise to maximum, to
+        area, to the area of a ppm region -- one display factor for
+        everything drawn for the active spectrum (larmor.display); compared
+        spectra are normalised by their own trace. Display only: the recipe,
+        the fit and every export stay in raw units."""
+        from PySide6.QtGui import QActionGroup
+
+        mode, region = self._saved_y_mode()
+        m = self._menu(m_view, "&Y axis",
+                       tip="how the plotting area scales intensities — display "
+                           "only: the fit and every export stay in raw units")
+        group = QActionGroup(self)
+        group.setExclusive(True)
+        self._y_axis_actions = {}
+        for key, label, tip in (
+                ("raw", "&Raw intensity", "intensities as stored"),
+                ("max", "Normalise to &maximum",
+                 "the active spectrum's maximum reads 1; every compared "
+                 "spectrum is scaled to its own maximum"),
+                ("area", "Normalise to &area",
+                 "unit trapezoid area over the whole axis, for the active "
+                 "spectrum and for each compared spectrum by its own area"),
+                ("region", "Normalise to area of a &region…",
+                 "unit area over a ppm range typed in, or taken from the fit "
+                 "zones / the current view")):
+            a = QAction(label, self)
+            a.setCheckable(True)
+            a.setChecked(key == mode)
+            a.setToolTip(tip)
+            a.setStatusTip(tip)
+            a.triggered.connect(lambda _=False, k=key: self._set_y_mode(k))
+            group.addAction(a)
+            m.addAction(a)
+            self._y_axis_actions[key] = a
+        # no data yet: the factor follows the first spectrum that arrives
+        self.view.set_y_mode(mode, region)
 
     def _format_x(self, x_ppm: float) -> str:
         """A cursor/readout position in the display unit (always with ppm)."""
