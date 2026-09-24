@@ -125,10 +125,13 @@ then fit, then measure/export — but the details depend on the experiment. The
 table at the bottom is a dmfit-style spreadsheet with paddles on the plot; the
 **Tools** and **Decomposition** menus hold the experiment-specific machinery.
 Under the spectrum, a **fit-health strip** states whether the last fit's
-numbers can be read as they stand — unphysical values, degenerate pairs,
-structured residual, parameters at bounds, missing error bars, a line cut by
-the integration window, an under-relaxed recycle delay, a too-long pulse — and
-each chip opens the matching detail (**F7** lists them all).
+numbers can be read as they stand: green `Fit OK`, amber `Fit: check` for
+things to look at (a structured residual — often sidebands or phasing —, a
+parameter at a bound, a degenerate pair, missing error bars, a line cut by the
+integration window, a measured under-relaxed recycle delay or too-long pulse),
+red `Fit: not physical` only for an impossible value (a negative amplitude, η
+outside 0–1, a zero width). Each chip opens the matching detail (**F7** lists
+them all); an acquisition fact that is simply unknown raises no chip.
 
 **Appearance.** **View ▸ Theme** offers ten colour presets (five light, five dark
 — Light, Sepia, Solarized, Nord, Slate, Ocean, High-Contrast, …). The choice is

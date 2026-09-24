@@ -234,32 +234,41 @@ re-evaluated as values change: a coloured pill, the RMSD and $\chi^2_r$ of the
 fit, then one chip per flag. A click on a chip opens the matching detail;
 **F7** (Decomposition ▸ Fit health details…) or a click on the pill lists every
 flag together with the analysis tools. The colours classify the *kind* of
-flag, not the quality of the fit — LARMOR does not grade a fit.
+flag, not the quality of the fit — LARMOR does not grade a fit, and a fit
+that is merely not accounting for sidebands or a phasing error is never
+called unphysical.
 
 | Pill | Meaning |
 |---|---|
-| `no fit yet — F5 fits the lines` | the model has not been fitted; only unphysical values are flagged while lines are placed |
-| `✓ Fit: no flags` (teal) | every check passed — the pill's tooltip lists them |
-| `⚠ Fit: n caveats` (amber) | statistical caveats: the values are readable, but the residual or the error bars are not clean |
-| `✗ Fit: not physical · degenerate` (red) | the numbers cannot be read as physical values: an unphysical value, or a pair the data cannot separate |
+| `no fit yet — F5 fits the lines` | the model has not been fitted; only the values are checked while lines are placed |
+| `✓ Fit OK` (green) | every check passed — the pill's tooltip lists them, and names any acquisition fact that could not be judged |
+| `⚠ Fit: check` (amber) | something to look at: a structured residual, a parameter at a bound, a degenerate pair, a population the data do not support, a line outside the window, a short recycle delay or a long pulse. The values are readable as they stand |
+| `✗ Fit: not physical` (red) | a value that cannot be physical — a negative amplitude, η outside [0, 1], a width of zero, a C_Q above 120 MHz. Only these turn the pill red |
 
 | Chip | What it measures | A click opens |
 |---|---|---|
-| `residual N.N× noise` | residual RMS in the signal region ÷ the noise of the spectrum edges, at or above 1.5× | the residual trace (View ▸ Residual) |
-| `structured residual` | Wald–Wolfowitz runs test with $\vert z\vert > 3$, or lag-1 autocorrelation above 0.4 | the residual trace |
-| `unphysical ×n` | η or the Gauss/Lorentz mix outside [0, 1], a width ≤ 0, a negative amplitude, δiso outside the fit window | the offending cell of the Fit-Parameters table |
-| `degenerate ×n: a↔b (r)` | a parameter pair with $\vert r\vert \geq 0.95$ in the covariance | Parameter correlations |
-| `at bounds: …` | a parameter that finished pinned at a min/max bound | its cell; the value is marked ‡ in every export |
+| `residual N.N× noise[, structured]` / `residual: structure left` | residual RMS in the signal region ÷ the noise of the spectrum edges, at or above 1.5×, and/or a Wald–Wolfowitz runs test with $\vert z\vert > 3$ or a lag-1 autocorrelation above 0.4. The tooltip names the usual causes — spinning sidebands not modelled, a phasing or baseline error, one component too few | the residual trace (View ▸ Residual) |
+| `unphysical ×n` (red) | η or the Gauss/Lorentz mix outside [0, 1], a width ≤ 0, a negative amplitude or C_Q, a C_Q above 120 MHz | the offending cell of the Fit-Parameters table |
+| `δiso outside the fit window: …` | a line whose centre the fit cannot see — widen the window or move the line | its δiso cell |
+| `degenerate pair: a↔b (r)` / `degenerate ×n: …` | a parameter pair with $\vert r\vert \geq 0.95$ in the covariance: the values are fine to read, their error bars are not | Parameter correlations |
+| `at a bound: A lb at its lower bound 0` | a free parameter that finished at its min/max bound, named as the table names it (letter + column). A parameter pinned since the fit, or held at its model default (the Czjzek lb), is never listed | its cell; the value is marked ‡ in every export |
 | `no error bars (no covariance)` | the fit returned no covariance matrix | Errors Analysis (χ² profile) |
 | `population ±≥100 %: …` | a population whose relative error reaches 100 % (see *Fitting glasses for publication* §5) | the Report |
 | `tail outside window: …` | a line whose simulated area lies more than 2 % outside the integration window — its population is biased low (*Fitting glasses for publication* §5); the Report table's *outside window (%)* column carries the number | widens the window to 99.5 % of every line and re-integrates (F5 then refits over it) |
-| `D1 = n T1 → m %` / `recycle n s — T1 unknown` | the recycle delay D1 + AQ against the T1 of each site, read from TopSpin's `ct1t2.txt` of the same-nucleus saturation-recovery EXPNO in the sample folder (steady-state recovery; 90° assumed until a flip angle is known) | Tools ▸ Relaxation on that EXPNO |
-| `flip n° > m° limit (I = …)` / `flip angle unknown` | the flip angle (from `P1(90)=` or `n deg tip` in the title, or the 90° pulse typed in Experiment parameters) against 30°/(I + ½) for single-pulse spectra of half-integer quadrupolar nuclei | Process ▸ Experiment parameters… |
+| `D1 = n T1 → m %` | the recycle delay D1 + AQ against a KNOWN T1 of each site — TopSpin's `ct1t2.txt` of the same-nucleus saturation-recovery EXPNO in the sample folder, or a T1 typed in Experiment parameters (steady-state recovery; 90° assumed until a flip angle is known) — below 99 % | Tools ▸ Relaxation on that EXPNO |
+| `flip n° > m° limit (I = …)` | a KNOWN flip angle (from `P1(90)=` or `n deg tip` in the title, or the 90° pulse typed in Experiment parameters) above 30°/(I + ½) for single-pulse spectra of half-integer quadrupolar nuclei | Process ▸ Experiment parameters… |
 | `frozen: …` | a site the fit held because its centre lies outside the window | its δiso cell |
 
+An **unknown** acquisition fact — no T1 measurement in the folder, a TopSpin
+fit that did not converge, no 90° pulse anywhere — produces **no chip**: it is
+not a problem with the fit. The pill's tooltip and the **F7** list still name
+it (`recycle 14 s — T1 unknown — not judged`, `flip angle unknown (I = 3/2) —
+not judged`), and **Process ▸ Experiment parameters…** is where the fact can
+be supplied; once it is, the check runs and a chip appears only if it fails.
+
 After an edit the pill reads **Model** instead of **Fit**, with `edited since
-fit`: the residual and physical chips follow the live model, while the
-covariance-based chips (degenerate, at bounds, no error bars, population, tail
+fit`: the residual and value chips follow the live model, while the
+covariance-based chips (degenerate, at a bound, no error bars, population, tail
 outside window) are dimmed — they describe the last fit until the next **F5**.
 The recycle-delay and flip-angle chips describe the acquisition rather than the
 fit, so they stay live and appear as soon as lines are placed on a Bruker

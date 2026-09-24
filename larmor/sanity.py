@@ -2,16 +2,22 @@
 
 A least-squares fit will happily return numbers that are *unphysical* — an
 asymmetry η outside [0, 1], a negative line width, a negative-amplitude (negative
-population) line, or a site whose centre sits outside the fit window (so its
-parameters are unconstrained). This module flags those so the human can judge
-whether the fit is physically meaningful — LARMOR's paramount concern. It only
-reports; it never silently "corrects" a value (that stays a human decision).
+population) line, a C_Q above anything a nucleus shows, or a site whose centre
+sits outside the fit window (so its parameters are unconstrained). This module
+flags those so the human can judge whether the fit is physically meaningful —
+LARMOR's paramount concern. It only reports; it never silently "corrects" a
+value (that stays a human decision). fithealth reads the window warning as a
+thing to check and every other warning as "not physical".
 
 Qt-free and testable.
 """
 from __future__ import annotations
 
 import numpy as np
+
+#: the largest |C_Q| any registered model can represent (the quad_ct /
+#: ext_czjzek bound): a coupling above it is not a physical value
+CQ_MAX_MHZ = 120.0
 
 #: parameter names that are an **asymmetry** η and must lie in [0, 1]
 _ETA = {"eta", "eta_q", "etaq", "eta_cs", "etacs"}
@@ -61,6 +67,12 @@ def check_recipe(recipe, window=None, *, tol: float = 1e-6) -> list[dict]:
             elif _is_width(low):
                 if v <= tol:
                     add(i, label, pn, f"{pn} = {v:.3g} ≤ 0 — a non-physical width")
+            elif pn == "Cq_MHz":
+                if v < -tol:
+                    add(i, label, pn, f"C_Q = {v:.3g} MHz is negative")
+                elif v > CQ_MAX_MHZ * (1 + tol):
+                    add(i, label, pn, f"C_Q = {v:.3g} MHz is above the plausible "
+                                      f"maximum ({CQ_MAX_MHZ:g} MHz)")
         centre = site.params.get("isotropic_chemical_shift_ppm")
         if centre is not None and lo is not None:
             c = float(centre.value)

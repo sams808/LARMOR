@@ -603,6 +603,31 @@ class Check:
                      "and power)")
         return "; ".join(parts)
 
+    def unchecked_lines(self) -> list:
+        """What could NOT be judged — no usable T1, no flip angle — as neutral
+        tooltip lines (never chips: an unknown fact is not a problem). Each
+        names where the fact can be supplied."""
+        out = []
+        acq = self.acquisition
+        if acq is None:
+            return out
+        if not self.recoveries and self.t1_status in ("missing", "implausible",
+                                                      "none"):
+            note = self.facts.t1_note if self.facts is not None else ""
+            if self.t1_status == "none":
+                why = note or "no T1 EXPNO of this nucleus in the sample folder"
+            elif self.t1_status == "implausible":
+                why = note or "the TopSpin T1 fit did not converge"
+            else:
+                why = note or "the sibling T1 EXPNO carries no TopSpin result"
+            out.append(f"{self.recovery_unknown_text()} — not judged ({why}); "
+                       "Tools ▸ Relaxation measures it, or type a T1 in Process "
+                       "▸ Experiment parameters…")
+        if self.excitation_judged and self.flip_deg is None:
+            out.append(f"{self.excitation_unknown_text()} — not judged; the 90° "
+                       "pulse can be typed in Process ▸ Experiment parameters…")
+        return out
+
     def passing_lines(self, exclude=()) -> list:
         """What passed, for the pill tooltip; ``exclude`` names the flag kinds
         ('recovery' / 'excitation') already shown as chips."""

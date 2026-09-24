@@ -553,3 +553,27 @@ def test_real_base1ca_24_and_p5bi8_12_3102_and_2ca12f_6():
     f = Q.facts_for(require(BASE2CA / "13"))
     assert f.t1 is None and f.t1_status == "implausible"
     assert f.sibling_expno.endswith("12") and "did not converge" in f.t1_note
+
+
+def test_unchecked_lines_name_the_unknown_facts_without_judging():
+    """An unknown T1 or flip angle is not a flag (fithealth raises none): the
+    Check lists it as a neutral line naming where the fact can be supplied."""
+    chk = Q.check(_facts(), _sites(15.0, 0.0))            # T1 known, flip unknown
+    lines = chk.unchecked_lines()
+    assert len(lines) == 1
+    assert lines[0].startswith("flip angle unknown (I = 3/2) — not judged")
+    assert "Experiment parameters" in lines[0]
+    chk = Q.check(_facts(t1=None, status="none", sibling=None), _sites(15.0))
+    lines = chk.unchecked_lines()
+    assert len(lines) == 2
+    assert lines[0].startswith("recycle 14 s — T1 unknown — not judged (")
+    assert "no T1 EXPNO" in lines[0] and "Tools ▸ Relaxation" in lines[0]
+    # both known: nothing left unjudged
+    acq = _acq()
+    acq.title = "P1(90)=2.5"
+    acq.p90_us_title = 2.5
+    chk = Q.check(_facts(acq=acq), _sites(15.0))
+    assert chk.flip_deg is not None and chk.unchecked_lines() == []
+    # spin-1/2: the flip angle is never judged, so never 'unchecked' either
+    chk = Q.check(_facts(t1=None, status="none", sibling=None, spin=0.5), _sites(15.0))
+    assert len(chk.unchecked_lines()) == 1 and "T1 unknown" in chk.unchecked_lines()[0]

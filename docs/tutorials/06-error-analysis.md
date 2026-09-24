@@ -75,24 +75,27 @@ In the app, load the same copy (**File > Open…**, Ctrl+O) and press **Fit**
 fit-health strip under the spectrum reads, for this fit:
 
 ```
-✗ Fit: degenerate    RMSD 0.0468 · χ²ᵣ 33547853846.93    degenerate ×4: s2.pos↔s2.sigma (+1.00)    structured residual
+⚠ Fit: check    RMSD 0.0468 · χ²ᵣ 33547853846.93    degenerate ×4: s2.pos↔s2.sigma (+1.00)    residual: structure left
 ```
-<!-- measured v0.13.0, 2026-09-22: fithealth.assess on the fit result above (pill_text, chi_text, flag texts); the Report dock header reads "RMSD 0.0468 · χ²ᵣ 33547853846.93 · residual within noise · ⚠ structured residual · ⚠ 4 unidentifiable pairs (see Correlations)" -->
+<!-- measured v0.13.0, 2026-09-22: fithealth.assess on the fit result above (chi_text, pair count); wording re-pinned to the calmer verdict rules of wip/WB (the Report dock header still reads "RMSD 0.0468 · χ²ᵣ 33547853846.93 · residual within noise · ⚠ structured residual · ⚠ 4 unidentifiable pairs (see Correlations)") -->
 
-Read it left to right. The pill is the verdict (✓, ⚠ or ✗, followed by the
-worst finding). χ²ᵣ is in the spectrum's intensity² units (residuals are not
-divided by a noise estimate), so only its change between fits of the same
-spectrum means anything. `degenerate ×4` counts parameter pairs with
-|r| ≥ 0.95 and names the worst one; clicking the chip opens the correlation
-matrix of §3. `structured residual` is a runs test on the residual's sign:
-the misfit is not random noise. Other chips appear when they apply: `residual
-N× noise` when the residual in the signal region exceeds the noise at the
-edges of the window, `at bounds` when a parameter finished at its min/max
-(Tutorial 2, §4 — the errors are then conditional on the pinned value, and
-the recipe carries a note saying so), `frozen` for sites the fit held outside
-the window, and a red physical-warning chip for values such as η outside
-[0, 1]. Editing any parameter after the fit dims the strip and re-labels it
-"Model … edited since fit" until the next Fit.
+Read it left to right. The pill is the verdict: `✓ Fit OK`, `⚠ Fit: check`
+(something to look at — the values are readable as they stand) or `✗ Fit: not
+physical` (an impossible value, and only that). χ²ᵣ is in the spectrum's
+intensity² units (residuals are not divided by a noise estimate), so only its
+change between fits of the same spectrum means anything. `degenerate ×4`
+counts parameter pairs with |r| ≥ 0.95 and names the worst one; clicking the
+chip opens the correlation matrix of §3. `residual: structure left` is a runs
+test on the residual's sign: the misfit is not random noise — its tooltip
+names the usual causes (sidebands not modelled, phasing, baseline). The same
+chip reads `residual N× noise` when the residual in the signal region exceeds
+the noise at the edges of the window. Other chips appear when they apply:
+`at a bound: A lb at its lower bound 0` when a free parameter finished at its
+min/max (Tutorial 2, §4 — the errors are then conditional on the pinned
+value, and the recipe carries a note saying so), `frozen` for sites the fit
+held outside the window, and the red `unphysical` chip for values such as η
+outside [0, 1]. Editing any parameter after the fit dims the strip and
+re-labels it "Model … edited since fit" until the next Fit.
 
 ## 3. Correlations — where the covariance comes from
 

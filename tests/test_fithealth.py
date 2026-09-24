@@ -51,50 +51,97 @@ def test_clean_fit_is_ok():
     h = fithealth.assess(_rec(), Y, PEAK, lmfit_result=_lm(), rmsd=0.01,
                          window=WINDOW)
     assert h.level == "ok" and h.flags == []
-    assert h.pill_text() == "✓ Fit: no flags"
+    assert h.pill_text() == "✓ Fit OK"
     assert h.chi_text() == "RMSD 0.0100 · χ²ᵣ 1.10"
     assert h.summary().startswith(
         "RMSD 0.0100 · χ²ᵣ 1.10   ·   residual within noise")
     tip = h.tooltip()
     assert tip.splitlines()[0].startswith("Fit health — last fit")
     assert "residual ≈ noise" in tip
-    assert h.status_suffix() == "  ·  Fit: no flags"
+    assert h.status_suffix() == "  ·  Fit OK"
+    assert h.unchecked == []
 
 
-def test_unphysical_and_degenerate_are_bad_and_lead():
+def test_unphysical_is_bad_degenerate_and_bounds_are_check():
+    """Red is reserved for an impossible value; a degenerate pair and a
+    parameter at a bound are amber 'check' flags -- a physically sound fit
+    can show both. The bounds chip names the cell and the bound in words."""
     lm = _lm(_DEGEN_NAMES, covar=_DEGEN_COV)
-    h = fithealth.assess(_rec(gl=Param(1.4, vary=False)), Y, PEAK, lmfit_result=lm,
-                         at_bounds=["s0.shift_fwhm_ppm"], rmsd=0.01, window=WINDOW)
+    h = fithealth.assess(_rec(gl=Param(1.4, vary=False),
+                              shift_fwhm_ppm=Param(2.0, min=2.0)), Y, PEAK,
+                         lmfit_result=lm, at_bounds=["s0.shift_fwhm_ppm"],
+                         rmsd=0.01, window=WINDOW)
     assert h.level == "bad"
     assert [f.kind for f in h.flags] == ["physical", "degenerate", "at_bounds"]
-    assert h.pill_text() == "✗ Fit: not physical · degenerate"
+    assert h.pill_text() == "✗ Fit: not physical"
     phys, degen, bounds = h.flags
-    assert phys.text == "unphysical ×1" and phys.target == "param"
+    assert phys.level == "bad" and phys.text == "unphysical ×1" and phys.target == "param"
     assert phys.params == [(0, "gl")]
     assert "Gauss/Lorentz mix = 1.4 outside [0, 1]" in phys.detail
-    assert degen.text == "degenerate ×1: s0.σCq↔s1.amp (-0.95)"
+    assert degen.level == "check"
+    assert degen.text == "degenerate pair: s0.σCq↔s1.amp (-0.95)"
     assert degen.target == "correlations" and degen.covariance_based
-    assert bounds.text == "at bounds: s0.shift_fwhm_ppm"
+    assert "error bars are not" in degen.detail
+    assert bounds.level == "check"
+    assert bounds.text == "at a bound: A fwhm at its lower bound 2"
     assert bounds.params == [(0, "shift_fwhm_ppm")]
+    assert "A fwhm at its lower bound 2 (value 2)" in bounds.detail
+    assert "loosen it" in bounds.detail
     s = h.summary()                                   # legacy wording pinned
     for legacy in ("⚠ 1 physical warning",
                    "⚠ 1 unidentifiable pair (see Correlations)",
                    "⚠ at bounds: s0.shift_fwhm_ppm"):
         assert legacy in s, (legacy, s)
+    # without the impossible value the same fit is amber, never red
+    h2 = fithealth.assess(_rec(shift_fwhm_ppm=Param(2.0, min=2.0)), Y, PEAK,
+                          lmfit_result=lm, at_bounds=["s0.shift_fwhm_ppm"],
+                          rmsd=0.01, window=WINDOW)
+    assert h2.level == "check" and h2.pill_text() == "⚠ Fit: check"
+    assert h2.status_suffix() == "  ·  Fit: check"
+    assert [f.kind for f in h2.flags] == ["degenerate", "at_bounds"]
+    # a parameter pinned (or held at its model default) since the fit is not
+    # 'at a bound', whatever the fit reported
+    h3 = fithealth.assess(_rec(shift_fwhm_ppm=Param(2.0, min=2.0, vary=False)),
+                          Y, PEAK, lmfit_result=_lm(),
+                          at_bounds=["s0.shift_fwhm_ppm"], rmsd=0.01, window=WINDOW)
+    assert "at_bounds" not in h3.kinds()
+    # a Czjzek lb freed and driven to 0 reads as the table names it
+    from larmor import models
+    cz = Recipe(nucleus="27Al", larmor_frequency_MHz=130.0, sites=[
+        SiteModel(model="czjzek", label="Al4", params=models.get("czjzek").defaults())])
+    cz.sites[0].params["line_fwhm_ppm"] = Param(0.0)
+    h4 = fithealth.assess(cz, None, None, lmfit_result=_lm(("s0_line_fwhm_ppm",)),
+                          at_bounds=["s0.line_fwhm_ppm"], rmsd=0.01)
+    (b4,) = [f for f in h4.flags if f.kind == "at_bounds"]
+    assert b4.text == "at a bound: A lb at its lower bound 0"
+    assert fithealth.param_label(cz, 0, "sigma_Cq_MHz") == "A σCq"
+    assert fithealth.param_label(cz, 0, "shift_fwhm_ppm") == "A dCS"
 
 
-def test_structured_residual_and_noise_ratio_are_check():
+def test_structured_residual_and_noise_ratio_are_one_check_chip():
+    """Structure left in the residual and a residual above the noise are one
+    amber chip whose tooltip names the usual causes (sidebands, phasing,
+    baseline) -- never a red verdict."""
     h = fithealth.assess(_rec(), Y, 0.7 * PEAK, lmfit_result=_lm(), rmsd=0.05,
                          window=WINDOW)
     assert h.level == "check"
-    assert [f.kind for f in h.flags] == ["structured", "noise"]
-    assert h.noise_ratio > 3 and h.runs_z < -3
-    struct, noise = h.flags
-    assert re.fullmatch(r"residual \d+\.\d× noise", noise.text)
-    assert noise.target == "residual" and struct.target == "residual"
-    assert "runs test z=" in struct.detail
-    assert h.pill_text() == "⚠ Fit: 2 caveats"
+    assert [f.kind for f in h.flags] == ["residual"]
+    assert h.noise_ratio > 3 and h.runs_z < -3 and h.structured
+    (res,) = h.flags
+    assert re.fullmatch(r"residual \d+\.\d× noise, structured", res.text)
+    assert res.target == "residual" and res.level == "check"
+    assert "runs test z=" in res.detail and "× the edge noise" in res.detail
+    for cause in ("sidebands", "phasing", "baseline"):
+        assert cause in res.detail
+    assert h.pill_text() == "⚠ Fit: check"
     assert "⚠ structured residual" in h.summary()
+    assert "residual" not in " ".join(h.passing())
+    # structure without excess noise: the same chip, worded for what it saw
+    r2 = fithealth.residual_flag(1.1, {"structured": True, "message": "runs test z=-4.0"})
+    assert r2.text == "residual: structure left" and "runs test z=-4.0" in r2.detail
+    assert fithealth.residual_flag(1.1, {"structured": False, "message": ""}) is None
+    assert fithealth.residual_flag(None, None) is None
+    assert fithealth.residual_flag(2.0, None).text == "residual 2.0× noise"
 
 
 def test_missing_covariance_and_population_are_check_and_fit_only():
@@ -183,7 +230,7 @@ def test_signatures_and_live_reassessment():
     assert h.pill_text().startswith(("⚠ Model:", "✗ Model:", "Model:"))
     degen = [f for f in h.flags if f.kind == "degenerate"]
     assert degen and degen[0].stale                   # carried from the fit
-    assert {"structured", "noise"} <= h.kinds()       # recomputed live
+    assert "residual" in h.kinds()                    # recomputed live
     assert h.rmsd == 0.01 and h.recipe_sig == sig
     # the same values again: the fit verdict itself comes back (identity)
     assert fithealth.reassess_live(h_fit, d, Y, PEAK, ppm=X, window=WINDOW) is h_fit
@@ -192,7 +239,7 @@ def test_signatures_and_live_reassessment():
     unphys["sites"][0]["params"]["gl"]["value"] = 1.4
     h0 = fithealth.reassess_live(None, unphys, Y, 0.5 * PEAK, ppm=X, window=WINDOW)
     assert h0.level == "bad" and h0.pill_text() == "✗ Model: not physical"
-    assert not ({"noise", "structured"} & h0.kinds())
+    assert "residual" not in h0.kinds()
     assert h0.tooltip().splitlines()[0] == "Model health — not fitted yet (F5 to fit)"
     hn = fithealth.reassess_live(None, d, Y, 0.5 * PEAK, ppm=X, window=WINDOW)
     assert hn.level == "none" and hn.pill_text() == fithealth.NO_FIT_TEXT
@@ -205,10 +252,13 @@ def test_assess_accepts_dict_and_does_not_mutate_it():
     before = json.dumps(d)
     h = fithealth.assess(d, Y, PEAK, lmfit_result=_lm(), rmsd=0.01)
     assert json.dumps(d) == before
-    phys = [f for f in h.flags if f.kind == "physical"]
-    assert phys and "is outside the fit window" in phys[0].detail
+    # a centre outside the fit window is a thing to check, not 'not physical'
+    assert "physical" not in h.kinds()
+    (out,) = [f for f in h.flags if f.kind == "outside"]
+    assert out.level == "check" and out.text == "δiso outside the fit window: A"
+    assert "is outside the fit window" in out.detail and out.params == [(0, "isotropic_chemical_shift_ppm")]
     assert fithealth.assess(Recipe.from_dict(d), Y, PEAK, lmfit_result=_lm(),
-                            rmsd=0.01).level == h.level == "bad"
+                            rmsd=0.01).level == h.level == "check"
 
 
 def test_pill_text_is_bounded_for_any_flag_load():
@@ -228,7 +278,10 @@ def test_pill_text_is_bounded_for_any_flag_load():
                          rmsd=0.1, window=WINDOW)
     assert len(h.warns) == 24 and len(h.pairs) == 780
     assert len(h.pill_text()) <= 40
-    assert h.pill_text() == "✗ Fit: not physical · degenerate"
+    assert h.pill_text() == "✗ Fit: not physical"
+    texts = [f.text for f in h.flags]
+    assert texts[1].startswith("degenerate ×780: ")
+    assert texts[2] == "at a bound ×30: A amp at its lower bound 0, …"
     assert all(len(f.text) <= 60 for f in h.flags), [f.text for f in h.flags]
     assert h.summary_tooltip().count("↔") == 8            # legacy uni[:8]
     assert fithealth.short_name("s0_amplitude") == "s0.amp"
@@ -300,20 +353,24 @@ def test_acquisition_flags_are_live_leveled_and_targeted():
     facts = _facts()
     h = fithealth.assess(_rec(), Y, PEAK, lmfit_result=_lm(), rmsd=0.01, window=WINDOW,
                          acquisition=facts)
-    assert [f.kind for f in h.flags] == ["recovery", "excitation"]
-    rec, exc = h.flags
+    # an UNKNOWN flip angle is no flag at all: only the measured recovery is
+    assert [f.kind for f in h.flags] == ["recovery"]
+    (rec,) = h.flags
     assert (rec.level, rec.text, rec.target) == \
         ("check", "D1 = 3.0 T1 → 95 % (90° assumed)", "relaxation")
     assert "EXPNO 23" in rec.detail and "4.64 s" in rec.detail
-    assert (exc.level, exc.text, exc.target) == ("info", "flip angle unknown (I = 3/2)", "flip")
-    assert not rec.covariance_based and not exc.covariance_based
-    assert h.pill_text() == "⚠ Fit: 1 caveat"            # info does not count
+    assert not rec.covariance_based
+    assert h.pill_text() == "⚠ Fit: check"
     assert isinstance(h.acquisition, Q.Check) and h.acquisition.facts is facts
     assert "⚠ D1 = 3.0 T1 → 95 % (90° assumed)" in h.summary()
     assert "acquisition not checked" not in h.tooltip()
+    # the unknown fact stays readable in the tooltip, as a neutral line
+    assert h.unchecked == ["flip angle unknown (I = 3/2) — not judged; the 90° "
+                           "pulse can be typed in Process ▸ Experiment parameters…"]
+    assert "· flip angle unknown (I = 3/2) — not judged" in h.tooltip()
     # live: shown before the first fit too
     h0 = fithealth.assess(_rec(), None, None, fitted=False, window=WINDOW, acquisition=facts)
-    assert {"recovery", "excitation"} <= h0.kinds() and h0.level == "check"
+    assert h0.kinds() == {"recovery"} and h0.level == "check"
     # a live edit recomputes the site -> region mapping from the cached facts
     d = _rec().to_dict()
     h.recipe_sig, h.data_sig = fithealth.recipe_signature(d), fithealth.data_signature(X, Y)
@@ -324,12 +381,15 @@ def test_acquisition_flags_are_live_leveled_and_targeted():
     assert rec2.text == "D1 = 3.6 T1 → 97 % (90° assumed)" and not rec2.stale
     assert live.acquisition.facts is facts                  # reused from prev
     assert live.acquisition.recoveries[0].t1_s == 3.896
-    # no usable T1: a grey info chip that never colours the pill
+    # no usable T1: no chip at all -- the fact is a tooltip line, and the
+    # verdict stays OK (an unknown is not a problem)
     hn = fithealth.assess(_rec(), Y, PEAK, lmfit_result=_lm(), rmsd=0.01, window=WINDOW,
                           acquisition=_facts(t1=False))
-    (f,) = [f for f in hn.flags if f.kind == "recovery"]
-    assert f.level == "info" and f.text == "recycle 14 s — T1 unknown"
-    assert hn.level == "ok"
+    assert hn.flags == [] and hn.level == "ok" and hn.pill_text() == "✓ Fit OK"
+    assert hn.unchecked[0].startswith("recycle 14 s — T1 unknown — not judged (")
+    assert "Tools ▸ Relaxation" in hn.unchecked[0]
+    assert len(hn.unchecked) == 2 and "flip angle unknown" in hn.unchecked[1]
+    assert "· recycle 14 s — T1 unknown" in hn.tooltip()
     # spin-1/2: no excitation chip, a passing line instead
     hp = fithealth.assess(_rec(), Y, PEAK, lmfit_result=_lm(), rmsd=0.01, window=WINDOW,
                           acquisition=_facts(spin=0.5))
@@ -366,18 +426,19 @@ def test_with_quantification_rebuilds_only_quant_flags():
     prev = fithealth.assess(_rec(), Y, PEAK, lmfit_result=lm, rmsd=0.01, window=WINDOW,
                             quant_rows=rows, acquisition=_facts())
     prev.recipe_sig, prev.data_sig = ("sig",), ("data",)
-    assert [f.kind for f in prev.flags] == ["degenerate", "tail", "recovery", "excitation"]
+    assert [f.kind for f in prev.flags] == ["degenerate", "tail", "recovery"]
+    assert len(prev.unchecked) == 1                         # the flip angle
     degen = prev.flags[0]
     fresh = [dict(rows[0], tail_outside_pct=0.2)]
     h = fithealth.with_quantification(prev, _rec(), fresh)
-    assert [f.kind for f in h.flags] == ["degenerate", "recovery", "excitation"]
+    assert [f.kind for f in h.flags] == ["degenerate", "recovery"]
     assert h.flags[0] == degen
     assert (h.recipe_sig, h.data_sig, h.stale, h.rmsd, h.fitted) == \
         (("sig",), ("data",), False, 0.01, True)
     assert h.acquisition.facts is prev.acquisition.facts and h.tail_checked
     assert prev.flags[1].kind == "tail"                     # prev untouched
     h2 = fithealth.with_quantification(prev, _rec().to_dict(), None)
-    assert [f.kind for f in h2.flags] == ["degenerate", "recovery", "excitation"]
+    assert [f.kind for f in h2.flags] == ["degenerate", "recovery"]
     assert not h2.tail_checked
     # a typed 90-degree pulse re-judges the recovery without a refit
     r = _rec()
@@ -385,6 +446,7 @@ def test_with_quantification_rebuilds_only_quant_flags():
     h3 = fithealth.with_quantification(prev, r, fresh)
     assert [f.kind for f in h3.flags] == ["degenerate"]
     assert any("recycle" in p for p in h3.passing())
+    assert h3.unchecked == []                               # both facts known now
     # on an unfitted verdict nothing fit-only appears
     unfit = fithealth.assess(_rec(), None, None, fitted=False, window=WINDOW,
                              acquisition=_facts())

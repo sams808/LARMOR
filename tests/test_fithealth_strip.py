@@ -75,7 +75,7 @@ def test_strip_empty_and_ok_states(qapp):
     assert not s.rmsd_chip.isVisibleTo(s)
     h = _ok()
     s.set_health(h)
-    assert s.pill.text() == "✓ Fit: no flags"
+    assert s.pill.text() == "✓ Fit OK"
     assert s.rmsd_chip.isVisibleTo(s) and s.rmsd_chip.text() == h.chi_text()
     assert s.chips == []                                # passing checks collapse
     assert s.pill.toolTip() == h.tooltip()
@@ -144,10 +144,18 @@ def test_stale_dims_covariance_chips(qapp):
     assert not s.pill.text().endswith(" · edited since fit")
     # the drag-time hint changes only the pill wording, and only once
     s.set_stale_hint(True)
-    assert s.pill.text() == "Model: no flags · edited since fit"
+    assert s.pill.text() == "Model OK · edited since fit"
     assert s.chips == []
     s.set_stale_hint(False)
-    assert s.pill.text() == "✓ Fit: no flags"
+    assert s.pill.text() == "✓ Fit OK"
+    # the unjudged acquisition facts are listed in the details menu, inert
+    h = _ok()
+    h.unchecked = ["flip angle unknown (I = 3/2) — not judged"]
+    s.set_health(h)
+    assert s.chips == []                                # never a chip
+    (a,) = [a for a in s.details_menu().actions()
+            if a.text().startswith("· flip angle unknown")]
+    assert not a.isEnabled() and a.toolTip() == h.unchecked[0]
     s.close()
 
 

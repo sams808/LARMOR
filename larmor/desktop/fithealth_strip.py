@@ -89,18 +89,13 @@ class FitHealthStrip(QWidget):
     def _pill_text(self) -> str:
         if self._health is None:
             return fithealth.NO_FIT_TEXT
-        text = self._health.pill_text()
-        if self._stale_hint and text != fithealth.NO_FIT_TEXT \
-                and not text.endswith(fithealth.STALE_SUFFIX):
-            text = text.replace(" Fit: ", " Model: ", 1)
-            if text.startswith("✓ "):
-                text = text[2:]
-            text += fithealth.STALE_SUFFIX
-        return text
+        return self._health.pill_text(stale_hint=self._stale_hint)
 
     # ------------------------------------------------------------ colours
     def colours(self, level: str) -> tuple[str, str]:
-        """(background, foreground) of the verdict pill for a level."""
+        """(background, foreground) of the verdict pill for a level: the
+        theme's red (model) for 'not physical', amber (baseline) for 'check',
+        green-teal (measure) for OK -- the contrast-checked signal roles."""
         t = theme.active()
         if level == "bad":
             bg = t.model
@@ -216,6 +211,11 @@ class FitHealthStrip(QWidget):
                 a.triggered.connect(lambda *_, fl=f: self._activate(fl))
         else:
             a = m.addAction("· no flags" if h is not None else "· not fitted yet")
+            a.setEnabled(False)
+        # the acquisition facts that could not be judged: listed, not flagged
+        for u in (getattr(h, "unchecked", None) or []):
+            a = m.addAction("· " + _elide(u, 90))
+            a.setToolTip(u)
             a.setEnabled(False)
         m.addSeparator()
         for act in extra_actions:

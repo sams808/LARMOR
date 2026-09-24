@@ -10,14 +10,21 @@ cells they concern. The desktop strip (``larmor/desktop/fithealth_strip.py``),
 the Report header and the status bar all render a ``Health``; nothing here
 imports Qt, so the same verdict is available headless.
 
-Levels are classes of flag, not grades of the fit: ``bad`` means the numbers
-cannot be read as physical values (an unphysical value, or a pair the data
-cannot separate), ``check`` is a statistical caveat, ``ok`` is a fitted model
-with no flag and ``none`` is a model that has not been fitted yet. Every
-threshold is the one its source module already applies (1.5x edge noise,
-|z| > 3 / lag-1 > 0.4, |r| >= 0.95, a population error of 100 %, the 2 %
-tail, 99 % recovery and 30°/(I+½) rules of quantify.py / quantitativity.py);
-no new judgement is introduced.
+Levels are classes of flag, not grades of the fit. ``bad`` ("Fit: not
+physical", red) is reserved for values that cannot be physical at all -- a
+negative amplitude, η outside [0, 1], a width of zero, a C_Q above the
+registry's maximum (the sanity rules). Everything a physically sound fit can
+still show -- a structured residual, a parameter at a bound, a degenerate
+pair, a population the data do not support, δiso outside the fit window, a
+too-short recycle delay or a too-long pulse -- is ``check`` ("Fit: check",
+amber): something to look at, never an alarm. ``ok`` ("Fit OK") is a fitted
+model with no flag and ``none`` a model that has not been fitted yet. An
+UNKNOWN acquisition fact (no sibling T1, no 90° pulse) raises no flag: only a
+measured problem does, and the unknowns stay in the pill tooltip and in
+Process ▸ Experiment parameters. Every threshold is the one its source module
+already applies (1.5x edge noise, |z| > 3 / lag-1 > 0.4, |r| >= 0.95, a
+population error of 100 %, the 2 % tail, 99 % recovery and 30°/(I+½) rules of
+quantify.py / quantitativity.py); no new judgement is introduced.
 """
 from __future__ import annotations
 
@@ -49,16 +56,27 @@ NO_FIT_TEXT = "no fit yet — F5 fits the lines"
 STALE_SUFFIX = " · edited since fit"
 STALE_PREFIX = "from the last fit — F5 to refresh: "
 GLYPH = {"bad": "✗", "check": "⚠", "info": "·"}
+#: the pill wording per level (``Fit`` becomes ``Model`` for a live model)
+PILL = {"ok": "✓ Fit OK", "check": "⚠ Fit: check", "bad": "✗ Fit: not physical"}
 
 #: display order of the flags: what makes the numbers unreadable first, then
-#: the statistical caveats, then information
-KIND_ORDER = ("physical", "degenerate", "nocov", "at_bounds", "structured",
-              "noise", "population", "tail", "recovery", "excitation", "frozen")
+#: the things to check, then information
+KIND_ORDER = ("physical", "degenerate", "nocov", "at_bounds", "outside",
+              "residual", "population", "tail", "recovery", "excitation", "frozen")
 #: the flags derived from the quantify rows and the acquisition facts, the
 #: ones ``with_quantification`` rebuilds without a new fit
 QUANT_KINDS = ("population", "tail", "recovery", "excitation")
 _WINDOW_MSG = "is outside the fit window"
 _BOUND_RE = re.compile(r"^s(\d+)\.(.+)$")
+#: the residual chip's tooltip: what usually leaves structure behind
+RESIDUAL_CAUSES = ("usual causes: spinning sidebands not modelled (Decomposition "
+                   "▸ Add spinning sidebands…), a phasing or baseline error, one "
+                   "component too few — the fitted values may still be sound")
+#: short parameter names for the chips, the table's own headers where the
+#: registry key differs from them ('line' → lb); the model's registry key for
+#: everything else (fwhm, dCS, cq, eta, …)
+_SHORT = {"isotropic_chemical_shift_ppm": "pos", "sigma_Cq_MHz": "σCq",
+          "amplitude": "amp", "line_fwhm_ppm": "lb"}
 
 
 @dataclass
@@ -114,6 +132,11 @@ class Health:
     acquisition: object = None
     #: the quantify rows of the fit carried a tail measurement
     tail_checked: bool = False
+    #: the residual failed the runs / lag-1 test (behind the residual chip)
+    structured: bool = False
+    #: acquisition facts that could NOT be judged (no sibling T1, no 90°
+    #: pulse): tooltip lines, never chips
+    unchecked: list = field(default_factory=list)
 
     # ------------------------------------------------------------ verdict
     @property
@@ -133,22 +156,22 @@ class Health:
     def _word(self) -> str:
         return "Fit" if (self.fitted and not self.stale) else "Model"
 
-    def pill_text(self) -> str:
+    def pill_text(self, stale_hint: bool = False) -> str:
+        """'✓ Fit OK' / '⚠ Fit: check' / '✗ Fit: not physical'; 'Model' in
+        place of 'Fit' (and ' · edited since fit' after it) for a live model
+        edited since the fit -- ``stale_hint`` forces that wording during a
+        paddle drag, before the full pass has run."""
         lvl = self.level
         if lvl == "none":
             return NO_FIT_TEXT
-        word = self._word()
-        suffix = STALE_SUFFIX if (self.fitted and self.stale) else ""
-        if lvl == "ok":
-            core = "✓ Fit: no flags" if word == "Fit" else "Model: no flags"
-        elif lvl == "check":
-            n = sum(1 for f in self.flags if f.level == "check")
-            core = f"⚠ {word}: {n} caveat{'s' if n != 1 else ''}"
-        else:
-            kinds = self.kinds()
-            what = [w for k, w in (("physical", "not physical"),
-                                   ("degenerate", "degenerate")) if k in kinds]
-            core = f"✗ {word}: " + " · ".join(what)
+        live = self.stale or stale_hint
+        word = "Fit" if (self.fitted and not live) else "Model"
+        suffix = STALE_SUFFIX if (self.fitted and live) else ""
+        core = PILL[lvl]
+        if word == "Model":
+            core = core.replace("Fit", "Model", 1)
+            if lvl == "ok":
+                core = core[2:]                      # no tick on a live model
         return core + suffix
 
     def status_suffix(self) -> str:
@@ -173,10 +196,11 @@ class Health:
         """The checks that ran and passed, for the pill tooltip."""
         kinds = self.kinds()
         out = []
-        if self.noise_ratio is not None and "noise" not in kinds:
-            out.append(f"residual ≈ noise ({self.noise_ratio:.1f}×)")
-        if self.runs_z is not None and "structured" not in kinds:
-            out.append("residual unstructured")
+        if "residual" not in kinds:
+            if self.noise_ratio is not None:
+                out.append(f"residual ≈ noise ({self.noise_ratio:.1f}×)")
+            if self.runs_z is not None:
+                out.append("residual unstructured")
         if "physical" not in kinds:
             out.append("values physical")
         if self.fitted and not self.stale:
@@ -214,6 +238,8 @@ class Health:
         for f in self.flags:
             lines.append(f"{GLYPH[f.level]} {f.detail}"
                          + (" — from the last fit" if f.stale else ""))
+        for u in self.unchecked:
+            lines.append(f"· {u}")
         if self.flags:
             lines.append("click a chip for its detail · F7 lists everything")
         else:
@@ -234,7 +260,7 @@ class Health:
                         if self.noise_ratio < NOISE_RATIO_LIMIT
                         else f"⚠ residual {self.noise_ratio:.1f}× noise "
                              "(structure left)")
-        if "structured" in kinds:
+        if self.structured:
             bits.append("⚠ structured residual")
         if self.frozen:
             bits.append("frozen: " + ", ".join(self.frozen))
@@ -258,7 +284,7 @@ class Health:
         """The Report-header tooltip: structure message, sanity summary and the
         first eight unidentifiable pairs (lmfit names)."""
         lines = []
-        struct = next((f for f in self.flags if f.kind == "structured"), None)
+        struct = next((f for f in self.flags if f.kind == "residual"), None)
         if struct is not None:
             lines.append(struct.detail)
         if sanity.summarize(self.warns):
@@ -375,6 +401,67 @@ def parse_bound_name(name: str):
     return int(m.group(1)), m.group(2)
 
 
+def short_param(model: str | None, pname: str) -> str:
+    """'lb' for line_fwhm_ppm, 'σCq' for sigma_Cq_MHz, …; the registry key
+    of the model's ParamDef for anything the short table does not know."""
+    if pname in _SHORT:
+        return _SHORT[pname]
+    try:
+        from larmor import models as model_registry
+
+        return model_registry.get(model).key_of(pname)
+    except Exception:
+        return str(pname)
+
+
+def param_label(rec: Recipe, i: int, pname: str) -> str:
+    """'A lb' — the table letter of site ``i`` and the short parameter name,
+    the way a chip names a cell."""
+    from larmor.cellparse import index_to_letter
+
+    model = rec.sites[i].model if 0 <= i < len(rec.sites) else None
+    return f"{index_to_letter(i)} {short_param(model, pname)}"
+
+
+def _bound_words(rec: Recipe, at_bounds: list) -> tuple:
+    """The at-bounds names of a fit ('s0.line_fwhm_ppm') as cells and words:
+    ``(cells, short, long)`` — ``short`` 'A lb at its lower bound 0' per
+    parameter (for the chip), ``long`` the same with the value (for the
+    tooltip). A name whose parameter is no longer free (pinned or linked since
+    the fit, or held at its model default) is dropped: a held value is not
+    'at a bound', whatever the fit said."""
+    from larmor.paramstatus import effective_bounds, param_status
+
+    cells, short, long = [], [], []
+    for name in at_bounds:
+        parsed = parse_bound_name(name)
+        if parsed is None:
+            short.append(str(name))
+            long.append(str(name))
+            continue
+        i, pname = parsed
+        p = rec.sites[i].params.get(pname) if 0 <= i < len(rec.sites) else None
+        model = rec.sites[i].model if p is not None else None
+        if p is not None and (p.expr or not p.vary):
+            continue
+        label = param_label(rec, i, pname) if p is not None else name
+        st = param_status(model, pname, p) if p is not None else None
+        if st is not None and st.kind == "at_bound":
+            side, bound = st.side, st.bound
+        elif p is not None:
+            lo, hi = effective_bounds(model, pname, p)
+            side, bound = ("min", lo) if lo is not None else ("max", hi)
+        else:
+            side, bound = "", None
+        word = {"min": "lower", "max": "upper"}.get(side, "")
+        b = f" {bound:.4g}" if bound is not None else ""
+        cells.append((i, pname))
+        short.append(f"{label} at its {word} bound{b}".replace("  ", " "))
+        value = f" (value {float(p.value):.4g})" if p is not None else ""
+        long.append(f"{label} at its {word} bound{b}{value}")
+    return cells, short, long
+
+
 def _bounded(prefix: str, names: list) -> str:
     text = f"{prefix}: " + ", ".join(names)
     if len(text) > TEXT_LIMIT:
@@ -464,7 +551,9 @@ def _tails_checked(rows) -> bool:
 def _quant_flags(rec: Recipe, rows, facts, fitted: bool) -> tuple:
     """The flags derived from the quantify rows (population, tail — a FIT's
     numbers, so fitted only) and from the acquisition facts (recovery,
-    excitation — live). Returns (flags, quantitativity.Check or None)."""
+    excitation — live, and only when the fact IS known: a missing T1 or an
+    unknown flip angle is a tooltip line, not a flag). Returns (flags,
+    quantitativity.Check or None)."""
     flags = []
     if fitted:
         unsupported = _unsupported_populations(rows)
@@ -505,22 +594,46 @@ def _quant_flags(rec: Recipe, rows, facts, fitted: bool) -> tuple:
             flags.append(Flag(
                 kind="recovery", level="check", text=chk.recovery_text(),
                 detail=chk.recovery_detail(), target="relaxation"))
-        elif chk.recovery_min is None and chk.t1_status in ("missing",
-                                                            "implausible", "none"):
+        if chk.excitation_judged and chk.excitation_over():
             flags.append(Flag(
-                kind="recovery", level="info", text=chk.recovery_unknown_text(),
-                detail=chk.recovery_unknown_detail(), target="relaxation"))
-        if chk.excitation_judged:
-            if chk.excitation_over():
-                flags.append(Flag(
-                    kind="excitation", level="check", text=chk.excitation_text(),
-                    detail=chk.excitation_detail(), target="flip"))
-            elif chk.flip_deg is None:
-                flags.append(Flag(
-                    kind="excitation", level="info",
-                    text=chk.excitation_unknown_text(),
-                    detail=chk.excitation_unknown_detail(), target="flip"))
+                kind="excitation", level="check", text=chk.excitation_text(),
+                detail=chk.excitation_detail(), target="flip"))
     return flags, chk
+
+
+def _unchecked(chk) -> list:
+    """The acquisition facts a Check could not judge, as tooltip lines."""
+    if chk is None:
+        return []
+    try:
+        return list(chk.unchecked_lines())
+    except Exception:
+        return []
+
+
+def residual_flag(noise_ratio, struct) -> Flag | None:
+    """The one amber residual chip: a residual at or above NOISE_RATIO_LIMIT
+    times the edge noise and/or a structured residual (``struct`` is
+    ``diagnostics.residual_structure``'s dict, or None). Its tooltip gives
+    the measurement and the usual causes; None when neither applies."""
+    structured = bool(struct is not None and struct.get("structured"))
+    noisy = noise_ratio is not None and noise_ratio >= NOISE_RATIO_LIMIT
+    if not (structured or noisy):
+        return None
+    if noisy:
+        text = f"residual {noise_ratio:.1f}× noise"
+        measured = (f"residual RMS in the signal region is {noise_ratio:.1f}× "
+                    f"the edge noise (limit {NOISE_RATIO_LIMIT:g}×)")
+        if structured:
+            text += ", structured"
+            measured += "; " + str(struct.get("message", ""))
+    else:
+        text = "residual: structure left"
+        measured = str(struct.get("message", ""))
+    return Flag(kind="residual", level="check", text=text,
+                detail=(f"the residual carries structure the model does not "
+                        f"describe — {measured}; {RESIDUAL_CAUSES}"),
+                target="residual")
 
 
 def _sort_flags(flags: list) -> list:
@@ -542,9 +655,11 @@ def assess(recipe, y_exp, y_fit, *, lmfit_result=None, at_bounds=(), frozen=(),
     are only emitted for a fitted model. ``acquisition`` is the
     ``quantitativity.AcqFacts`` of the source EXPNO (None for a non-Bruker
     source): the recycle-delay and flip-angle flags are judged from it and
-    the current sites, fitted or not. Sanity's δiso-outside-window warning is
-    not repeated for a site the fit froze for exactly that reason (it stays in
-    ``warns``; the frozen chip reports it once).
+    the current sites, fitted or not, and only when T1 / the flip angle are
+    known. Sanity's δiso-outside-window warning is a ``check`` flag of its
+    own (``outside``), not repeated for a site the fit froze for exactly that
+    reason (it stays in ``warns``; the frozen chip reports it once); the other
+    sanity warnings are the one ``bad`` flag.
     """
     rec = recipe if isinstance(recipe, Recipe) else Recipe.from_dict(recipe)
     if window is None:
@@ -573,14 +688,17 @@ def assess(recipe, y_exp, y_fit, *, lmfit_result=None, at_bounds=(), frozen=(),
         struct = diagnostics.residual_structure(y - f)
         runs_z, lag1 = float(struct["runs_z"]), float(struct["lag1"])
 
-    # physical values (sanity), minus the window warning of frozen sites
+    # physical values (sanity): the impossible ones are the red flag, a δiso
+    # outside the fit window is a thing to check (minus the frozen sites,
+    # whose chip already says so)
     warns = sanity.check_recipe(rec, window)
     frozen_idx = _frozen_indices(rec, frozen)
     frozen_sites = set(frozen_idx.values())
-    shown = [w for w in warns
-             if not (w["site"] in frozen_sites
-                     and w["param"] == "isotropic_chemical_shift_ppm"
-                     and _WINDOW_MSG in w["message"])]
+    outside = [w for w in warns
+               if w["param"] == "isotropic_chemical_shift_ppm"
+               and _WINDOW_MSG in w["message"]]
+    impossible = [w for w in warns if w not in outside]
+    outside = [w for w in outside if w["site"] not in frozen_sites]
 
     pairs = unidentifiable_pairs(lmfit_result) if fitted else []
     names = list(getattr(lmfit_result, "var_names", []) or []) if lmfit_result is not None else []
@@ -589,16 +707,18 @@ def assess(recipe, y_exp, y_fit, *, lmfit_result=None, at_bounds=(), frozen=(),
     quant, chk = _quant_flags(rec, quant_rows, acquisition, fitted)
 
     flags = []
-    if shown:
+    if impossible:
         flags.append(Flag(
-            kind="physical", level="bad", text=f"unphysical ×{len(shown)}",
-            detail="; ".join(f"{w['label']}: {w['message']}" for w in shown),
+            kind="physical", level="bad", text=f"unphysical ×{len(impossible)}",
+            detail="; ".join(f"{w['label']}: {w['message']}" for w in impossible),
             target="param",
-            params=[(int(w["site"]), str(w["param"])) for w in shown]))
+            params=[(int(w["site"]), str(w["param"])) for w in impossible]))
     if pairs:
         n = len(pairs)
         a, b, r = pairs[0]
-        text = f"degenerate ×{n}: {short_name(a)}↔{short_name(b)} ({r:+.2f})"
+        text = f"degenerate pair: {short_name(a)}↔{short_name(b)} ({r:+.2f})"
+        if n > 1:
+            text = f"degenerate ×{n}: {short_name(a)}↔{short_name(b)} ({r:+.2f})"
         if len(text) > TEXT_LIMIT:
             text = f"degenerate ×{n}"
         listed = ", ".join(f"{short_name(a)}↔{short_name(b)} ({r:+.2f})"
@@ -606,10 +726,11 @@ def assess(recipe, y_exp, y_fit, *, lmfit_result=None, at_bounds=(), frozen=(),
         if n > 8:
             listed += f" … +{n - 8} more"
         flags.append(Flag(
-            kind="degenerate", level="bad", text=text,
-            detail=(f"unidentifiable (|r| ≥ {IDENTIFIABILITY_THRESHOLD:.2f}): "
-                    f"{listed} — the data cannot separate them; fix or link "
-                    "one, or add a constraint"),
+            kind="degenerate", level="check", text=text,
+            detail=(f"the data cannot separate these parameters (|r| ≥ "
+                    f"{IDENTIFIABILITY_THRESHOLD:.2f}): {listed} — their "
+                    "values are fine to read, their error bars are not; fix "
+                    "or link one, or add a constraint from chemistry"),
             target="correlations", covariance_based=True))
     if nocov:
         flags.append(Flag(
@@ -620,24 +741,30 @@ def assess(recipe, y_exp, y_fit, *, lmfit_result=None, at_bounds=(), frozen=(),
                     "(χ² profile) still gives confidence intervals"),
             target="errors", covariance_based=True))
     if at_bounds:
-        cells = [c for c in (parse_bound_name(n) for n in at_bounds) if c]
+        cells, short, long = _bound_words(rec, at_bounds)
+        if short:
+            flags.append(Flag(
+                kind="at_bounds", level="check",
+                text=_bounded("at a bound", short),
+                detail=("finished at a bound — its uncertainty is conditional "
+                        "on the bound: loosen it if a larger range is "
+                        "physical, or hold the parameter on purpose: "
+                        + "; ".join(long)),
+                target="param", params=cells, covariance_based=True))
+    if outside:
         flags.append(Flag(
-            kind="at_bounds", level="check", text=_bounded("at bounds", at_bounds),
-            detail=("finished pinned at a min/max bound — the uncertainties "
-                    "are conditional on it; check the constraints or the "
-                    "starting model: " + ", ".join(at_bounds)),
-            target="param", params=cells, covariance_based=True))
-    if struct is not None and struct["structured"]:
-        flags.append(Flag(
-            kind="structured", level="check", text="structured residual",
-            detail=struct["message"], target="residual"))
-    if noise_ratio is not None and noise_ratio >= NOISE_RATIO_LIMIT:
-        flags.append(Flag(
-            kind="noise", level="check", text=f"residual {noise_ratio:.1f}× noise",
-            detail=(f"residual RMS in the signal region is {noise_ratio:.1f}× "
-                    f"the edge noise (limit {NOISE_RATIO_LIMIT:g}×) — structure "
-                    "the model does not describe"),
-            target="residual"))
+            kind="outside", level="check",
+            text=_bounded("δiso outside the fit window",
+                          [str(w["label"]) for w in outside]),
+            detail=("; ".join(f"{w['label']}: {w['message']}" for w in outside)
+                    + " — widen the window or move the line; the fit cannot "
+                    "constrain a centre it does not see"),
+            target="param",
+            params=[(int(w["site"]), str(w["param"])) for w in outside]))
+    structured = bool(struct is not None and struct["structured"])
+    res = residual_flag(noise_ratio, struct)
+    if res is not None:
+        flags.append(res)
     flags.extend(quant)
     if frozen:
         flags.append(Flag(
@@ -653,7 +780,8 @@ def assess(recipe, y_exp, y_fit, *, lmfit_result=None, at_bounds=(), frozen=(),
                   noise_ratio=noise_ratio, runs_z=runs_z, lag1=lag1,
                   warns=warns, pairs=list(pairs), at_bounds=at_bounds,
                   frozen=frozen, flags=_sort_flags(flags), acquisition=chk,
-                  tail_checked=bool(fitted and _tails_checked(quant_rows)))
+                  tail_checked=bool(fitted and _tails_checked(quant_rows)),
+                  structured=structured, unchecked=_unchecked(chk))
 
 
 def reassess_live(prev, recipe_dict, y_exp, y_model_on_exp, *, ppm=None,
@@ -707,4 +835,5 @@ def with_quantification(prev: Health, recipe, quant_rows, acquisition=None) -> H
     keep = [f for f in prev.flags if f.kind not in QUANT_KINDS]
     quant, chk = _quant_flags(rec, quant_rows, facts, prev.fitted)
     return replace(prev, flags=_sort_flags(keep + quant), acquisition=chk,
-                   tail_checked=bool(prev.fitted and _tails_checked(quant_rows)))
+                   tail_checked=bool(prev.fitted and _tails_checked(quant_rows)),
+                   unchecked=_unchecked(chk))

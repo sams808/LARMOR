@@ -198,7 +198,7 @@ def test_paddle_drag_only_marks_stale_and_release_does_the_full_pass(qapp, win):
     win.on_paddle_released(0)
     assert win._health.stale
     texts = [c.text() for c in win.health_strip.chips]
-    assert any(t.startswith("residual ") and t.endswith("× noise") for t in texts), texts
+    assert any(t.startswith("residual ") and "× noise" in t for t in texts), texts
 
 
 def test_unphysical_edit_shows_red_live_flag_and_focus_click_through(qapp, win):
@@ -365,8 +365,10 @@ def test_real_glass_fit_verdict(qapp, win):
         [t if len(t) <= 48 else t[:47] + "…" for t in texts]
     assert win.qtable.rowCount() == 5                # quantify still ran
     # three overlapping Czjzek sites on one 1D lineshape: the degenerate pair
-    # is the documented outcome (docs/tutorials/01, section 4)
-    assert "degenerate" in h.kinds() and h.level == "bad"
+    # is the documented outcome (docs/tutorials/01, section 4) -- amber, a
+    # thing to check, since every value is physical
+    assert "degenerate" in h.kinds() and h.level == "check"
+    assert "physical" not in h.kinds()
     assert win._health_fit is h and win._last_lmfit is result.lmfit_result
 
 
@@ -517,8 +519,10 @@ def test_real_base1ca_recovery_chip(qapp, win):
     assert rec.level == "check" and rec.text.endswith("(90° assumed)")
     assert rec.text.startswith("D1 = 3.0–3.6 T1 → 95–97 %")
     assert "EXPNO 23" in rec.detail and "4.64" in rec.detail
-    (exc,) = [f for f in h.flags if f.kind == "excitation"]
-    assert exc.level == "info" and exc.text == "flip angle unknown (I = 3/2)"
+    # the unknown flip angle is no chip: a tooltip line names the fact
+    assert "excitation" not in h.kinds()
+    assert any(u.startswith("flip angle unknown (I = 3/2)") for u in h.unchecked)
+    assert "flip angle unknown (I = 3/2)" in win.health_strip.pill.toolTip()
     assert h.acquisition.facts.t1.expno.endswith("23")
     assert h.acquisition.facts.acquisition.d1_s == 14.0
     # the 90° pulse typed once clears both chips without a refit

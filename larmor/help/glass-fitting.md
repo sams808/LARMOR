@@ -95,13 +95,16 @@ deconvolution. LARMOR's tools map one-to-one:
 - **Monte-Carlo errors** — the parametric bootstrap, robust for correlated
   parameters;
 - **identifiability warnings** — parameter pairs the data cannot separate
-  are flagged after every fit: the fit-health strip under the spectrum turns
-  red with a `degenerate` chip, and a click on it opens the correlation
-  matrix;
+  are flagged after every fit: the fit-health strip under the spectrum shows
+  an amber `degenerate pair` chip (the values are readable, their error bars
+  are not), and a click on it opens the correlation matrix;
 - **residual diagnostics** — the runs-test flags structured residuals even
   when the rms looks small (a systematically wrong model, e.g. too few or
-  wrongly-placed components); the strip shows an amber `structured residual`
-  or `residual N× noise` chip, and a click turns the residual trace on.
+  wrongly-placed components, sidebands left unmodelled, a phasing error);
+  the strip shows one amber `residual N× noise, structured` chip whose
+  tooltip lists those causes, and a click turns the residual trace on. A
+  structured residual never makes the verdict red — only an impossible value
+  (a negative amplitude, η outside [0, 1], a zero width) does.
 
 If a component's population has a 100 % relative uncertainty, the data do
 not support that component. Report that, or remove it. The strip shows an
@@ -203,9 +206,11 @@ nutation of a short pulse); the chip turns amber below 99 % (≈ 5 T₁ at
 tip`, `11 degree tip`) or from the 90° pulse typed once in **Process ▸
 Experiment parameters…** (remembered per nucleus, probe and power), and is
 compared with 30°/(I + ½) for single-pulse spectra; echo and CPMG
-excitation is not judged. Grey chips name what could not be checked (no T₁
-measurement in the folder, a TopSpin fit that did not converge, an unknown
-flip angle); the **F7** menu's *Measure T1 per site* runs LARMOR's own
+excitation is not judged. What could not be checked (no T₁ measurement in
+the folder, a TopSpin fit that did not converge, an unknown flip angle) is
+**not a chip**: it is listed in the pill's tooltip and the **F7** menu as
+"not judged", and the fact can be typed in **Process ▸ Experiment
+parameters…**; the **F7** menu's *Measure T1 per site* runs LARMOR's own
 per-site decomposition of the relaxation series on the fitted lineshapes
 instead. Nothing is corrected — the chips are the caveats to carry into
 the Methods text.
