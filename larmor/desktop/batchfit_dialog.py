@@ -737,7 +737,9 @@ class BatchFitDialog(QDialog):
 
     # ------------------------------------------------------------------ comparability
     def _show_comparability(self):
-        ComparabilityDialog(self, self._comparison).exec()
+        # a read-only table: non-modal, so the grid stays usable beside it
+        from larmor.desktop.windowtray import show_tool_window
+        show_tool_window(ComparabilityDialog(self, self._comparison))
 
     def _reprocess_all(self):
         dlg = ReprocessDialog(self, self._comparison, self._n_with_fid())
@@ -1713,7 +1715,8 @@ class BatchFitDialog(QDialog):
         if self._result is None:
             return
         from larmor.desktop.series_plot import SeriesPlotDialog
-        SeriesPlotDialog(self, self._result, series=self._series).exec()
+        from larmor.desktop.windowtray import show_tool_window
+        show_tool_window(SeriesPlotDialog(self, self._result, series=self._series))
 
     # ------------------------------------------------------------------ series table
     def _edit_series(self):
