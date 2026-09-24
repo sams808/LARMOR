@@ -46,7 +46,8 @@ Workplan"; this file is the ground truth for progress.
 - **Full suite**: at v0.14.0 (0de34c7), **1324 passed / 0 failed** in 20 min 39 s,
   real-data layer complete (all 19 datasets present). v0.14.1 (faab8f9) adds
   `larmor/selftest.py`, the quick overlays and their tests (scoped runs
-  green; the full suite was not re-run for it).
+  green; the full suite was not re-run for it). **v0.14.2 (cc8b1ca): 1366
+  passed / 0 failed** in 20 min 21 s, real-data layer complete (19 datasets).
 - **0.14.1 (2026-09-23, same day)**: a student's frozen 0.14.0 opened spectra
   but "fitting did not work". The fit path was verified in the exe's own
   package set — console-less Python of `packaging/.buildenv`, then the frozen
