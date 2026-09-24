@@ -500,7 +500,7 @@ class LinesTable(QWidget):
             "another line by its letter:  A  ·  A+20  ·  A+20kHz (→ppm)  ·  "
             "0.5B  ·  A+20 [50..80].   pin ☑ = fixed   ·   "
             + ("scroll = nudge" if scroll_nudge_enabled()
-               else "scroll-nudge off (View ▸ Scroll edits values)")
+               else "scroll-nudge off (View ▸ Scroll nudges fit values)")
             + "   ·   ↑/↓ in a cell nudges 2 % (Shift 10 %, Ctrl 0.2 %)   ·   "
             "right-click a row for line actions (sidebands, duplicate, fix / "
             "free all, remove)   ·   Delete removes the selected line(s) "
@@ -766,7 +766,7 @@ class LinesTable(QWidget):
                                             if site.get("label") else ""))
         a_ssb = QAction("Add spinning sidebands…  (±k·νrot, linked to this line)",
                         menu)
-        a_ssb.setToolTip("Decomposition ▸ Add spinning sidebands… with this "
+        a_ssb.setToolTip("Edit ▸ Spinning sidebands ▸ Add spinning sidebands… with this "
                          "line preselected: copies at pos ± k·νrot whose shape "
                          "follows the parent, amplitudes free")
         a_ssb.setEnabled(site.get("model") not in _SELF_SIDEBAND_MODELS)

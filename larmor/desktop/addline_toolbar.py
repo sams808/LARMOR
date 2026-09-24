@@ -137,7 +137,7 @@ class AddLineToolbar:
                 # the background spectrum is a dialog, not a placing mode
                 a_bg = QAction("Spectrum (background)…", self.menu)
                 a_bg.setToolTip(model_tooltip("spectrum")
-                                + "\nOpens Decomposition ▸ Add background spectrum…")
+                                + "\nOpens Edit ▸ Add background spectrum…")
                 a_bg.triggered.connect(lambda *_: self.win.add_background_spectrum())
                 self.menu.addAction(a_bg)
                 self.action_background = a_bg

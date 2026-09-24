@@ -194,7 +194,7 @@ command line: `larmor srcheck <session folder> --csv audit.csv`.
    two-site exchange, function, background spectrum) — each with a one-line
    description and its key parameters as tooltip. The five most used models
    sit as quick buttons beside it (Gauss/Lorentz, Czjzek, quad CT, CSA
-   powder, ext. Czjzek); every model is also under **Decomposition ▸ Add
+   powder, ext. Czjzek); every model is also under **Edit ▸ Add
    line** and in the command palette. While a mode is on the toolbar reads
    `placing Czjzek — click on the spectrum · Esc to stop`: the mode is
    *sticky* — place as many as you like; click the button (or the model)
