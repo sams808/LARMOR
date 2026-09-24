@@ -945,13 +945,19 @@ class _MenusMixin:
         from PySide6.QtGui import QActionGroup
 
         m = parent.addMenu("&Theme")
+        # every entry carries a swatch (window | accent | plot background) and
+        # a tooltip naming the scheme it follows, so the themes can be told
+        # apart BEFORE one is picked -- the swatch is the theme's identity
+        m.setToolTipsVisible(True)
         self._theme_group = QActionGroup(self)
         self._theme_group.setExclusive(True)
         current = theme.active().name
         for name in theme.names():
-            act = m.addAction(name)
+            t = theme.get(name)
+            act = m.addAction(theme.swatch_icon(t), name)
             act.setCheckable(True)
             act.setChecked(name == current)
+            act.setToolTip(theme.describe(t))
             act.triggered.connect(lambda _=False, n=name: self._set_theme(n))
             self._theme_group.addAction(act)
 
@@ -961,22 +967,37 @@ class _MenusMixin:
         # other theme once picked.
         m.addSeparator()
         more = m.addMenu("More styles…")
-        more.setToolTip("just-for-fun styles, applied immediately")
+        more.setToolTipsVisible(True)
+        more.setToolTip(self.MORE_STYLES_NOTE)
+        # section headings render as labelled separators under the Fusion
+        # style the app runs with (a plain separator elsewhere) -- the
+        # restart requirement is stated IN the chooser, next to the swatches
+        more.addSection("just-for-fun styles · swatch = window | accent | plot")
         self._aesthetic_group = QActionGroup(self)
         self._aesthetic_group.setExclusive(True)
         current_override = QSettings("LARMOR", "app").value("appearanceOverride", "")
         act_normal = more.addAction("Normal")
         act_normal.setCheckable(True)
         act_normal.setChecked(not current_override)
+        act_normal.setToolTip("back to the theme picked in the list above")
         act_normal.triggered.connect(lambda _=False: self._set_aesthetic_override(""))
         self._aesthetic_group.addAction(act_normal)
         for name in theme.aesthetic_names():
-            act = more.addAction(name)
+            t = theme.get(name)
+            act = more.addAction(theme.swatch_icon(t), name)
             act.setCheckable(True)
             act.setChecked(name == current_override)
+            act.setToolTip(f"{theme.describe(t)}\n{self.MORE_STYLES_NOTE}")
             act.triggered.connect(
                 lambda _=False, n=name: self._set_aesthetic_override(n))
             self._aesthetic_group.addAction(act)
+        more.addSection(self.MORE_STYLES_NOTE)
+
+    #: stated in the More styles… chooser (section heading + every tooltip):
+    #: the style is applied at once, but dialogs built earlier keep the
+    #: colours they were built with until LARMOR is restarted
+    MORE_STYLES_NOTE = ("applied now — restart LARMOR for every dialog to "
+                        "follow the style")
 
     def _set_aesthetic_override(self, name: str):
         """Switch to a hidden "aesthetic" style (or back to "Normal", which
@@ -993,7 +1014,9 @@ class _MenusMixin:
         # while a genuine aesthetic is active, the matching entry when "Normal"
         for act in self._theme_group.actions():
             act.setChecked((not name) and act.text() == effective)
-        self.statusBar().showMessage(f"style: {name or effective}")
+        self.statusBar().showMessage(
+            f"style: {name or effective} — {self.MORE_STYLES_NOTE}" if name
+            else f"style: {effective}")
 
     def _build_textsize_menu(self, parent):
         from PySide6.QtGui import QActionGroup

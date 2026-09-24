@@ -13,9 +13,9 @@
 
 | Representation | How | S/N | Fit it? |
 |---|---|---|---|
-| **Sum echo** (absorption) | split the train, coadd the echoes, process one echo | high | ✅ **yes** — a continuous powder lineshape |
+| **Sum echo, magnitude (mc)** | split the train, coadd the echoes, process one echo, take \|spectrum\| | high | ✅ **yes — the recommended route**: phase-independent, and for a whole echo \|spectrum\| *is* the absorption lineshape (no ×√3 penalty); only the sign of a genuinely negative feature is lost |
+| **Sum echo** (phased absorption) | as above, phased (p0/p1/p2) instead of rectified | high | ✅ yes — a continuous powder lineshape; *optional*, for users who want a phased spectrum |
 | **Spikelets** | Fourier-transform the whole train | spectacular | ❌ no — a comb with no lineshape *between* spikes |
-| **Sum echo, magnitude (mc)** | as above, then \|spectrum\| | high | ❌ no — but the only option when the pattern cannot be phased |
 | **Both, overlaid** | Stage 5, tick both | — | the validation: the envelope must trace the spikelet tops |
 
 The spikelet **maxima** trace the powder pattern, but a smooth model cannot fit
@@ -29,6 +29,10 @@ the comb — fit the **sum echo** and use spikelets only to inspect the manifold
 the T₂ decay), and process the single resulting echo with *whole-echo*
 processing: the echo top is moved to t = 0 so the transform is **pure
 absorption**. This is the spectrum you fit with the usual quadrupolar models.
+The recommended way to display it is **magnitude (mc)**, \|spectrum\| with its
+noise floor subtracted — phase-independent, and for a whole echo identical to
+the absorption lineshape (§5 below). Phasing the absorption spectrum by hand
+is optional (**Phasing (optional)** in stage 5).
 
 **Spikelets.** Fourier-transform the whole train untouched. The manifold of
 sharp lines, spaced by 1/τ_echo, traces the powder pattern with superb S/N —
@@ -153,21 +157,50 @@ spectrum, so before/after are directly comparable.
 ### 5 · Spectrum
 
 Sum echo and spikelets, **independently toggleable** — tick both for the
-overlay. A correct whole-echo transform is already near-pure absorption, so
-**p0 alone is normally enough**.
+overlay. **Tick magnitude (mc)** — the recommended route: \|spectrum\| needs
+no phase at all, costs a whole echo no width, and has its rectified noise
+floor subtracted (see *Magnitude (mc)* below). The sum-echo box then reads
+*sum echo (magnitude — mc)*, and stage 6 measures it directly.
 
-A large p1 is a *diagnostic*, not a nuisance. An echo top that falls between
-two samples needs a first-order phase to compensate it exactly, and up to
-±180° is legitimate (a −0.76-dwell top on a real ⁸¹Br train needed +148°).
-Beyond about ±200°, the period or the top is genuinely wrong: go back to
-stage 1 (**Find period**) and stage 2 (**Auto**).
+**Phasing (optional).** A phased absorption sum echo remains available for
+users who want one: the arrow **Phasing (optional)** below the display row
+expands p0 / p1 / p2, the step and **Autophase** (it stays collapsed by
+default, and remembers being left open). A correct whole-echo transform is
+already near-pure absorption, so **p0 alone is normally enough**. A large p1
+is a *diagnostic*, not a nuisance: an echo top that falls between two samples
+needs a first-order phase to compensate it exactly, and up to ±180° is
+legitimate (a −0.76-dwell top on a real ⁸¹Br train needed +148°). Beyond
+about ±200°, the period or the top is genuinely wrong: go back to stage 1
+(**Find period**) and stage 2 (**Auto**).
 
-**Phasing runs once automatically on load**: on an unphased spectrum the
-tallest feature is a noise sliver, and stage 6 would happily report a δ_CG
-from it. The automatic pass is exactly the **Autophase** button (p0/p1, then
-p0/p1/p2, keeping the quadratic only if it cuts the negative area by more
-than 25 %); type into the phase fields or press Autophase again to override
-it at any time.
+Phasing also **runs once automatically on load**, whether or not the section
+is open: on an unphased spectrum the tallest feature is a noise sliver, and
+stage 6 would happily report a δ_CG from it. The automatic pass is exactly
+the **Autophase** button (p0/p1, then p0/p1/p2, keeping the quadratic only if
+it cuts the negative area by more than 25 %); expand the section and type
+into the phase fields or press Autophase again to override it at any time.
+
+**Save as dataset…** writes **both spectra**, from one Save dialog, as two
+LARMOR `.csv` files next to each other: `<base>_sumecho.csv` (the envelope to
+fit) and `<base>_spikelets.csv` (the spikelet manifold), each on its own ppm
+axis. Whatever name is typed is the *base* — `qcpmg_12.csv`,
+`qcpmg_12_sumecho.csv` and `qcpmg_12_spikelets.csv` all name the same pair —
+and the readout reports both files. With **normalise to max** ticked (the
+default) each spectrum is divided by its own maximum, so the two overlay
+directly and a fit's amplitude reads as a fraction of the tallest point; the
+factor divided out is kept in the header as `intensity_scale`, so
+`raw = intensity × intensity_scale` recovers the raw intensity
+(`intensity_scale = 1` for an unticked, raw save). Each header also says
+which spectrum it is (`spectrum_kind`), names its twin (`twin_file`), and
+carries the acquisition and processing provenance the multi-field tools read:
+`nucleus`, `larmor_MHz`, `qcpmg_rotor_Hz`, `spectrum_mode`, `lb_Hz`,
+`carrier_ppm`, `referenced`, `sf_MHz`/`sr_hz`, `spikelet_spacing_Hz`
+(= 1/τ_echo), `echo_period_pts`, `split_offset_pts` and `n_echoes`. In both
+files `spin_rate_Hz` is 0: neither has a sideband manifold for the workbench to
+model, and the spikelets are not sidebands. Either file opens with **File ▸
+Open**, overlays, and drops onto the multi-field grids — where the spikelet
+twin is recognised as the comb it is and the sum-echo file is the one to
+measure.
 
 #### When p0/p1 is not enough: the second-order phase
 
@@ -185,10 +218,11 @@ helps, so an ordinary echo still reports p2 = 0.
 #### Magnitude (mc)
 
 Ticking **magnitude (mc)** plots |spectrum| — TopSpin's `mc` — which is
-phase-independent by construction. Use it when a phase error cannot be
-written as a polynomial at all, or as a cross-check: on the ⁸¹Br sample above
-magnitude gives δ_CG = −310 ppm against the p2-phased −314 ppm, which is the
-agreement that makes both trustworthy.
+phase-independent by construction. It is the **recommended route**: no phase
+to get right, and a phase error that cannot be written as a polynomial at all
+is no obstacle. The phased spectrum is the cross-check: on the ⁸¹Br sample
+above magnitude gives δ_CG = −310 ppm against the p2-phased −314 ppm, which
+is the agreement that makes both trustworthy.
 
 Two things to know, and one common myth to drop:
 
@@ -291,8 +325,10 @@ amplified). Do this before quantifying anything across a wide pattern.
    maximum (it is usually already there).
 4. **Stage 3** — read T₂ ± error and R². Exclude obvious outliers by clicking.
 5. **Stage 4** — click **Use matched LB**.
-6. **Stage 5** — **Autophase**, then tick *spikelets* to confirm the envelope
-   traces the spikelet tops.
+6. **Stage 5** — tick **magnitude (mc)** (the recommended route: no phasing
+   needed), then tick *spikelets* to confirm the envelope traces the spikelet
+   tops. Optional: a phased absorption sum echo is one click away under
+   **Phasing (optional)** — Autophase already ran once on load.
 7. **Stage 6** — place the window, read δ_CG ± σ and FWHM.
 8. **Copy CSV** for the lab book, then **Send to fit →** to model the
    lineshape (see the *Lineshapes* manual — for a glass, `czjzek` or

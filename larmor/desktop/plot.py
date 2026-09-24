@@ -672,9 +672,11 @@ class SpectrumView(pg.PlotWidget):
         self.setCursor(Qt.PointingHandCursor if on else Qt.ArrowCursor)
 
     def _add_baseline_anchor(self, x: float, y: float):
+        # the anchor's fill follows the theme (a white dot on a dark plot
+        # read as a stray data point); the baseline-coloured ring is the mark
         t = pg.TargetItem(pos=(x, y), size=11, movable=True,
                           pen=pg.mkPen(theme.active().baseline, width=1.5),
-                          brush=pg.mkBrush(255, 255, 255, 220))
+                          brush=pg.mkBrush(*theme._rgb(theme.active().base), 220))
         t.sigPositionChanged.connect(lambda *_: self._update_baseline_curve())
         self.addItem(t)
         self._bl_anchors.append(t)

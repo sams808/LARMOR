@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import numpy as np
 
@@ -386,7 +387,8 @@ def seed_window(ppm: np.ndarray, y: np.ndarray, meta: dict | None = None
     if n_spk < COMB_MIN_SPIKELETS:
         return WindowSeed(hi, lo)
     pp = str((meta or {}).get("pulse_program", "") or "").lower()
-    what = ("a QCPMG spikelet spectrum" if "cpmg" in pp
+    kind = str((meta or {}).get("spectrum_kind", "") or "").lower()
+    what = ("a QCPMG spikelet spectrum" if "cpmg" in pp or kind == "spikelets"
             else "a spikelet comb")
     note = (f"this is {what} (spacing {period_ppm:.1f} ppm, {n_spk} spikelets "
             "in the band): the window was seeded from its envelope -- prefer "
@@ -864,6 +866,73 @@ def coadd_spectrum(fid: np.ndarray, period: int, sw_Hz: float, sfo_MHz: float,
 
 def spikelet_spacing_ppm(period: int, sw_Hz: float, sfo_MHz: float) -> float:
     return (sw_Hz / period) / (sfo_MHz or 1.0) if period else 0.0
+
+
+# --------------------------------------------------------------------------
+# Saved datasets: the sum-echo envelope AND the spikelet spectrum, as twin
+# LARMOR .csv files written from ONE chosen name.
+
+#: the two spectra *Save as dataset...* writes, and the file-name token of each
+DATASET_KINDS = ("sumecho", "spikelets")
+_KIND_TOKEN_RE = re.compile(r"[ _\-.]?(sum[ _\-]?echo|spikelets?)$", re.IGNORECASE)
+
+
+def dataset_pair_paths(path) -> dict:
+    """The twin file names for the name the user picked in the Save dialog.
+
+    ``qcpmg_1_sumecho.csv``, ``qcpmg_1_spikelets.csv``, ``qcpmg_1.csv`` and
+    ``qcpmg_1`` all name the same pair: ``qcpmg_1_sumecho.csv`` +
+    ``qcpmg_1_spikelets.csv`` next to each other. Returns
+    ``{"sumecho": Path, "spikelets": Path}``.
+    """
+    p = Path(str(path))
+    stem = p.stem if p.suffix.lower() == ".csv" else p.name
+    base = _KIND_TOKEN_RE.sub("", stem) or stem
+    return {kind: p.with_name(f"{base}_{kind}.csv") for kind in DATASET_KINDS}
+
+
+def normalise_to_max(y) -> tuple[np.ndarray, float]:
+    """``(y / max|y|, max|y|)`` -- the scale that was divided out is returned
+    so the raw intensity is recoverable (``raw = saved * scale``); 1.0 for an
+    all-zero or non-finite trace, which is then returned unchanged."""
+    y = np.asarray(y, float)
+    finite = y[np.isfinite(y)]
+    scale = float(np.max(np.abs(finite))) if finite.size else 0.0
+    if not scale > 0.0:
+        return y, 1.0
+    return y / scale, scale
+
+
+def write_dataset_pair(path, sum_ppm, sum_spec, spk_ppm, spk_spec,
+                       sum_meta: dict, spk_meta: dict, *,
+                       normalise: bool = True) -> dict:
+    """Write the sum-echo envelope and the spikelet spectrum as twin LARMOR
+    .csv datasets (see :func:`dataset_pair_paths`), each on its own ppm axis.
+
+    With ``normalise`` both are divided by their own maximum, so the two are
+    directly comparable and a fit's amplitude reads as a fraction; the factor
+    divided out is written as ``intensity_scale`` (1.0 for a raw save), so
+    ``raw = intensity * intensity_scale`` either way. Each header names its
+    twin (``twin_file``) and says which spectrum it is (``spectrum_kind``).
+    Returns ``{"sumecho": path, "spikelets": path}`` of the files written.
+    """
+    from larmor.io import spectra
+
+    paths = dataset_pair_paths(path)
+    traces = {"sumecho": (sum_ppm, sum_spec, dict(sum_meta)),
+              "spikelets": (spk_ppm, spk_spec, dict(spk_meta))}
+    written = {}
+    for kind, (ppm, y, meta) in traces.items():
+        y = np.asarray(y, float)
+        if normalise:
+            y, scale = normalise_to_max(y)
+        else:
+            scale = 1.0
+        twin = paths["spikelets" if kind == "sumecho" else "sumecho"]
+        meta.update({"spectrum_kind": kind, "intensity_scale": scale,
+                     "twin_file": twin.name})
+        written[kind] = spectra.write_csv(paths[kind], ppm, y, meta)
+    return written
 
 
 # --------------------------------------------------------------------------

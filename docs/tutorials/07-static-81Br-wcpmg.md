@@ -127,7 +127,12 @@ echoes.
 ## 6. Stage 5 — the spectrum
 
 Tab `5 · Spectrum` shows the whole-echo transform of the weighted echo sum,
-zero-filled ×16. **Autophase** fits p0/p1 first and tries p0/p1/p2 second,
+zero-filled ×16. The recommended route is **`magnitude (mc)`** — |spectrum|
+with its noise floor subtracted, phase-independent and, for a whole echo,
+identical in width to the absorption lineshape. The phased absorption
+spectrum used for the numbers below is optional: the **Phasing (optional)**
+arrow expands p0 / p1 / p2 and **Autophase**, which also ran once when the
+train was loaded. Autophase fits p0/p1 first and tries p0/p1/p2 second,
 keeping the quadratic term only when it cuts the residual negative area by
 more than a quarter — a frequency-swept refocusing pulse can imprint such a
 phase. On this train the linear phase suffices:
@@ -138,11 +143,14 @@ sum echo · scale unit max · zero-fill ×16 · p0 -101.6° p1 141.5° · carrie
 <!-- measured v0.12.1, 2026-09-22: qcpmg.autophase_best on the summed echo; the residual negative area is 0.45 % of full scale with p0/p1, so p2 stays 0 -->
 
 Tick `spikelets` to overlay the spikelet spectrum (the comb TopSpin
-produced): its envelope must trace the sum-echo lineshape. Tick
-`magnitude (mc)` for the phase-independent cross-check of §7, then untick it
-— the absorption spectrum is the one to fit. **Save as dataset…** writes the
-processed spectrum as a LARMOR `.csv` with the Larmor frequency in its
-header; this is the file the batch route of §12 reads.
+produced): its envelope must trace the sum-echo lineshape. `magnitude (mc)`
+and the phased spectrum are cross-checks of each other (§7 quotes both);
+§7–§10 below were measured on the phased spectrum, so untick `magnitude
+(mc)` to reproduce those numbers. **Save as dataset…** writes the processed
+spectra as two LARMOR `.csv` files from one name — `<base>_sumecho.csv` and
+`<base>_spikelets.csv`, each normalised to unit maximum with the factor
+divided out kept as `intensity_scale` in the header, and the Larmor frequency
+in both; the sum-echo file is the one the batch route of §12 reads.
 
 ## 7. Stage 6 — measure
 

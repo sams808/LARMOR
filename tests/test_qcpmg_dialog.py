@@ -650,11 +650,13 @@ def test_saved_dataset_carries_the_rotor_rate_under_its_own_key(qapp, tmp_path,
                    "sf_MHz": 78.36217, "sr_hz": 3982.87,
                    "title": "12/09/2025\nSample LAW3CL0CA\nRotor-synchronized CPMG"})
     d._carrier, d._referenced = -102.8, True
-    out = tmp_path / "ds.csv"
+    # the chosen name is the BASE of the twin files (see
+    # test_qcpmg_dataset_pair.py): "ds.csv" -> ds_sumecho.csv + ds_spikelets.csv
     monkeypatch.setattr(
         "PySide6.QtWidgets.QFileDialog.getSaveFileName",
-        staticmethod(lambda *a, **k: (str(out), "")))
+        staticmethod(lambda *a, **k: (str(tmp_path / "ds.csv"), "")))
     d._save_dataset()
+    out = tmp_path / "ds_sumecho.csv"
     _, _, meta = spectra.read_csv(out)
     assert meta["qcpmg_rotor_Hz"] == pytest.approx(16000.0)
     assert meta["mas_uncertain"] is True
@@ -676,6 +678,80 @@ def test_saved_dataset_carries_the_rotor_rate_under_its_own_key(qapp, tmp_path,
     d._save_dataset()
     _, _, meta = spectra.read_csv(out)
     assert meta["sr_hz"] == 0.0 and meta["referenced"] is False
+    d.close()
+
+
+def test_phasing_section_starts_collapsed_and_expands(qapp, tmp_path):
+    """Magnitude (mc) is the recommended route, so the phasing controls
+    (p0/p1/p2, step, Autophase) sit under a collapsible 'Phasing (optional)'
+    that starts COLLAPSED; expanding shows them, collapsing hides them, and
+    neither touches the processed spectrum."""
+    from PySide6.QtCore import Qt
+    from larmor import qcpmg
+
+    d = _dialog_with(qapp, _synthetic_qcpmg(tmp_path))
+    assert d.phaseToggle.text() == "Phasing (optional)"
+    assert not d.phaseToggle.isChecked()
+    assert d.phaseBox.isHidden()                       # collapsed by default
+    assert d.phaseToggle.arrowType() == Qt.RightArrow
+    for w in (d.p0, d.p1, d.p2, d.pstep, d.btnAutophase):
+        assert w in d.phaseBox.findChildren(type(w))    # they live inside it
+    # (stage 5 sits in a tab page, so "shown" is isHidden() == False --
+    # not explicitly hidden -- rather than isVisibleTo(dialog))
+    assert not d.magMode.isHidden()                    # the visible default route
+    assert not d.magMode.isChecked()
+    before = d._spec.copy()
+
+    d.phaseToggle.setChecked(True)                     # the user expands it
+    assert not d.phaseBox.isHidden()
+    assert d.phaseToggle.arrowType() == Qt.DownArrow
+    for w in (d.p0, d.p1, d.p2, d.pstep, d.btnAutophase):
+        assert not w.isHidden() and w.isEnabled()
+    # the existing behaviour once expanded: phasing still works as before
+    d.p0.setValue(30.0)
+    d._rephase()
+    assert np.allclose(d._spec, qcpmg.phase_spectrum(
+        d._spec_raw, 30.0, d.p1.value(), p2_deg=d.p2.value()).real)
+    d.p0.setValue(0.0)
+    d._rephase()
+    assert np.allclose(d._spec, before)                # result unchanged
+
+    d.phaseToggle.setChecked(False)                    # collapse again
+    assert d.phaseBox.isHidden()
+    assert np.allclose(d._spec, before)                # collapsing changes nothing
+    # magnitude mode still greys the (hidden or shown) phase controls
+    d.magMode.setChecked(True)
+    assert not d.p0.isEnabled() and not d.btnAutophase.isEnabled()
+    d.close()
+
+
+def test_phasing_section_state_is_not_persisted_under_no_session(qapp, tmp_path,
+                                                                 monkeypatch):
+    """Like the dialog geometry, the remembered open/closed state is gated by
+    LARMOR_NO_SESSION: tests never read or write the real QSettings."""
+    from larmor.desktop.qcpmg_dialog import QcpmgDialog
+
+    monkeypatch.setenv("LARMOR_NO_SESSION", "1")
+    assert QcpmgDialog._phasing_open_remembered() is False
+    d = _dialog_with(qapp, _synthetic_qcpmg(tmp_path))
+    d.phaseToggle.setChecked(True)
+    # a second dialog still starts collapsed: nothing was remembered
+    d2 = _dialog_with(qapp, _synthetic_qcpmg(tmp_path))
+    assert d2.phaseBox.isHidden()
+    d.close(); d2.close()
+
+
+def test_every_dialog_plot_axis_has_no_si_prefix(qapp, tmp_path):
+    """pyqtgraph would label a wideline ppm axis "kppm" (and an intensity
+    axis "k"): every plot in the dialog disables the SI prefix on BOTH axes."""
+    import pyqtgraph as pg
+
+    d = _dialog_with(qapp, _synthetic_qcpmg(tmp_path))
+    plots = d.findChildren(pg.PlotWidget)
+    assert len(plots) >= 8                             # all six stages' plots
+    for pw in plots:
+        for name in ("bottom", "left"):
+            assert pw.getPlotItem().getAxis(name).autoSIPrefix is False, name
     d.close()
 
 

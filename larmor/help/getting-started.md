@@ -153,11 +153,31 @@ red `Fit: not physical` only for an impossible value (a negative amplitude, η
 outside 0–1, a zero width). Each chip opens the matching detail (**F7** lists
 them all); an acquisition fact that is simply unknown raises no chip.
 
-**Appearance.** **View ▸ Theme** offers ten colour presets (five light, five dark
-— Light, Sepia, Solarized, Nord, Slate, Ocean, High-Contrast, …). The choice is
-remembered between sessions and re-colours everything — widgets, plot, curves,
-site markers — while keeping text, buttons and markers readable (every preset is
-contrast-checked). Pick whichever is easiest on your eyes.
+**Appearance.** **View ▸ Theme** offers ten colour presets, each with a swatch
+(window | accent | plot) next to its name and a tooltip naming what it follows.
+Light: **Light** (LARMOR's neutral near-white with the brand teal accent),
+**Sepia (paper)** (aged-paper chrome, parchment pages, brown ink and a
+saddle-brown accent), **Solarized Light** (Ethan Schoonover's base3/base2 cream
+with the Solarized blue accent) and **High Contrast Light** (pure white, black
+ink, cobalt). Dark: **Dark** (neutral graphite, brand teal), **Slate** (a cool
+blue-grey with a brass accent), **Nord** (the polar-night greys, snow-storm ink
+and frost accent of the Nord palette — the plot and its site colours use Nord's
+frost and aurora too), **Ocean** (deep blue-teal water with a sea-foam accent),
+**Solarized Dark** (base03/base02 with the Solarized blue and the scheme's own
+accents as site colours) and **High Contrast Dark** (pure black, white ink,
+yellow). The choice is remembered between sessions and re-colours everything —
+widgets, plot background, axes, grid, curves, site markers — while keeping text,
+buttons and markers readable (every preset is contrast-checked, and every pair
+of presets is held a perceptual distance apart so no two look alike). Pick
+whichever is easiest on your eyes.
+
+**View ▸ Theme ▸ More styles…** holds four just-for-fun styles — **Y2K**
+(glossy brushed silver with a lime accent), **Dreamcore** (a lilac haze),
+**Gen X Soft Club** (pastel mint with a soft rose accent) and **Vaporwave**
+(hot pink and cyan on indigo) — each shown with the same swatch. A style is
+applied at once, but dialogs built earlier keep the colours they were built
+with: restart LARMOR for every window to follow it (the chooser says so).
+**Normal** returns to the preset picked in the main list.
 
 **Finding a command.** **? ▸ Command palette…** (Ctrl + Shift + P) lists every
 menu and toolbar entry — menu path, label and shortcut — and filters as you type.

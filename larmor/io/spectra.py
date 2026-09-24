@@ -15,6 +15,12 @@ Format::
 
 Comment lines (``#``) are optional; the data may be comma- or whitespace-
 separated, so ordinary two-column exports load too.
+
+A QCPMG *Save as dataset...* writes two such files side by side -- the
+sum-echo envelope and the spikelet spectrum -- each normalised to unit
+maximum with the factor divided out kept as ``intensity_scale`` (so
+``raw = intensity * intensity_scale``), each naming the other under
+``twin_file`` and saying which it is under ``spectrum_kind``.
 """
 from __future__ import annotations
 
@@ -25,7 +31,12 @@ import numpy as np
 #: header keys parsed back as floats (lower-cased key -> canonical name)
 _FLOAT_KEYS = {"larmor_mhz": "larmor_MHz", "spin_rate_hz": "spin_rate_Hz",
                "qcpmg_rotor_hz": "qcpmg_rotor_Hz", "sf_mhz": "sf_MHz",
-               "sr_hz": "sr_hz", "lb_hz": "lb_Hz", "carrier_ppm": "carrier_ppm"}
+               "sr_hz": "sr_hz", "lb_hz": "lb_Hz", "carrier_ppm": "carrier_ppm",
+               "intensity_scale": "intensity_scale",
+               "spikelet_spacing_hz": "spikelet_spacing_Hz"}
+#: header keys parsed back as integers (echo-train bookkeeping)
+_INT_KEYS = {"echo_period_pts": "echo_period_pts",
+             "split_offset_pts": "split_offset_pts", "n_echoes": "n_echoes"}
 #: header keys parsed back as booleans
 _BOOL_KEYS = {"referenced": "referenced", "mas_uncertain": "mas_uncertain"}
 
@@ -36,7 +47,14 @@ _BOOL_KEYS = {"referenced": "referenced", "mas_uncertain": "mas_uncertain"}
 _RECIPE_KEYS = ("nucleus", "larmor_MHz", "spin_rate_Hz", "sample")
 _PROVENANCE_KEYS = ("qcpmg_rotor_Hz", "mas_uncertain", "spectrum_mode",
                     "lb_Hz", "sf_MHz", "sr_hz", "referenced", "carrier_ppm",
-                    "source", "title")
+                    "source", "title",
+                    # the QCPMG twin datasets (larmor.qcpmg.write_dataset_pair):
+                    # which spectrum this is, the maximum divided out of it
+                    # (raw = intensity * intensity_scale), its twin file and
+                    # the echo-train bookkeeping behind both
+                    "spectrum_kind", "intensity_scale", "twin_file",
+                    "spikelet_spacing_Hz", "echo_period_pts",
+                    "split_offset_pts", "n_echoes")
 
 
 def write_csv(path: str | Path, ppm: np.ndarray, amp: np.ndarray,
@@ -81,10 +99,11 @@ def read_csv(path: str | Path) -> tuple[np.ndarray, np.ndarray, dict]:
             if "=" in body:
                 k, val = body.split("=", 1)
                 k = k.strip().lower()
-                key = _FLOAT_KEYS.get(k, _BOOL_KEYS.get(k, k))
-                if k in _FLOAT_KEYS:
+                key = _FLOAT_KEYS.get(k, _INT_KEYS.get(k, _BOOL_KEYS.get(k, k)))
+                if k in _FLOAT_KEYS or k in _INT_KEYS:
                     try:
-                        meta[key] = float(val)
+                        meta[key] = (int(float(val)) if k in _INT_KEYS
+                                     else float(val))
                     except ValueError:
                         pass
                 elif k in _BOOL_KEYS:
