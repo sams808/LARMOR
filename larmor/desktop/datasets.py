@@ -103,10 +103,13 @@ class DatasetsPanel(QScrollArea):
         self.offset.valueChanged.connect(self.offset_changed)
         off.addWidget(self.offset)
         self.match = QCheckBox("match height")
-        self.match.setToolTip("fill each overlay's × scale with the factor that "
-                              "brings its maximum to the active spectrum's — one "
-                              "click, editable afterwards; untick for ×1 "
-                              "(display only; nothing is written)")
+        self.match.setToolTip(
+            "keep every overlay drawn at the active spectrum's height: each "
+            "row's × scale holds the matching factor, re-derived whenever the "
+            "active spectrum or the View ▸ Y axis mode changes. Typing a × by "
+            "hand (or right-click ▸ Reset) unticks this and stops the "
+            "matching; unticking puts every scale back to ×1 "
+            "(display only; nothing is written)")
         self.match.toggled.connect(self.match_changed)
         off.addWidget(self.match); off.addStretch(1)
         self._v.addLayout(off)

@@ -64,7 +64,9 @@ still write raw amplitudes into the recipe — while the recipe, the fit, the
 Report and every data export keep the raw units. Compared spectra (Datasets
 dock, see *Multi-dataset*) are normalised by their **own** maximum or area
 under the same mode, so lineshapes compare across spectra of very different
-intensity; their per-row × scale then acts on top. The y-axis label names the
+intensity; their per-row × scale then acts on top, and with **match height**
+ticked those scales are re-derived for the new mode, so the compared peaks
+keep agreeing with the active spectrum's. The y-axis label names the
 mode (*intensity (normalised to area 100…−20 ppm)*), the status bar's y
 readout shows the displayed value, and the choice is remembered between
 sessions. *Export figure…* and *Send to Plotting studio* on the plot's

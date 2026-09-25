@@ -217,6 +217,64 @@ def test_transform_round_trips_through_snapshot_and_project(win, tmp_path, monke
     assert np.allclose(win.view._overlay_items[0].xData, ov["ppm"])
 
 
+def test_match_height_keeps_matching_when_the_active_or_the_mode_changes(win, tmp_path):
+    """Group G (2026-09-24 review): the factor was baked into ov["scale"]
+    once, by the checkbox toggle and by _add_overlay, and nothing re-derived
+    it when the active spectrum or the Y-axis mode changed -- yet the box
+    stayed ticked and each row still showed its old ×. After 'Make active'
+    the demoted spectrum (re-added through _add_overlay) WAS matched to the
+    new active while every other overlay was still matched to the old one:
+    a set of overlays at mutually meaningless heights under a ticked box.
+    Pre-batch _refresh_overlays recomputed the ratio on every redraw, so the
+    ticked box did keep matching. It does again: ticked is a standing
+    request, and only an untick, a hand-typed × or Reset stop it."""
+    ppm, amp = _active(win)                              # active peak 100
+    p1, _ = _csv(tmp_path, "weak.csv", 5.0)
+    p2, _ = _csv(tmp_path, "strong.csv", 1000.0)
+    assert win.add_overlay_path(str(p1))
+    assert win.add_overlay_path(str(p2))
+    win.datasets_panel.match.setChecked(True)
+
+    def drawn():
+        return [float(it.yData.max()) for it in win.view._overlay_items]
+
+    def act():
+        return float(win.view._exp.yData.max())
+
+    assert drawn() == pytest.approx([act(), act()], rel=1e-9)
+
+    # (1) a View > Y axis change re-derives them
+    win._set_y_mode("max")
+    assert act() == pytest.approx(1.0)
+    assert drawn() == pytest.approx([1.0, 1.0], rel=1e-9)
+    win._set_y_mode("raw")
+    assert drawn() == pytest.approx([act(), act()], rel=1e-9)
+
+    # (2) a new active spectrum, half as tall: still matched to IT
+    amp2 = 50.0 * np.exp(-((ppm - 30.0) / 6.0) ** 2)
+    win._display_1d(ppm, amp2, "27Al", 130.3, 20000.0, "half", "half")
+    assert act() == pytest.approx(50.0, rel=1e-3)
+    assert drawn() == pytest.approx([act(), act()], rel=1e-9)
+    assert win.datasets_panel.match.isChecked()
+
+    # (3) Make active: the promoted overlay becomes the reference
+    win.overlay_make_active(0)
+    assert win.datasets_panel.match.isChecked()
+    assert win._overlays
+    assert drawn() == pytest.approx([act()] * len(win._overlays), rel=1e-9)
+    # every row's box shows the factor actually drawn
+    for i, ov in enumerate(win._overlays):
+        assert _row(win, i)["scale"].value() == pytest.approx(ov["scale"], rel=2e-3)
+
+    # a hand-typed × stops it: the box unticks and a later load leaves it alone
+    _row(win, 0)["scale"].setValue(3.0)
+    assert not win.datasets_panel.match.isChecked()
+    win._display_1d(ppm, amp, "27Al", 130.3, 20000.0, "active", "active")
+    assert win._overlays[0]["scale"] == 3.0
+    # nothing in any of this left display units in the stored arrays
+    assert np.array_equal(win.exp_amp, amp)
+
+
 def test_the_scale_box_holds_any_matching_factor_without_clamping(qapp):
     """Group C (2026-09-24 review): the × box was setRange(0.01, 1000) while
     the dict, the badge and the plot used the unclamped factor, so a matched

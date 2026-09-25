@@ -25,14 +25,21 @@ untouched — and the settings travel with the overlay into the workspace and
 the project file. Above the rows, the global **stack offset** spreads the
 overlays out (each row's own offset adds to it) and **match height** fills
 every row's scale with the factor that draws each overlay at the active
-spectrum's height; typing a scale by hand unticks it, unticking it returns
-every scale to ×1. Under **View ▸ Y axis** (see *1D spectra*) each overlay is
+spectrum's height. Under **View ▸ Y axis** (see *1D spectra*) each overlay is
 normalised by its own maximum or area first, so shapes compare across
 intensities, and the scale acts on top — so the matching factor is a
 *displayed*-height one and follows the mode: the ratio of the raw maxima
 under *Raw intensity*, ×1 under *Normalise to maximum* (both traces already
 reach 1) and the ratio of the displayed peaks under the two area modes. The
-drawn peaks therefore agree in every Y-axis mode. **Compare acquisition…** (beside the add button, live once
+drawn peaks therefore agree in every Y-axis mode.
+
+A ticked **match height** is a standing request, not a one-shot fill: the
+factors are re-derived whenever what they are matched *to* changes — a
+different Y-axis mode, a newly loaded active spectrum, **active** on a row, a
+workspace switch — so a ticked box always means the heights agree, and each
+row's × shows the factor in use. Typing a × by hand, or **Reset** on the row,
+unticks the box and stops the matching (the typed factor stays); unticking it
+returns every scale to ×1. **Compare acquisition…** (beside the add button, live once
 an overlay with a Bruker source exists) opens the comparability table of §6
 over the active spectrum and every overlay — `acqus` and `procs` side by
 side — and an overlay acquired or processed unlike the others carries a ⚠

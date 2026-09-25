@@ -177,17 +177,15 @@ class _OverlaysMixin:
         """Append a compared spectrum. Besides its arrays the dict carries
         the display transform -- ``scale`` (x1), ``shift`` (ppm) and
         ``yoff`` (a fraction of the active span) -- applied at draw time
-        only; with 'match height' ticked the scale starts at the matching
-        factor."""
+        only; with 'match height' ticked the scale is the matching factor
+        from the first draw on."""
         from larmor import display
         from larmor.desktop.datasets import overlay_color
 
         ov = {"label": label, "ppm": np.asarray(ppm), "amp": np.asarray(amp),
               "color": overlay_color(len(self._overlays)), "visible": True,
               "source": source, **display.OVERLAY_DEFAULTS, **(info or {})}
-        match = getattr(self.datasets_panel, "match", None)
-        if match is not None and match.isChecked():
-            ov["scale"] = self._match_scale(ov)
+        # with 'match height' ticked the scale is filled by _refresh_overlays
         self._overlays.append(ov)
         self._refresh_overlays()
         self.datasets_dock.raise_()
@@ -261,14 +259,18 @@ class _OverlaysMixin:
             shift=ov.get("shift", 0.0))
 
     def overlay_match_height(self, on: bool):
-        """Datasets > match height: ticked, every overlay's scale becomes
-        the factor that draws it at the active spectrum's height in the
-        current Y-axis mode -- written into its row, editable afterwards;
-        unticked, back to x1. Display only: the stored arrays and every
-        export are untouched."""
-        for ov in self._overlays:
-            ov["scale"] = self._match_scale(ov) if on else 1.0
-        self._refresh_overlays()
+        """Datasets > match height. Ticked, it is a STANDING request, not a
+        one-shot fill: every overlay's scale is the factor that draws it at
+        the active spectrum's height in the current Y-axis mode, re-derived
+        by _refresh_overlays whenever that could have changed (a new active
+        spectrum, Make active, a workspace switch, a View > Y axis change, a
+        row's shift). Typing a scale by hand, or right-click > Reset, unticks
+        it and stops the matching; unticking puts every scale back to x1.
+        Display only: the stored arrays and every export are untouched."""
+        if not on:
+            for ov in self._overlays:
+                ov["scale"] = 1.0
+        self._refresh_overlays()            # ticked: the scales are filled there
 
     def _uncheck_match(self):
         m = getattr(getattr(self, "datasets_panel", None), "match", None)
@@ -300,6 +302,21 @@ class _OverlaysMixin:
             return
         from larmor import display
 
+        # 'match height' is a standing request: while the box is ticked the
+        # scales are re-derived HERE, the ONE place every path that can
+        # invalidate them already ends in -- an added overlay, Make active, a
+        # freshly loaded active spectrum (mw_files), a workspace switch
+        # (mw_session), a View > Y axis change (mw_chrome), a row's shift.
+        # Unticking, a hand-typed x and right-click > Reset stop it, since
+        # they all go through _uncheck_match(). Before this the factor was
+        # baked in once and the box stayed ticked over stale numbers: after
+        # 'Make active' the demoted spectrum (re-added through _add_overlay)
+        # was matched to the new active while every other overlay was still
+        # matched to the old one.
+        match = getattr(self.datasets_panel, "match", None)
+        if match is not None and match.isChecked():
+            for ov in self._overlays:
+                ov["scale"] = self._match_scale(ov)
         # every overlay is drawn through larmor.display.overlay_display --
         # normalised by its OWN trace under View > Y axis, then its scale,
         # shift and offsets -- the stored arrays untouched; the offsets are
