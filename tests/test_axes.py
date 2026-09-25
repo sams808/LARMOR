@@ -199,6 +199,28 @@ def test_spectrum_view_shows_a_wideline_spectrum_in_thousands_of_ppm(qapp):
     assert _tick_span(ax) >= 4000, _tick_strings(ax)
 
 
+def test_spectrum_view_intensity_axis_is_plain_in_every_y_mode(qapp):
+    """The intensity axis carries no unit, so pyqtgraph is free to annotate it
+    "(x0.001)" and rescale the ticks: under View > Y axis > normalise to area a
+    0 ... 6e-8 axis read 0 ... 60 with an "n" prefix until apply_theme() made
+    BOTH axes plain (2026-09-24 review)."""
+    import numpy as np
+
+    from larmor.desktop.plot import SpectrumView
+
+    v = SpectrumView()
+    v.set_experiment(WIDE_PPM, 1e6 * np.asarray(WIDE_AMP, float))
+    _shown(qapp, v)
+    left = v.getPlotItem().getAxis("left")
+    for mode in ("raw", "max", "area"):
+        v.set_y_mode(mode)
+        qapp.processEvents()
+        assert left.autoSIPrefix is False, mode
+        assert left.autoSIPrefixScale == 1.0, (mode, left.autoSIPrefixScale)
+        assert left.labelUnitPrefix in ("", None), (mode, left.labelUnitPrefix)
+    _assert_plain(v, 1)
+
+
 def test_spectrum_view_keeps_thousands_of_ppm_after_a_theme_reapply(qapp):
     from larmor.desktop.plot import SpectrumView
 

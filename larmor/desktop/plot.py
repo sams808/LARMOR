@@ -505,7 +505,10 @@ class SpectrumView(pg.PlotWidget):
         # prefix INSIDE that call and never again once off, so re-applying
         # it from apply_theme() while a +-6000 ppm spectrum was shown froze a
         # "k" prefix -- ticks 6 ... -6 under a "(kppm)" label (Sam, 2026-09-24)
-        plain_units(pi, axes=("bottom",))
+        # BOTH axes: the intensity axis carries no unit, and pyqtgraph then
+        # annotates it "(x0.001)" and rescales the ticks -- under View > Y
+        # axis > normalise to area it read 0 ... 60 "n" for 0 ... 6e-8
+        plain_units(pi)
         self._apply_y_label()
         self.showGrid(x=True, y=True, alpha=t.grid_alpha)
         self._exp.setPen(pg.mkPen(t.experiment, width=1.4))
