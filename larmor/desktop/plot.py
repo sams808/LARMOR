@@ -370,24 +370,45 @@ class SpectrumView(pg.PlotWidget):
             return y
         return np.asarray(y, float) * f
 
-    def _apply_y_scale(self):
+    def _set_y_scale(self, new: float) -> float:
+        """Install the display factor and carry every item that LIVES in
+        display units with it -- the baseline anchors and the paddles --
+        returning the ratio new/old.
+
+        The one place ``_y_scale`` is assigned after construction, so the
+        handles follow a factor change from ANY cause. set_experiment() used
+        to assign the factor directly: a baseline anchor placed before a new
+        active spectrum arrived stayed where it was on screen while the
+        factor under it changed, so baseline_anchors() -- which divides the
+        anchor's display y by the CURRENT factor -- handed the processing
+        code a different RAW level from the one the user clicked, and
+        apply_manual_baseline() subtracted it from the data."""
         old = self._y_scale
-        self._y_scale = new = self._recompute_y_scale()
+        new = float(new)
+        if not np.isfinite(new) or new <= 0.0:
+            new = 1.0
+        self._y_scale = new
         r = new / old if old else 1.0
+        if r == 1.0 or not np.isfinite(r):
+            return 1.0
+        for anchor in self._bl_anchors:             # anchors sit at display y
+            p = anchor.pos()
+            anchor.setPos(p.x(), p.y() * r)
+        for pad, st in zip(self._paddles, self._paddle_states):
+            _idx, pos, amp, fwhm, _movable = st
+            pad.set_state(pos, amp * new, fwhm)
+        return r
+
+    def _apply_y_scale(self):
         # the zoom to carry over, read BEFORE the redraw: the new limits
         # envelope (display units) would clamp the old-unit range first
         vb = self.getPlotItem().getViewBox()
         _xr, (y0, y1) = vb.viewRange()
+        r = self._set_y_scale(self._recompute_y_scale())
         if self._trace_raw_y is not None and self._domain == "freq":
             self._exp.setData(self._freq_x, self._disp(self._trace_raw_y))
         if self._model_args is not None:
             self.set_model(*self._model_args)
-        for pad, st in zip(self._paddles, self._paddle_states):
-            _idx, pos, amp, fwhm, _movable = st
-            pad.set_state(pos, amp * new, fwhm)
-        for anchor in self._bl_anchors:             # anchors sit at display y
-            p = anchor.pos()
-            anchor.setPos(p.x(), p.y() * r)
         self._update_baseline_curve()
         # a fit in flight: its trail is in the old scale, the next frame is not
         self._anim_hist = []
@@ -1016,7 +1037,10 @@ class SpectrumView(pg.PlotWidget):
                 # already visible, so nothing else would create the pivot
                 self.show_phase_pivot(True)     # no-op once it exists
         self._trace_raw_y = y
-        self._y_scale = self._recompute_y_scale()   # the active spectrum changed
+        # the active spectrum changed, so the factor does -- through
+        # _set_y_scale, never by assignment, so the baseline anchors and the
+        # paddles (which live in display units) follow it
+        self._set_y_scale(self._recompute_y_scale())
         self._exp.setData(x, self._disp(y))
         self._update_limits()
         self.set_trace_label("experiment")

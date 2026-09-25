@@ -183,6 +183,50 @@ def test_zoom_follows_and_click_to_add_maps_back_to_raw(qapp, view):
     assert pts[0][1] == pytest.approx(0.4 / f) and pts[1][1] == pytest.approx(0.2 / f)
 
 
+def test_a_new_active_spectrum_carries_the_display_unit_handles(qapp, view):
+    """Group E (2026-09-24 review, severity high): set_experiment() assigned
+    self._y_scale directly instead of going through the rescale
+    _apply_y_scale performs, so a baseline anchor placed before a load stayed
+    put on screen while the factor under it changed -- and
+    baseline_anchors(), which divides the anchor's display y by the CURRENT
+    factor, then returned a RAW level the user never clicked.
+    apply_manual_baseline() subtracts exactly that from the data."""
+    x = np.linspace(200.0, -100.0, 1024)
+    wings = 2.0 * np.ones_like(x)
+    yA = wings + 100.0 * np.exp(-((x - 60.0) / 5.0) ** 2)
+    view.set_experiment(x, yA)
+    view.set_y_mode("max")
+    fA = view.y_scale()
+    assert fA == pytest.approx(1.0 / float(yA.max()))
+    view.set_paddles([(0, 60.0, 100.0, 5.0, True)])
+    view.set_baseline_mode(True)
+    view._add_baseline_anchor(-80.0, 2.0 * fA)          # on the drawn wings
+    view._add_baseline_anchor(80.0, 2.0 * fA)
+    assert [p[1] for p in view.baseline_anchors()] == pytest.approx([2.0, 2.0])
+
+    # a new active spectrum: the SAME wings, twice the peak -- so the factor
+    # halves while the raw level under the anchors is still 2.0
+    yB = wings + 200.0 * np.exp(-((x - 60.0) / 5.0) ** 2)
+    view.set_experiment(x, yB)
+    fB = view.y_scale()
+    assert fB == pytest.approx(1.0 / float(yB.max()))
+    assert fB < 0.6 * fA
+    # the raw level read back out of the handles is the one that was placed
+    assert [p[1] for p in view.baseline_anchors()] == pytest.approx([2.0, 2.0])
+    assert float(view.baseline_curve(x).max()) == pytest.approx(2.0)
+    # ... and on screen they still sit on the drawn wings
+    assert [float(t.pos().y()) for t in view._bl_anchors] == \
+        pytest.approx([2.0 * fB, 2.0 * fB])
+    assert float(view._bl_curve.yData.max()) == pytest.approx(2.0 * fB)
+    # the paddle is a display-unit handle too: it follows and still reports raw
+    got = []
+    view.paddle_moved.connect(lambda *a: got.append(a))
+    assert view._paddles[0]._amp == pytest.approx(100.0 * fB)
+    view._paddles[0]._handle_dragged("top", QPointF(60.0, 50.0 * fB))
+    assert got[-1][2] == pytest.approx(50.0)                 # raw amplitude
+    view.set_baseline_mode(False)
+
+
 # ------------------------------------------------------------- MainWindow
 def _active(win):
     ppm = np.linspace(80.0, -20.0, 600)
