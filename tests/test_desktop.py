@@ -1843,8 +1843,12 @@ def test_datasets_compare_button_and_overlay_marker(qapp, win, monkeypatch):
     win.overlay_set_color(0, "#123456")
     assert calls["n"] == n
     seen = []
-    monkeypatch.setattr(comparability_dialog.ComparabilityDialog, "exec",
-                        lambda self: seen.append(self._cmp) or 0)
+    # the table opens as a non-modal tool window (0.14.3), not through exec()
+    from larmor.desktop import windowtray
+    monkeypatch.setattr(
+        windowtray, "show_tool_window",
+        lambda dlg, owner=None: (seen.append(dlg._cmp) if isinstance(
+            dlg, comparability_dialog.ComparabilityDialog) else None) or dlg)
     win.datasets_panel.compare_requested.emit()
     qapp.processEvents()
     assert len(seen) == 1 and seen[0].report("LB").deviants == [1]
