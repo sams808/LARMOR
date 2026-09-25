@@ -46,14 +46,25 @@ Workplan"; this file is the ground truth for progress.
   (`dist/LARMOR-0.14.3-setup.exe` 105 MB, `dist/LARMOR-0.14.3-win64.zip`
   151 MB): frozen exe `--selftest` pass, silent install 40 s (1993 files),
   installed exe self-test pass, Apps entry "LARMOR 0.14.3", silent uninstall
-  clean. Hand out the 0.14.3 setup; the 0.14.2 files are superseded.
+  clean. **0.14.4** built after the review fixes
+  (`dist/LARMOR-0.14.4-setup.exe` 105 MB, `dist/LARMOR-0.14.4-win64.zip`
+  151 MB): frozen exe `--selftest` pass, silent install 35 s (1993 files),
+  installed exe self-test pass, Apps entry "LARMOR 0.14.4", silent
+  uninstall clean. **Hand out the 0.14.4 setup**; every earlier file in
+  `dist/` is superseded.
 - **Full suite**: at v0.14.0 (0de34c7), **1324 passed / 0 failed** in 20 min 39 s,
   real-data layer complete (all 19 datasets present). v0.14.1 (faab8f9) adds
   `larmor/selftest.py`, the quick overlays and their tests (scoped runs
   green; the full suite was not re-run for it). **v0.14.2 (cc8b1ca): 1366
   passed / 0 failed** in 20 min 21 s, real-data layer complete (19 datasets).
   **v0.14.3: 1561 passed / 0 failed** in 34 min 12 s (1561 tests in 116
-  files), real-data layer complete.
+  files), real-data layer complete. **v0.14.4: 1570 passed / 0 failed**,
+  real-data layer complete — the run reports 8 h 53 min of WALL time
+  because the machine slept from 23:34 to 08:00 (Kernel-Power 42/107);
+  the compute was ~27 min, and a before/after benchmark of the plot paths
+  the review touched (set_experiment, set_overlays, setXRange, zoom_full,
+  set_model, Y-mode round trip) shows no regression: every one is within
+  a millisecond of 0.14.3 except zoom_full, 0.97 → 2.15 ms.
 - **0.14.1 (2026-09-23, same day)**: a student's frozen 0.14.0 opened spectra
   but "fitting did not work". The fit path was verified in the exe's own
   package set — console-less Python of `packaging/.buildenv`, then the frozen
@@ -153,6 +164,46 @@ Workplan"; this file is the ground truth for progress.
   Integrals region dragged to zero width); no per-theme site palette for
   Sepia / Ocean / Slate; the magnitude checkbox is not ticked by default
   (a pinned test expects absorption on load) — a two-line change if wanted.
+- **0.14.4 (2026-09-24, the review of 0.14.3)**: because four agents wrote
+  0.14.3 in parallel and only scoped tests had seen it, the whole diff went
+  through a six-lens adversarial review (Qt lifetime, the display transform,
+  the view range, QCPMG data integrity, persistence, merge damage and tests
+  that cannot fail), each finding verified by a skeptic told to refute it:
+  **29 raised, 15 confirmed, 14 refuted**, deduplicating to seven defects —
+  four lenses had independently found the first one. All fixed, each with a
+  test checked to fail against the unfixed code:
+  **(A)** "match height" stored a ratio of RAW maxima while
+  `display.overlay_display` had already normalised each overlay by its own
+  trace, so under *Normalise to maximum* an overlay was drawn
+  max(active)/max(overlay) times too tall (20× measured); the stored factor
+  is now display-space (`display.match_scale_display`), so ×1 always means
+  "as tall as the active spectrum". **(G)** the same factor went stale after
+  *Make active*, a new spectrum or a mode change; a ticked box now re-derives
+  in `_refresh_overlays` (the one path they all funnel through) and an untick,
+  a typed value or Reset stops it. **(E, high)** `set_experiment` assigned
+  `_y_scale` directly, so the baseline anchors and paddles already on the plot
+  kept the old display units: an anchor clicked at raw 2.0 read back 3.96
+  after loading a spectrum twice as tall, and the manual baseline subtracted
+  that. `_set_y_scale()` is now the only assignment and rescales both.
+  **(D)** *View all* framed only the active trace, dropping the compared
+  spectra that the same batch had made scalable and shiftable (before the
+  batch it auto-ranged and included them); `full_extents(..., extra=)` unions
+  the visible overlays as drawn, still excluding the model and far paddles.
+  **(C)** the Datasets ×-box clamped to [0.01, 1000] while the dict and the
+  plot used the real factor, so it showed a different number and one arrow
+  click destroyed it; the range is now 0 … 1e9 with adaptive decimals and
+  `_set_quiet` widens the box for anything outside it. **(F)** a Y-mode change
+  with the FID on screen lost the spectrum's saved zoom (the stored range was
+  in the old display units). **(B)** the intensity axis was the one physical
+  axis left auto-SI-prefixed: under *Normalise to area* a 0 … 6e-8 axis read
+  0 … 60 with an "n" prefix, and under *maximum* a 0 … 1 axis read micro —
+  `apply_theme` passed `axes=("bottom",)` where the default is both.
+  Deliberately NOT acted on: the fourteen refuted claims, several of them
+  plausible (that the QCPMG twin files lose raw units; that the Plotting
+  studio is handed normalised intensities; that the pan-limit envelope hides
+  the residual strip). One consequence recorded in the manual: a project saved
+  under a normalisation mode stores the DISPLAYED match factor, so re-ticking
+  the box after reopening in another mode restores the right one.
 
 ## Done — the workplan is closed
 
