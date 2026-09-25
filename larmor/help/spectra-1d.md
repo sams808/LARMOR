@@ -36,12 +36,17 @@ The wheel zooms about the cursor (over an axis: that axis only) and a left
 drag pans. **Full** (the sidebar button, *View ▸ Zoom ▸ Full spectrum*) resets
 the view to the **data**: the x axis spans exactly the acquired spectrum, high
 → low ppm with a 2 % margin, and the y axis runs from the data minimum to its
-maximum with room for the residual strip below zero. The range is computed
-from the spectrum's own arrays, never from the drawn items, so a model
-simulated on the wider Czjzek kernel axis, a fit in progress or a linked
-sideband paddle outside the data cannot widen it; on the FID display
-(**Ctrl+T**) the same button spans the acquisition time. The view then holds:
-a simulation or a fit result never moves it.
+maximum with room for the residual strip below zero. Any **compared spectrum**
+on screen (Datasets dock, see *Multi-dataset*) is framed with it, as it is
+drawn — after its scale, shift, offsets and the Y-axis normalisation — so a
+reference over a wider ppm range, or a stack lifted by the stack offset, is
+inside the Full view rather than beyond it; hiding the overlays
+(**View ▸ Overlays**) takes them back out of it. The range is computed from
+the arrays, never from the drawn *model* items, so a model simulated on the
+wider Czjzek kernel axis, a fit in progress or a linked sideband paddle
+outside the data cannot widen it; on the FID display (**Ctrl+T**) the same
+button spans the acquisition time. The view then holds: a simulation or a fit
+result never moves it.
 
 Panning or zooming cannot leave the spectrum behind. The view is bounded to
 one data span beyond each end, and a pan or zoom-out that would no longer show

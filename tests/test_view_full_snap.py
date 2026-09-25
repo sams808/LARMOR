@@ -108,6 +108,48 @@ def test_zoom_full_is_the_data_extent_not_the_auto_range(qapp, view):
     assert not any(vb.autoRangeEnabled())                 # the view holds
 
 
+def test_zoom_full_frames_the_visible_overlays(qapp, view):
+    """Group D (2026-09-24 review): zoom_full built its range from
+    _display_arrays(), the active trace alone, so a compared spectrum over a
+    wider ppm range -- or lifted by the Datasets dock's stack offset -- was
+    outside the view the Full command had just set. Before the batch
+    zoom_full was enableAutoRange(), which framed the overlay curves."""
+    x, y = _data()                                      # 640 ... -580 ppm
+    view.set_experiment(x, y)
+    ox = x + 900.0                                      # 1540 ... 320
+    oy = y + 3.0e6                                      # stacked above
+    view.set_overlays([(ox, oy, "#ff0000", "ref")])
+    view.set_paddles([(0, 6000.0, 1.8e6, 30.0, False)])  # a far sideband copy
+    view.zoom_full()
+    qapp.processEvents()
+    lo, hi = _xr(view)
+    ylo, yhi = _yr(view)
+    assert lo < -580.0 and hi > 1540.0                  # the overlay is inside
+    assert hi < 2000.0                                  # the far paddle is not
+    assert yhi > float(oy.max()) and ylo < float(y.min())
+    assert ylo < -display.RESID_ROOM_FRAC * float(y.max())   # the resid strip
+    assert not any(view.getPlotItem().getViewBox().autoRangeEnabled())
+
+    # the snap-back target frames exactly the same thing
+    view.setXRange(20.0, 100.0, padding=0)
+    view.setXRange(-9000.0, -8000.0, padding=0)         # entirely off the data
+    qapp.processEvents()
+    assert _xr(view) == pytest.approx((lo, hi))
+    assert _yr(view) == pytest.approx((ylo, yhi))
+
+    # View > Overlays (hidden) takes them back out of Full
+    view.set_overlays_hidden(True)
+    view.zoom_full()
+    qapp.processEvents()
+    assert _xr(view)[1] < 700.0
+    assert _yr(view) == pytest.approx(display.full_extents(x, y)[1])
+    view.set_overlays_hidden(False)
+    view.set_overlays([])
+    view.zoom_full()
+    qapp.processEvents()
+    assert _xr(view)[1] < 700.0
+
+
 def test_zoom_full_on_the_fid_axis_and_back(qapp, view):
     x, y = _data()
     view.set_experiment(x, y)

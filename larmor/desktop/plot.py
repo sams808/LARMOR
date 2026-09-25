@@ -1311,10 +1311,12 @@ class SpectrumView(pg.PlotWidget):
         """View > Zoom > Full spectrum and the sidebar's Full: the x range is
         the displayed trace's extent (+ FULL_MARGIN_FRAC of its span on each
         side, high -> low ppm on the inverted axis), the y range its
-        min...max with room for the residual strip below zero -- from the
-        data arrays (larmor.display.full_extents), never from pyqtgraph's
-        auto-range, which the model items would widen. The same on the
-        FID's ms axis. Auto-range stays off afterwards: the view holds."""
+        min...max with room for the residual strip below zero, both united
+        with the VISIBLE compared spectra as they are drawn -- from the data
+        arrays (larmor.display.full_extents), never from pyqtgraph's
+        auto-range, which the model items and the paddles would widen. The
+        same on the FID's ms axis. Auto-range stays off afterwards: the view
+        holds."""
         ext = self._full_extents()
         pi = self.getPlotItem()
         if ext is None:
@@ -1337,11 +1339,24 @@ class SpectrumView(pg.PlotWidget):
             y = self._disp(self._freq_y)
         return x, y
 
+    def _overlay_arrays(self):
+        """[(x, y), ...] of the VISIBLE compared spectra exactly as drawn --
+        scale, shift, offsets and Y normalisation already applied by
+        larmor.display.overlay_display, so the Full view frames what is on
+        screen. Empty while the FID is shown (the items are hidden then)."""
+        return [(it.xData, it.yData) for it in self._overlay_items
+                if it.isVisible()]
+
     def _full_extents(self):
+        """The Full view's range: the active trace's extent united with the
+        visible overlays'. Deliberately NOT the model curve or the paddles
+        -- a Czjzek kernel axis or a linked sideband copy outside the data
+        must not widen Full (test_zoom_full_is_the_data_extent_not_the_auto
+        _range) -- but a compared spectrum is data the user asked to see."""
         x, y = self._display_arrays()
         if x is None or y is None:
             return None
-        return display.full_extents(x, y)
+        return display.full_extents(x, y, extra=self._overlay_arrays())
 
     @staticmethod
     def _bounds_of(arrays):
@@ -1361,7 +1376,7 @@ class SpectrumView(pg.PlotWidget):
         sideband copy can sit outside the data); None without data."""
         x, _ = self._display_arrays()
         lo, hi = self._bounds_of(
-            [x] + [it.xData for it in self._overlay_items if it.isVisible()])
+            [x] + [ox for ox, _oy in self._overlay_arrays()])
         for pad in self._paddles:
             if pad.isVisible():
                 lo.append(float(pad._pos))
@@ -1374,7 +1389,7 @@ class SpectrumView(pg.PlotWidget):
         lo, hi = self._bounds_of(
             [self._exp.yData,
              self._model.yData if self._model.isVisible() else None]
-            + [it.yData for it in self._overlay_items if it.isVisible()])
+            + [oy for _ox, oy in self._overlay_arrays()])
         for pad in self._paddles:
             if pad.isVisible():
                 lo.append(min(0.0, float(pad._amp)))

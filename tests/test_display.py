@@ -186,6 +186,26 @@ def test_full_extents_come_from_the_data_with_margin_and_residual_room():
     assert (xlo2, xhi2) == (xlo, xhi)
 
 
+def test_full_extents_unions_the_drawn_overlays():
+    """Group D (2026-09-24 review): Full was built from the active trace
+    alone, so a compared spectrum over a wider ppm range (or lifted by the
+    stack offset) sat outside the view the Full command had just set."""
+    x, y = _spectrum()
+    ox = np.linspace(400.0, -300.0, 501)
+    oy = 0.5 * float(y.max()) * np.exp(-((ox - 200.0) / 40.0) ** 2) + 2.0 * float(y.max())
+    (xlo, xhi), (ylo, yhi) = display.full_extents(x, y, extra=[(ox, oy)])
+    assert xlo < -300.0 and xhi > 400.0                  # the overlay's wings
+    assert yhi > float(oy.max()) and ylo < float(y.min())
+    # the residual strip's room still comes from the ACTIVE maximum
+    assert ylo < -display.RESID_ROOM_FRAC * float(y.max())
+    # no overlays, an empty pair or a NaN-only pair: the old answer exactly
+    base = display.full_extents(x, y)
+    assert display.full_extents(x, y, extra=[]) == base
+    assert display.full_extents(x, y, extra=[([], [])]) == base
+    assert display.full_extents(x, y, extra=[([np.nan], [np.nan])]) == base
+    assert display.full_extents([], [], extra=[(ox, oy)]) is None
+
+
 def test_snap_back_rule():
     data = (-100.0, 200.0)                       # span 300
     assert display.snap_back((250.0, 400.0), data)         # entirely right of the data

@@ -20,10 +20,11 @@ the numbers without a window:
   scale is therefore a DISPLAY-space number and 'match height' fills it
   through :func:`match_scale_display`, not with the raw peak ratio.
 * **The Full view**: the data's x extent with a small margin and a y range
-  with room for the residual strip below zero, computed from the arrays
-  (never from pyqtgraph's auto-range, which the model items would widen),
-  plus the rule that sends a view back to it when it no longer shows the
-  data at all or has zoomed out far beyond it.
+  with room for the residual strip below zero, united with the compared
+  spectra as they are drawn and computed from the arrays (never from
+  pyqtgraph's auto-range, which the model items and the paddles would
+  widen), plus the rule that sends a view back to it when it no longer shows
+  the data at all or has zoomed out far beyond it.
 """
 from __future__ import annotations
 
@@ -237,20 +238,32 @@ def overlay_badge(scale: float = 1.0, shift: float = 0.0,
 # ------------------------------------------------------------- the Full view
 def full_extents(x, y, margin_frac: float = FULL_MARGIN_FRAC,
                  resid_frac: float = RESID_ROOM_FRAC,
-                 pad_frac: float = Y_PAD_FRAC):
+                 pad_frac: float = Y_PAD_FRAC, extra=()):
     """``((xlo, xhi), (ylo, yhi))`` of the Full view from the data arrays
     alone: the x extent widened by ``margin_frac`` of its span on each side,
     the y extent with ``resid_frac`` of the maximum kept free below zero for
     the residual strip and ``pad_frac`` of the height as padding. None when
-    there is no finite point."""
+    the active trace has no finite point.
+
+    ``extra`` is a sequence of ``(x, y)`` pairs unioned in before the margin
+    and the padding are applied -- the VISIBLE compared spectra AS DRAWN
+    (scale, shift, offsets and normalisation already applied), so Full frames
+    them too. The residual strip's room is keyed to the ACTIVE maximum: the
+    strip belongs to the fit, not to an overlay stacked above it."""
     x, y = _finite_pair(x, y)
     if not x.size:
         return None
     xlo, xhi = float(x.min()), float(x.max())
-    span = xhi - xlo
-    m = margin_frac * span if span > 0 else max(abs(xlo) * 0.01, 1.0)
     ylo, yhi = float(y.min()), float(y.max())
     ylo = min(ylo, -resid_frac * yhi)          # room for the residual strip
+    for ex, ey in extra or ():
+        ex, ey = _finite_pair(ex, ey)
+        if not ex.size:
+            continue
+        xlo, xhi = min(xlo, float(ex.min())), max(xhi, float(ex.max()))
+        ylo, yhi = min(ylo, float(ey.min())), max(yhi, float(ey.max()))
+    span = xhi - xlo
+    m = margin_frac * span if span > 0 else max(abs(xlo) * 0.01, 1.0)
     pad = pad_frac * ((yhi - ylo) or 1.0)
     return (xlo - m, xhi + m), (ylo - pad, yhi + pad)
 
