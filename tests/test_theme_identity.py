@@ -242,7 +242,13 @@ def test_plot_follows_the_theme(qapp, name):
 
     previous = T.active().name
     try:
-        t = T.apply(qapp, name)
+        # app=None: set the active theme and pyqtgraph's defaults WITHOUT
+        # restyling the QApplication -- QApplication.setStyleSheet re-polishes
+        # every live widget, and late in the full suite (thousands of widgets
+        # from earlier tests still alive) 14 themes x 2 calls took > 30 min
+        # and looked like a hang (faulthandler dumps at theme.apply). The
+        # view built next reads theme.active(), which is what is under test.
+        t = T.apply(None, name)
         view = P.SpectrumView()
         pi = view.getPlotItem()
         assert _qcolor_hex(view.backgroundBrush().color()) == t.plot_bg
@@ -270,7 +276,7 @@ def test_plot_follows_the_theme(qapp, name):
         view.clear_baseline()
         view.close()
     finally:
-        T.apply(qapp, previous)
+        T.apply(None, previous)             # symmetric: the app was never restyled
 
 
 def test_swatch_icon_shows_window_accent_and_plot(qapp):
