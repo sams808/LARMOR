@@ -187,7 +187,7 @@ class _OverlaysMixin:
               "source": source, **display.OVERLAY_DEFAULTS, **(info or {})}
         match = getattr(self.datasets_panel, "match", None)
         if match is not None and match.isChecked():
-            ov["scale"] = display.match_scale(self.exp_amp, ov["amp"])
+            ov["scale"] = self._match_scale(ov)
         self._overlays.append(ov)
         self._refresh_overlays()
         self.datasets_dock.raise_()
@@ -239,16 +239,35 @@ class _OverlaysMixin:
             self._uncheck_match()
             self._refresh_overlays()
 
-    def overlay_match_height(self, on: bool):
-        """Datasets > match height: ticked, every overlay's scale becomes
-        the factor that brings its maximum to the active spectrum's --
-        written into its row, editable afterwards; unticked, back to x1.
-        Display only: the stored arrays and every export are untouched."""
+    def _match_scale(self, ov) -> float:
+        """The 'match height' × for one overlay: the factor that makes its
+        DRAWN peak equal the active spectrum's drawn peak in the View > Y
+        axis mode currently in force.
+
+        A DISPLAY-space factor is stored rather than the raw peak ratio
+        divided out again at draw time, because the × box, the row badge,
+        the workspace snapshot and the project file then all speak the same
+        language as the plot: ``display.overlay_display`` multiplies the
+        overlay's OWN normalised trace by this number, so '× 1' always means
+        'exactly as tall as the active spectrum'. Under Raw intensity both
+        display factors are 1.0 and the stored number is the raw peak ratio
+        0.14.3 wrote, unchanged."""
         from larmor import display
 
+        mode, region = self.view.y_mode()
+        return display.match_scale_display(
+            self.exp_amp, ov["ppm"], ov["amp"],
+            active_factor=self.view.y_scale(), mode=mode, region=region,
+            shift=ov.get("shift", 0.0))
+
+    def overlay_match_height(self, on: bool):
+        """Datasets > match height: ticked, every overlay's scale becomes
+        the factor that draws it at the active spectrum's height in the
+        current Y-axis mode -- written into its row, editable afterwards;
+        unticked, back to x1. Display only: the stored arrays and every
+        export are untouched."""
         for ov in self._overlays:
-            ov["scale"] = (display.match_scale(self.exp_amp, ov["amp"])
-                           if on else 1.0)
+            ov["scale"] = self._match_scale(ov) if on else 1.0
         self._refresh_overlays()
 
     def _uncheck_match(self):

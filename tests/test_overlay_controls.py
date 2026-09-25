@@ -134,6 +134,43 @@ def test_match_height_fills_the_scale_and_stays_a_helper(win, tmp_path):
     assert win.view._overlay_items[0].yData.max() == pytest.approx(ref_max, rel=1e-9)
 
 
+def test_match_height_matches_the_drawn_peaks_in_every_y_mode(win, tmp_path):
+    """Group A (2026-09-24 review): the stored × was the ratio of the two RAW
+    maxima while each overlay is drawn normalised by its OWN trace, so under
+    View > Y axis > Normalise to maximum the overlay came out
+    max(active)/max(overlay) times the active spectrum -- 20x here. The
+    factor is now a display-space one: the drawn peaks agree in every mode,
+    and raw mode still stores the raw ratio."""
+    ppm, amp = _active(win)
+    path, _ref = _csv(tmp_path, "weak.csv", 5.0)
+    assert win.add_overlay_path(str(path))
+    ov = win._overlays[0]
+    raw_ratio = float(amp.max()) / float(ov["amp"].max())
+    assert raw_ratio == pytest.approx(20.0, rel=1e-3)
+    stored = ov["amp"].copy()
+
+    def drawn():
+        return (float(win.view._exp.yData.max()),
+                float(win.view._overlay_items[0].yData.max()))
+
+    for mode, region, expect in (("raw", None, raw_ratio),
+                                 ("max", None, 1.0),
+                                 ("area", None, None),
+                                 ("region", (60.0, 0.0), None)):
+        win.view.set_y_mode(mode, region)
+        win.datasets_panel.match.setChecked(False)
+        win.datasets_panel.match.setChecked(True)
+        act_peak, ov_peak = drawn()
+        assert ov_peak == pytest.approx(act_peak, rel=1e-9), mode
+        if expect is not None:
+            assert ov["scale"] == pytest.approx(expect, rel=1e-3), mode
+        # the box the user reads shows the factor actually in use
+        assert _row(win)["scale"].value() == pytest.approx(ov["scale"], rel=2e-3), mode
+        # RAW units everywhere but the canvas
+        assert np.array_equal(ov["amp"], stored) and np.array_equal(win.exp_amp, amp)
+    win.view.set_y_mode("raw")
+
+
 def test_transform_round_trips_through_snapshot_and_project(win, tmp_path, monkeypatch):
     win._confirm_open_mode = lambda: "replace"
     win._report_project_notes = lambda notes: None

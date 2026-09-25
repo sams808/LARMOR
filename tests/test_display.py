@@ -126,6 +126,45 @@ def test_match_scale_and_badge():
     assert display.overlay_badge(1.0, 0.0, -0.5) == "↓0.5"
 
 
+def test_match_scale_display_matches_the_DRAWN_peaks_in_every_y_mode():
+    """Group A (2026-09-24 review): 'match height' stored the ratio of the
+    two RAW maxima while overlay_display normalised each overlay by its own
+    trace first, so under View > Y axis the overlay was drawn
+    max(active)/max(overlay) times the active spectrum. The factor is a
+    DISPLAY-space number: whatever the mode, the drawn peaks agree."""
+    ppm = np.linspace(200.0, -100.0, 1001)
+    act = 1.0e6 * np.exp(-((ppm - 10.0) / 20.0) ** 2)
+    ov = 1.0e3 * np.exp(-((ppm + 30.0) / 25.0) ** 2)
+
+    for mode, region in (("raw", None), ("max", None), ("area", None),
+                         ("region", (60.0, -80.0))):
+        fa = display.y_factor(mode, ppm, act, region)
+        s = display.match_scale_display(act, ppm, ov, active_factor=fa,
+                                        mode=mode, region=region)
+        _x, drawn = display.overlay_display(ppm, ov, scale=s, mode=mode,
+                                            region=region)
+        assert float(drawn.max()) == pytest.approx(float(act.max()) * fa), mode
+    # raw mode is byte-identical to the old raw ratio ...
+    assert display.match_scale_display(act, ppm, ov) == display.match_scale(act, ov)
+    assert display.match_scale_display(act, ppm, ov) == pytest.approx(1000.0, rel=1e-3)
+    # ... and 'normalise to maximum' is exactly 1.0 (both traces reach 1)
+    assert display.match_scale_display(
+        act, ppm, ov, active_factor=display.y_factor("max", ppm, act),
+        mode="max") == pytest.approx(1.0)
+    # the overlay's own factor follows its SHIFT, like overlay_display's
+    s = display.match_scale_display(act, ppm, ov, active_factor=1.0,
+                                    mode="region", region=(60.0, -80.0),
+                                    shift=40.0)
+    _x, drawn = display.overlay_display(ppm, ov, scale=s, shift=40.0,
+                                        mode="region", region=(60.0, -80.0))
+    assert float(drawn.max()) == pytest.approx(float(act.max()))
+    # degenerate references fall back to x1 rather than blowing the plot up
+    assert display.match_scale_display(np.zeros(5), ppm, ov) == 1.0
+    assert display.match_scale_display(act, ppm, np.zeros_like(ov)) == 1.0
+    assert display.match_scale_display(act, ppm, ov, active_factor=0.0) == \
+        pytest.approx(1000.0, rel=1e-3)            # a bad factor reads as 1.0
+
+
 # ------------------------------------------------------------- the Full view
 def test_full_extents_come_from_the_data_with_margin_and_residual_room():
     x, y = _spectrum()

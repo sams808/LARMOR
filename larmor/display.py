@@ -16,7 +16,9 @@ the numbers without a window:
   displayed span) plus the global stack offset, applied to a compared
   spectrum's arrays at draw time only. Under a normalisation mode each
   overlay is normalised by its OWN maximum / area first, so shapes compare
-  across spectra of different intensity; the scale then acts on top.
+  across spectra of different intensity; the scale then acts on top. The
+  scale is therefore a DISPLAY-space number and 'match height' fills it
+  through :func:`match_scale_display`, not with the raw peak ratio.
 * **The Full view**: the data's x extent with a small margin and a y range
   with room for the residual strip below zero, computed from the arrays
   (never from pyqtgraph's auto-range, which the model items would widen),
@@ -172,16 +174,46 @@ def overlay_display(ppm, amp, *, scale: float = 1.0, shift: float = 0.0,
     return x, y * (f * float(scale)) + (float(yoff) + float(stack)) * float(span)
 
 
+def _peak(y) -> float:
+    """The trace's maximum, 0.0 when it has no finite point."""
+    a = np.asarray(y, float).ravel()
+    if not a.size or not np.isfinite(a).any():
+        return 0.0
+    return float(np.nanmax(a))
+
+
 def match_scale(active_amp, amp) -> float:
-    """The scale that brings an overlay's maximum to the active spectrum's
-    ('match height'); 1.0 when either maximum is not positive."""
-    a = np.asarray(active_amp, float).ravel()
-    b = np.asarray(amp, float).ravel()
-    if not a.size or not b.size:
-        return 1.0
-    pa = float(np.nanmax(a)) if np.isfinite(a).any() else 0.0
-    pb = float(np.nanmax(b)) if np.isfinite(b).any() else 0.0
+    """The scale that brings an overlay's RAW maximum to the active
+    spectrum's raw maximum; 1.0 when either maximum is not positive."""
+    pa, pb = _peak(active_amp), _peak(amp)
     if pa <= 0.0 or pb <= 0.0:
+        return 1.0
+    return pa / pb
+
+
+def match_scale_display(active_amp, ppm, amp, *, active_factor: float = 1.0,
+                        mode: str = "raw", region=None,
+                        shift: float = 0.0) -> float:
+    """The 'match height' factor as :func:`overlay_display` consumes it: the
+    × that makes this overlay's DRAWN peak equal the active spectrum's drawn
+    peak under ``mode``.
+
+    ``active_factor`` is what the active trace is drawn with (the view's
+    y_scale); the overlay's own factor is derived here exactly as
+    ``overlay_display`` does -- from its SHIFTED axis, so a lined-up
+    reference matches over the same region. The result is therefore
+    ``(max_active · f_active) / (max_overlay · f_overlay)``: the raw peak
+    ratio under "raw" (where both factors are 1.0), exactly 1.0 under "max"
+    (both traces already reach 1.0) and the displayed-peak ratio under
+    "area" / "region". 1.0 whenever a reference is not positive and finite.
+    """
+    x = np.asarray(ppm, float) + float(shift)
+    fb = y_factor(mode, x, amp, region)
+    fa = float(active_factor)
+    if not np.isfinite(fa) or fa <= 0.0:
+        fa = 1.0
+    pa, pb = _peak(active_amp) * fa, _peak(amp) * fb
+    if pa <= 0.0 or pb <= 0.0 or not np.isfinite(pa / pb):
         return 1.0
     return pa / pb
 
