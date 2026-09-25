@@ -227,6 +227,41 @@ def test_a_new_active_spectrum_carries_the_display_unit_handles(qapp, view):
     view.set_baseline_mode(False)
 
 
+def test_a_y_mode_change_while_the_fid_is_shown_keeps_the_saved_zoom(qapp, view):
+    """Group F (2026-09-24 review): set_fid() saves the frequency view in the
+    DISPLAY units in force at that moment and _leave_time_domain() restores
+    it verbatim, but _apply_y_scale only carried a factor change into the
+    LIVE range and only while the domain was "freq". Switching the Y mode
+    with the FID on screen therefore left the saved range in the old units:
+    the restored zoom was off by the factor, and the new limits envelope
+    swallowed it whole (measured [-2.0, 3.0] instead of [0, 1.04])."""
+    x, y = _data()
+    peak = float(y.max())
+    t = np.linspace(0.0, 50.0, 512)
+    fid = 7.0e5 * np.exp(-t / 12.0)
+
+    view.set_experiment(x, y)
+    view.setXRange(120.0, 0.0, padding=0)
+    view.setYRange(0.0, 1.04 * peak, padding=0)
+    view.set_fid(t, fid, "FID (real)")
+    view.set_y_mode("max")                     # the menu is live in the FID view
+    f = view.y_scale()
+    assert f == pytest.approx(1.0 / peak)
+    view.set_experiment(x, y)                  # Ctrl+T back to the spectrum
+    (x0, x1), (y0, y1) = view.getPlotItem().getViewBox().viewRange()
+    assert (min(x0, x1), max(x0, x1)) == pytest.approx((0.0, 120.0))
+    assert (y0, y1) == pytest.approx((0.0, 1.04))       # the same zoom, normalised
+    assert float(view._exp.yData.max()) == pytest.approx(1.0)
+
+    # and the other way round: a normalised zoom comes back in raw units
+    view.set_fid(t, fid, "FID (real)")
+    view.set_y_mode("raw")
+    view.set_experiment(x, y)
+    _, (y0, y1) = view.getPlotItem().getViewBox().viewRange()
+    assert (y0, y1) == pytest.approx((0.0, 1.04 * peak))
+    assert np.array_equal(view._exp.yData, y)
+
+
 # ------------------------------------------------------------- MainWindow
 def _active(win):
     ppm = np.linspace(80.0, -20.0, 600)

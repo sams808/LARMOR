@@ -397,6 +397,13 @@ class SpectrumView(pg.PlotWidget):
         for pad, st in zip(self._paddles, self._paddle_states):
             _idx, pos, amp, fwhm, _movable = st
             pad.set_state(pos, amp * new, fwhm)
+        if self._freq_ranges is not None:
+            # the spectrum's zoom, saved in the display units in force when
+            # the FID took the canvas: converted here too, or _leave_time_
+            # domain would restore a y range that is off by this factor and
+            # the new limits envelope would swallow it whole
+            (x0, x1), (y0, y1) = self._freq_ranges
+            self._freq_ranges = ((x0, x1), (y0 * r, y1 * r))
         return r
 
     def _apply_y_scale(self):
@@ -1028,6 +1035,9 @@ class SpectrumView(pg.PlotWidget):
         FID view if it was on, draw it, and tell the workbench
         (experiment_set) so a stale FID / imaginary display is dropped."""
         self._freq_x, self._freq_y = x, y
+        # the factor first, so a saved pre-FID zoom is converted BEFORE
+        # _leave_time_domain restores it (and the handles follow with it)
+        self._set_y_scale(self._recompute_y_scale())
         if self._domain == "time":
             self._leave_time_domain()
         if x is not None and len(x):
@@ -1037,10 +1047,6 @@ class SpectrumView(pg.PlotWidget):
                 # already visible, so nothing else would create the pivot
                 self.show_phase_pivot(True)     # no-op once it exists
         self._trace_raw_y = y
-        # the active spectrum changed, so the factor does -- through
-        # _set_y_scale, never by assignment, so the baseline anchors and the
-        # paddles (which live in display units) follow it
-        self._set_y_scale(self._recompute_y_scale())
         self._exp.setData(x, self._disp(y))
         self._update_limits()
         self.set_trace_label("experiment")
