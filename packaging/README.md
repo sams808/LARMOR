@@ -55,6 +55,19 @@ PyInstaller, `INSTALL.txt`, Inno Setup, zip) and leaves two files in `dist/`:
 Both carry `packaging/INSTALL.txt` next to the exe (first start 10–30 s,
 SmartScreen "Run anyway", where the crash log is, how to update).
 
+Upgrading over an older version is the normal path and needs no uninstall: the
+`AppId` is fixed, so Setup finds the previous install, offers its folder, replaces
+it, and leaves one entry under Settings > Apps. `[InstallDelete]` wipes the old
+`_internal` first, so a compiled module the new version no longer ships cannot
+linger and shadow the new one (verified: a planted file is gone after the upgrade,
+file count back to the shipped 1993). The user's recipes, projects, settings
+(`HKCU\Software\LARMOR`) and logs (`%LOCALAPPDATA%\LARMOR`) live outside `{app}`
+and are never touched, by either an upgrade or an uninstall.
+
+**Close the app before updating.** `CloseApplications=yes` lets the wizard close a
+running LARMOR itself, but a silent install over a running copy aborts with exit
+code 5, because `/SUPPRESSMSGBOXES` answers the file-in-use prompt with Abort.
+
 Test the installer once per build, silently:
 
 ```

@@ -64,6 +64,15 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 
+[InstallDelete]
+; wipe the previous version's _internal before laying down the new one:
+; an overwrite install leaves files the new version no longer ships, and a
+; stale compiled module there is exactly the kind of fault that is
+; undebuggable from another machine. Everything under _internal belongs to
+; LARMOR, and the user's recipes, projects, settings and logs live
+; elsewhere, so nothing of theirs is at risk.
+Type: filesandordirs; Name: "{app}\_internal"
+
 [Files]
 ; the whole PyInstaller folder: LARMOR.exe, _internal\, INSTALL.txt
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
