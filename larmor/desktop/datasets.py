@@ -12,6 +12,8 @@ box being edited keeps its focus.
 """
 from __future__ import annotations
 
+import math
+
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractSpinBox, QCheckBox, QDoubleSpinBox, QHBoxLayout, QLabel, QMenu,
@@ -28,6 +30,31 @@ OVERLAY_COLORS = ["#e8832a", "#1f77b4", "#2ca02c", "#9467bd", "#8c564b",
 
 def overlay_color(i: int) -> str:
     return OVERLAY_COLORS[i % len(OVERLAY_COLORS)]
+
+
+#: range of the per-overlay × box. A matching factor is the ratio of two
+#: displayed peaks and is unbounded -- a raw Bruker 1r against a CSV twin
+#: normalised to unit maximum is ~1e7 -- so the box must be able to show,
+#: and give back unchanged, anything display.match_scale_display produces.
+#: It used to be [0.01, 1000]: the dict held the true factor, the box showed
+#: the clamp, and one arrow click wrote the clamp back over the factor. The
+#: floor is 0 (a flat overlay); small factors are reached by the decimals
+#: growing with the magnitude, and a factor beyond the ceiling widens the
+#: box rather than being clipped (_set_quiet).
+SCALE_MIN, SCALE_MAX = 0.0, 1e9
+
+
+def scale_decimals(value: float) -> int:
+    """Decimals the × box needs to give ``value`` back unchanged: 3 for an
+    ordinary factor, four significant digits once it drops below 1 (×2.5e-4
+    needs 7), capped at 12."""
+    try:
+        v = abs(float(value))
+    except (TypeError, ValueError):
+        return 3
+    if not math.isfinite(v) or v <= 0.0 or v >= 1.0:
+        return 3
+    return min(12, max(3, 3 - int(math.floor(math.log10(v)))))
 
 
 class DatasetsPanel(QScrollArea):
@@ -196,10 +223,30 @@ class DatasetsPanel(QScrollArea):
                 "border-radius: 3px;")
 
     @staticmethod
-    def _set_quiet(spin: QDoubleSpinBox, value: float):
+    def _set_quiet(spin: QDoubleSpinBox, value: float, decimals: int = 0):
+        """Show ``value`` without emitting valueChanged -- and without Qt
+        quietly clamping it: the box's range is widened to hold it first, so
+        the number in the dock is always the number being drawn. ``decimals``
+        (the × box) is applied before the value, since it rounds it."""
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            value = 1.0
+        if not math.isfinite(value):
+            value = 1.0
         spin.blockSignals(True)
-        spin.setValue(float(value))
+        if decimals and spin.decimals() != decimals:
+            spin.setDecimals(decimals)
+        if value < spin.minimum():
+            spin.setMinimum(value)
+        if value > spin.maximum():
+            spin.setMaximum(value)
+        spin.setValue(value)
         spin.blockSignals(False)
+
+    @classmethod
+    def _set_scale_quiet(cls, spin: QDoubleSpinBox, value: float):
+        cls._set_quiet(spin, value, decimals=scale_decimals(value))
 
     def _update_in_place(self, active_label: str, overlays: list[dict],
                          active_detail: str):
@@ -213,7 +260,7 @@ class DatasetsPanel(QScrollArea):
             w["swatch"].setStyleSheet(self._swatch_style(ov["color"], t))
             w["lab"].setText(self._label_html(ov, t))
             w["lab"].setToolTip(self._tip_of(ov))
-            self._set_quiet(w["scale"], ov.get("scale", 1.0))
+            self._set_scale_quiet(w["scale"], ov.get("scale", 1.0))
             self._set_quiet(w["shift"], ov.get("shift", 0.0))
             self._set_quiet(w["yoff"], ov.get("yoff", 0.0))
             w["act"].setEnabled(bool(ov.get("source")))
@@ -259,11 +306,14 @@ class DatasetsPanel(QScrollArea):
         ctl.setContentsMargins(24, 0, 0, 0)
         scale = QDoubleSpinBox()
         scale.setPrefix("× ")
-        scale.setRange(0.01, 1000.0)
         scale.setDecimals(3)
+        scale.setRange(SCALE_MIN, SCALE_MAX)
         scale.setStepType(QAbstractSpinBox.AdaptiveDecimalStepType)   # log-friendly steps
         scale.setKeyboardTracking(False)
-        scale.setValue(float(ov.get("scale", 1.0)))
+        # never setValue() into the raw box: _set_scale_quiet widens the
+        # range and the decimals first, so a matched 1e7 (or 2.5e-4) reads
+        # back as itself instead of the nearest bound
+        self._set_scale_quiet(scale, ov.get("scale", 1.0))
         scale.setToolTip("multiply this overlay's intensity for display "
                          "(match height fills it in); the stored data are untouched")
         scale.valueChanged.connect(lambda v, i=i: self.scale_changed.emit(i, float(v)))

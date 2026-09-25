@@ -217,6 +217,41 @@ def test_transform_round_trips_through_snapshot_and_project(win, tmp_path, monke
     assert np.allclose(win.view._overlay_items[0].xData, ov["ppm"])
 
 
+def test_the_scale_box_holds_any_matching_factor_without_clamping(qapp):
+    """Group C (2026-09-24 review): the × box was setRange(0.01, 1000) while
+    the dict, the badge and the plot used the unclamped factor, so a matched
+    ×9.999e+07 was shown as "× 1000" and one arrow click emitted 990 over it
+    -- five orders of magnitude, unrecoverable by typing. The box now holds
+    any factor a match can produce, with the decimals following its
+    magnitude, and a step is a nudge."""
+    from larmor.desktop.datasets import DatasetsPanel, scale_decimals
+
+    assert scale_decimals(2.5) == 3 and scale_decimals(0.5) == 4
+    assert scale_decimals(2.5e-4) == 7 and scale_decimals(1e-9) == 12
+    assert scale_decimals("nonsense") == 3 and scale_decimals(float("nan")) == 3
+
+    p = DatasetsPanel()
+    got = []
+    p.scale_changed.connect(lambda i, v: got.append((i, v)))
+    for factor in (9.999e7, 2.5e-4, 1.0e-7, 1234.5, 1.0, 5.0e12):
+        ovs = [{"label": "a", "color": "#e8832a", "visible": True,
+                "source": "C:/a/1r", "scale": factor, "shift": 0.0,
+                "yoff": 0.0}]
+        p.rebuild("active", ovs, "")          # first build, then in place
+        box = p._row_widgets[0]["scale"]
+        assert box.value() == pytest.approx(factor, rel=1e-6), factor
+        assert got == []                      # a quiet fill emits nothing
+        # the row no longer contradicts itself: box and badge are one number
+        assert display.overlay_badge(box.value()) == display.overlay_badge(factor)
+        # one arrow click is a nudge of the order of a percent, not a collapse
+        box.stepBy(-1)
+        assert got[-1] == (0, pytest.approx(box.value()))
+        assert 0.5 * factor < box.value() < factor, factor
+        got.clear()
+    # a value the static range cannot hold widens the box instead of clipping
+    assert p._row_widgets[0]["scale"].maximum() >= 5.0e12
+
+
 def test_panel_rows_offer_the_controls_and_update_in_place(qapp):
     from larmor.desktop.datasets import DatasetsPanel
 
@@ -238,7 +273,7 @@ def test_panel_rows_offer_the_controls_and_update_in_place(qapp):
     assert rows[1]["scale"].value() == 2.0 and rows[1]["shift"].value() == -3.0
     assert rows[1]["yoff"].value() == 0.5 and not rows[1]["chk"].isChecked()
     assert "\u00d72" in rows[1]["lab"].text() and "\u21910.5" in rows[1]["lab"].text()
-    assert rows[0]["scale"].minimum() == 0.01 and rows[0]["scale"].maximum() == 1000.0
+    assert rows[0]["scale"].minimum() == 0.0 and rows[0]["scale"].maximum() == 1e9
     assert rows[0]["scale"].prefix().startswith("\u00d7")
     rows[0]["scale"].setValue(4.0)
     rows[1]["shift"].setValue(2.0)

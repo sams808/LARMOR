@@ -14,7 +14,8 @@ The **Datasets** dock overlays spectra behind the active one for visual
 comparison — a composition series (e.g. LAW3Cl0→4Ca), before/after processing,
 or a reference. **＋ Add spectrum to compare…** draws each overlay in its own
 colour and gives it a row of controls: **visible**, the colour swatch, a
-**× scale** factor (0.01–1000, steps that follow the magnitude), an **x shift**
+**× scale** factor (any factor a match can produce, from a flat ×0 to ×10⁹,
+with the decimals and the arrow steps following its magnitude), an **x shift**
 in ppm (to line up a reference peak) and a **↑ y offset** as a fraction of the
 active spectrum's span, plus **active** and **✕ remove**; a right-click on the
 row offers **Reset scale / shift / offset**, **Make active** and **Remove**.
