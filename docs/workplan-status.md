@@ -42,12 +42,18 @@ Workplan"; this file is the ground truth for progress.
   "LARMOR 0.14.2", and the silent uninstall left no folder and no key. The
   0.14.0 and 0.14.1 files stay in `dist/` for comparison; the student's
   machine should get the 0.14.2 setup and run `LARMOR.exe --selftest` if
-  Fit misbehaves again.
+  Fit misbehaves again. **0.14.3** rebuilt the same day
+  (`dist/LARMOR-0.14.3-setup.exe` 105 MB, `dist/LARMOR-0.14.3-win64.zip`
+  151 MB): frozen exe `--selftest` pass, silent install 40 s (1993 files),
+  installed exe self-test pass, Apps entry "LARMOR 0.14.3", silent uninstall
+  clean. Hand out the 0.14.3 setup; the 0.14.2 files are superseded.
 - **Full suite**: at v0.14.0 (0de34c7), **1324 passed / 0 failed** in 20 min 39 s,
   real-data layer complete (all 19 datasets present). v0.14.1 (faab8f9) adds
   `larmor/selftest.py`, the quick overlays and their tests (scoped runs
   green; the full suite was not re-run for it). **v0.14.2 (cc8b1ca): 1366
   passed / 0 failed** in 20 min 21 s, real-data layer complete (19 datasets).
+  **v0.14.3: 1561 passed / 0 failed** in 34 min 12 s (1561 tests in 116
+  files), real-data layer complete.
 - **0.14.1 (2026-09-23, same day)**: a student's frozen 0.14.0 opened spectra
   but "fitting did not work". The fit path was verified in the exe's own
   package set — console-less Python of `packaging/.buildenv`, then the frozen
@@ -102,6 +108,51 @@ Workplan"; this file is the ground truth for progress.
   acqus would hang the app — guard it); the `LinesTable` embedded in
   `panels.SiteCard` / the sequential-fit dialog is not wired for multi-select
   Remove.
+- **0.14.3 (2026-09-24, later the same day)**: Sam's second field-use batch,
+  four branches (WD 490f31b…38bbf93, WE 0a13a3a…59d1d0b, WF 150e103…41ac5f5,
+  WG on master 76d1c6b/e93b364; release commit 37ece2d). **Help and
+  viewers**: manuals and tutorials open as non-modal tool windows
+  (`desktop/windowtray.show_tool_window`) with an A− / A+ / reset bar
+  (Ctrl + wheel, size in QSettings) — `QTextDocument.toHtml()` had been
+  pinning the manuals at the 9-pt app font all along; thirteen read-only
+  viewers and calculators (NMR table, conversions, correlations, Czjzek
+  distribution, compare fits, χ² map, integrals, dataset info, About,
+  comparability, series plot…) open the same way; value-returning dialogs
+  and the analysis tools that push results from a snapshot stay modal, on
+  purpose. **Open-windows bar** at the bottom of the left sidebar: every
+  tool window listed oldest-first with a count, minimised ones hidden from
+  the desktop and dimmed in the bar (no floating title bar), right-click
+  Restore / Minimise / Close / Close all. **Plot**: the Full view is
+  computed from the data (x extent, y with room for the residual strip),
+  a range requested entirely outside the data or wider than ~3 spans snaps
+  back, pan limits ±1 span; **View ▸ Y axis**: raw / normalised to maximum /
+  to area / to the area of a region, ONE display transform in SpectrumView
+  (`larmor/display.py` Qt-free) that scales experiment, model, components,
+  residual, frames, paddles (drags map back to raw), anchors, overlays (own
+  max / area) and the y label, while recipe, fit and exports stay raw.
+  **Datasets dock**: per-overlay ×scale, shift (ppm) and ↑offset rows,
+  "match height" writes the factor, right-click Reset / Make active /
+  Remove; the three keys travel with the session and the project bundle.
+  **QCPMG**: Save as dataset writes `<base>_sumecho.csv` and
+  `<base>_spikelets.csv` (own axes, unit maximum, `intensity_scale`,
+  `twin_file`, `spectrum_kind` in the headers; `qcpmg.dataset_pair_paths`,
+  `write_dataset_pair`), a "normalise to max" checkbox, phasing collapsed
+  under "Phasing (optional)", magnitude the documented route (manual +
+  tutorial 7). **Themes**: canonical Solarized and Nord palettes, distinct
+  identities for Sepia / Slate / Ocean / Y2K (now light silver + lime) /
+  Dreamcore / Gen X Soft Club, a `scheme` on every Theme, CIE Lab
+  discernibility test over all 91 pairs (window ΔE ≥ 6 or accent ΔE ≥ 25),
+  swatch icons and scheme tooltips in the menus, the plot follows the theme.
+  **Axis prefix**: `desktop/axes.plain_units()` on every physical axis of
+  every dialog plot (23 creation sites) — and the actual trigger of the
+  "6 … −6 ppm" report: pyqtgraph recomputes the SI prefix inside
+  `enableAutoSIPrefix(False)` and never again once off, so re-applying it
+  from `apply_theme()` while a ±6000 ppm spectrum was shown froze a "k"
+  prefix on the main plot; `plain_units` also resets the frozen scale.
+  Follow-ups: `measure.centre_of_mass` raises on an empty region mask (an
+  Integrals region dragged to zero width); no per-theme site palette for
+  Sepia / Ocean / Slate; the magnitude checkbox is not ticked by default
+  (a pinned test expects absorption on load) — a two-line change if wanted.
 
 ## Done — the workplan is closed
 
@@ -273,6 +324,11 @@ Open observations from the batch (not fixed; for Sam):
   once more this session); write a Python script file or use an editor tool.
 - **Worktree testing**: the conda env's editable install resolves `larmor` to
   the main checkout; a worktree is tested with `PYTHONPATH=<worktree>`.
+- **A test must never restyle the QApplication.** `QApplication.setStyleSheet` re-polishes every live widget (0.05 ms
+  each); the suite never destroys its windows, so in its last fifth one
+  such call takes minutes. Six parametrised theme cases blew the
+  10-minute `faulthandler_timeout` three times and killed a run at 83 %.
+  A test that needs only the active theme calls `theme.apply(None, name)`.
 - **A green pytest bar is not enough**: read the real-data banner.
 
 ## Remaining

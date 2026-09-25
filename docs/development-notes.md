@@ -78,6 +78,17 @@ scipy 1.17.1, PySide6 6.11.1, pyqtgraph 0.14.0. `pyproject.toml` pins
 
 ### Testing traps
 
+- **Never restyle the QApplication from a test.** `QApplication.setStyleSheet`
+  (what `theme.apply(app, name)` does) re-polishes **every live widget**:
+  measured 0.05 ms each — 0.3 s at 8 000 widgets, 0.6 s for the aesthetic
+  styles whose QSS carries gradients. The suite never destroys the windows it
+  builds, so by its last fifth the count is in the millions and one such call
+  takes minutes: six parametrised cases of `test_theme_identity` blew the
+  10-minute `faulthandler_timeout` three times and killed the run at 83 %
+  (2026-09-24). A test that only needs the active theme calls
+  `theme.apply(None, name)` — same `set_active` and same pyqtgraph defaults,
+  no restyle — and restores it the same way. The app itself is fine: one
+  window is ~2 000 widgets, so a user's theme switch costs ~0.1 s.
 - **`QT_QPA_PLATFORM=offscreen` and `LARMOR_NO_SESSION=1`** are set by each Qt
   test module with `os.environ.setdefault`, so they do not need exporting —
   but `setdefault` means an **inherited value wins**. If either is already
