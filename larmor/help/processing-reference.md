@@ -87,9 +87,12 @@ $$S_\text{corr}(\nu) = S(\nu)\,e^{i(\phi_0+\phi_1(\nu-\nu_\text{pivot})/\text{SW
 
 ## 4 · Baseline & referencing
 
-- **Automatic baseline (arPLS)** — asymmetrically reweighted penalized
-  least-squares (Baek *et al.* 2015, $\lambda\approx10^7$): a smooth curve that
-  follows the baseline but not the peaks.
+- **Automatic baseline (polynomial)** — *Process ▸ Baseline ▸ Polynomial*: a
+  polynomial (order 3 from the menu; the panel sets the order) fitted to every
+  point, the points sticking up above it clipped, refitted until stable — the
+  standard automatic baseline of most NMR software (`baseline`). For a smooth
+  baseline that is not a polynomial, or one under broad peaks, use the
+  **pybaselines** methods below (arPLS and its relatives).
 - **Manual baseline (PCHIP, dmfit-style anchors)** — click **Pick anchors**, drop
   as many points as needed (drag to shape); a shape-preserving monotone cubic
   previews live and is **subtracted automatically when you exit anchor mode**.
@@ -112,6 +115,59 @@ $$S_\text{corr}(\nu) = S(\nu)\,e^{i(\phi_0+\phi_1(\nu-\nu_\text{pivot})/\text{SW
   its ppm. A rigid ppm shift; the raw data is untouched.
 - **scale SW / car-ref** — stretch the ppm axis about its centre (correct a
   spectral-width/referencing mismatch between datasets).
+
+### pybaselines — *Process ▸ Baseline ▸ pybaselines*
+
+Thirteen baseline algorithms of the **pybaselines** library (Erb 2022), each
+recorded as one `pybaseline` step (`method` plus its parameters) so a saved fit
+replays it exactly. The submenu opens the dialog on one method (*arPLS…*,
+*asLS…*, *airPLS…*, *SNIP…*, *ModPoly…*, *Rolling ball…*, *Morphological…*);
+*All methods…* lists every one, grouped by family. The dialog shows the
+spectrum with the estimated baseline (top) and the corrected result (bottom)
+and updates them as you move a control; the step is appended to the recorded
+processing chain, so an earlier phase or window is kept. A spectrum longer
+than 8192 points is previewed on every n-th point with λ and the windows
+rescaled accordingly (the status line says so) and **Apply** runs on all
+points. The baseline is subtracted from the real part; the imaginary part is
+kept, so phasing afterwards still works.
+
+**Which method.**
+
+| Family | Methods | Suits | What to set |
+|---|---|---|---|
+| Whittaker smoothers | arPLS, asLS, airPLS, IarPLS, drPLS, asPLS | a smooth, slowly curving baseline under peaks of any width — the usual case in solid-state NMR (probe background, a residual dead-time roll, broad humps) | λ, the smoothness |
+| Iterative polynomials | ModPoly, IModPoly, penalized poly | a gently curved baseline that a low-order polynomial describes; IModPoly for a noisy spectrum | the polynomial order (2–4) |
+| Peak clipping and morphology | SNIP, rolling ball, Mor, MorMol | narrow lines on a wide rolling baseline, where a smoother would start to follow the peaks | the half-window in points, wider than the widest peak's half-width |
+
+Start with **arPLS**: its weights come from the noise, so λ is the only choice.
+asLS adds a fixed asymmetry *p* (0.001–0.05); airPLS discounts the peak regions
+harder at each pass (dense, overlapping peaks); IarPLS is gentler on weak,
+broad features; drPLS follows a strong curvature; asPLS lets λ vary along the
+axis (the slowest — prefer it on spectra up to ~16k points). SNIP and the
+morphological methods need the half-window above the widest peak's half-width
+or the baseline climbs into the peak; MorMol removes the flat steps of a plain
+opening. A baseline that dips under a broad, weak feature is the sign that the
+smoothing is too weak (λ too low, or for asLS *p* too high, or a window too
+narrow).
+
+**λ rule of thumb.** λ is written in points, so it depends on how densely the
+spectrum is sampled: the same curve sampled *f* times more finely has every
+second difference *f*² smaller and costs *f*⁴ more penalty. LARMOR's default
+is 10⁵ (arPLS) at 2048 points and scales as (*n* / 2048)⁴, rounded to a decade
+— 10⁶ at 4096, 10⁹ at 16k, 10¹¹ at 64k points (`pybaseline.suggest_lam`). From
+there move by decades: one down when the baseline misses a real curvature, one
+up when it starts to follow the peaks. The window defaults are 1/32 of the
+spectrum (`pybaseline.suggest_half_window`).
+
+**Citing.** D. Erb, "pybaselines: A Python library of algorithms for the
+baseline correction of experimental data", Zenodo, doi:10.5281/zenodo.5608581
+— together with the method's own paper (arPLS: Baek *et al.* 2015; asLS: Eilers
+& Boelens 2005; airPLS: Zhang *et al.* 2010; ModPoly: Lieber & Mahadevan-Jansen
+2003; IModPoly: Zhao *et al.* 2007; penalized poly: Mazet *et al.* 2005; SNIP:
+Ryan *et al.* 1988; rolling ball: Kneen & Annegarn 1996; MorMol: Koch *et al.*
+2017; the IarPLS, drPLS and asPLS papers are listed in the library's
+documentation). Every algorithm's parameters and reference:
+https://pybaselines.readthedocs.io.
 
 ---
 
@@ -204,6 +260,24 @@ recipe without a hash (written before this record existed) stays silent.
   *(iterative dead-time baseline)*
 - S.-J. Baek, A. Park, Y.-J. Ahn, J. Choo, *Analyst* **140**, 250 (2015). *(arPLS
   baseline)*
+- D. Erb, "pybaselines: A Python library of algorithms for the baseline
+  correction of experimental data", Zenodo, doi:10.5281/zenodo.5608581;
+  https://pybaselines.readthedocs.io. *(pybaselines)*
+- P. H. C. Eilers, H. F. M. Boelens, "Baseline correction with asymmetric least
+  squares smoothing", Leiden University Medical Centre report (2005). *(asLS)*
+- Z.-M. Zhang, S. Chen, Y.-Z. Liang, *Analyst* **135**, 1138 (2010). *(airPLS)*
+- C. A. Lieber, A. Mahadevan-Jansen, *Appl. Spectrosc.* **57**, 1363 (2003).
+  *(ModPoly)*
+- J. Zhao, H. Lui, D. I. McLean, H. Zeng, *Appl. Spectrosc.* **61**, 1225 (2007).
+  *(IModPoly)*
+- V. Mazet, C. Carteret, D. Brie, J. Idier, B. Humbert, *Chemom. Intell. Lab.
+  Syst.* **76**, 121 (2005). *(penalized polynomial)*
+- C. G. Ryan, E. Clayton, W. L. Griffin, S. H. Sie, D. R. Cousens, *Nucl.
+  Instrum. Methods B* **34**, 396 (1988). *(SNIP)*
+- M. Kneen, H. Annegarn, *Nucl. Instrum. Methods B* **109–110**, 209 (1996).
+  *(rolling ball)*
+- M. Koch, C. Suhr, B. Roth, M. Meinhardt-Wollweber, *J. Raman Spectrosc.* **48**,
+  336 (2017). *(MorMol)*
 - R. R. Ernst, G. Bodenhausen, A. Wokaun, *Principles of NMR in One and Two
   Dimensions*, Oxford (1987).
 

@@ -2,9 +2,9 @@
 
 ``apply_processing`` and the display refresh (FID / spectrum toggle, real /
 imag / magnitude channels), drag-to-phase, calibrate / measure / reset,
-the manual, two-point and iterative baseline tools, zones, the experiment
-parameters dialog, the processing-steps editor, WURST correction and
-spectrum subtraction.
+the manual, two-point, iterative and pybaselines baseline tools, zones,
+the experiment parameters dialog, the processing-steps editor, WURST
+correction and spectrum subtraction.
 
 Owned state: ``_proc_base``, ``_proc_spec``, ``_proc_fid``,
 ``_proc_apply_count``, ``_phase_live`` / ``_phase_start`` /
@@ -237,6 +237,40 @@ class _ProcessingMixin:
             [{"op": "iterbaseline", **dlg.params()}], False)
         self.statusBar().showMessage(
             "iterative baseline (Yon et al. 2020) applied — "
+            "'Reset to original' undoes")
+
+    def apply_pybaseline(self, method=None):
+        """Baseline correction through pybaselines (Erb 2022): the dialog with
+        its live preview (opened on ``method`` when given), then the chosen
+        method APPENDED to the recorded chain as a ``pybaseline`` step -- an
+        earlier phase or window is kept and a saved fit replays the whole
+        chain. The panel is synced to the new chain afterwards: it emits the
+        absolute chain from its widgets plus the steps it carries, and only
+        ``_on_proc_view_changed`` syncs it otherwise, so without this its next
+        Apply would silently drop the step."""
+        if self.exp_ppm is None or self.exp_amp is None or not len(self.exp_ppm):
+            self.statusBar().showMessage("open a spectrum first")
+            return
+        from PySide6.QtWidgets import QDialog
+
+        from larmor.desktop.pybaseline_dialog import PybaselineDialog
+
+        if not isinstance(method, str):     # a QAction hands over its checked flag
+            method = None
+        dlg = PybaselineDialog(self, self.exp_ppm, self.exp_amp, method=method)
+        if dlg.exec() != QDialog.Accepted:
+            return
+        step = {"op": "pybaseline", **dlg.params()}
+        recipe = self.recipe or {}
+        ops = list(recipe.get("processing") or []) + [step]
+        use_raw = bool(recipe.get("processing_from_raw"))
+        n0 = self._proc_apply_count
+        self.apply_processing(ops, use_raw)
+        if self._proc_apply_count == n0:
+            return                          # it did not run; apply_processing said why
+        self.proc_panel.sync_from_ops(ops, use_raw)
+        self.statusBar().showMessage(
+            f"{dlg.method_label()} baseline (pybaselines) applied — "
             "'Reset to original' undoes")
 
     # ------------------------------------------------------------- zones

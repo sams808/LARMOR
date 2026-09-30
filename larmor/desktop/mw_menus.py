@@ -232,6 +232,24 @@ class _MenusMixin:
         self._add(m_base, "Subtract &averages",
                   lambda: self.apply_processing([{"op": "subtract_avg"}], False),
                   tip="remove the offset read from the spectrum edges")
+        # the pybaselines library (Erb 2022): one dialog, opened on a method
+        from larmor.pybaseline import METHODS as _pyb
+
+        m_pyb = self._menu(m_base, "py&baselines",
+                           tip="baseline algorithms of the pybaselines library "
+                               "(Erb 2022): Whittaker smoothers, iterative "
+                               "polynomials, peak clipping and morphology")
+        for text, key in (("&arPLS…", "arpls"), ("a&sLS…", "asls"),
+                          ("a&irPLS…", "airpls"), ("&SNIP…", "snip"),
+                          ("&ModPoly…", "modpoly"),
+                          ("&Rolling ball…", "rolling_ball"),
+                          ("M&orphological…", "mor")):
+            self._add(m_pyb, text,
+                      lambda _=False, k=key: self.apply_pybaseline(k),
+                      tip=f"{_pyb[key].description} (pybaselines, Erb 2022)")
+        self._add(m_pyb, "A&ll methods…", lambda: self.apply_pybaseline(),
+                  tip="every method of the library in one dialog, grouped by "
+                      "family, with a live preview (pybaselines, Erb 2022)")
         m_ref = self._menu(m_proc, "&Reference")
         self._add(m_ref, "&Calibrate axis…", self.start_calibrate,
                   tip="click a peak and type its ppm; the fit follows")

@@ -534,6 +534,7 @@ OP_PHRASES: dict[str, str] = {
     "autophase": "automatic phase correction",
     "baseline": "polynomial baseline (order {order})",
     "iterbaseline": "iterative polynomial baseline",
+    "pybaseline": "{method} baseline (pybaselines)",
     "flat_baseline": "flat baseline (edge offset)",
     "twopoint_bg": "two-point linear baseline",
     "subtract_avg": "constant-offset subtraction",
@@ -556,8 +557,30 @@ OP_PHRASES: dict[str, str] = {
 }
 
 
+def _pybaseline_phrase(op: dict) -> str:
+    """'arPLS baseline (pybaselines)': the method's display label rather
+    than its registry key."""
+    from larmor.pybaseline import METHODS
+
+    key = str(op.get("method", "arpls"))
+    spec = METHODS.get(key)
+    return f"{spec.label if spec else key} baseline (pybaselines)"
+
+
+#: op -> function(op) -> phrase, for the ops whose wording needs a lookup;
+#: consulted before OP_PHRASES, which keeps a plain template for each as
+#: the fallback
+OP_PHRASE_FUNCS = {"pybaseline": _pybaseline_phrase}
+
+
 def _phrase(op: dict) -> str:
     name = str(op.get("op", ""))
+    fn = OP_PHRASE_FUNCS.get(name)
+    if fn is not None:
+        try:
+            return fn(op)
+        except Exception:                        # noqa: BLE001 - the template
+            pass
     tmpl = OP_PHRASES.get(name)
     if tmpl is not None:
         try:
