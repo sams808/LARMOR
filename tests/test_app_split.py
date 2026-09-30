@@ -62,7 +62,7 @@ HOMES = {"FitWorker": "larmor.desktop.workers",
 #: which LARMOR_NO_SESSION does not gate, so they vary per machine
 EXCLUDE_CHILDREN = frozenset({"Open &recent", "&Apply recipe"})
 
-# 317 MainWindow members
+# 318 MainWindow members
 SURFACE = (
     'remove_sites', 'add_sidebands_for_line',
     '__init__', '_build_menus', '_menu', '_add', '_MODEL_GROUPS',
@@ -152,8 +152,8 @@ SURFACE = (
     'open_vt', 'show_correlations', 'show_czjzek_dist',
     'open_qcpmg_batch_fields', 'open_qcpmg_fields', 'open_staticct',
     '_staticct_seed', 'open_herzfeld_berger', '_hb_seed',
-    'open_referencing_audit', 'open_acquisition_table', 'open_session_inventory',
-    '_apply_sr_correction', 'open_vocs',
+    'open_referencing_audit', 'open_acquisition_table', 'open_pulse_program',
+    'open_session_inventory', '_apply_sr_correction', 'open_vocs',
     '_vocs_to_workbench', 'open_qcpmg', 'open_satrec', 'open_redor',
     'open_magres', '_magres_add_sites', 'open_twod', 'run_auto_fit',
     'run_errors_analysis',
@@ -164,7 +164,7 @@ SURFACE = (
     'closeEvent', '_restore_session', 'on_family_changed',
 )
 
-# 219 menu rows: (menu path, text, shortcut, checkable, has submenu)
+# 221 menu rows: (menu path, text, shortcut, checkable, has submenu)
 GOLDEN_MENU = (
     ((), '&File', '', False, True),
     (('&File',), '&Open…', 'Ctrl+O', False, False),
@@ -285,6 +285,7 @@ GOLDEN_MENU = (
     ((), '&Tools', '', False, True),
     (('&Tools',), '&NMR table…', '', False, False),
     (('&Tools',), '&Conversion tools…', '', False, False),
+    (('&Tools',), '&Pulse program…', '', False, False),
     (('&Tools',), '&Herzfeld–Berger sideband analysis…', '', False, False),
     (('&Tools',), '&Read static pattern (C_Q, η)…', '', False, False),
     (('&Tools',), 'Czjzek &distribution P(C_Q)…', '', False, False),
@@ -375,6 +376,7 @@ GOLDEN_MENU = (
     (('&Help', 'User &manuals'), 'QCPMG', '', False, False),
     (('&Help', 'User &manuals'), 'Multi-dataset & co-fitting', '', False, False),
     (('&Help', 'User &manuals'), 'DFT tensors — import & shift calibration', '', False, False),
+    (('&Help', 'User &manuals'), 'Reading a pulse program', '', False, False),
     (('&Help',), '&Tutorials', '', False, True),
     (('&Help', '&Tutorials'), '1 · A first fit — ²⁷Al Czjzek', '', False, False),
     (('&Help', '&Tutorials'), '2 · Constraints — fix, bound, link', '', False, False),

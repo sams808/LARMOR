@@ -67,6 +67,7 @@ class _ChromeMixin:
         self.explorer.batch_requested.connect(self.run_batch_fit)
         self.explorer.inventory_requested.connect(self.open_session_inventory)
         self.explorer.overlay_requested.connect(self.add_overlay_path)
+        self.explorer.pulseprog_requested.connect(self.open_pulse_program)
         self.explorer.open_paths = self._open_source_paths
         self.explorer.renamed.connect(self._on_explorer_renamed)
         self.explorer_dock.setWidget(self.explorer)
