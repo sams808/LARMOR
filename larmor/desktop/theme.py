@@ -457,6 +457,8 @@ QPushButton {{ color: {t.text}; background: {t.base}; border: 1px solid {t.borde
 QPushButton:hover {{ background: {t.hover}; }}
 QPushButton:disabled {{ color: {t.disabled_text}; }}
 QPushButton:default {{ background: {t.accent}; color: {t.accent_text}; border-color: {t.accent}; }}
+QPushButton:checked {{ background: {t.accent}; color: {t.accent_text}; border-color: {t.accent}; font-weight: 600; }}
+QPushButton:checked:hover {{ background: {t.accent}; color: {t.accent_text}; }}
 QCheckBox {{ color: {t.text}; }}
 QRadioButton {{ color: {t.text}; }}
 QLabel {{ color: {t.text}; background: transparent; }}

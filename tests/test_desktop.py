@@ -24,11 +24,24 @@ def qapp():
 @pytest.fixture()
 def win(qapp, monkeypatch):
     monkeypatch.setenv("LARMOR_NO_SESSION", "1")  # never inherit a real session
-    from larmor.desktop.app import MainWindow
+    from PySide6.QtCore import QSettings
 
+    from larmor.desktop.app import MainWindow
+    from larmor.desktop.mw_sidebands import SSB_OFFER_KEY
+
+    settings = QSettings("LARMOR", "app")
+    before = settings.value(SSB_OFFER_KEY)
     w = MainWindow()
+    # the sideband offer on load is OFF by default since 0.15; the offer
+    # tests below exercise it, so this window has it on, and the user's own
+    # setting is put back afterwards (the toggle writes QSettings)
+    w.actSsbOffer.setChecked(True)
     yield w
     w.close()
+    if before is None:
+        settings.remove(SSB_OFFER_KEY)
+    else:
+        settings.setValue(SSB_OFFER_KEY, before)
 
 
 def test_open_any_type_never_rejects(qapp, win):
@@ -1417,6 +1430,8 @@ def test_sideband_offer_warns_on_a_wrong_rate_and_writes_it_only_when_uncertain(
         win, qapp, tmp_path):
     from PySide6.QtCore import QSettings
 
+    from larmor.desktop.mw_sidebands import SSB_OFFER_KEY
+
     # (a) a certain rate 1.5 % off: the banner warns, the rate is left alone
     data = tmp_path / "manifold.csv"
     ppm, amp = _write_csv_manifold(data, rate_hz=20000.0, header_rate_hz=20300.0)
@@ -1465,13 +1480,15 @@ def test_sideband_offer_warns_on_a_wrong_rate_and_writes_it_only_when_uncertain(
     assert p["shift_fwhm_ppm"]["value"] == pytest.approx(4.0, abs=0.4)
     assert win.recipe["spin_rate_Hz"] == pytest.approx(20000.0, rel=3e-3)
     assert "`sidebands` line" in win.statusBar().currentMessage()
-    assert QSettings("LARMOR", "app").value("ssbAutoOffer", True, type=bool) \
+    assert QSettings("LARMOR", "app").value(SSB_OFFER_KEY, False, type=bool) \
         == win.actSsbOffer.isChecked()
 
 
 def test_sideband_offer_is_silent_for_plain_static_and_toggled_off_data(
         win, qapp, tmp_path, monkeypatch):
     from PySide6.QtCore import QSettings
+
+    from larmor.desktop.mw_sidebands import SSB_OFFER_KEY
 
     # (a) the default fixture: two lines, a 20 kHz header whose spacing
     # (124.6 ppm) exceeds half the 160 ppm axis -> nothing, and the menu
@@ -1504,10 +1521,10 @@ def test_sideband_offer_is_silent_for_plain_static_and_toggled_off_data(
 
     # (c) the View toggle, persisted in QSettings
     settings = QSettings("LARMOR", "app")
-    before = settings.value("ssbAutoOffer", True, type=bool)
+    before = settings.value(SSB_OFFER_KEY, False, type=bool)
     try:
         win.actSsbOffer.setChecked(False)
-        assert settings.value("ssbAutoOffer", True, type=bool) is False
+        assert settings.value(SSB_OFFER_KEY, False, type=bool) is False
         assert not _banner_shown(win)
         data = tmp_path / "manifold.csv"
         _write_csv_manifold(data)
@@ -1515,10 +1532,10 @@ def test_sideband_offer_is_silent_for_plain_static_and_toggled_off_data(
         qapp.processEvents()
         assert not _banner_shown(win)
         win.actSsbOffer.setChecked(True)               # no reload needed
-        assert settings.value("ssbAutoOffer", True, type=bool) is True
+        assert settings.value(SSB_OFFER_KEY, False, type=bool) is True
         assert _banner_shown(win)
     finally:
-        settings.setValue("ssbAutoOffer", bool(before))
+        settings.setValue(SSB_OFFER_KEY, bool(before))
         win.actSsbOffer.setChecked(bool(before))
 
 

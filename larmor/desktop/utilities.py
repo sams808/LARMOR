@@ -19,6 +19,18 @@ def _spin_color(spin: float) -> str:
     return SPIN_COLOR.get(spin, "#4a5568")
 
 
+#: cell fill per glass-NMR feasibility category (larmor.nuclei.FEASIBILITY,
+#: Youngman 2018): tints light enough for the table's dark cell text on
+#: every theme, in the figure's order from favorable to impossible
+FEASIBILITY_FILL = {
+    "favorable": "#c9ead2",
+    "challenging": "#ffe3ad",
+    "very_difficult": "#f5c4bb",
+    "impractical": "#eceef1",
+    "impossible": "#b9bec7",
+}
+
+
 from larmor.desktop import theme
 
 
@@ -45,8 +57,30 @@ class NmrTableDialog(QDialog):
         leg = " ".join(f"<span style='color:{c}'>●</span> {int(s*2)}/2" if s % 1
                        else f"<span style='color:{c}'>●</span> {int(s)}"
                        for s, c in sorted(SPIN_COLOR.items()))
-        lab = QLabel("spin " + leg); top.addWidget(lab)
+        lab = QLabel("border = spin " + leg); top.addWidget(lab)
         v.addLayout(top)
+        # the cell fill: how practical the element is for NMR of GLASSES
+        # (Youngman 2018, Fig. 1) -- what a student needs before booking
+        # spectrometer time on an unfamiliar nucleus
+        row2 = QHBoxLayout()
+        row2.addWidget(QLabel("fill"))
+        self.shade = QComboBox()
+        self.shade.addItem("glass-NMR feasibility (Youngman 2018)", "feasibility")
+        self.shade.addItem("none", "none")
+        self.shade.setToolTip(
+            "Youngman, Materials 11, 476 (2018), Fig. 1: a practical "
+            "categorisation of the elements for solid-state NMR of glasses -- "
+            "the fill is the category, the tooltip of each cell says why")
+        self.shade.currentIndexChanged.connect(lambda _i: self._refresh())
+        row2.addWidget(self.shade)
+        self.legend = QLabel(" ".join(
+            f"<span style='background:{FEASIBILITY_FILL[k]}; color:#16202a;'>"
+            f"&nbsp;{N.FEASIBILITY_LABEL[k]}&nbsp;</span>"
+            for k in FEASIBILITY_FILL))
+        self.legend.setToolTip(N.FEASIBILITY_SOURCE)
+        row2.addWidget(self.legend)
+        row2.addStretch(1)
+        v.addLayout(row2)
         self._guard = False
         self.b0.valueChanged.connect(self._b0_changed)
         self.h1.valueChanged.connect(self._h1_changed)
@@ -81,20 +115,38 @@ class NmrTableDialog(QDialog):
         self._guard = False
         self._refresh()
 
+    def cell_fill(self, element: str) -> str | None:
+        """The feasibility fill colour of an element's cell, or None when
+        the fill is off or the figure does not classify it."""
+        if self.shade.currentData() != "feasibility":
+            return None
+        cat = N.feasibility(element)
+        return FEASIBILITY_FILL.get(cat) if cat else None
+
     def _refresh(self):
         b0 = self.b0.value()
+        self.legend.setVisible(self.shade.currentData() == "feasibility")
         for sym, btn in self._buttons.items():
             iso = N.primary_isotope(sym)
+            cat = N.feasibility(sym)
+            fill = self.cell_fill(sym)
+            why = (f"\nglass NMR: {N.FEASIBILITY_LABEL[cat]} — "
+                   f"{N.FEASIBILITY_NOTE[cat]} (Youngman 2018)" if cat else "")
             if iso is None:
                 btn.setText(sym); btn.setEnabled(False)
-                btn.setStyleSheet(f"color:{theme.active().disabled_text};")
+                btn.setStyleSheet(
+                    f"color:{theme.active().disabled_text};"
+                    + (f" background: {fill};" if fill else ""))
+                btn.setToolTip(f"{sym}: no NMR-active isotope" + why)
                 continue
             btn.setText(f"{sym}\n{iso.larmor_MHz(b0):.1f}")
             col = _spin_color(iso.spin)
             btn.setStyleSheet(f"border: 1.5px solid {col}; border-radius: 3px; "
-                              f"font-size: 9px; color: #16202a;")
+                              f"font-size: 9px; color: #16202a;"
+                              + (f" background: {fill};" if fill else ""))
             btn.setToolTip(f"{iso.symbol} · spin {iso.spin} · "
-                           f"{iso.abundance:.2f}% · {iso.larmor_MHz(b0):.3f} MHz")
+                           f"{iso.abundance:.2f}% · {iso.larmor_MHz(b0):.3f} MHz"
+                           + why)
 
     def _details(self, element: str):
         from larmor.desktop.windowtray import show_tool_window

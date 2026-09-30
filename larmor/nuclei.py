@@ -72,6 +72,66 @@ PERIODIC_ROWS = [
 ]
 
 
+#: How practical each element is for solid-state NMR of glasses -- the five
+#: categories of Fig. 1 of R. E. Youngman, "NMR Spectroscopy in Glass
+#: Science: A Review of the Elements", Materials 11, 476 (2018),
+#: doi:10.3390/ma11040476 (open access), read cell by cell from the figure:
+#: black = Favorable, grey = Challenging, dotted = Very Difficult, white =
+#: Impractical, cross-hatched = "widely considered impossible for
+#: solid-state NMR". The judgement is the author's, for oxide / chalcogenide
+#: glasses at ordinary fields; a nucleus can be routine in a crystal and
+#: still 'very difficult' in a glass (site distributions broaden it).
+FEASIBILITY_SOURCE = ("R. E. Youngman, Materials 11, 476 (2018), Fig. 1 -- "
+                      "doi:10.3390/ma11040476")
+FEASIBILITY = {
+    "favorable": (
+        "H", "Li", "Be", "B", "C", "F", "Na", "Al", "Si", "P", "Sc", "V", "Pb"),
+    "challenging": ("O", "Ga", "Se", "Y", "Mo", "Ag", "Sn", "Cs", "Tl"),
+    "very_difficult": (
+        "N", "Mg", "S", "K", "Ca", "Cu", "Ge", "As", "Rb", "Nb", "Sb", "Te",
+        "La"),
+    "impractical": (
+        "He", "Ne", "Cl", "Ti", "Cr", "Mn", "Fe", "Co", "Ni", "Zn", "Br", "Kr",
+        "Sr", "Zr", "Tc", "Ru", "Rh", "Pd", "Cd", "In", "I", "Xe", "Ba", "Hf",
+        "Ta", "W", "Re", "Os", "Ir", "Pt", "Au", "Hg", "Bi", "Pr", "Nd", "Sm",
+        "Eu", "Gd", "Tb", "Dy", "Ho", "Er", "Tm", "Yb", "Lu", "U", "Pu", "Am"),
+    "impossible": (
+        "Ar", "Po", "At", "Rn", "Fr", "Ra", "Ac", "Ce", "Pm", "Th", "Pa", "Np",
+        "Cm"),
+}
+#: label and one-line meaning of each category, in the figure's order
+FEASIBILITY_LABEL = {
+    "favorable": "Favorable",
+    "challenging": "Challenging",
+    "very_difficult": "Very difficult",
+    "impractical": "Impractical",
+    "impossible": "Impossible",
+}
+FEASIBILITY_NOTE = {
+    "favorable": ("routine in glasses: a receptive spin-1/2 or a quadrupolar "
+                  "nucleus whose lines stay tractable (e.g. 27Al, 11B, 23Na)"),
+    "challenging": ("workable with effort: low receptivity or a sizeable "
+                    "quadrupole moment -- enrichment (17O), long acquisitions "
+                    "or high field (119Sn, 71Ga, 133Cs)"),
+    "very_difficult": ("low gamma and/or a large quadrupole moment: very wide "
+                       "lines, special sequences, often enrichment or the "
+                       "highest fields (25Mg, 43Ca, 39K, 73Ge)"),
+    "impractical": ("no isotope that gives a usable spectrum in a glass: "
+                    "huge quadrupole moments, negligible receptivity or a "
+                    "paramagnetic host"),
+    "impossible": ("no stable NMR-active isotope for the solid state "
+                   "(radioactive elements, argon)"),
+}
+_FEASIBILITY_OF = {el: cat for cat, els in FEASIBILITY.items() for el in els}
+
+
+def feasibility(element: str) -> str | None:
+    """The Youngman 2018 category of an element symbol ('favorable',
+    'challenging', 'very_difficult', 'impractical', 'impossible'), or None
+    for an element the figure does not show."""
+    return _FEASIBILITY_OF.get(element)
+
+
 @dataclass(frozen=True)
 class Isotope:
     symbol: str                     # e.g. "27Al"

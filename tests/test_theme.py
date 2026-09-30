@@ -49,6 +49,11 @@ def test_qss_is_complete_and_parametric():
     for widget in ("QMenu", "QPushButton", "QTableWidget", "QHeaderView",
                    "QToolTip", "QTabBar", "QLineEdit"):
         assert widget in css
+    # a checkable button that is ON (Pick anchors, Pick 2 points, Drag to
+    # phase) must look on: the accent fill, like a checked tool button
+    assert "QPushButton:checked" in css
+    checked = css.split("QPushButton:checked")[1].split("}")[0]
+    assert t.accent in checked and t.accent_text in checked
     # no leftover hardcoded light colour from the old stylesheet
     assert "#f0f2f0" not in css or t.window == "#f0f2f0"
 

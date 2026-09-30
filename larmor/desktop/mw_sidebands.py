@@ -7,8 +7,8 @@ rate update and the remembered dismissal. Physics lives in
 ``larmor.sidebands``; the banner widget in ``larmor.desktop.sideband_offer``.
 
 Owned state: ``ssb_banner`` (the offer banner), ``_ssb_detection`` (the last
-detection) and ``_ssb_dismissed``; the ``ssbAutoOffer`` QSettings flag behind
-the menu toggle.
+detection) and ``_ssb_dismissed``; the ``SSB_OFFER_KEY`` QSettings flag
+behind the menu toggle.
 """
 from __future__ import annotations
 
@@ -18,6 +18,15 @@ from PySide6.QtWidgets import QLabel, QMessageBox
 
 from larmor import models as model_registry
 from larmor import sidebands as _sb
+
+#: QSettings key of Edit > Spinning sidebands > Offer ... on load. OFF by
+#: default since 0.15: the banner popping up over every loaded spectrum was
+#: the first thing Sam asked to stop; Detect (Ctrl+Shift+D) shows it on
+#: demand. A new key, not a new default on the old 'ssbAutoOffer' -- that
+#: one defaulted to True and had been written as True on every install that
+#: never touched the toggle, so a default change alone would have changed
+#: nothing for them.
+SSB_OFFER_KEY = "ssbOfferOnLoad"
 
 
 class _SidebandsMixin:
@@ -265,7 +274,7 @@ class _SidebandsMixin:
             banner.dismiss()
 
     def _toggle_ssb_offer(self, on: bool):
-        QSettings("LARMOR", "app").setValue("ssbAutoOffer", bool(on))
+        QSettings("LARMOR", "app").setValue(SSB_OFFER_KEY, bool(on))
         self.statusBar().showMessage(
             "spinning-sideband offer: "
             + ("ON — a banner appears when a loaded spectrum repeats at ±νrot"

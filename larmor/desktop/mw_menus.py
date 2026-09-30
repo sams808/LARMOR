@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (QFileDialog, QHBoxLayout, QMessageBox,
 
 from larmor import models as model_registry
 from larmor.desktop import theme
+from larmor.desktop.mw_sidebands import SSB_OFFER_KEY
 from larmor.recipe import Recipe
 
 #: (file stem under docs/tutorials, menu title) -- the Help ▸ Tutorials entries.
@@ -72,10 +73,13 @@ class _MenusMixin:
                   tip="compare a spectrum on top of the active one; the fit is "
                       "kept (Shift + drop on the plot does the same)")
         self.actWatch = self._add(
-            m_file, "&Watch the source file", self._toggle_watch, checkable=True,
-            tip="re-open the current spectrum whenever its file is rewritten -- "
-                "e.g. while acquiring on the spectrometer -- keeping the fit "
-                "model so it follows the growing signal")
+            m_file, "Auto-reload &when the file changes", self._toggle_watch,
+            checkable=True,
+            tip="for process-in-TopSpin, fit-in-LARMOR round trips: when "
+                "TopSpin rewrites this dataset's 1r (efp / apk / abs / a new "
+                "sr) or an acquisition still running appends to it, LARMOR "
+                "reloads the spectrum and keeps the fit model on it -- leave "
+                "off otherwise")
         m_file.addSeparator()
         self._add(m_file, "Open pro&ject…", self.open_project,
                   tip="a whole session: spectra, 2D maps, figures, batch fits")
@@ -172,12 +176,15 @@ class _MenusMixin:
                                    self)
         self.actSsbOffer.setCheckable(True)
         self.actSsbOffer.setToolTip(
-            "when a loaded 1D spectrum repeats at ±νrot, a banner over the "
-            "plot offers the linked manifold or a shifted copy in one click; "
-            "turn off for spectra whose periodic structure is not sidebands "
-            "(Detect spinning sidebands still works on demand)")
+            "off by default: when on, a loaded 1D spectrum that repeats at "
+            "±νrot gets a banner over the plot offering the linked manifold "
+            "or a shifted copy in one click; Detect spinning sidebands "
+            "(Ctrl+Shift+D) does the same on demand at any time")
+        # SSB_OFFER_KEY: a fresh key so the off-by-default applies to every
+        # install -- the old 'ssbAutoOffer' defaulted to True and was written
+        # as such on machines that never touched the toggle
         self.actSsbOffer.setChecked(bool(QSettings("LARMOR", "app").value(
-            "ssbAutoOffer", True, type=bool)))
+            SSB_OFFER_KEY, False, type=bool)))
         self.actSsbOffer.toggled.connect(self._toggle_ssb_offer)
         m_ssb.addAction(self.actSsbOffer)
         m_con = self._menu(m_edit, "&Constraints",
@@ -212,9 +219,12 @@ class _MenusMixin:
                   tip="source, display, phase, baseline and reference controls")
         m_proc.addSeparator()
         m_phase = self._menu(m_proc, "&Phase")
-        self._add(m_phase, "&Autophase (ACME)",
+        self._add(m_phase, "&Autophase",
                   lambda: self.apply_processing([{"op": "autophase"}], False),
-                  tip="automatic p0 / p1 by entropy minimisation")
+                  tip="automatic p0 / p1: a p0 sweep maximising the positive "
+                      "real signal, then a p0 / p1 refinement (robust on wide "
+                      "solid-state lines); uses TopSpin's 1i channel, else a "
+                      "Hilbert reconstruction of the imaginary part")
         # non-checkable: the panel's Drag-to-phase button is the single
         # source of truth for the mode, this entry toggles it
         self._add(m_phase, "&Drag to phase", self.start_phase_drag, "Ctrl+P",
