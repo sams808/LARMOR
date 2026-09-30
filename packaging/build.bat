@@ -18,7 +18,19 @@ if not exist "%PY%" (
 
 echo [1/5] reinstalling larmor into the build venv
 "%PY%" -m pip install --no-deps --quiet ".[desktop]" || exit /b 1
-for /f %%v in ('"%PY%" -c "import larmor; print(larmor.__version__)"') do set "VER=%%v"
+rem The version through a file, not a for /f: cmd strips the outer quotes of
+rem a for /f command that starts with a quoted path, so '"%PY%" -c "import
+rem larmor; ..."' became "import' is not recognized" when this script ran
+rem under PowerShell (cmd /c), VER stayed empty and the build produced
+rem LARMOR--setup.exe with no version in the installer metadata (0.15.0).
+set "VERFILE=%TEMP%\larmor_build_version.txt"
+"%PY%" -c "import larmor, sys; sys.stdout.write(larmor.__version__)" > "%VERFILE%" || exit /b 1
+set /p VER=<"%VERFILE%"
+del "%VERFILE%" >nul 2>&1
+if "%VER%"=="" (
+    echo could not read larmor.__version__ from the build venv
+    exit /b 1
+)
 echo       version %VER%
 
 echo [2/5] PyInstaller
