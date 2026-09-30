@@ -355,6 +355,45 @@ class _OverlaysMixin:
             detail = (detail + " · " if detail else "") + "⚠ " + cmp.signature(0)
         self.datasets_panel.rebuild(label, self._overlays, detail)
 
+    def overlay_workspaces(self, indices):
+        """Workspaces ▸ right-click ▸ Overlay on the active spectrum: the
+        selected 1D workspaces' spectra become compared spectra of the active
+        one (Datasets dock: colour, scale, shift, offset, match height,
+        remove, make active); the active fit is untouched. Their snapshots
+        are read, never switched to; the active row itself is skipped."""
+        if self.central_stack.currentWidget() is not self.view or not self.exp_ppm.size:
+            self.statusBar().showMessage("open a 1D spectrum to overlay on first")
+            return
+        self._sync_active()
+        n = 0
+        for i in indices or []:
+            if (not isinstance(i, int) or not (0 <= i < len(self.workspaces))
+                    or i == self.active_ws):
+                continue
+            ws = self.workspaces[i]
+            snap = ws.get("snap") or {}
+            if ws.get("kind") != "1d" or snap.get("exp_ppm") is None:
+                continue
+            rec = snap.get("recipe") or {}
+            info = {"nucleus": rec.get("nucleus", ""),
+                    "larmor_MHz": float(rec.get("larmor_frequency_MHz", 0.0) or 0.0),
+                    "npts": int(np.asarray(snap["exp_ppm"]).size), "title": ""}
+            self._add_overlay(ws["title"], snap["exp_ppm"], snap["exp_amp"],
+                              snap.get("source_path") or "", info)
+            n += 1
+        if not n:
+            self.statusBar().showMessage(
+                "nothing to overlay — select other 1D workspaces than the active one")
+            return
+        act = getattr(self, "actOverlaysVisible", None)
+        if act is not None and not act.isChecked():
+            act.setChecked(True)                          # meant to be seen
+            self.view.set_overlays_hidden(False)
+        self.statusBar().showMessage(
+            f"overlaid {n} workspace(s) -- {len(self._overlays)} compared "
+            "spectrum(s); Datasets dock: colour, scale, shift, offset, match "
+            "height, remove, make active")
+
     #: colour assigned to each HMQC projection axis (matches the overlay + the
     #: Explorer highlight)
     PROJ_COLOR = {"f2": "#e8832a", "f1": "#6a4fb0"}

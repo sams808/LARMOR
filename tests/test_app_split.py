@@ -165,7 +165,7 @@ SURFACE = (
     'closeEvent', '_restore_session', 'on_family_changed',
 )
 
-# 219 menu rows: (menu path, text, shortcut, checkable, has submenu)
+# 220 menu rows: (menu path, text, shortcut, checkable, has submenu)
 GOLDEN_MENU = (
     ((), '&File', '', False, True),
     (('&File',), '&Open…', 'Ctrl+O', False, False),
@@ -276,6 +276,7 @@ GOLDEN_MENU = (
     (('F&it', '&Errors'), 'Parameter correlations…', '', False, False),
     (('F&it', '&Errors'), 'χ² map (parameter pair)…', '', False, False),
     (('F&it',), 'Compare with a saved fit…', '', False, False),
+    (('F&it',), 'Fit parameter ta&ble…', '', False, False),
     (('F&it',), 'Co-&fit datasets…', '', False, False),
     (('F&it',), '&Predict at another field…', '', False, False),
     (('F&it',), '&MQMAS', '', False, True),

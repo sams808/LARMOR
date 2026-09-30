@@ -206,6 +206,7 @@ class _SessionMixin:
                          + ", ".join(missing_overlays))
         self._ws_mode = "new"
         self._register_ws("1d")
+        self._restore_custom_title(w.get("title"))
         self._update_paddles(); self._update_exp_label(); self._update_enabled()
 
     def _restore_2d_entry(self, w: dict, project_dir: str, notes: list):
@@ -260,10 +261,23 @@ class _SessionMixin:
                              f"overlay not found ({pj.get('source')})")
         self.lines_table.rebuild(self.recipe, self.hidden)
         self._sync_active()
+        self._restore_custom_title(w.get("title"))
         self._update_exp_label(); self._update_enabled()
         if self.recipe and self.recipe.get("sites"):
             notes.append(f"2D map '{title}': fit parameters restored — run Fit "
                          "to redraw the model overlay")
+
+    def _restore_custom_title(self, title):
+        """A project entry saved under a title that is not the document's own
+        (recipe sample / file name / 2D title) was renamed in the Workspaces
+        dock: keep that name as the row's custom title."""
+        if not title or self.active_ws is None:
+            return
+        ws = self.workspaces[self.active_ws]
+        if str(title) != self._doc_title():
+            ws["custom_title"] = str(title)
+            ws["title"] = str(title)
+            self._refresh_ws_panel()
 
     def _snapshot_doc(self) -> dict:
         is2d = self.central_stack.currentWidget() is self.view2d
@@ -331,7 +345,9 @@ class _SessionMixin:
         ws["snap"] = self._snapshot_doc()
         ws["kind"] = ws["snap"]["kind"]
         ws["has_fit"] = bool(self.recipe and self.recipe.get("sites"))
-        ws["title"] = self._doc_title()
+        # a name given in the Workspaces dock (Rename…) outlives every
+        # switch; without one the row follows the document's own title
+        ws["title"] = ws.get("custom_title") or self._doc_title()
 
     def _register_ws(self, kind: str):
         mode, self._ws_mode = self._ws_mode, "auto"
@@ -361,13 +377,14 @@ class _SessionMixin:
         return len(self.workspaces) - 1
 
     def _refresh_ws_panel(self):
-        items = []
+        items, info = [], []
         for ws in self.workspaces:
             icon = ({"2d": "▦", "figure": "◫", "batch": "☷"}.get(ws["kind"])
                     or ("⤳" if ws["has_fit"] else "∿"))
             items.append((icon, ws["title"]))
+            info.append({"kind": ws["kind"], "has_fit": bool(ws["has_fit"])})
         self.ws_panel.rebuild(items, self.active_ws if self.active_ws is not None
-                              else -1)
+                              else -1, info)
 
     def switch_workspace(self, i: int):
         if i == self.active_ws or not (0 <= i < len(self.workspaces)):
@@ -430,6 +447,85 @@ class _SessionMixin:
             self.save_recipe()
         else:
             self.save_spectrum()
+
+    def rename_workspace(self, i: int):
+        """Workspaces ▸ right-click ▸ Rename…: a name of the user's own for
+        the row, kept as ``custom_title`` so _sync_active (which rewrites
+        the title from the document on every switch) respects it; an empty
+        name restores the document's own title."""
+        from PySide6.QtWidgets import QInputDialog
+
+        if not (0 <= i < len(self.workspaces)):
+            return
+        ws = self.workspaces[i]
+        text, ok = QInputDialog.getText(
+            self, "Rename workspace",
+            "Name for this row (empty = the document's own title):",
+            text=str(ws.get("title") or ""))
+        if not ok:
+            return
+        self.set_workspace_title(i, text)
+
+    def set_workspace_title(self, i: int, title: str):
+        """Give row ``i`` a custom title ('' clears it). The dialog-free
+        half of rename_workspace, so tests and scripts can call it."""
+        if not (0 <= i < len(self.workspaces)):
+            return
+        ws = self.workspaces[i]
+        title = str(title or "").strip()
+        if title:
+            ws["custom_title"] = title
+            ws["title"] = title
+        else:
+            ws.pop("custom_title", None)
+            if i == self.active_ws:
+                ws["title"] = self._doc_title()
+            elif ws["kind"] in DOC_KINDS:
+                rec = (ws.get("snap") or {}).get("recipe") or {}
+                src = (ws.get("snap") or {}).get("source_path")
+                ws["title"] = (rec.get("sample")
+                               or (Path(src).name if src else ws["title"]))
+        self._refresh_ws_panel()
+        self.statusBar().showMessage(f"workspace renamed: {ws['title']}" if title
+                                     else f"workspace title restored: {ws['title']}")
+
+    def close_workspaces(self, indices):
+        """Workspaces ▸ right-click ▸ Close (the selection) / Close others:
+        highest index first, so the lower ones stay valid; the nearest
+        document takes over when the active one goes (close_workspace)."""
+        rows = sorted({int(i) for i in (indices or [])
+                       if isinstance(i, int) and 0 <= i < len(self.workspaces)},
+                      reverse=True)
+        for i in rows:
+            self.close_workspace(i)
+        if rows:
+            self.statusBar().showMessage(
+                f"closed {len(rows)} workspace(s) — {len(self.workspaces)} open")
+
+    def workspace_fit_entries(self, indices=None) -> list:
+        """The open documents that carry a fit as ``larmor.fittable.FitEntry``
+        rows for the Fit parameter table -- the rows ``indices`` name, or
+        every fitted 1D / 2D workspace when None. The active document's
+        snapshot is refreshed first, so an unsaved edit is what the table
+        shows; the entry's source is the data path."""
+        from larmor.fittable import entry_from_recipe
+
+        self._sync_active()
+        rows = (range(len(self.workspaces)) if indices is None
+                else [i for i in indices if isinstance(i, int)
+                      and 0 <= i < len(self.workspaces)])
+        out = []
+        for i in rows:
+            ws = self.workspaces[i]
+            snap = ws.get("snap") or {}
+            if ws["kind"] not in DOC_KINDS or not ws.get("has_fit"):
+                continue
+            rec = snap.get("recipe")
+            if not isinstance(rec, dict) or not rec.get("sites"):
+                continue
+            out.append(entry_from_recipe(ws["title"], rec,
+                                         source=snap.get("source_path") or ""))
+        return out
 
     # ------------------------------------------- figures & batch sessions
     # Figures and batch-fit sessions are rows of the Workspaces dock (kind

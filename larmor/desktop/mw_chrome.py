@@ -67,6 +67,7 @@ class _ChromeMixin:
         self.explorer.batch_requested.connect(self.run_batch_fit)
         self.explorer.inventory_requested.connect(self.open_session_inventory)
         self.explorer.overlay_requested.connect(self.add_overlay_path)
+        self.explorer.fit_table_requested.connect(self.open_fit_table_files)
         self.explorer.open_paths = self._open_source_paths
         self.explorer.renamed.connect(self._on_explorer_renamed)
         self.explorer_dock.setWidget(self.explorer)
@@ -117,8 +118,8 @@ class _ChromeMixin:
                 rec = snap.get("recipe")
                 if isinstance(rec, dict):
                     rec["sample"] = scan.sample_label(snap["source_path"], {})
-                    if snap.get("kind") == "1d":
-                        ws["title"] = rec["sample"]
+                    if snap.get("kind") == "1d" and not ws.get("custom_title"):
+                        ws["title"] = rec["sample"]      # a Rename… wins
                 touched += 1
         if within(self.source_path):
             self.source_path = moved(self.source_path)
@@ -147,6 +148,13 @@ class _ChromeMixin:
         self.ws_panel.close.connect(self.close_workspace)
         self.ws_panel.save.connect(self.save_workspace)
         self.ws_panel.activate.connect(self.open_workspace_entry)
+        # the right-click menu: row ops (session mixin), dialog launchers
+        # (tools mixin) and the overlay cockpit (overlays mixin)
+        self.ws_panel.rename.connect(self.rename_workspace)
+        self.ws_panel.close_many.connect(self.close_workspaces)
+        self.ws_panel.send_to_studio.connect(self.send_workspaces_to_studio)
+        self.ws_panel.fit_table.connect(self.open_fit_table)
+        self.ws_panel.overlay.connect(self.overlay_workspaces)
         self.ws_dock.setWidget(self.ws_panel)
         self.addDockWidget(Qt.LeftDockWidgetArea, self.ws_dock)
         self.tabifyDockWidget(self.explorer_dock, self.ws_dock)
