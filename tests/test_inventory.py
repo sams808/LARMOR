@@ -436,6 +436,187 @@ def test_cli_inventory(tmp_path, capsys):
     assert f"{A}/2799" in text and "production" in text
 
 
+# ---------------------------------------------------------------- fixes
+@pytest.fixture()
+def sr_store(tmp_path, monkeypatch):
+    """Own SR-override store, referencing log and alias file per test."""
+    monkeypatch.setenv("LARMOR_SR_OVERRIDES", str(tmp_path / "store" / "sr_overrides.json"))
+    monkeypatch.setenv("LARMOR_REF_LOG", str(tmp_path / "store" / "referencing_log.jsonl"))
+    monkeypatch.setenv("LARMOR_ALIASES", str(tmp_path / "store" / "aliases.json"))
+    return tmp_path
+
+
+CRY = "01192026_SR31648_Cryolite_SS_ALP"
+
+
+def _sr_month(tmp_path) -> Path:
+    """A month whose findings admit every remedy: a referenced 1H, an ok and
+    an unreferenced 27Al (the pick) plus a short one, a 2D flagged by the
+    audit, a 31P pick outranked by an unprocessed EXPNO, a rotor flag on a
+    sample folder and a nucleus-token flag on an EXPNO."""
+    root = tmp_path / "2026-05"
+    al_ok = R.expected_sf_MHz(SF_H, "27Al")
+    _expno(root, C, 1, "1H", ns=1, bf1=BF1_H, sf=SF_H, title="1H spectrum for later referencing")
+    _expno(root, B, 2701, "27Al", ns=512, sf=al_ok, title="27Al")
+    _expno(root, B, 2702, "27Al", ns=512, sf=BF1_AL, title="27Al forgot xiref")
+    _expno(root, B, 2703, "27Al", ns=16, sf=al_ok, title="27Al")
+    _expno(root, B, 2799, "27Al", ns=2, pulprog="mp3qdfsz", twod=True, sf=BF1_AL,
+           title="27Al 3Q")
+    _expno(root, B, 3101, "31P", ns=64, bf1=BF1_P, sf=R.expected_sf_MHz(SF_H, "31P"),
+           title="31P")
+    _expno(root, B, 3102, "31P", ns=140, bf1=BF1_P, has_1r=False, title="31P")
+    _expno(root, E, 33, "27Al", ns=512, sf=al_ok,
+           title="27Al zg power check\n\nRotor SR31648 - packed with cryolite")
+    _expno(root, CRY, 16, "23Na", ns=8, bf1=BF1_NA, title="1H spectrum for later referencing")
+    return root
+
+
+def test_join_sr_keeps_expected_stored_reference_and_the_override_state(tmp_path, sr_store):
+    root = _sr_month(tmp_path)
+    inv = I.build(root)
+    r = _row(inv, B, 2702)
+    assert r.pick and r.sr_verdict == r.sr_audit == "unreferenced"
+    assert r.sr_expected_hz == pytest.approx(-135.31, abs=0.02)
+    assert r.sr_stored_hz == pytest.approx(0.0, abs=0.01)
+    assert r.sr_delta_ppm == pytest.approx(0.866, abs=2e-3)
+    assert Path(r.sr_ref) == root / C / "1"
+    assert r.sr_override is None and not r.sr_stale and "xiref" in r.sr_note
+    assert inv.n_sr_flagged() == 1 and inv.n_corrected() == 0
+    ok = _row(inv, B, 2701)
+    assert ok.sr_verdict == "ok" and ok.sr_stored_hz == pytest.approx(ok.sr_expected_hz, abs=0.01)
+    # an override whose old SR matches the file's: corrected (LARMOR)
+    R.set_override(r.path, r.sr_expected_hz, r.sr_stored_hz, nucleus="27Al", note="why")
+    I.refresh_sr(r)
+    assert r.sr_verdict == I.SR_CORRECTED and r.sr_audit == "unreferenced"
+    assert "LARMOR applies SR -135.31 Hz" in r.sr_note and "why" in r.sr_note
+    assert r.sr_override["new_sr_hz"] == pytest.approx(-135.31, abs=0.02)
+    assert inv.n_sr_flagged() == 0 and inv.n_corrected() == 1
+    # a fresh build reads the store too, with and without the audit
+    assert _row(I.build(root), B, 2702).sr_verdict == I.SR_CORRECTED
+    off = _row(I.build(root, sr_audit=False), B, 2702)
+    assert off.sr_verdict == I.SR_CORRECTED and off.sr_audit == ""
+    assert off.sr_stored_hz == pytest.approx(0.0, abs=0.01)        # read for the check
+    assert _row(I.build(root, sr_audit=False), B, 2701).sr_verdict == ""
+    # the CSV carries the verdict
+    body = I.to_csv(inv, tmp_path / "inv.csv").read_text(encoding="utf-8")
+    assert I.SR_CORRECTED in body
+    # stale: TopSpin fixed the file since -> the audit's verdict, a note, an undo
+    _jcamp(root / B / "2702" / "pdata" / "1" / "procs",
+           SF=R.expected_sf_MHz(SF_H, "27Al"), SI=1024, SR=-135.31)
+    inv2 = I.build(root)
+    r2 = _row(inv2, B, 2702)
+    assert r2.sr_verdict == "ok" and r2.sr_stale and "stale" in r2.sr_note
+    fixes = I.fixes_for(r2, inv2)
+    assert [f.kind for f in fixes] == ["sr_undo", "open_info"]
+    assert "stale" in fixes[0].label
+    R.clear_override(r2.path)
+    I.refresh_sr(r2)
+    assert r2.sr_verdict == "ok" and not r2.sr_stale and r2.sr_override is None
+    assert "stale" not in r2.sr_note
+
+
+def test_fixes_for_every_kind_on_the_synthetic_month(tmp_path, sr_store):
+    root = _sr_month(tmp_path)
+    inv = I.build(root)
+
+    def kinds(r):
+        return [f.kind for f in I.fixes_for(r, inv)]
+
+    # the unreferenced 27Al pick: apply in LARMOR, the TopSpin command, the 1H reference
+    p = _row(inv, B, 2702)
+    assert p.pick and kinds(p) == ["sr_override", "sr_topspin", "sr_open_reference", "open_info"]
+    fx = {f.kind: f for f in I.fixes_for(p, inv)}
+    assert all(f.detail for f in fx.values()) and set(fx) <= set(I.FIX_KINDS)
+    ov = fx["sr_override"]
+    assert ov.payload["new_sr_hz"] == pytest.approx(-135.31, abs=0.02)
+    assert ov.payload["old_sr_hz"] == pytest.approx(0.0, abs=0.01)
+    assert Path(ov.payload["reference"]) == root / C / "1" and ov.payload["nucleus"] == "27Al"
+    assert Path(ov.payload["path"]) == root / B / "2702"
+    assert ov.label == "Apply the audited SR in LARMOR (0.00 → -135.31 Hz)"
+    assert "+0.866 ppm" in ov.detail and "reversible" in ov.detail
+    assert "RS40339_P5-Bi1-12/1" in ov.payload["note"]
+    assert fx["sr_topspin"].payload["command"] == "sr -135.31"
+    assert fx["sr_topspin"].label.endswith("sr -135.31") and "for good" in fx["sr_topspin"].detail
+    assert Path(fx["sr_open_reference"].payload["path"]) == root / C / "1" / "pdata" / "1" / "1r"
+    assert [f.kind for f in I.remedies(I.fixes_for(p, inv))] == \
+        ["sr_override", "sr_topspin", "sr_open_reference"]
+    assert [r.expno for r in I.sr_candidates(inv)] == [2702]
+    # the ok 27Al: nothing but the info; the 1H reference likewise
+    assert kinds(_row(inv, B, 2701)) == ["open_info"]
+    assert kinds(_row(inv, C, 1)) == ["open_info"]
+    # a 2D flagged by the audit: the TopSpin command, never the LARMOR override
+    two = _row(inv, B, 2799)
+    assert two.role == "2D" and two.sr_verdict == "unreferenced"
+    assert kinds(two) == ["sr_topspin", "sr_open_reference", "open_info"]
+    # the short 27Al: pick it anyway
+    s = _row(inv, B, 2703)
+    assert s.role == "short" and kinds(s) == ["pick", "open_info"]
+    pk = I.fixes_for(s, inv)[0]
+    assert pk.payload == {"sample": (B, "P1-Bi1-12"), "nucleus": "27Al", "expno": 2703}
+    assert "3 %" in pk.detail and pk.label == "Pick EXPNO 2703 anyway"
+    # the unprocessed 31P and the pick it outranks
+    u = _row(inv, B, 3102)
+    assert u.role == "unprocessed" and kinds(u) == ["process_fid", "open_info"]
+    assert Path(I.fixes_for(u, inv)[0].payload["path"]) == root / B / "3102" / "fid"
+    pp = _row(inv, B, 3101)
+    assert pp.pick and any("3102" in f and "no pdata/1/1r" in f for f in pp.flags)
+    assert kinds(pp) == ["process_fid", "open_info"]
+    sib = I.fixes_for(pp, inv)[0]
+    assert sib.label == "Process the fid of EXPNO 3102 (NS 140) in LARMOR…"
+    assert Path(sib.payload["path"]) == root / B / "3102" / "fid"
+    # the rotor flag: rename the sample folder; the nucleus token: the EXPNO
+    e = _row(inv, E, 33)
+    assert any("SR31648" in f for f in e.flags)
+    al = [f for f in I.fixes_for(e, inv) if f.kind == "alias"]
+    assert len(al) == 1 and al[0].payload == {"path": str(root / E), "scope": "sample"}
+    assert al[0].label == f"Rename the sample folder {E}…" and "SR31648" in al[0].detail
+    c16 = _row(inv, CRY, 16)
+    assert any("starts with 1H" in f for f in c16.flags)
+    al = [f for f in I.fixes_for(c16, inv) if f.kind == "alias"]
+    assert len(al) == 1 and al[0].payload == {"path": str(root / CRY / "16"), "scope": "expno"}
+    assert al[0].label == "Rename EXPNO 16…" and "read-only" in al[0].detail
+    # an EXPNO-per-sample set has no sample folder to rename: the EXPNO instead
+    mag = I.build(_maglab(tmp_path), sr_audit=False)
+    m3 = _row(mag, "35Cl_2025-12", 3)
+    m3.flags.append("title says rotor RS1 but the folder is RS2")
+    al = [f for f in I.fixes_for(m3, mag) if f.kind == "alias"]
+    assert len(al) == 1 and al[0].payload["scope"] == "expno"
+    assert Path(al[0].payload["path"]) == mag.root / "3"
+    # after the override: undo replaces apply; the TopSpin route stays
+    R.set_override(p.path, -135.31, 0.0)
+    I.refresh_sr(p)
+    assert kinds(p) == ["sr_undo", "sr_topspin", "sr_open_reference", "open_info"]
+    undo = I.fixes_for(p, inv)[0]
+    assert undo.label == "Undo the LARMOR SR correction (0.00 → -135.31 Hz)"
+    assert undo.payload == {"path": p.path} and I.sr_candidates(inv) == []
+    # a manual pick of the short one: no 'pick' fix left on it
+    inv.set_pick((B, "P1-Bi1-12"), "27Al", 2703)
+    assert kinds(s) == ["open_info"] and s.pick
+
+
+def test_refresh_names_follows_an_alias_and_keeps_manual_picks(tmp_path, sr_store):
+    from larmor import aliases
+
+    root = _month(tmp_path)
+    inv = I.build(root, sr_audit=False)
+    inv.set_pick((A, "P5-Bi8-12"), "27Al", 2702)
+    assert any("shared with folder" in f for f in _row(inv, A, 3114).flags)
+    aliases.set_alias(root / A, "Glass A")
+    I.refresh_names(inv)
+    labels = inv.labels()
+    assert labels[(A, "Glass A")] == "Glass A" and (A, "P5-Bi8-12") not in labels
+    assert labels[(D, "P5-Bi8-12")] == "P5-Bi8-12"            # no longer shared
+    assert inv.cell((A, "Glass A"), "27Al").expno == 2702      # the manual pick survived
+    assert "chosen by user" in _row(inv, A, 2702).reasons
+    assert _row(inv, A, 2704).role == "candidate"
+    assert not any("shared with folder" in f for r in inv.rows for f in r.flags)
+    aliases.set_alias(root / A, "")
+    I.refresh_names(inv)
+    assert (A, "P5-Bi8-12") in inv.labels()
+    assert inv.cell((A, "P5-Bi8-12"), "27Al").expno == 2702
+    assert any("shared with folder" in f for f in _row(inv, A, 3114).flags)
+
+
 # ---------------------------------------------------------------- real sessions
 def test_real_2026_05_picks_failed_title_and_unprocessed_flag():
     require(BRUKER_1R)

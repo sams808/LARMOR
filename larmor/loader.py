@@ -166,6 +166,19 @@ def load_any(path: str | Path, replay: bool = True):
         from larmor import masrate
 
         mas = masrate.resolve_for_load(data.meta, ref.expno)
+        # a per-EXPNO SR correction recorded by the referencing audit / the
+        # Session inventory (referencing.set_override) is applied here, so
+        # every consumer of this branch sees the corrected axis -- but only
+        # while the file's SR is still the value the correction was made
+        # against; a TopSpin `sr` since then makes it stale (warned, ignored)
+        from larmor import referencing
+
+        sr_hz = float(data.meta.get("sr_hz", 0.0) or 0.0)
+        ref_prov, ov_note = None, ""
+        ov = referencing.override_for(ref.expno)
+        if ov is not None:
+            ppm, sr_hz, ref_prov, ov_note = referencing.apply_override(
+                ov, ppm, sr_hz, float(data.meta["larmor_MHz"]))
         # the sample of a Bruker source is the sample folder without its
         # date / rotor / operator tokens (or the title's "Sample …" line for
         # EXPNO-per-sample layouts), never the title's pulse note; the
@@ -182,16 +195,19 @@ def load_any(path: str | Path, replay: bool = True):
             nucleus=data.nucleus, larmor_frequency_MHz=data.meta["larmor_MHz"],
             spin_rate_Hz=mas["spin_rate_Hz"],
             mas_uncertain=mas["mas_uncertain"],
-            sr_hz=data.meta.get("sr_hz", 0.0),
+            sr_hz=sr_hz,
             provenance={"mas_rate": mas["provenance"]},
             source_sha256=provenance.source_sha256(
                 Path(ref.expno) / "pdata" / str(ref.procno) / "1r"),
             acquisition=block,
         )
+        if ref_prov is not None:
+            recipe.provenance["referencing"] = ref_prov
         if (title or "").strip():
             recipe.provenance["title"] = name.title_first
             recipe.provenance["sample_folder"] = name.folder
-        warns = list(data.warnings) + ([mas["note"]] if mas["note"] else [])
+        warns = list(data.warnings) + ([mas["note"]] if mas["note"] else []) \
+            + ([ov_note] if ov_note else [])
         return ppm, amp, recipe.to_dict(), data.summary, warns
 
     raise ValueError(f"unrecognized source: {p} (expected .fxmla, "

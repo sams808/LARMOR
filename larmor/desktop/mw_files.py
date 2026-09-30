@@ -167,8 +167,6 @@ class _FilesMixin:
                 "to open it")
 
     def open_fid(self):
-        from larmor.desktop.fid_dialog import FidDialog
-
         path = None
         if self.source_path and Path(self.source_path).is_dir() and \
                 ((Path(self.source_path) / "fid").exists() or
@@ -176,7 +174,16 @@ class _FilesMixin:
             path = str(Path(self.source_path) /
                        ("ser" if (Path(self.source_path) / "ser").exists()
                         else "fid"))
-        dlg = FidDialog(self, path)
+        self.open_fid_path(path)
+
+    def open_fid_path(self, path):
+        """File ▸ Open FID on a given fid / ser path (None: the dialog asks):
+        the processed 1D result lands in the workbench, a 2D one in the 2D
+        viewer. Also the Session inventory's "process this fid" remedy for
+        an EXPNO that has no pdata/1/1r yet."""
+        from larmor.desktop.fid_dialog import FidDialog
+
+        dlg = FidDialog(self, str(path) if path else None)
         dlg.accepted_1d.connect(self._fid_to_workbench)
         dlg.accepted_2d.connect(self._fid_to_2d)
         dlg.exec()

@@ -1,12 +1,21 @@
 """Session inventory window (Tools > Session inventory…): one month folder
 read into a sample x nucleus grid with the production EXPNO pre-picked per
 block, the roles / reasons / title-vs-folder flags of every EXPNO in a
-detail table, a manual pick override, and one-action hand-off of the picks
-to Batch fit or Sequential fit. Logic lives in larmor.inventory (Qt-free,
+detail table, a manual pick override, one-action hand-off of the picks to
+Batch fit or Sequential fit -- and, on every row, the remedies its findings
+admit (right-click a grid cell or a detail row, or press Fix…): apply the
+audited SR when the EXPNO opens in LARMOR (``referencing.set_override``;
+the instrument files stay untouched, the correction is logged and undone
+from the same menu), copy the TopSpin ``sr`` command, open the ¹H reference,
+rename a mis-titled EXPNO or a mis-named folder (the Explorer's
+RenameDialog: a display name in LARMOR or a rename on disk), process an
+unprocessed fid in Open FID, pick a demoted spectrum anyway, read the
+dataset's own description. Logic lives in larmor.inventory (Qt-free,
 tested); the window renders it and emits signals the main window's existing
 slots accept."""
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
@@ -17,6 +26,7 @@ from PySide6.QtWidgets import (
     QSplitter, QTableWidget, QTableWidgetItem, QVBoxLayout,
 )
 
+from larmor import aliases
 from larmor import inventory as I
 from larmor import referencing as R
 from larmor.desktop import theme
@@ -32,10 +42,16 @@ _AMBER = "#A8570F"
 DETAIL_COLS = ["pick", "EXPNO", "nucleus", "role", "kind", "NS", "D1 (s)", "1r",
                "procs", "date", "SR", "title", "flags"]
 _ROLE_KEY = Qt.UserRole + 1          # (folder, key, nucleus, expno) on detail items
+WRENCH = "🔧"
+_HINT = "right-click a row (or press Fix…) for the remedies"
 
 
 def _pickable(r: I.Row) -> bool:
     return r.info.ndim == 1 and r.info.has_1r and r.nucleus != "1H"
+
+
+def _same(a, b) -> bool:
+    return os.path.normcase(os.path.normpath(str(a))) == os.path.normcase(os.path.normpath(str(b)))
 
 
 class SessionInventoryDialog(QDialog):
@@ -45,6 +61,12 @@ class SessionInventoryDialog(QDialog):
     batch_requested = Signal(list)
     #: -> MainWindow.run_seq_fit
     seq_requested = Signal(list)
+    #: a fid / ser path -> MainWindow.open_fid_path (the Fix… menu's "process
+    #: this fid" for an EXPNO that has no pdata/1/1r yet)
+    fid_requested = Signal(str)
+    #: (old path, new path) after a rename from the Fix… menu -- equal for a
+    #: display name -> MainWindow._on_inventory_renamed
+    renamed = Signal(str, str)
 
     def __init__(self, parent=None, start_dir: str | None = None):
         super().__init__(parent)
@@ -54,6 +76,9 @@ class SessionInventoryDialog(QDialog):
         self.inv: I.Inventory | None = None
         self._filling = False
         self._sample = None                  # the sample shown in the detail table
+        #: the data paths open in LARMOR (the main window sets this): a
+        #: folder holding one of them is never renamed on disk
+        self.open_paths = lambda: []
         t = theme.active()
         v = QVBoxLayout(self)
 
@@ -70,7 +95,8 @@ class SessionInventoryDialog(QDialog):
         self.chkSr = QCheckBox("SR audit (needs a referenced ¹H in the session)")
         self.chkSr.setChecked(True)
         self.chkSr.setToolTip("second pass through the referencing audit: the SR column "
-                              "and a red cell where a pick is unreferenced or off")
+                              "and a red cell where a pick is unreferenced or off — the "
+                              "Fix… menu then offers to apply the audited SR in LARMOR")
         opts.addWidget(self.chkSr)
         opts.addSpacing(16)
         opts.addWidget(QLabel("a pick whose NS is below"))
@@ -119,6 +145,8 @@ class SessionInventoryDialog(QDialog):
         self.detail.setSelectionBehavior(QTableWidget.SelectRows)
         self.detail.itemChanged.connect(self._pick_toggled)
         self.detail.itemDoubleClicked.connect(self._detail_double)
+        self.detail.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.detail.customContextMenuRequested.connect(self._detail_context_menu)
         split.addWidget(self.detail)
         split.setSizes([380, 320])
         v.addWidget(split, 1)
@@ -135,6 +163,13 @@ class SessionInventoryDialog(QDialog):
         self.btnOpen.setToolTip("open the selected EXPNO (detail table) or the selected "
                                 "sample's pick in the workbench")
         self.btnOpen.clicked.connect(self._open)
+        self.btnFix = QPushButton("Fix…")
+        self.btnFix.setToolTip(
+            "the remedies for the selected EXPNO (the same menu as a right-click): apply "
+            "the audited SR in LARMOR or undo it, copy the TopSpin sr command, open the ¹H "
+            "reference, rename (display name or on disk), process an unprocessed fid, "
+            "pick a demoted spectrum anyway, dataset info — each entry explains itself")
+        self.btnFix.clicked.connect(self._fix_button)
         self.btnCopy = QPushButton("Copy picks")
         self.btnCopy.setToolTip("sample, nucleus, EXPNO and path of every pick, tab-separated")
         self.btnCopy.clicked.connect(self._copy)
@@ -142,7 +177,8 @@ class SessionInventoryDialog(QDialog):
         self.btnExport.setToolTip("inventory_<month>.csv (every EXPNO) and "
                                   "inventory_<month>_picks.txt")
         self.btnExport.clicked.connect(self.export)
-        for w in (self.btnBatch, self.btnSeq, self.btnOpen, self.btnCopy, self.btnExport):
+        for w in (self.btnBatch, self.btnSeq, self.btnOpen, self.btnFix, self.btnCopy,
+                  self.btnExport):
             bottom.addWidget(w)
         bottom.addStretch(1)
         btnClose = QPushButton("Close"); btnClose.clicked.connect(self.close)
@@ -154,7 +190,7 @@ class SessionInventoryDialog(QDialog):
 
     # ------------------------------------------------------------------ state
     def _enable(self, on: bool):
-        for w in (self.btnCopy, self.btnExport, self.btnOpen):
+        for w in (self.btnCopy, self.btnExport, self.btnOpen, self.btnFix):
             w.setEnabled(on)
         n = len(self.current_picks()) if on else 0
         self.btnBatch.setEnabled(n >= 2)
@@ -169,6 +205,28 @@ class SessionInventoryDialog(QDialog):
             return []
         return [r.openable for r in self.inv.picks(self.current_nucleus() or None)
                 if r.openable]
+
+    def _row_for(self, key) -> I.Row | None:
+        """The row a detail item stands for (its _ROLE_KEY)."""
+        if self.inv is None or not key:
+            return None
+        folder, sample, nuc, expno = key
+        return next((r for r in self.inv.rows if r.folder == folder and r.sample == sample
+                     and r.nucleus == nuc and r.expno == expno), None)
+
+    def current_row(self) -> I.Row | None:
+        """The EXPNO the Fix… button acts on: the detail table's current row,
+        else the pick shown in the grid's current cell."""
+        if self.inv is None:
+            return None
+        it = self.detail.currentItem()
+        if it is not None and it.data(_ROLE_KEY):
+            return self._row_for(it.data(_ROLE_KEY))
+        g = self.grid.currentItem()
+        if g is not None:
+            folder, key, n = g.data(Qt.UserRole)
+            return self.inv.cell((folder, key), n)
+        return None
 
     def _browse(self):
         d = QFileDialog.getExistingDirectory(self, "Session folder (one month)",
@@ -207,16 +265,23 @@ class SessionInventoryDialog(QDialog):
             if acqs:
                 I.join_sr(self.inv, R.audit(acqs))
             self._fill_all()
-        self.status.setText(self._summary())
+        self.status.setText(self._summary() + (f"  ·  {_HINT}" if self.inv.rows else ""))
         self.setWindowTitle(f"Session inventory — {root.name}")
 
     def _summary(self) -> str:
         inv = self.inv
         if inv is None or not inv.rows:
             return "no EXPNO found — pick the month folder that holds the sample folders"
+        sr = ""
+        n_fix = inv.n_corrected()
+        if any(r.sr_audit for r in inv.rows):
+            n_bad = inv.n_sr_flagged()
+            sr = f" · {n_bad} pick{'' if n_bad == 1 else 's'} unreferenced/off"
+        if n_fix:
+            sr += f" · {n_fix} SR corrected in LARMOR"
         return (f"{len(inv.rows)} EXPNOs in {inv.n_folders()} sample folders · "
                 f"{' '.join(inv.nuclei())} · {len(inv.picks())} picks · "
-                f"{inv.n_flags()} flagged")
+                f"{inv.n_flags()} flagged{sr}")
 
     def _repick(self, value: float):
         """A new NS fraction re-runs the roles and flags (no rescan)."""
@@ -313,6 +378,10 @@ class SessionInventoryDialog(QDialog):
                     tip = list(r.reasons) + list(r.flags)
                     if r.sr_verdict:
                         tip.append(f"SR: {r.sr_verdict}" + (f" — {r.sr_note}" if r.sr_note else ""))
+                    rem = I.remedies(I.fixes_for(r, inv))
+                    if rem:
+                        tip.append(f"{WRENCH} Fix… (right-click): "
+                                   + "; ".join(f.label for f in rem))
                     it.setToolTip("\n".join(tip) or "clean pick: the highest EXPNO of the "
                                   "block with a pdata/1/1r")
                 self.grid.setItem(i, j, it)
@@ -355,13 +424,18 @@ class SessionInventoryDialog(QDialog):
             self.detail.setRowCount(len(rows))
             for i, r in enumerate(rows):
                 info = r.info
-                vals = ["", str(r.expno), r.nucleus, r.role, info.kind, str(r.ns),
+                rem = I.remedies(I.fixes_for(r, inv))
+                alias = aliases.alias_for(r.path)
+                vals = ["", str(r.expno) + (f" ({alias})" if alias else ""), r.nucleus,
+                        r.role, info.kind, str(r.ns),
                         f"{r.d1_s:g}" if r.d1_s else "",
                         "✓" if info.has_1r else ("2rr" if info.has_2rr else "—"),
                         str(info.n_procs), r.date_iso, r.sr_verdict, r.title_line,
-                        "; ".join(r.flags)]
+                        (f"{WRENCH} " if rem else "") + "; ".join(r.flags)]
                 tip = "\n".join(list(r.reasons) + list(r.flags)
-                                + ([f"SR: {r.sr_note}"] if r.sr_note else []))
+                                + ([f"SR: {r.sr_note}"] if r.sr_note else [])
+                                + ([f"{WRENCH} Fix… (right-click): "
+                                    + "; ".join(f.label for f in rem)] if rem else []))
                 for j, txt in enumerate(vals):
                     it = QTableWidgetItem(txt)
                     flags = Qt.ItemIsEnabled | Qt.ItemIsSelectable
@@ -409,6 +483,200 @@ class SessionInventoryDialog(QDialog):
         path = item.data(Qt.UserRole)
         if path:
             self.open_requested.emit(str(path))
+
+    # ------------------------------------------------------------------ fixes
+    def fix_menu(self, row: I.Row | None) -> QMenu:
+        """The context menu for ``row``: its remedies (``inventory.fixes_for``,
+        each entry's explanation in its tooltip), the bulk SR entry when any
+        flagged pick is still uncorrected, then the window's own actions.
+        Returned rather than shown, so the caller decides where (and tests
+        can read it without a popup)."""
+        m = QMenu(self)
+        m.setToolTipsVisible(True)
+        inv = self.inv
+        if row is not None and inv is not None:
+            labels = inv.labels()
+            m.addSection(f"{labels.get(row.sample_id, row.sample)} · {row.nucleus} · "
+                         f"EXPNO {row.expno}")
+            fixes = I.fixes_for(row, inv)
+            for f in I.remedies(fixes):
+                a = m.addAction(f.label)
+                a.setToolTip(f.detail); a.setStatusTip(f.detail)
+                a.triggered.connect(lambda _c=False, f=f: self.run_fix(f))
+        n_bulk = len(I.sr_candidates(inv)) if inv is not None else 0
+        if n_bulk:
+            a = m.addAction(f"Apply the audited SR to every flagged pick… ({n_bulk})")
+            a.setToolTip("one LARMOR-side correction per unreferenced / off pick, after a "
+                         "confirmation that lists them; the instrument files stay untouched; "
+                         "each is logged and reversible from this menu")
+            a.triggered.connect(self.apply_sr_to_flagged_picks)
+        if row is not None and inv is not None:
+            for f in fixes:
+                if f.kind in I.INFO_KINDS:
+                    a = m.addAction(f.label)
+                    a.setToolTip(f.detail); a.setStatusTip(f.detail)
+                    a.triggered.connect(lambda _c=False, f=f: self.run_fix(f))
+        if not m.isEmpty():
+            m.addSeparator()
+        m.addAction("Open pick", self._open)
+        m.addAction("Batch fit picks…", self._batch)
+        m.addAction("Sequential fit picks…", self._seq)
+        m.addSeparator()
+        m.addAction("Copy picks", self._copy)
+        m.addAction("Export CSV…", self.export)
+        return m
+
+    def _fix_button(self):
+        row = self.current_row()
+        if row is None:
+            self.status.setText("select an EXPNO in the detail table (or a grid cell) first")
+            return
+        m = self.fix_menu(row)
+        m.exec(self.btnFix.mapToGlobal(self.btnFix.rect().bottomLeft()))
+
+    def _context_menu(self, pos):
+        if self.inv is None:
+            return
+        it = self.grid.itemAt(pos)
+        row = None
+        if it is not None:
+            self.grid.setCurrentItem(it)
+            folder, key, n = it.data(Qt.UserRole)
+            row = self.inv.cell((folder, key), n)
+        m = self.fix_menu(row)
+        m.exec(self.grid.viewport().mapToGlobal(pos))
+
+    def _detail_context_menu(self, pos):
+        if self.inv is None:
+            return
+        it = self.detail.itemAt(pos)
+        row = None
+        if it is not None:
+            self.detail.setCurrentItem(it)
+            row = self._row_for(it.data(_ROLE_KEY))
+        m = self.fix_menu(row)
+        m.exec(self.detail.viewport().mapToGlobal(pos))
+
+    def _refresh_sr(self, path: str):
+        """Re-read the override state of the rows at ``path`` and repaint."""
+        for r in self.inv.rows:
+            if _same(r.path, path):
+                I.refresh_sr(r)
+        self._fill_grid()
+        self._fill_detail(self._sample)
+
+    def run_fix(self, fix: I.Fix):
+        """Carry out one remedy of the Fix… menu."""
+        if self.inv is None:
+            return
+        p = fix.payload
+        kind = fix.kind
+        if kind == "sr_override":
+            R.set_override(p["path"], p["new_sr_hz"], p["old_sr_hz"],
+                           reference=p.get("reference", ""), note=p.get("note", ""),
+                           nucleus=p.get("nucleus", ""))
+            self._refresh_sr(p["path"])
+            self.status.setText(
+                f"{self._summary()}  ·  EXPNO {Path(p['path']).name}: LARMOR applies SR "
+                f"{p['new_sr_hz']:.2f} Hz when it opens (the file still says "
+                f"{p['old_sr_hz']:.2f} Hz) — logged; Undo is in the same menu")
+        elif kind == "sr_undo":
+            rec = R.clear_override(p["path"])
+            self._refresh_sr(p["path"])
+            what = (f"SR {rec['old_sr_hz']:.2f} → {rec['new_sr_hz']:.2f} Hz" if rec
+                    else "no correction was recorded")
+            self.status.setText(f"{self._summary()}  ·  EXPNO {Path(p['path']).name}: the "
+                                f"LARMOR SR correction ({what}) is cleared — logged")
+        elif kind == "sr_topspin":
+            QApplication.clipboard().setText(p["command"])
+            e = Path(p["path"])
+            self.status.setText(
+                f"copied '{p['command']}' — paste it in TopSpin on {e.parent.name}/{e.name} "
+                "(procno 1); that changes the file for good, unlike a LARMOR correction")
+        elif kind == "sr_open_reference":
+            self.open_requested.emit(str(p["path"]))
+        elif kind == "alias":
+            self._rename(str(p["path"]))
+        elif kind == "process_fid":
+            self.fid_requested.emit(str(p["path"]))
+            self.status.setText(f"{Path(p['path']).parent.name}/{Path(p['path']).name} sent to "
+                                "Open FID — accept the transform to bring it to the workbench")
+        elif kind == "pick":
+            sample = tuple(p["sample"])
+            self.inv.set_pick(sample, p["nucleus"], p["expno"])
+            self._sample = sample
+            self._fill_grid()
+            self._fill_detail(self._sample)
+            self._enable(True)
+            self.status.setText(f"{self._summary()}  ·  {sample[1]} · {p['nucleus']}: EXPNO "
+                                f"{p['expno']} chosen by hand")
+        elif kind == "open_info":
+            from larmor.desktop.explorer import show_dataset_info
+
+            show_dataset_info(self, str(p["path"]))
+
+    def apply_sr_to_flagged_picks(self):
+        """One LARMOR-side SR correction per flagged pick, after a
+        confirmation that lists them."""
+        rows = I.sr_candidates(self.inv) if self.inv is not None else []
+        if not rows:
+            self.status.setText("every flagged pick already carries a LARMOR correction")
+            return
+        labels = self.inv.labels()
+        lines = [f"{labels.get(r.sample_id, r.sample)} · {r.nucleus} · EXPNO {r.expno}:  "
+                 f"SR {float(r.sr_stored_hz or 0.0):.2f} → {float(r.sr_expected_hz):.2f} Hz"
+                 for r in rows]
+        shown = lines[:25] + ([f"… and {len(lines) - 25} more"] if len(lines) > 25 else [])
+        ans = QMessageBox.question(
+            self, "Apply the audited SR in LARMOR",
+            f"Record a LARMOR-side SR correction for these {len(rows)} pick(s)?\n\n"
+            + "\n".join(shown)
+            + "\n\nEach EXPNO then opens with the audited SR (workbench, Batch fit, "
+            "Sequential fit, CLI); the instrument files stay untouched; every "
+            "correction is logged and reversible from the Fix… menu.",
+            QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel)
+        if ans != QMessageBox.Yes:
+            return
+        n = 0
+        for r in rows:
+            f = next((f for f in I.fixes_for(r, self.inv) if f.kind == "sr_override"), None)
+            if f is None:
+                continue
+            p = f.payload
+            R.set_override(p["path"], p["new_sr_hz"], p["old_sr_hz"],
+                           reference=p.get("reference", ""), note=p.get("note", ""),
+                           nucleus=p.get("nucleus", ""))
+            I.refresh_sr(r)
+            n += 1
+        self._fill_grid()
+        self._fill_detail(self._sample)
+        self.status.setText(f"{self._summary()}  ·  {n} SR correction(s) recorded — logged "
+                            "and reversible (Fix… ▸ Undo)")
+
+    def _rename(self, path: str):
+        """A display name or a rename on disk through the Explorer's dialog;
+        the inventory follows (names re-derived, or the session rescanned
+        after a move) and ``renamed`` tells the main window."""
+        from larmor.desktop.explorer import rename_flow
+
+        done = rename_flow(self, path, open_paths=self.open_paths())
+        if done is None:
+            return
+        old, new = done
+        if old == new:                       # a display name: re-derive the names in place
+            folder = self._sample[0] if self._sample else None
+            I.refresh_names(self.inv)
+            if folder is not None:
+                key = next((r.sample for r in self.inv.rows if r.folder == folder), None)
+                self._sample = (folder, key) if key is not None else None
+            self._fill_all()
+            self.status.setText(f"{self._summary()}  ·  {Path(new).name}: display name "
+                                f"'{aliases.display_name(new)}' set in LARMOR (aliases.json)")
+        else:                                # paths changed on disk: re-read the session
+            self.scan()
+            self.status.setText(f"{self.status.text()}  ·  renamed on disk: {Path(old).name} → "
+                                f"{Path(new).name} (rename_log.jsonl)")
+        self.renamed.emit(old, new)
 
     # ------------------------------------------------------------------ actions
     def _batch(self):
@@ -470,18 +738,3 @@ class SessionInventoryDialog(QDialog):
             QMessageBox.warning(self, "Export", f"could not write: {exc}")
             return
         self.status.setText(f"wrote {p.name} and {txt.name}")
-
-    def _context_menu(self, pos):
-        if self.inv is None:
-            return
-        it = self.grid.itemAt(pos)
-        if it is not None:
-            self.grid.setCurrentItem(it)
-        m = QMenu(self)
-        m.addAction("Open pick", self._open)
-        m.addAction("Batch fit picks…", self._batch)
-        m.addAction("Sequential fit picks…", self._seq)
-        m.addSeparator()
-        m.addAction("Copy picks", self._copy)
-        m.addAction("Export CSV…", self.export)
-        m.exec(self.grid.viewport().mapToGlobal(pos))

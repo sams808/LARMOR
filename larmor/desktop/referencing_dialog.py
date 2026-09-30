@@ -22,7 +22,10 @@ from larmor.desktop import theme
 
 _VERDICT_COLOR = {"ok": "#2C6A4E", "off": "#9E3324", "unreferenced": "#9E3324",
                   "no reference": "#A8570F", "unprocessed": "#6A7C80",
-                  "1H reference": "#0B6A71", "1H": "#6A7C80"}
+                  "1H reference": "#0B6A71", "1H": "#6A7C80",
+                  # the Session inventory's verdict for an active LARMOR-side
+                  # SR correction (referencing.set_override): as good as ok
+                  "corrected (LARMOR)": "#2C6A4E"}
 
 
 class ReferencingAuditDialog(QDialog):

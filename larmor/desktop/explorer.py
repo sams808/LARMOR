@@ -72,6 +72,69 @@ def _proc_openable(procdir: Path):
     return None
 
 
+def show_dataset_info(parent, path: str):
+    """The dataset's own description (``ExplorerPanel.dataset_info_text``) in
+    a read-only, NON-modal text window; returns the window. Shared by the
+    Explorer's context menu and the Session inventory's Fix… menu."""
+    from PySide6.QtWidgets import QPlainTextEdit
+
+    from larmor.desktop.windowtray import show_tool_window
+
+    dlg = QDialog(parent)
+    dlg.setWindowTitle(f"{Path(path).name} — dataset info")
+    dlg.resize(560, 380)
+    v = QVBoxLayout(dlg)
+    txt = QPlainTextEdit(ExplorerPanel.dataset_info_text(path))
+    txt.setReadOnly(True)
+    f = txt.font(); f.setFamily("Consolas"); txt.setFont(f)
+    v.addWidget(txt)
+    bb = QDialogButtonBox(QDialogButtonBox.Close)
+    bb.rejected.connect(dlg.reject)
+    bb.accepted.connect(dlg.accept)
+    bb.button(QDialogButtonBox.Close).clicked.connect(dlg.close)
+    v.addWidget(bb)
+    show_tool_window(dlg)                    # read-only: never blocks the app
+    return dlg
+
+
+def rename_flow(parent, path: str, open_paths=()):
+    """Right-click ▸ Rename… on a sample folder or an EXPNO: the
+    :class:`RenameDialog`, then either the alias (a display name kept by
+    LARMOR) or the folder renamed on disk after an explicit confirmation
+    that states both paths. Returns ``(old, new)`` -- equal for an alias --
+    or None when cancelled or refused. Shared by the Explorer and the
+    Session inventory so the two cannot drift apart."""
+    from PySide6.QtWidgets import QMessageBox
+
+    dlg = RenameDialog(parent, path)
+    if dlg.exec() != RenameDialog.Accepted:
+        return None
+    name = dlg.name()
+    if not dlg.on_disk():
+        aliases.set_alias(path, name)
+        return path, path
+    try:
+        target = aliases.check_rename(path, name, open_paths=open_paths)
+    except aliases.RenameError as exc:
+        QMessageBox.warning(parent, "Rename on disk", str(exc))
+        return None
+    kind = "EXPNO" if aliases.is_expno(path) else "sample folder"
+    ans = QMessageBox.question(
+        parent, "Rename on disk",
+        f"Rename this {kind} on disk?\n\n{path}\n→ {target}\n\n"
+        "The move is logged in LARMOR's rename log; nothing inside the "
+        "folder is changed.",
+        QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel)
+    if ans != QMessageBox.Yes:
+        return None
+    try:
+        target = aliases.rename_folder(path, name, open_paths=open_paths)
+    except (aliases.RenameError, OSError) as exc:
+        QMessageBox.warning(parent, "Rename on disk", str(exc))
+        return None
+    return path, str(target)
+
+
 class ExplorerPanel(QWidget):
     open_requested = Signal(str)        # openable data path
     batch_requested = Signal(list)      # openable paths for a batch fit
@@ -299,23 +362,7 @@ class ExplorerPanel(QWidget):
         return "\n".join(parts)
 
     def _dataset_info(self, path: str):
-        from PySide6.QtWidgets import (QDialog, QDialogButtonBox,
-                                       QPlainTextEdit, QVBoxLayout)
-        dlg = QDialog(self)
-        dlg.setWindowTitle(f"{Path(path).name} — dataset info")
-        dlg.resize(560, 380)
-        v = QVBoxLayout(dlg)
-        txt = QPlainTextEdit(self.dataset_info_text(path))
-        txt.setReadOnly(True)
-        f = txt.font(); f.setFamily("Consolas"); txt.setFont(f)
-        v.addWidget(txt)
-        bb = QDialogButtonBox(QDialogButtonBox.Close)
-        bb.rejected.connect(dlg.reject)
-        bb.accepted.connect(dlg.accept)
-        bb.button(QDialogButtonBox.Close).clicked.connect(dlg.close)
-        v.addWidget(bb)
-        from larmor.desktop.windowtray import show_tool_window
-        show_tool_window(dlg)                    # read-only: non-modal
+        show_dataset_info(self, path)
 
     # ---------------- loading ----------------
     def _open_sample(self):
@@ -612,39 +659,22 @@ class ExplorerPanel(QWidget):
     def rename_item(self, path: str):
         """Right-click ▸ Rename… on a sample folder or an EXPNO: a display
         name kept by LARMOR (an alias), or the folder renamed on disk after
-        an explicit confirmation that states both paths."""
-        from PySide6.QtWidgets import QMessageBox
+        an explicit confirmation that states both paths (``rename_flow``);
+        then the tree follows and ``renamed`` tells the main window."""
+        done = rename_flow(self, path, open_paths=self.open_paths())
+        if done is None:
+            return
+        self.apply_rename(*done)
+        self.renamed.emit(*done)
 
-        dlg = RenameDialog(self, path)
-        if dlg.exec() != RenameDialog.Accepted:
-            return
-        name = dlg.name()
-        if not dlg.on_disk():
-            aliases.set_alias(path, name)
-            self._relabel(path)
-            self.renamed.emit(path, path)
-            return
-        try:
-            target = aliases.check_rename(path, name, open_paths=self.open_paths())
-        except aliases.RenameError as exc:
-            QMessageBox.warning(self, "Rename on disk", str(exc))
-            return
-        kind = "EXPNO" if aliases.is_expno(path) else "sample folder"
-        ans = QMessageBox.question(
-            self, "Rename on disk",
-            f"Rename this {kind} on disk?\n\n{path}\n→ {target}\n\n"
-            "The move is logged in LARMOR's rename log; nothing inside the "
-            "folder is changed.",
-            QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel)
-        if ans != QMessageBox.Yes:
-            return
-        try:
-            target = aliases.rename_folder(path, name, open_paths=self.open_paths())
-        except (aliases.RenameError, OSError) as exc:
-            QMessageBox.warning(self, "Rename on disk", str(exc))
-            return
-        self._retarget(path, str(target))
-        self.renamed.emit(path, str(target))
+    def apply_rename(self, old: str, new: str):
+        """Make the tree follow a rename made anywhere in LARMOR: relabel the
+        rows of an aliased folder (``old == new``), or retarget every stored
+        path after a rename on disk."""
+        if old == new:
+            self._relabel(old)
+        else:
+            self._retarget(old, new)
 
 
 class RenameDialog(QDialog):

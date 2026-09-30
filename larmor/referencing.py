@@ -21,8 +21,20 @@ TopSpin-ready list of ``sr`` values and appends every old and new value to
 an append-only log, so any correction typed at the spectrometer can be
 reversed later. Instrument folders are never written to.
 
-Qt-free; the desktop window (larmor/desktop/referencing_dialog.py) and the
-``larmor srcheck`` command are consumers.
+**SR overrides** are the LARMOR-side way of fixing a flagged EXPNO without
+touching its files: ``set_override`` records, per EXPNO, the audited SR and
+the SR the file had at the time in ``%LOCALAPPDATA%/LARMOR/sr_overrides.json``
+(``LARMOR_SR_OVERRIDES`` overrides; tests point it at a temporary file).
+``larmor.loader`` consults the store on every Bruker load -- the desktop,
+Batch fit, Sequential fit and the CLI -- and moves the ppm axis by
+``axis_shift_ppm`` while the file's SR still equals the recorded old value;
+once TopSpin's ``sr`` has corrected the file the override is stale and is
+ignored with a warning. Every set / clear is appended to the referencing log
+(actions ``override`` / ``override-cleared``), so the log stays the single
+audit trail of every referencing change LARMOR knows about.
+
+Qt-free; the desktop windows (larmor/desktop/referencing_dialog.py, the
+Session inventory) and the ``larmor srcheck`` command are consumers.
 """
 from __future__ import annotations
 
@@ -54,7 +66,9 @@ __all__ = [
     "axis_shift_ppm", "session_root", "read_acquisition", "scan_session",
     "find_references", "pick_reference", "check_reference", "sf_from_peak",
     "audit", "consistency_notes", "summary", "topspin_list", "to_csv",
-    "log_path", "append_log", "previous_audits",
+    "log_path", "append_log", "append_log_entries", "previous_audits",
+    "OVERRIDE_MATCH_HZ", "overrides_path", "load_overrides", "override_for",
+    "set_override", "clear_override", "apply_override",
 ]
 
 
@@ -428,14 +442,27 @@ def log_path() -> Path:
     return Path(base) / "LARMOR" / "referencing_log.jsonl"
 
 
-def append_log(rows: list[AuditRow], session, *, ada_ppm: float, tol_ppm: float,
-               action: str, path=None) -> Path:
-    """Append one record holding the OLD and NEW SR/SF of every flagged EXPNO
-    (and the reference used), so a correction can be reversed years later."""
+def append_log_entries(entries: list[dict], session, *, action: str, path=None,
+                       **extra) -> Path:
+    """Append one record ``{time, larmor, session, action, **extra, entries}``
+    to the log (the single audit trail: audits, applied corrections and the
+    LARMOR-side overrides all land here)."""
     from larmor import __version__
 
     p = Path(path) if path else log_path()
     p.parent.mkdir(parents=True, exist_ok=True)
+    record = {"time": _dt.datetime.now().isoformat(timespec="seconds"),
+              "larmor": __version__, "session": str(Path(session)),
+              "action": action, **extra, "entries": list(entries)}
+    with open(p, "a", encoding="utf-8") as f:
+        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    return p
+
+
+def append_log(rows: list[AuditRow], session, *, ada_ppm: float, tol_ppm: float,
+               action: str, path=None) -> Path:
+    """Append one record holding the OLD and NEW SR/SF of every flagged EXPNO
+    (and the reference used), so a correction can be reversed years later."""
     entries = []
     for r in rows:
         if r.acq.is_1h or r.expected_sr_hz is None or not r.flagged:
@@ -449,13 +476,8 @@ def append_log(rows: list[AuditRow], session, *, ada_ppm: float, tol_ppm: float,
             "reference": r.ref.path if r.ref else None,
             "reference_sf_MHz": r.ref.sf_MHz if r.ref else None,
         })
-    record = {"time": _dt.datetime.now().isoformat(timespec="seconds"),
-              "larmor": __version__, "session": str(Path(session)),
-              "action": action, "ada_ppm": ada_ppm, "tol_ppm": tol_ppm,
-              "counts": summary(rows), "entries": entries}
-    with open(p, "a", encoding="utf-8") as f:
-        f.write(json.dumps(record, ensure_ascii=False) + "\n")
-    return p
+    return append_log_entries(entries, session, action=action, path=path,
+                              ada_ppm=ada_ppm, tol_ppm=tol_ppm, counts=summary(rows))
 
 
 def previous_audits(session, path=None) -> list[dict]:
@@ -483,3 +505,151 @@ def row_dict(r: AuditRow) -> dict:
              delta_ppm=r.delta_ppm, delta_hz=r.delta_hz, verdict=r.verdict,
              note=r.note, notes=list(r.notes))
     return d
+
+
+# ---------------------------------------------------------------- SR overrides
+#: an override applies while the file's SR still equals its recorded old
+#: value within this (the loader's own SR tolerance, provenance.SR_TOL_HZ)
+OVERRIDE_MATCH_HZ = 0.5
+_ov_cache: dict = {"path": None, "mtime": None, "data": {}}
+
+
+def overrides_path() -> Path:
+    """``%LOCALAPPDATA%/LARMOR/sr_overrides.json`` (``LARMOR_SR_OVERRIDES``
+    overrides): the per-EXPNO SR corrections LARMOR applies at load."""
+    env = os.environ.get("LARMOR_SR_OVERRIDES")
+    if env:
+        return Path(env)
+    base = os.environ.get("LOCALAPPDATA") or str(Path.home())
+    return Path(base) / "LARMOR" / "sr_overrides.json"
+
+
+def _expno_dir(path) -> Path:
+    """The EXPNO folder a path belongs to (itself, or the first ancestor
+    holding an ``acqus``); the path itself when none does."""
+    p = Path(str(path))
+    for c in [p] + list(p.parents)[:5]:
+        try:
+            if (c / "acqus").exists():
+                return c
+        except OSError:
+            break
+    return p
+
+
+def _override_key(path) -> str:
+    """The store key of an EXPNO: absolute, normalised, case-folded the way
+    the platform compares paths -- the same rule as ``aliases._key``; a 1r
+    or pdata path inside the EXPNO keys the EXPNO."""
+    return os.path.normcase(os.path.normpath(os.path.abspath(str(_expno_dir(path)))))
+
+
+def load_overrides() -> dict[str, dict]:
+    """``{EXPNO key: record}`` -- re-read only when the file changed, so the
+    loader's lookup stays cheap for a batch of hundreds."""
+    p = overrides_path()
+    try:
+        mtime = p.stat().st_mtime_ns
+    except OSError:
+        _ov_cache.update(path=str(p), mtime=None, data={})
+        return {}
+    if _ov_cache["path"] == str(p) and _ov_cache["mtime"] == mtime:
+        return _ov_cache["data"]
+    try:
+        raw = json.loads(p.read_text(encoding="utf-8"))
+        data = {str(k): dict(v) for k, v in raw.items()
+                if isinstance(v, dict) and "new_sr_hz" in v and "old_sr_hz" in v} \
+            if isinstance(raw, dict) else {}
+    except (OSError, ValueError, TypeError):
+        data = {}
+    _ov_cache.update(path=str(p), mtime=mtime, data=data)
+    return data
+
+
+def _write_overrides(data: dict[str, dict]) -> None:
+    p = overrides_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(p.suffix + ".tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1, sort_keys=True),
+                   encoding="utf-8")
+    os.replace(tmp, p)
+    _ov_cache.update(path=None, mtime=None, data={})      # force a re-read
+
+
+def override_for(expno_path) -> dict | None:
+    """The stored correction of an EXPNO (``{path, old_sr_hz, new_sr_hz,
+    reference, nucleus, note, time, larmor}``), None when it has none."""
+    if not expno_path:
+        return None
+    rec = load_overrides().get(_override_key(expno_path))
+    return dict(rec) if rec else None
+
+
+def _override_entry(p: Path, rec: dict) -> dict:
+    try:
+        expno = int(p.name)
+    except ValueError:
+        expno = 0
+    return {"path": str(p), "sample": p.parent.name, "expno": expno, "procno": 1,
+            "nucleus": rec.get("nucleus", ""), "old_sr_hz": rec.get("old_sr_hz"),
+            "new_sr_hz": rec.get("new_sr_hz"), "reference": rec.get("reference") or None,
+            "note": rec.get("note", "")}
+
+
+def set_override(expno_path, new_sr_hz: float, old_sr_hz: float, *, reference="",
+                 note: str = "", nucleus: str = "") -> dict:
+    """Record that ``expno_path`` opens with SR ``new_sr_hz`` while its file
+    still says ``old_sr_hz`` (``reference``: the 1H EXPNO the value came
+    from). Replaces an earlier record for the same EXPNO; appended to the
+    referencing log as action ``override``. The instrument folder is not
+    touched."""
+    from larmor import __version__
+
+    p = _expno_dir(expno_path)
+    rec = {"path": str(p), "old_sr_hz": float(old_sr_hz), "new_sr_hz": float(new_sr_hz),
+           "reference": str(reference or ""), "nucleus": str(nucleus or ""),
+           "note": str(note or ""),
+           "time": _dt.datetime.now().isoformat(timespec="seconds"),
+           "larmor": __version__}
+    data = dict(load_overrides())
+    data[_override_key(p)] = rec
+    _write_overrides(data)
+    append_log_entries([_override_entry(p, rec)], session_root(p), action="override")
+    return rec
+
+
+def clear_override(expno_path) -> dict | None:
+    """Forget the correction of an EXPNO (logged as ``override-cleared``);
+    returns the record that was dropped, None when there was none."""
+    k = _override_key(expno_path)
+    data = dict(load_overrides())
+    rec = data.pop(k, None)
+    if rec is None:
+        return None
+    _write_overrides(data)
+    p = Path(rec.get("path") or _expno_dir(expno_path))
+    append_log_entries([_override_entry(p, rec)], session_root(p), action="override-cleared")
+    return dict(rec)
+
+
+def apply_override(ov: dict, ppm, sr_hz: float, sf_MHz: float):
+    """Decide what a stored override does to a freshly read spectrum whose
+    file says ``sr_hz``. Returns ``(ppm, sr_hz, provenance, note)``: while
+    the file's SR still equals the recorded old value the axis moves by
+    :func:`axis_shift_ppm` (TopSpin's direction), the SR becomes the new one
+    and ``provenance`` is the recipe's ``referencing`` block; otherwise
+    (TopSpin corrected the file since) nothing changes, ``provenance`` is
+    None and the note says the override is stale."""
+    old, new = float(ov["old_sr_hz"]), float(ov["new_sr_hz"])
+    cur = float(sr_hz or 0.0)
+    if abs(cur - old) > OVERRIDE_MATCH_HZ:
+        return (ppm, cur, None,
+                f"a LARMOR SR correction ({old:.2f} → {new:.2f} Hz) is stale: the file's "
+                f"SR is now {cur:.2f} Hz, so nothing was applied — clear it from the "
+                "Session inventory (Fix…)")
+    d_ppm = axis_shift_ppm(old, new, sf_MHz)
+    prov = {"old_sr_hz": old, "new_sr_hz": new, "axis_shift_ppm": float(d_ppm),
+            "note": str(ov.get("note", "")), "source": "sr_overrides"}
+    return (np.asarray(ppm, float) + d_ppm, new, prov,
+            f"SR corrected by the referencing audit (was {old:.2f} Hz): "
+            f"SR {new:.2f} Hz, axis moved {d_ppm:+.3f} ppm")
