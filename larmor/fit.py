@@ -87,10 +87,18 @@ def diff_step_for(recipe) -> float | None:
 
 
 def _tol_kws(tol) -> dict:
-    """least_squares stop tolerances from a completion threshold (``ftol`` on the
-    cost, matched ``xtol``); empty when no threshold is set."""
+    """Solver stop tolerance from a completion threshold: ``ftol`` on the
+    cost only; empty when no threshold is set.
+
+    Never ``xtol``: scipy's step test is ``|dx| < xtol * (xtol + |x|)`` on the
+    WHOLE parameter vector, and |x| is the amplitude (1e5-1e7 on real data),
+    so a matched xtol of 0.002 declared convergence as soon as the amplitude
+    settled -- a position step of 1 ppm is 1e-6 of |x|. Measured on a
+    synthetic gauss_lor started 6 ppm off: with xtol the fit stopped at
+    61.1 ppm, with ftol alone it reaches 60.0. The threshold is a statement
+    about the residual, and ftol is the residual test."""
     ft = ftol_from_pct(tol)
-    return {} if ft is None else {"ftol": ft, "xtol": ft}
+    return {} if ft is None else {"ftol": ft}
 
 
 def _key(site, pname: str) -> str:

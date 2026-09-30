@@ -18,13 +18,24 @@ from larmor.recipe import Recipe
 
 
 def _emit_progress(sig, should_stop=None, converge_frac=None):
-    """An lmfit iter_cb that reports (iteration, residual stdev) to a Qt signal.
+    """An lmfit iter_cb that reports (evaluation, residual stdev) to a Qt signal.
 
-    Returning True aborts the minimisation. It halts if ``should_stop()`` is
-    truthy, or — dmfit-style — once the residual stdev changes by less than
-    ``converge_frac`` (a fraction, e.g. 1e-3 = 0.1 %) between iterations, keeping
-    the latest parameters."""
-    state = {"n": 0, "prev": None}
+    Returning True aborts the minimisation; it does so only when
+    ``should_stop()`` is truthy (the Stop / Cancel buttons).
+
+    ``converge_frac`` is accepted for compatibility and IGNORED. The
+    completion threshold is honoured by the solver's own ``ftol`` / ``xtol``
+    (``fit._tol_kws``), which compare successive ITERATIONS. This callback
+    cannot: lmfit calls ``iter_cb`` on every residual EVALUATION, and most
+    evaluations are finite-difference Jacobian probes whose residual differs
+    from the previous one by a relative 1e-8 (analytic models) or ~1e-4
+    (the 1e-3 step of kernel models). A "stdev changed by less than 0.1 %"
+    test on those aborted every Fit-button fit after ~5 evaluations -- the
+    positions never moved, only the analytic amplitude pre-scale showed --
+    while Auto fit (no threshold, no callback) converged. Measured on the
+    shipped 27Al example: threshold 0.1 % -> nfev 5, RMSD 0.082, "Fit
+    aborted by user callback"; threshold 0 -> nfev 273, RMSD 0.0536."""
+    state = {"n": 0}
 
     def cb(params, it, resid, *args, **kws):
         state["n"] += 1
@@ -35,11 +46,6 @@ def _emit_progress(sig, should_stop=None, converge_frac=None):
         sig.emit(state["n"], rms)
         if should_stop is not None and should_stop():
             return True
-        prev = state["prev"]
-        if (converge_frac and prev is not None and prev > 0 and rms == rms
-                and abs(rms - prev) / prev < converge_frac):
-            return True                      # sdev not changing more than threshold
-        state["prev"] = rms
         return None
     return cb
 
@@ -73,7 +79,9 @@ def humanize_error(msg) -> str:
 def _fit_tol():
     """The user's global completion threshold (% change in the residual stdev at
     which a fit is considered done). Default 0.1 % ≈ dmfit's 1.0e-3; set to 0 for
-    the full-precision solver default. Honoured by every fit button in the app."""
+    the full-precision solver default. Honoured by every fit button in the app
+    through the solver tolerances (``fit.ftol_from_pct``), never through the
+    progress callback (see ``_emit_progress``)."""
     from PySide6.QtCore import QSettings
     try:
         return float(QSettings("LARMOR", "app").value("fitStdevPct", 0.1) or 0.0)

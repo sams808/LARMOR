@@ -135,6 +135,10 @@ class _FittingMixin:
                 "fit window is read from the frequency axis")
             return
         if self._fit_worker and self._fit_worker.isRunning():
+            # say so: a silent return here looks exactly like a broken button
+            self.statusBar().showMessage(
+                "a fit is still running — Stop or Cancel it first (the buttons "
+                "beside the progress bar)")
             return
         self._sanitize_constraints_before_fit()
         self.snapshot()

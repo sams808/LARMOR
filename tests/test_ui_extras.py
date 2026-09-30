@@ -106,15 +106,18 @@ class _FakeSig:
         pass
 
 
-def test_emit_progress_dmfit_style_convergence(qapp):
-    """The completion threshold stops the fit once the residual stdev stops
-    changing by more than the threshold (dmfit 'sdev not changing' criterion)."""
+def test_emit_progress_never_aborts_on_a_small_residual_change(qapp):
+    """The completion threshold is the solver's ftol / xtol (per iteration),
+    never a callback rule: lmfit calls iter_cb on every residual EVALUATION,
+    and finite-difference Jacobian probes change the residual by ~1e-8, so a
+    'stdev changed by less than 0.1 %' test aborted every Fit-button fit
+    after ~5 evaluations (0.14.x). Only Stop / Cancel may abort."""
     from larmor.desktop.app import _emit_progress
-    cb = _emit_progress(_FakeSig(), lambda: False, converge_frac=1e-3)  # 0.1%
-    assert cb(None, 1, np.full(100, 10.0)) is None       # first iteration
-    assert cb(None, 2, np.full(100, 9.98)) is None        # Δ 0.2% > 0.1% → keep going
-    assert cb(None, 3, np.full(100, 9.9795)) is True      # Δ ~0.005% < 0.1% → stop
-    # with no threshold it never converges on its own
+    cb = _emit_progress(_FakeSig(), lambda: False, converge_frac=1e-3)  # ignored
+    assert cb(None, 1, np.full(100, 10.0)) is None
+    assert cb(None, 2, np.full(100, 9.98)) is None
+    assert cb(None, 3, np.full(100, 9.9795)) is None       # a Jacobian probe
+    assert cb(None, 4, np.full(100, 9.9795)) is None       # identical: still no
     cb2 = _emit_progress(_FakeSig(), lambda: False, converge_frac=None)
     assert cb2(None, 1, np.full(100, 10.0)) is None
     assert cb2(None, 2, np.full(100, 10.0)) is None
