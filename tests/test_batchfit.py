@@ -193,7 +193,14 @@ def test_error_analysis_covariance_refits_when_the_fast_fit_had_none():
     free = [(i, pn) for rec in res.recipes for i, pn in batchfit._free_params(rec)]
     n_none_raw = sum(1 for rec in res.recipes for i, pn in batchfit._free_params(rec)
                      if rec.sites[i].params[pn].stderr is None)
-    assert n_none_raw == len(free)          # confirms the fixture DOES trigger it
+    # confirms the fixture DOES trigger it: with the unscaled solver every
+    # one of the six was None; since the Jacobian-scaled solver (0.15.1,
+    # fit.X_SCALE) the fast pass lands where lmfit can invert the
+    # near-singular matrix for some spectra, so at least one spectrum, not
+    # necessarily all three, must come back without error bars
+    assert 1 <= n_none_raw <= len(free)
+    assert any(all(rec.sites[i].params[pn].stderr is None
+                   for i, pn in batchfit._free_params(rec)) for rec in res.recipes)
 
     batchfit.batch_error_analysis(res, _data_for(entries), method="covariance")
     rows = batchfit.error_table(res, method="covariance")

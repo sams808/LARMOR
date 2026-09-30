@@ -77,7 +77,13 @@ Workplan"; this file is the ground truth for progress.
   a millisecond of 0.14.3 except zoom_full, 0.97 → 2.15 ms.
   **v0.15.0 (f627a89, 2026-09-30): 1728 passed / 0 failed** in 23 min 31 s,
   run alone after the four worktree merges, real-data layer complete (all 19
-  datasets present).
+  datasets present). **v0.15.1 (a6d2251): 1740 passed / 1 failed** in
+  41 min 03 s, real-data layer complete — the one failure was the fixture
+  precondition of `test_error_analysis_covariance_refits_when_the_fast_fit_had_none`
+  ("all six stderr None"), which the Jacobian-scaled solver no longer
+  satisfies for every spectrum of the degenerate pair (2 of 6 None); the
+  assertion now requires at least one spectrum without error bars, and the
+  test passes.
 - **0.14.1 (2026-09-23, same day)**: a student's frozen 0.14.0 opened spectra
   but "fitting did not work". The fit path was verified in the exe's own
   package set — console-less Python of `packaging/.buildenv`, then the frozen
