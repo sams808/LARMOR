@@ -318,6 +318,10 @@ class _MenusMixin:
                                      "pair determined?")
         self._add(m_fit, "Compare with a saved fit…", self.compare_with_saved_fit,
                   tip="parameter-by-parameter diff against a saved recipe")
+        self._add(m_fit, "Fit parameter ta&ble…", self.open_fit_table,
+                  tip="one table of every line's parameters across several "
+                      "fits — the open workspaces, plus saved fit files added "
+                      "in the table; copy as TSV or export CSV")
         m_fit.addSeparator()
         self._add(m_fit, "Co-&fit datasets…", self.open_cofit,
                   tip="one shared model over several datasets, 1D + MQMAS")

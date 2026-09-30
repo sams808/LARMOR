@@ -77,6 +77,7 @@ class ExplorerPanel(QWidget):
     batch_requested = Signal(list)      # openable paths for a batch fit
     inventory_requested = Signal(str)   # a month or sample folder -> Session inventory
     overlay_requested = Signal(str)     # an EXPNO -> overlay on the active spectrum
+    fit_table_requested = Signal(list)  # saved fit files -> the Fit parameter table
     renamed = Signal(str, str)          # (old path, new path) -- equal for an alias
 
     def __init__(self):
@@ -252,6 +253,13 @@ class ExplorerPanel(QWidget):
         if item is None:
             return
         path = item.data(0, _ROLE_PATH)
+        if item.data(0, _ROLE_KIND) == "fit" and path:
+            if not item.isSelected():        # a right-click outside the selection
+                self.tree.clearSelection()   # acts on the clicked fit alone
+                item.setSelected(True)
+            fits = self.selected_fits() or [path]
+            self.fit_menu(path, fits).exec(self.tree.viewport().mapToGlobal(pos))
+            return
         if not path or not Path(path).is_dir():
             return
         m = QMenu(self)
@@ -526,6 +534,38 @@ class ExplorerPanel(QWidget):
                 continue                           # a fit, not a spectrum
             paths.append(op); seen.add(op)
         return paths
+
+    def selected_fits(self) -> list[str]:
+        """The saved fit files (LARMOR .recipe.json, dmfit .fxml / .fxmla)
+        in the selected rows, de-duplicated, in tree order -- the
+        counterpart of selected_spectra, which skips them."""
+        paths, seen = [], set()
+        for it in self.tree.selectedItems():
+            if it.data(0, _ROLE_KIND) != "fit":
+                continue
+            p = it.data(0, _ROLE_OPEN) or it.data(0, _ROLE_PATH)
+            if p and p not in seen:
+                paths.append(p); seen.add(p)
+        return paths
+
+    def fit_menu(self, path: str, fits: list[str]) -> QMenu:
+        """The right-click menu of a saved-fit row (built, not shown): Open
+        loads the clicked fit on its spectrum; Fit parameter table… tables
+        the parameters of every selected fit (``fits``)."""
+        m = QMenu(self)
+        m.setToolTipsVisible(True)
+        a = m.addAction("Open", lambda: self.open_requested.emit(path))
+        a.setToolTip("load this fit with its spectrum on the workbench "
+                     "(double-click does the same)")
+        n = len(fits)
+        a = m.addAction("Fit parameter table…" if n <= 1
+                        else f"Fit parameter table…  ({n} fits)",
+                        lambda: self.fit_table_requested.emit(list(fits)))
+        a.setToolTip("one table of every line's parameters from the selected "
+                     "fits (value ± error, † fixed, ‡ at a bound, § linked) — "
+                     "Ctrl / Shift-click several fits first; more can be added "
+                     "in the table")
+        return m
 
     def _batch_clicked(self):
         self.batch_requested.emit(self.selected_spectra())

@@ -734,3 +734,90 @@ class _ToolsMixin:
                            "label": "experiment"})
         spec = {"kind": "1d", "traces": traces}
         self.open_plotting_studio(spec)     # untouched seed -> nothing kept
+
+    def send_workspaces_to_studio(self, indices):
+        """Workspaces ▸ right-click ▸ Send to Plotting studio: every selected
+        1D workspace as inline traces -- its experiment, the fitted total
+        (dashed) and each component (thinner, translucent), one colour per
+        workspace (figures.site_color) -- then the studio. The models are
+        simulated here, on the GUI thread under a wait cursor (Czjzek
+        kernels are cached process-wide); a workspace whose model cannot be
+        simulated keeps its experiment trace and is named in the status bar,
+        never in a box."""
+        from PySide6.QtCore import Qt
+        from PySide6.QtGui import QCursor
+
+        from larmor import figures
+
+        self._sync_active()
+        picked = [i for i in (indices or []) if isinstance(i, int)
+                  and 0 <= i < len(self.workspaces)
+                  and self.workspaces[i]["kind"] == "1d"]
+        if not picked:
+            self.statusBar().showMessage(
+                "select at least one 1D workspace (Ctrl / Shift-click in the "
+                "Workspaces dock) to send to the Plotting studio")
+            return
+        traces, notes, titles = [], [], []
+        QApplication.setOverrideCursor(QCursor(Qt.WaitCursor))
+        try:
+            for k, i in enumerate(picked):
+                ws = self.workspaces[i]
+                snap = ws["snap"]
+                got, note = figures.fit_traces(
+                    ws["title"], snap["exp_ppm"], snap["exp_amp"],
+                    snap.get("recipe"), color=figures.site_color(k))
+                traces += got
+                titles.append(ws["title"])
+                if note:
+                    notes.append(note)
+        finally:
+            QApplication.restoreOverrideCursor()
+        title = (titles[0] if len(titles) == 1
+                 else f"{titles[0]} + {len(titles) - 1} more")
+        spec = {"kind": "1d", "traces": traces, "title": title}
+        if notes:
+            self.statusBar().showMessage(
+                "sent to the Plotting studio; could not simulate the fit of "
+                + "; ".join(notes), 12000)
+        else:
+            self.statusBar().showMessage(
+                f"{len(picked)} spectrum(s) sent to the Plotting studio as "
+                f"{len(traces)} trace(s)")
+        self.open_plotting_studio(spec)
+
+    def open_fit_table(self, indices=None):
+        """Fit ▸ Fit parameter table… (every open workspace with a fit) and
+        the Workspaces dock's right-click (the selected fitted rows): one
+        NON-modal table of every line's parameters across several fits; saved
+        fit files can be added in the dialog. A QAction passes a bool, which
+        means 'every fitted workspace'; with none open the table opens empty
+        with its Add fits… hint."""
+        from larmor.desktop.fittable_dialog import FitTableDialog
+
+        rows = list(indices) if isinstance(indices, (list, tuple)) else None
+        entries = self.workspace_fit_entries(rows)
+        show_tool_window(FitTableDialog(self, entries,
+                                        workspaces=self.workspace_fit_entries))
+        if not entries:
+            self.statusBar().showMessage(
+                "no fitted workspace open — Add fits… in the table loads saved "
+                "fits (LARMOR recipes, dmfit .fxml)")
+
+    def open_fit_table_files(self, paths):
+        """Explorer ▸ right-click on saved fits ▸ Fit parameter table…: the
+        files (LARMOR .recipe.json, dmfit .fxml / .fxmla) in one table; a file
+        that cannot be read is named in the status bar."""
+        from larmor.desktop.fittable_dialog import FitTableDialog
+        from larmor.fittable import load_fit_file
+
+        entries, bad = [], []
+        for p in (paths or []):
+            try:
+                entries.append(load_fit_file(p))
+            except Exception as exc:                          # noqa: BLE001
+                bad.append(f"{Path(str(p)).name}: {exc}")
+        show_tool_window(FitTableDialog(self, entries,
+                                        workspaces=self.workspace_fit_entries))
+        if bad:
+            self.statusBar().showMessage("could not read " + "; ".join(bad), 12000)

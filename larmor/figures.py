@@ -181,6 +181,51 @@ def _norm_window(x: np.ndarray, y: np.ndarray, window) -> np.ndarray:
     return y / peak if peak else y
 
 
+def fit_traces(label: str, x, y, recipe: dict | None = None, color: str | None = None
+               ) -> tuple[list[dict], str]:
+    """Inline-data traces of one fitted spectrum for a 1D spec: the
+    experiment (``"<label> · experiment"``), the fitted total (``"<label> ·
+    fit"``, dashed) and one thinner, translucent trace per component
+    (``"<label> · <site label>"``) when ``recipe`` (a dict) has sites. Inline
+    arrays, not a recipe path, because the fit on screen may be unsaved. The
+    model is simulated here on the data axis with every linked parameter
+    resolved, exactly as the workbench's SimWorker does; kernel models come
+    back on their own axis, which the studio draws as it is. Returns
+    ``(traces, note)``: the note names why the model could not be simulated
+    (the experiment trace is still there), '' otherwise. Every trace shares
+    ``color`` so several spectra sent together stay distinguishable."""
+    x = np.asarray(x, float)
+    y = np.asarray(y, float)
+
+    def trace(name, xx, yy, **style):
+        t = {"data": {"x": [float(v) for v in xx], "y": [float(v) for v in yy]},
+             "label": name}
+        if color:
+            t["color"] = color
+        t.update(style)
+        return t
+
+    traces = [trace(f"{label} · experiment", x, y)]
+    sites = (recipe or {}).get("sites") or []
+    if not sites:
+        return traces, ""
+    try:
+        from larmor import cellparse, engine
+        from larmor import fit as fitmod
+        from larmor.recipe import Recipe
+
+        rec = Recipe.from_dict(recipe)
+        fitmod._apply_params(rec, fitmod._make_params(rec))   # links resolved
+        xs, total, per_site = engine.simulate(rec, exp_ppm=x)
+    except Exception as exc:                                  # noqa: BLE001
+        return traces, f"{label}: {exc}"
+    traces.append(trace(f"{label} · fit", xs, total, linestyle="--"))
+    for i, (site, ys) in enumerate(zip(rec.sites, per_site)):
+        name = site.label or cellparse.index_to_letter(i)
+        traces.append(trace(f"{label} · {name}", xs, ys, linewidth=0.8, alpha=0.7))
+    return traces, ""
+
+
 def load_trace(t: dict) -> tuple[np.ndarray, np.ndarray, dict]:
     """Resolve one trace spec to (x_ppm, y, meta).
 
