@@ -470,8 +470,11 @@ different ± than its site row.
   spectrum, up to the SR offset). Other vendors' quadrature conventions may
   need a Reverse/Flip, available in the UI.
 - **Phasing:** $S\cdot e^{\,i(\phi_0+\phi_1(\nu-\nu_\text{pivot})/\text{SW})}$
-  with a user-settable pivot (TopSpin-style), plus the ACME automatic phase
-  algorithm (Chen et al. 2002). Standard forms.
+  with a user-settable pivot (TopSpin-style), plus automatic phasing (a p0
+  sweep maximising the positive real signal, then a Nelder–Mead p0 / p1
+  refinement; the ACME entropy criterion of Chen et al. 2002 is selectable).
+  The 1i TopSpin writes next to a 1r is read, so the rotation acts on the true
+  complex spectrum. Standard forms.
 - **Apodisation / zero-fill / FCOR:** standard window functions and
   information-preserving zero-fill.
 - **Referencing (SR / calibrate):** a rigid ppm shift; re-referencing also

@@ -79,9 +79,18 @@ $$S_\text{corr}(\nu) = S(\nu)\,e^{i(\phi_0+\phi_1(\nu-\nu_\text{pivot})/\text{SW
 - Moving the pivot while phasing re-expresses the zero order,
   $\phi_0' = \phi_0 + \phi_1\,\Delta\nu_\text{pivot}/\text{SW}$, so the spectrum
   on screen does not change; the recipe records the new pivot.
-- **Autophase (ACME)** — minimises the entropy of the real spectrum to find p0 and
-  p1 automatically (Chen *et al.* 2002); a negative-area criterion is used for
-  all-positive powder patterns (QCPMG).
+- **Autophase** — finds p0 and p1 automatically: a fine p0 sweep maximising the
+  positive real signal with a penalty on negative excursions, then a
+  Nelder–Mead refinement of (p0, p1) — the criterion that holds up on wide
+  all-positive powder patterns (QCPMG included), where the entropy criterion
+  (ACME, Chen *et al.* 2002; available as the recorded op's `method: acme`)
+  can prefer a dispersive-looking answer. The angles it finds are **written
+  into the Phase controls** as an ordinary p0 / p1 step (like TopSpin's `apk`
+  filling PHC0 / PHC1), so a nudge of the sliders continues from the
+  autophased state. Phasing needs the imaginary channel: TopSpin's `1i` is
+  read next to the `1r`; a source without one (CSV, dmfit, magnitude data)
+  gets it reconstructed by a Hilbert transform first — *Signal ▸ Hilbert
+  first* is ticked for you.
 
 ---
 

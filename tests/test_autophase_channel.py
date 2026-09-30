@@ -182,8 +182,11 @@ def test_csv_without_imag_gets_a_hilbert_reconstruction_before_phasing(
     dephased = win.exp_amp.copy()
     win.apply_processing([{"op": "phase", "p0": 60.0}, {"op": "autophase"}], False)
     qapp.processEvents()
-    assert [o["op"] for o in win.recipe["processing"]] == ["hilbert", "phase",
-                                                            "autophase"]
+    # the autophase is resolved into the phase step it stands for (folded
+    # into the 60 degrees typed before it), never recorded as an opaque op
+    chain = win.recipe["processing"]
+    assert [o["op"] for o in chain] == ["hilbert", "phase"]
+    assert chain[1]["p0"] == pytest.approx(win.proc_panel.p0v.value(), abs=0.01)
     assert _corr(win.exp_amp, amp) > 0.95
     assert _corr(win.exp_amp, amp) > _corr(dephased, amp) + 0.2
 

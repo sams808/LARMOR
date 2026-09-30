@@ -115,9 +115,14 @@ exact type-in, and **−90 / +90 / 180°** quick steps (two +90 equals one 180).
 **TopSpin-style pivot:** while the Processing panel is open a **draggable purple
 pivot line** appears (default: the tallest peak); p1 rotates *about* the pivot,
 so the peak under it stays in phase and only the wings twist — drag the pivot
-onto whichever peak you want to hold. **Autophase** minimises the spectral
-entropy of the real part (the **ACME** criterion of Chen *et al.* 2002), finding
-p0 **and** p1 robustly even on crowded spectra.
+onto whichever peak you want to hold. **Autophase** finds p0 **and** p1 by
+maximising the positive real signal (a fine p0 sweep, then a p0 / p1
+refinement) and writes them into the Phase controls, so a nudge of the sliders
+continues from the autophased state; the ACME entropy criterion of Chen
+*et al.* 2002 is available as the recorded op's `method: acme`. It works on
+the true complex spectrum: TopSpin's `1i` is read next to the `1r`, and a
+source without one (CSV, dmfit) gets its imaginary part reconstructed by a
+Hilbert transform first.
 
 **Drag to phase (TopSpin gesture):** press *Drag to phase* in the panel (or
 **Ctrl+P**, *Process ▸ Phase ▸ Drag to phase*) and drag on the spectrum — left/right

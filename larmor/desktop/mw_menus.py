@@ -220,7 +220,7 @@ class _MenusMixin:
         m_proc.addSeparator()
         m_phase = self._menu(m_proc, "&Phase")
         self._add(m_phase, "&Autophase",
-                  lambda: self.apply_processing([{"op": "autophase"}], False),
+                  lambda: self.append_processing_step({"op": "autophase"}),
                   tip="automatic p0 / p1: a p0 sweep maximising the positive "
                       "real signal, then a p0 / p1 refinement (robust on wide "
                       "solid-state lines); uses TopSpin's 1i channel, else a "
@@ -232,7 +232,7 @@ class _MenusMixin:
                       "about the pivot line")
         m_base = self._menu(m_proc, "&Baseline")
         self._add(m_base, "&Polynomial (order 3)",
-                  lambda: self.apply_processing([{"op": "baseline", "order": 3}], False),
+                  lambda: self.append_processing_step({"op": "baseline", "order": 3}),
                   tip="automatic polynomial baseline; the panel sets the order")
         self._add(m_base, "&Iterative (dead-time; Yon 2020)…", self.apply_iterbaseline,
                   tip="the dead-time baseline roll removed iteratively")
@@ -240,7 +240,7 @@ class _MenusMixin:
                   tip="pick two flat points; the straight line through them "
                       "is subtracted")
         self._add(m_base, "Subtract &averages",
-                  lambda: self.apply_processing([{"op": "subtract_avg"}], False),
+                  lambda: self.append_processing_step({"op": "subtract_avg"}),
                   tip="remove the offset read from the spectrum edges")
         # the pybaselines library (Erb 2022): one dialog, opened on a method
         from larmor.pybaseline import METHODS as _pyb

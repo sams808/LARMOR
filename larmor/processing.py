@@ -203,26 +203,41 @@ def op_phase(s: Spectrum1D, p0: float = 0.0, p1: float = 0.0,
     return s
 
 
-def op_autophase(s: Spectrum1D, method: str = "scan") -> Spectrum1D:
-    """Automatic phasing.
+def _wrap_deg(p0: float) -> float:
+    """A zero-order phase folded into (-180, 180]."""
+    p0 = (float(p0) + 180.0) % 360.0 - 180.0
+    return 180.0 if p0 == -180.0 else p0
 
-    "scan" (default): fine p0 sweep maximizing positive real signal with a
-    negativity penalty, then a Nelder-Mead (p0, p1) refinement -- robust on
-    wide solid-state lines. "acme": nmrglue's entropy minimization.
+
+def autophase_angles(s: Spectrum1D, method: str = "scan") -> tuple[float, float]:
+    """The (p0, p1) in DEGREES, p1 about the spectrum centre (``pivot_frac``
+    0.5 of :func:`op_phase`), that :func:`op_autophase` applies -- so that
+    an automatic phase can be written into the recipe and shown in the
+    phase controls as an ordinary phase step. Does not modify ``s``.
+
+    "scan" (default): a fine p0 sweep maximising the positive real signal
+    with a negativity penalty, then a Nelder-Mead (p0, p1) refinement --
+    robust on wide solid-state lines. "acme": nmrglue's entropy minimisation
+    (Chen et al. 2002); nmrglue phases as ``p0 + p1 * i / n`` about the first
+    point, converted here to the centre-pivot form exactly.
     """
     if s.domain != "freq":
         raise ValueError("autophase needs frequency-domain data")
+    y = np.asarray(s.y, complex)
+    n = y.size
     if method == "acme":
         import nmrglue as ng
 
-        s.y = ng.process.proc_autophase.autops(s.y, "acme", disp=False)
-        return s
+        _, (p0, p1) = ng.process.proc_autophase.autops(
+            np.array(y, copy=True), "acme", disp=False, return_phases=True)
+        # p0 + p1*i/n  ==  p0' + p1'*(i/(n-1) - 0.5)  with
+        # p1' = p1*(n-1)/n and p0' = p0 + p1'/2
+        p1c = float(p1) * (n - 1) / n if n > 1 else 0.0
+        return _wrap_deg(float(p0) + 0.5 * p1c), p1c
 
-    y = s.y
     scale = np.abs(y).max() or 1.0
 
     def score(p0, p1):
-        n = y.size
         ph = np.exp(1j * (p0 + p1 * (np.arange(n) / max(n - 1, 1) - 0.5)))
         r = (y * ph).real / scale
         return r.sum() - 4.0 * np.abs(r[r < 0]).sum()
@@ -235,9 +250,98 @@ def op_autophase(s: Spectrum1D, method: str = "scan") -> Spectrum1D:
                    method="Nelder-Mead",
                    options={"xatol": 1e-4, "fatol": 1e-6})
     p0, p1 = res.x
-    n = y.size
-    s.y = y * np.exp(1j * (p0 + p1 * (np.arange(n) / max(n - 1, 1) - 0.5)))
-    return s
+    return _wrap_deg(np.rad2deg(p0)), float(np.rad2deg(p1))
+
+
+def op_autophase(s: Spectrum1D, method: str = "scan") -> Spectrum1D:
+    """Automatic phasing: :func:`autophase_angles` applied as a phase step
+    about the spectrum centre. Kept as a recorded op for older recipes; the
+    desktop resolves it into an explicit ``phase`` step before recording
+    (:func:`resolve_autophase`)."""
+    p0, p1 = autophase_angles(s, method)
+    return op_phase(s, p0, p1, pivot_frac=0.5)
+
+
+def resolve_autophase(s: Spectrum1D, ops: list, pivot_frac: float = 0.5,
+                      ) -> tuple[list, list]:
+    """Replace every ``{"op": "autophase"}`` in ``ops`` by the explicit
+    ``phase`` step it stands for, evaluated on the spectrum as it is at
+    that point of the chain, about ``pivot_frac`` (the phase controls'
+    pivot). A step that directly follows a ``phase`` step about the same
+    pivot is folded into it (angles add), so the chain reads like the
+    controls. Returns ``(new_ops, folds)`` with one ``(p0, p1)`` per resolved
+    step; ``s`` is left untouched (the chain runs on a copy). An opaque
+    autophase step in the recipe is invisible to the processing panel: its
+    next live tick re-emitted the widgets' phase on the raw spectrum and the
+    line snapped back -- 'autophase does not stick'."""
+    if not any(o.get("op") == "autophase" for o in ops):
+        return list(ops), []
+    import dataclasses
+
+    def fresh():
+        return dataclasses.replace(s, y=np.array(s.y, copy=True),
+                                   x_ppm=(None if s.x_ppm is None
+                                          else np.array(s.x_ppm, copy=True)))
+
+    out: list[dict] = []
+    folds: list[tuple[float, float]] = []
+    w = fresh()
+    for step in ops:
+        if step.get("op") != "autophase":
+            out.append(dict(step))
+            w = apply(w, [step])
+            continue
+        p0c, p1c = autophase_angles(w, step.get("method", "scan"))
+        # centre-pivot -> the controls' pivot:  p0 + p1*(idx-0.5)
+        #   = [p0 + p1*(f-0.5)] + p1*(idx-f)
+        p0 = _wrap_deg(p0c + p1c * (float(pivot_frac) - 0.5))
+        p1 = p1c
+        j = _phase_slot(out, float(pivot_frac))
+        if j is not None and out[j].get("op") == "phase":
+            out[j]["p0"] = _wrap_deg(float(out[j].get("p0", 0.0)) + p0)
+            out[j]["p1"] = float(out[j].get("p1", 0.0)) + p1
+        else:
+            new = {"op": "phase", "p0": p0, "p1": p1,
+                   "pivot_frac": float(pivot_frac)}
+            if j is None:
+                out.append(new)
+            else:
+                out.insert(j, new)
+        folds.append((p0, p1))
+        # the phase now sits where the controls keep it (possibly ahead of a
+        # baseline the angles were measured after); re-run the chain so a
+        # later autophase sees exactly what the recorded chain produces
+        w = apply(fresh(), out)
+    return out, folds
+
+
+#: frequency-domain steps a resolved phase may move ahead of: they act on
+#: the real part and the processing panel always emits its phase BEFORE the
+#: steps it merely carries, so putting the phase there keeps the recorded
+#: chain equal to what the panel's next live tick re-emits
+_PHASE_FOLD_THROUGH = frozenset({
+    "baseline", "iterbaseline", "pybaseline", "flat_baseline", "twopoint_bg",
+    "subtract_avg", "scale", "offset", "normalize", "sr",
+})
+
+
+def _phase_slot(out: list, pivot_frac: float):
+    """Where a resolved autophase belongs in ``out``: the index of the last
+    ``phase`` step about the same pivot when only fold-through steps follow
+    it (the angles are ADDED there), else the index just after the last step
+    that is not a fold-through one (a new phase step is INSERTED there),
+    else None (append). The processing panel can show one phase step and
+    emits it right after the transform / Hilbert block; a chain recorded in
+    any other order is re-emitted differently on the next slider nudge."""
+    i = len(out) - 1
+    while i >= 0 and out[i].get("op") in _PHASE_FOLD_THROUGH:
+        i -= 1
+    if i < 0:
+        return 0 if out else None
+    if (out[i].get("op") == "phase"
+            and float(out[i].get("pivot_frac", 0.5)) == float(pivot_frac)):
+        return i
+    return i + 1 if i + 1 < len(out) else None
 
 
 def op_baseline(s: Spectrum1D, order: int = 3, k_clip: float = 1.5,

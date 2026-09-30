@@ -261,8 +261,8 @@ class _ProcessingMixin:
         # moment the dialog closed -- caught by the dialog's first test
         if dlg.exec() != QDialog.Accepted:
             return
-        self.apply_processing(
-            [{"op": "iterbaseline", **dlg.params()}], False)
+        if not self.append_processing_step({"op": "iterbaseline", **dlg.params()}):
+            return
         self.statusBar().showMessage(
             "iterative baseline (Yon et al. 2020) applied — "
             "'Reset to original' undoes")
@@ -289,14 +289,8 @@ class _ProcessingMixin:
         if dlg.exec() != QDialog.Accepted:
             return
         step = {"op": "pybaseline", **dlg.params()}
-        recipe = self.recipe or {}
-        ops = list(recipe.get("processing") or []) + [step]
-        use_raw = bool(recipe.get("processing_from_raw"))
-        n0 = self._proc_apply_count
-        self.apply_processing(ops, use_raw)
-        if self._proc_apply_count == n0:
+        if not self.append_processing_step(step):
             return                          # it did not run; apply_processing said why
-        self.proc_panel.sync_from_ops(ops, use_raw)
         self.statusBar().showMessage(
             f"{dlg.method_label()} baseline (pybaselines) applied — "
             "'Reset to original' undoes")
@@ -389,6 +383,11 @@ class _ProcessingMixin:
                 # cos(phi) -- the reason 'Autophase did nothing'. Reconstruct
                 # the imaginary part first and show the panel doing so.
                 self.proc_panel.arm_hilbert()
+            # Autophase becomes the explicit p0 / p1 it found (folded into
+            # the controls' own phase step), like TopSpin's apk filling
+            # PHC0 / PHC1 -- an opaque step the panel cannot show was
+            # re-emitted away by its very next live tick
+            ops, auto_folds = proc.resolve_autophase(s, ops, pivot_frac=piv)
             # split at the LAST ft: the state just before it is the windowed,
             # zero-filled FID the transform sees (the FID display). Copied --
             # ops mutate the Spectrum1D in place and op_ft reassigns y / x_ppm
@@ -428,13 +427,43 @@ class _ProcessingMixin:
             self.recipe["processing"] = list(ops)
             self.recipe["processing_from_raw"] = bool(use_raw)
         self.request_simulation()
+        # the panel now mirrors the RECORDED chain: its widgets take the
+        # phase / window / SR steps and it carries the rest (baseline,
+        # pybaseline, subtract_avg, ...), so its next live tick re-emits the
+        # same chain instead of the widgets' leftovers. Safe here: the live
+        # timer it stops only ever starts from a widget edit, and no event
+        # is processed inside this method in live mode.
+        self.proc_panel.sync_from_ops(list(ops), use_raw)
+        if auto_folds:
+            p0, p1 = auto_folds[-1]
+            msg = (f"autophase: p0 {p0:+.1f}°, p1 {p1:+.1f}° — written into the "
+                   "Phase controls (nudge them from there)")
+        else:
+            msg = f"processing applied ({len(ops)} step(s), stored in the recipe)"
         self.statusBar().showMessage(
-            f"processing applied ({len(ops)} step(s), stored in the recipe)"
-            + (" — imaginary channel reconstructed by a Hilbert transform "
-               "(this source has no 1i)" if hilbert_added else ""))
+            msg + (" — imaginary channel reconstructed by a Hilbert transform "
+                   "(this source has no 1i)" if hilbert_added else ""))
         # draw whichever projection the panel selects (last, so a FID /
         # channel hint replaces the generic status line)
         self._refresh_display()
+
+    def append_processing_step(self, step: dict) -> bool:
+        """Apply ``step`` ON TOP of the recorded chain -- the menu entries'
+        way (Autophase, Polynomial, Subtract averages, Iterative,
+        pybaselines): an earlier phase or window is kept and a saved fit
+        replays the whole chain. Replacing the chain with the single step,
+        as these entries used to, dropped the phase from the display and the
+        recipe. Returns False when the pipeline did not run (no source, a
+        2D map up) -- apply_processing has said why."""
+        if self.exp_ppm is None or not len(self.exp_ppm):
+            self.statusBar().showMessage("open a spectrum first")
+            return False
+        recipe = self.recipe or {}
+        ops = list(recipe.get("processing") or []) + [dict(step)]
+        use_raw = bool(recipe.get("processing_from_raw"))
+        n0 = self._proc_apply_count
+        self.apply_processing(ops, use_raw)
+        return self._proc_apply_count != n0
 
     # ------------------------------------------------------- drag to phase (F2)
     def start_phase_drag(self):

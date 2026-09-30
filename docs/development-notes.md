@@ -18,10 +18,11 @@ an open successor to dmfit. The physics comes from mrsimulator, the
 optimisation from lmfit; LARMOR adds ingestion, the interactive UI, batch and
 series workflows, uncertainties, and reproducible figures.
 
-**Size.** 156 Python modules, ~58.5k lines under `larmor/`: 78 modules / ~28.3k
-lines of Qt-free core, 65 modules / ~29.3k lines of desktop, plus
-`larmor/xfact/` (13 modules, an easter egg). Tests: 107 files, 1324 collected
-(counts as of 0.14.0).
+**Size.** ~165 Python modules, ~63k lines under `larmor/`: the Qt-free core
+(69 top-level modules, ~27.5k lines, plus `io/` and `models/`), 72 modules /
+~34.5k lines of desktop, plus `larmor/xfact/` (13 modules, an easter egg).
+Tests: 135 files (counts as of 0.15.0; the collected count is in
+`docs/workplan-status.md` next to the last full run).
 
 **The split.** Everything outside `larmor/desktop/` and `larmor/xfact/` is
 Qt-free — `tests/test_core_qt_free.py` imports every core module and fails if
@@ -41,12 +42,13 @@ lives in eleven `desktop/mw_*.py` mixin modules of 207–920 lines each plus
 |---|---|
 | Ingestion | `io/bruker.py` (1r/2rr/fid/ser, EXPNO or pdata, self-identifies 1D/2D and raw/processed), `io/varian.py`, `io/fxmla.py` (dmfit), `io/spectra.py` (CSV with a metadata header), `io/scan.py`, `io/export.py`, `io/bundle.py` (series publication bundle); `masrate.py` — the MAS rate from three sources (acqus MASR / title / NMRFAM booking sidecar `experiment_addenda.xml`) by majority rule, the 1–150 kHz plausibility window with the unit-typo re-read, and the per-session confirmation store `%LOCALAPPDATA%/LARMOR/mas_confirmations.jsonl` (`LARMOR_MAS_LOG` overrides) applied by `loader.py`; `loader.py` is the single entry point (`load_any`, `apply_processing`), `fourier.py` handles States/TPPI/echo-antiecho |
 | Model | `recipe.py` — `Param` / `SiteModel` / `Recipe`, the diffable JSON format; data referenced by path + SHA-256, never inlined; `acquisition` (the flat acqus / procs / title block, filled by `loader.load_any`), `software` (stamped by `fit.fit` through `provenance.software_stamp`) and `source_sha256` (the hash of the exact data file) ride along, additive at `RECIPE_VERSION` 1. `project.py` — the `.larproj.json` bundle: schema version, the v1 → v2 migration (through `recipe.run_migrations`), the per-kind entry builders (1D embedded; 2D maps and batch spectra by reference), path relocation |
-| Processing | `processing.py` (the replayable op pipeline), `baseline.py`, `qcpmg.py`, `qcpmg_fields.py`, `sidebands.py` (autocorrelation νrot / sideband-manifold detector; mirrors qcpmg's period finder), `phasedrag.py` (drag-to-phase gesture arithmetic + pivot re-expression, Qt-free) |
+| Processing | `processing.py` (the replayable op pipeline; `autophase_angles` / `resolve_autophase` turn an autophase into the explicit p0 / p1 the controls show), `baseline.py` (Yon 2020), `pybaseline.py` (the pybaselines `METHODS` registry — Whittaker / polynomial / SNIP / morphological — with `compute`, `suggest_lam`, preview decimation; the `pybaseline` op), `qcpmg.py`, `qcpmg_fields.py`, `sidebands.py` (autocorrelation νrot / sideband-manifold detector; mirrors qcpmg's period finder), `phasedrag.py` (drag-to-phase gesture arithmetic + pivot re-expression, Qt-free) |
+| Session tools | `inventory.py` (a month folder as a sample × nucleus grid: roles, title flags, the SR join and `fixes_for` — the remedies the inventory window offers), `referencing.py` (the Ξ referencing audit, the TopSpin `sr` list, the append-only log and the per-EXPNO **SR override store** `%LOCALAPPDATA%/LARMOR/sr_overrides.json` (`LARMOR_SR_OVERRIDES`) that `loader._load_any` applies to a 1D Bruker spectrum while the file's SR still matches the recorded old value), `aliases.py` (display names and logged folder renames), `pulseprog.py` (Bruker `pulseprogram` parser, acqus value resolution with a safe expression evaluator, the not-to-scale timeline the viewer draws, `describe`) |
 | Simulation | `models/` (the registry), `engine.py` (Czjzek kernel + `simulate`), `twod.py` (MQMAS), `estimate.py` (starting values measured from data) |
 | Fitting | `fit.py`, `batchfit.py`, `seqfit.py`, `multifit.py`, `autofit.py`, `parallel.py` |
 | Interpretation | `quantify.py` (populations, the tail outside the window, the window containing every tail, the family block through `families.py`), `families.py` (family presets, the `RatioDef` catalogue, `summarize` / `trial_series` on the three stated error bases), `sanity.py`, `identifiability.py`, `diagnostics.py`, `quantitativity.py` (acquisition facts, the sibling-T1 search and the recycle-delay / flip-angle judgement feeding `fithealth`; its readers are `satrec.read_ct1t2`, `scan.find_sibling_t1` and `bruker.read_acqus_meta`), `fithealth.py` (one verdict from the previous five, rendered by the desktop strip), `chi2map.py`, `czjzek_dist.py`, `convert.py`, `nuclei.py`, `refranges.py`, `dft.py` (magres → sites, the `[calculation]` header, equivalent-atom grouping, the `_SEED_KEYS` partition), `shiftcal.py` (σ → δ calibration line with covariance) |
-| Output | `figures.py` (spec-driven renderers), `methods.py` (auto-written Methods text and the full Experimental paragraph), `acquisition.py` (the acquisition record of an EXPNO, the Experimental sentences under the never-state-what-the-files-do-not-support rules, Table S1 with cross-series variation), `provenance.py` (software stamp, file-read git commit, source hash and reload verification, recorded read-out changes, per-spectrum source carry-over), `paramstatus.py` (derived fixed / linked / at-bound status of every parameter and the † ‡ § marker vocabulary every table shares), `series_grid.py`, `series_table.py` (a batch / sequential series' identity: the names `io/scan` derived, unique after a rename, replicate groups, order, composition columns joined from a CSV, replicate statistics and OLS, the `_series.csv` sidecar and the DUST export; Qt-free, edited by `desktop/series_table_dialog.py`) |
-| Desktop shell | `desktop/app.py` is the `MainWindow` facade (construction, the two Qt event overrides, `main()`); every other method is defined on one mixin in `desktop/mw_*.py` — `mw_menus`, `mw_chrome`, `mw_files`, `mw_session`, `mw_overlays`, `mw_editing`, `mw_sidebands`, `mw_fitting`, `mw_processing`, `mw_cofit`, `mw_tools` — and the QThreads are in `desktop/workers.py`. The layout and its rules are in §11 |
+| Output | `figures.py` (spec-driven renderers), `methods.py` (auto-written Methods text and the full Experimental paragraph), `acquisition.py` (the acquisition record of an EXPNO, the Experimental sentences under the never-state-what-the-files-do-not-support rules, Table S1 with cross-series variation), `provenance.py` (software stamp, file-read git commit, source hash and reload verification, recorded read-out changes, per-spectrum source carry-over), `paramstatus.py` (derived fixed / linked / at-bound status of every parameter and the † ‡ § marker vocabulary every table shares), `fittable.py` (`PARAM_COLUMNS` — the parameter order every table uses, moved here from `desktop/table.py` — and the fit parameter table: `FitEntry` from a recipe or a saved fit file, `build_wide` / `build_long`, CSV / TSV), `series_grid.py`, `series_table.py` (a batch / sequential series' identity: the names `io/scan` derived, unique after a rename, replicate groups, order, composition columns joined from a CSV, replicate statistics and OLS, the `_series.csv` sidecar and the DUST export; Qt-free, edited by `desktop/series_table_dialog.py`) |
+| Desktop shell | `desktop/app.py` is the `MainWindow` facade (construction, the two Qt event overrides, `main()`); every other method is defined on one mixin in `desktop/mw_*.py` — `mw_menus`, `mw_chrome`, `mw_files`, `mw_session`, `mw_overlays`, `mw_editing`, `mw_sidebands`, `mw_fitting`, `mw_processing`, `mw_cofit`, `mw_tools` — and the QThreads are in `desktop/workers.py`. The layout and its rules are in §11. Tool windows added in 0.15: `desktop/workspaces.py` (multi-select + right-click: switch / rename / close / send to the studio / fit table / overlay), `desktop/fittable_dialog.py`, `desktop/pybaseline_dialog.py`, `desktop/pulseprog_dialog.py`; the inventory window's remedies live in `desktop/inventory_dialog.py` (`fix_menu` returns the QMenu so tests can read it) |
 
 **Data flow.** `loader.load_any(path)` → `(ppm, amp, recipe, meta, warnings)`
 → `engine.make_context(recipe, exp_ppm)` builds a `SimContext` →
@@ -230,6 +232,9 @@ comments in the source explain them; this is the index.
 | **A reopened `.json` recipe seeds `_proc_base` from `load_any(path, replay=False)`** | `desktop/mw_files.py` `_load_source_body` | The exp arrays arrive ALREADY replayed; seeding the live pipeline's base from them compounds the recorded chain on the first panel touch (p0 40 became 80) |
 | **The magres import routes tensor components by ROLE through `dft._SEED_KEYS`**, never by the shared parameter name `eta` | `dft.py` `to_site_dict` | The quadrupolar η landed in `csa_mas`'s shielding `eta` and a spin-1/2 nucleus got C_Q = 3 MHz; guarded by `tests/test_dft_simpson.py::test_to_site_dict_routes_shielding_and_quadrupolar_eta_by_model` and the fifth partition test |
 | **Per-spectrum recipes built by the batch / sequential / CLI paths must copy `source_path` / `source_kind` / `source_sha256` / `acquisition` from the loaded record** (`provenance.carry_source`) | `batchfit_dialog._entries`, `seqfit_dialog._seed_recipe`, `cli._series_entries` | 32 published Final2 recipes were written with an empty `source_kind` and `source_sha256` while the README promised path + hash; sequential recipes carried no source at all |
+| **The completion threshold is the solver's `ftol` only** — never an `iter_cb` rule, never a matched `xtol` | `desktop/workers.py` `_emit_progress`, `fit.py` `_tol_kws` | lmfit calls `iter_cb` on every residual EVALUATION, and most are Jacobian probes whose residual differs by 1e-8 (analytic) to 1e-4 (kernel models), so a "stdev changed by < 0.1 %" callback aborted every Fit-button fit after ~5 evaluations in 0.14.0–0.14.4 ("visibly not fitting": nfev 5, RMSD 0.082 on the shipped 27Al example against nfev 273, RMSD 0.0536) while Auto fit, which passes no threshold, converged. scipy's `xtol` tests the whole parameter vector, whose norm is the amplitude (1e5–1e7): a matched 0.002 stopped a synthetic line 1.1 ppm short as soon as the amplitude settled |
+| **A processed 1r is loaded WITH its 1i; a real-only spectrum gets `hilbert` inserted before its first phase step** | `io/bruker.py` `read_imag`, `desktop/mw_files.py` `_imag_for`, `desktop/mw_processing.py` `_complex_for_phase` | `y·e^{iφ}` taken real is `y·cos φ`: on the real-only 1r that `_read_1r` returned, Autophase changed nothing and a typed p0 merely scaled the spectrum (only Drag to phase worked, because it armed Hilbert itself). With the 1i a 90° p0 turns the real channel into exactly −1i; the CSV / dmfit fallback is the Hilbert reconstruction |
+| **`SSB_OFFER_KEY` (`ssbOfferOnLoad`, default off) is a fresh settings key**, not a new default on `ssbAutoOffer` | `desktop/mw_sidebands.py` | The old key defaulted to True and had been WRITTEN as True on every install that never touched the toggle, so changing its default would have silenced the banner for nobody; a behaviour change of a persisted boolean needs a new key |
 
 ---
 
@@ -435,6 +440,40 @@ Ordered by how likely they are to mislead someone.
     before any fit, or a bound widened after the fit without refitting, is
     marked from the recipe's literal state (the same staleness stderr
     already has; `edited since fit` covers the interactive case).
+18. ~~**Menu processing entries replaced the recorded chain, and the panel's
+    next live tick dropped anything it had no widget for.**~~ **fixed in
+    0.15.0**: the Process menu entries (Autophase, Polynomial, Subtract
+    averages, Iterative, pybaselines) go through
+    `MainWindow.append_processing_step`, and `apply_processing` ends with
+    `proc_panel.sync_from_ops(ops)` so the panel mirrors the recorded chain
+    (widgets for phase / window / SR, carried steps for the rest). Left as
+    is: `_emit` puts the widget steps BEFORE the carried steps, so a chain
+    recorded as `[baseline, phase]` re-emits as `[phase, baseline]` — a small
+    numerical difference for a baseline fitted before phasing.
+19. **The batch-fit dialog's `BASELINE_OPS` (Polynomial / Iterative / Flat)
+    has no pybaselines entry** — a batch cannot yet use arPLS & co. without
+    a parameter UI there. `asPLS` on a 64k-point spectrum is slow (5–13 s)
+    and poor whatever λ; the pybaselines dialog previews spectra above
+    8192 points decimated (parameters rescaled) and applies full length.
+20. **The SR override store is applied only by `loader._load_any`'s 1D
+    Bruker branch.** A spectrum processed from the fid (Open FID,
+    `_fid_to_workbench`) and the 2D path are not corrected; 2D rows the
+    audit flags get only the TopSpin command and the reference. An override
+    whose recorded old SR no longer matches the file (TopSpin fixed it) is
+    reported stale and applied to nothing.
+21. **The pulse-program timeline draws a QCPMG train as the `adc`
+    acquisition block followed by the `[d6 – p2 – d6] × l22` loop**, not
+    as one acquisition spanning the train; `help/pulse-programs.md`
+    explains that reading. Statement kinds extend the brief's set by
+    `group` (composites / `(center …)`); gradients are pulses on channel
+    `grad`.
+22. **`tests/test_app_split.py`'s `SURFACE` only checks that the listed
+    names still exist**; the 0.15 batch added `append_processing_step`,
+    `open_fid_path`, `_on_inventory_renamed`, `send_workspaces_to_studio`,
+    `open_fit_table`, `open_fit_table_files`, `overlay_workspaces`,
+    `close_workspaces`, `rename_workspace`, `set_workspace_title`,
+    `workspace_fit_entries`, `apply_pybaseline`, `open_pulse_program` to
+    MainWindow, only some of them to the tuple.
 
 Genuinely open work is in `docs/roadmap.md`. The largest structural item left
 is that there is no CI — so every "suite green" claim is one machine, one
