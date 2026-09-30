@@ -382,6 +382,96 @@ Open observations from the batch (not fixed; for Sam):
   A test that needs only the active theme calls `theme.apply(None, name)`.
 - **A green pytest bar is not enough**: read the real-data banner.
 
+## 2026-09-30 session — Sam's third field-use batch → v0.15.0
+
+Eleven items from field use, all delivered; the two "broken" ones were real
+defects with the same signature Sam described.
+
+**Root causes found (each with a regression test):**
+
+- *"The fit button is broken, it's visibly not fitting, where the autofit
+  button is working."* — the completion threshold (b70e9a7, shipped in
+  0.14.0, hence also the student's report): `_emit_progress` compared the
+  residual of successive `iter_cb` calls, but lmfit calls `iter_cb` on every
+  residual EVALUATION, and the Jacobian probes differ by 1e-8…1e-4, so at the
+  default 0.1 % every Fit-button fit aborted after 5 evaluations with the
+  positions untouched. Auto fit passes no threshold, hence worked. Fixed:
+  the callback aborts only on Stop / Cancel; the threshold is the solver's
+  `ftol` alone (a matched `xtol` stopped a synthetic line 1.1 ppm short once
+  the 1e6-scale amplitude settled). Probe on the shipped 27Al example at
+  0.1 %: nfev 5 / RMSD 0.082 before, nfev 106 / RMSD 0.05363 after (0.05362
+  at full precision). `tests/test_fit_threshold.py`.
+- *"autophasing isn't working"* — two halves. (1) A Bruker 1r was loaded
+  real-only, so a phase rotation was `y·cos φ`: Autophase changed nothing
+  and a typed p0 only scaled the line. `bruker.read_imag` now reads
+  TopSpin's 1i (a 90° p0 turns the real channel into exactly −1i on 3616);
+  CSV / dmfit sources get `hilbert` inserted before their first phase step
+  (`_complex_for_phase`). (2) An opaque `autophase` op was invisible to the
+  processing panel, whose next live tick re-emitted the widgets' phase on
+  the raw spectrum — the line snapped back on the first nudge. Now
+  `resolve_autophase` writes the angles into the Phase controls as a plain
+  phase step (like `apk` filling PHC0 / PHC1), `apply_processing` syncs the
+  panel to the recorded chain after every apply, and the Process menu
+  entries append to the chain instead of replacing it
+  (`append_processing_step`). `tests/test_autophase_channel.py`,
+  `tests/test_autophase_resolution.py`.
+
+**UI items:** checked push buttons take the accent fill (`QPushButton:checked`
+— Pick anchors / Pick 2 points / Drag to phase now look on); the
+spinning-sideband offer on load is OFF by default under a NEW settings key
+(`SSB_OFFER_KEY`; the old key had been persisted True on every install);
+the NMR table fills every cell with Youngman 2018's glass-NMR feasibility
+(five categories read cell by cell from Fig. 1, `nuclei.FEASIBILITY`, legend +
+tooltips); File ▸ "Auto-reload when the file changes" says what the watch is
+for (process in TopSpin, fit here); "Autophase (ACME)" is "Autophase" (the
+op has always run the p0-sweep search; ACME is the recorded op's `method`).
+
+**Features (four worktrees, merged one at a time with scoped regressions):**
+
+- **WS** — Workspaces dock: Ctrl/Shift multi-select and a right-click menu
+  (Switch / Open, Rename, Save, Close, Close others, Send to Plotting studio
+  with the data + fit + components of every selected document, Fit parameter
+  table, Overlay on the active spectrum). `larmor/fittable.py` (PARAM_COLUMNS
+  moved to the core; FitEntry from a recipe or a saved fit file; wide / long
+  tables; CSV / TSV) + `desktop/fittable_dialog.py`; reached from the
+  Workspaces menu, the Explorer's fit rows (multi-select) and Fit ▸ Fit
+  parameter table.
+- **INV** — Session inventory remedies: right-click a row / Fix… → apply the
+  audited SR when the EXPNO opens in LARMOR (the per-EXPNO override store
+  `%LOCALAPPDATA%/LARMOR/sr_overrides.json`, applied by `loader` while the
+  file's SR still matches, logged in the referencing log, undoable), all
+  flagged picks at once, copy the TopSpin `sr` command, open the ¹H
+  reference, rename (alias / on disk), process an unprocessed fid in
+  LARMOR, pick anyway, dataset info. `inventory.fixes_for` decides; the
+  dialog renders.
+- **PYB** — Process ▸ Baseline ▸ pybaselines: 13 methods (arPLS, asLS,
+  airPLS, iarPLS, drPLS, asPLS; ModPoly, IModPoly, penalized poly; SNIP,
+  rolling ball, mor, mormol) behind a live-preview dialog, recorded as the
+  replayable `pybaseline` op, λ scaled with the spectrum length; dependency
+  `pybaselines>=1.1` in pyproject / environment.yml / the PyInstaller spec /
+  `packaging/.buildenv`. Also corrected a manual that called `op_baseline`
+  arPLS.
+- **PP** — Tools ▸ Pulse program (and the Explorer's EXPNO menu): the
+  `pulseprogram` file parsed (`larmor/pulseprog.py`: definitions, `(center …)`
+  blocks, loops, mc macros, phase programs, legend), values resolved from
+  acqus with a safe expression evaluator, a TopSpin-like not-to-scale timing
+  diagram (channels with nuclei, pulses / shaped pulses / delays / decoupling
+  bars / acquisition glyph / loop brackets, PNG + SVG export), the text and a
+  parameter table; help page "Reading a pulse program" in ? ▸ User manuals.
+
+**Docs:** `development-notes.md` §1 module map and §5 rows for the fit
+threshold, the 1i channel and the settings key, §8 items 18–22; the manuals'
+menu map and the Autophase wording; `validation.md`.
+
+**Full suite:** see the State-of-the-repository line for v0.15.0.
+
+**Follow-ups noted, not done:** the batch-fit dialog's baseline choices have
+no pybaselines entry; asPLS is slow and poor on 64k-point spectra; the SR
+override applies only through `loader._load_any` (not Open FID / 2D); the
+panel re-emits a chain recorded as `[baseline, phase]` as `[phase, baseline]`;
+`Baseline_Corrector.m` (the Yon 2020 MATLAB source) sits untracked in the
+repo root and is not part of the package.
+
 ## Remaining
 
 1. **E7** — `dist/LARMOR-0.14.0-setup.exe` and the zip are built and tested

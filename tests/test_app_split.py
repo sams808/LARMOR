@@ -165,7 +165,7 @@ SURFACE = (
     'closeEvent', '_restore_session', 'on_family_changed',
 )
 
-# 221 menu rows: (menu path, text, shortcut, checkable, has submenu)
+# 231 menu rows: (menu path, text, shortcut, checkable, has submenu)
 GOLDEN_MENU = (
     ((), '&File', '', False, True),
     (('&File',), '&Open…', 'Ctrl+O', False, False),
@@ -175,7 +175,7 @@ GOLDEN_MENU = (
     (('&File',), 'Open &Varian / Agilent…', '', False, False),
     (('&File',), 'Open &recent', '', False, True),
     (('&File',), 'O&verlay a spectrum…', 'Ctrl+Shift+A', False, False),
-    (('&File',), '&Watch the source file', '', True, False),
+    (('&File',), 'Auto-reload &when the file changes', '', True, False),
     (('&File',), 'Open pro&ject…', '', False, False),
     (('&File',), 'Save projec&t…', 'Ctrl+Alt+S', False, False),
     (('&File',), '&Save fit', 'Ctrl+S', False, False),
@@ -232,7 +232,7 @@ GOLDEN_MENU = (
     (('&Process',), 'Processing s&teps…', '', False, False),
     (('&Process',), 'Show processing &panel', '', False, False),
     (('&Process',), '&Phase', '', False, True),
-    (('&Process', '&Phase'), '&Autophase (ACME)', '', False, False),
+    (('&Process', '&Phase'), '&Autophase', '', False, False),
     (('&Process', '&Phase'), '&Drag to phase', 'Ctrl+P', False, False),
     (('&Process',), '&Baseline', '', False, True),
     (('&Process', '&Baseline'), '&Polynomial (order 3)', '', False, False),
