@@ -404,6 +404,9 @@ class _MenusMixin:
         self._add(m_tools, "&Conversion tools…", self.open_convert,
                   tip="shift, Cq and dipolar conversions")
         m_tools.addSeparator()
+        self._add(m_tools, "&Pulse program…", self.open_pulse_program,
+                  tip="the sequence TopSpin ran for this EXPNO: text, timing diagram, "
+                      "parameters")
         self._add(m_tools, "&Herzfeld–Berger sideband analysis…",
                   self.open_herzfeld_berger,
                   tip="ζ and η of the CSA from spinning-sideband intensities")
@@ -531,7 +534,8 @@ class _MenusMixin:
                 ("relaxation", "Relaxation (T1/T2)"),
                 ("qcpmg", "QCPMG"),
                 ("multi-dataset", "Multi-dataset & co-fitting"),
-                ("dft-tensors", "DFT tensors — import & shift calibration")):
+                ("dft-tensors", "DFT tensors — import & shift calibration"),
+                ("pulse-programs", "Reading a pulse program")):
             self._add(m_man, title,
                       lambda _=False, n=name, t=title: self._open_manual(n, t))
         m_tut = self._menu(m_help, "&Tutorials")

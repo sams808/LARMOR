@@ -19,6 +19,7 @@ MANUALS = [
     ("multi-dataset", "Multi-dataset & co-fitting"),
     ("processing-reference", "Processing reference"),
     ("dft-tensors", "DFT tensors — import & shift calibration"),
+    ("pulse-programs", "Reading a pulse program"),
 ]
 
 

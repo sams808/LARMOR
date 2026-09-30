@@ -450,6 +450,31 @@ class _ToolsMixin:
         dlg.show()
         dlg.raise_()
 
+    def open_pulse_program(self, path=None):
+        """Tools ▸ Pulse program… / Explorer ▸ right-click an EXPNO ▸ Pulse
+        program…: the sequence TopSpin compiled for an EXPNO -- its text, a
+        TopSpin-like timing diagram and the parameters it uses with their
+        acqus values. ``path`` is an EXPNO (or anything under it) from the
+        Explorer; a QAction passes a bool, which means the open dataset.
+        Read-only, non-modal; a status message when the open data is not a
+        Bruker EXPNO."""
+        from larmor.desktop.pulseprog_dialog import PulseProgramDialog
+        from larmor.io import bruker
+
+        expno = path if isinstance(path, str) and path else None
+        if expno is None and self.source_path:
+            try:
+                expno = str(bruker.resolve(self.source_path).expno)
+            except (ValueError, FileNotFoundError, OSError, NotADirectoryError):
+                p = Path(self.source_path)
+                expno = str(p) if bruker.is_expno(p) else None
+        if not expno:
+            self.statusBar().showMessage(
+                "open a Bruker EXPNO first — the pulse program lives next to its acqus "
+                "(or right-click an EXPNO in the Explorer)")
+            return
+        show_tool_window(PulseProgramDialog(self, expno))
+
     def open_session_inventory(self, folder=None):
         """Tools > Session inventory: one month folder as a sample × nucleus
         grid with the production EXPNO pre-picked per block (the highest

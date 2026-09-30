@@ -141,6 +141,7 @@ class ExplorerPanel(QWidget):
     inventory_requested = Signal(str)   # a month or sample folder -> Session inventory
     overlay_requested = Signal(str)     # an EXPNO -> overlay on the active spectrum
     fit_table_requested = Signal(list)  # saved fit files -> the Fit parameter table
+    pulseprog_requested = Signal(str)   # an EXPNO -> the pulse program viewer
     renamed = Signal(str, str)          # (old path, new path) -- equal for an alias
 
     def __init__(self):
@@ -328,6 +329,8 @@ class ExplorerPanel(QWidget):
         m = QMenu(self)
         if (Path(path) / "acqus").exists():          # an EXPNO: it has a story
             m.addAction("Dataset info…", lambda: self._dataset_info(path))
+            m.addAction("Pulse program…  (the sequence as text and as a timing diagram)",
+                        lambda: self.pulseprog_requested.emit(path))
             m.addAction("Overlay on the current spectrum  (compare, keeps the fit)",
                         lambda: self.overlay_requested.emit(path))
             m.addSeparator()
@@ -367,6 +370,18 @@ class ExplorerPanel(QWidget):
                 if full and "\n" in full:
                     parts.append(f"\ntitle ({procdir.name}):\n{full}")
                 break
+        # the sequence that was run: where it is and how to see it drawn
+        try:
+            from larmor import pulseprog
+            pf = pulseprog.find_pulseprogram(path)
+            if pf is not None:
+                n = pf.read_text(encoding="utf-8", errors="replace").count("\n")
+                parts.append(f"\npulse program: {pf.name} ({n} lines) — right-click ▸ "
+                             f"Pulse program… shows the sequence and its timing diagram")
+            else:
+                parts.append("\npulse program: no pulseprogram file in this EXPNO")
+        except Exception:                                     # noqa: BLE001
+            pass
         return "\n".join(parts)
 
     def _dataset_info(self, path: str):
