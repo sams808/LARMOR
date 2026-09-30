@@ -101,6 +101,11 @@ class MainWindow(_MenusMixin, _ChromeMixin, _FilesMixin, _SessionMixin,
         #: unprocessed workbench spectrum the pipeline is (re)applied from, so
         #: live processing reflects ABSOLUTE settings instead of compounding
         self._proc_base: tuple[np.ndarray, np.ndarray] | None = None
+        #: the imaginary channel TopSpin wrote next to the loaded 1r (pdata
+        #: 1i), on exp_ppm's order; None for a source without one (CSV,
+        #: dmfit, magnitude data) -- phase corrections then reconstruct it
+        #: by a Hilbert transform (see _ProcessingMixin.apply_processing)
+        self._exp_imag: np.ndarray | None = None
         #: complex frequency-domain Spectrum1D from the last apply_processing
         #: (the imag / |S| display channels); None until a pipeline ran
         self._proc_spec = None

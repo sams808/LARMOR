@@ -54,6 +54,28 @@ def keep_fit_prompt(existing_nucleus, incoming_nucleus) -> tuple[str, bool]:
             "No = start empty (recommended) · Yes = keep the lines anyway", False)
 
 
+def _imag_for(path: str, recipe: dict, npts: int):
+    """TopSpin's imaginary channel for the spectrum just loaded: the 1i next
+    to a Bruker 1r, or the 1i of the 1r a reopened recipe points at. None
+    when there is none or its length does not match the real part (a chain
+    with ``extract`` / ``zf`` changes the length -- the base is then rebuilt
+    from the raw source anyway). Never raises."""
+    from larmor.io import bruker
+
+    candidates = [path]
+    src = (recipe or {}).get("source_path")
+    if src and (recipe or {}).get("source_kind") == "bruker":
+        candidates.append(str(src))
+    for cand in candidates:
+        try:
+            imag = bruker.read_imag(cand)
+        except Exception:                                 # noqa: BLE001
+            imag = None
+        if imag is not None:
+            return imag if imag.size == npts else None
+    return None
+
+
 def _nmrdata_to_data2d(data):
     """Convert a frequency-domain 2D NMRData into a twod.Data2D for display."""
     from larmor.twod import Data2D
@@ -188,6 +210,7 @@ class _FilesMixin:
         order = np.argsort(ppm)
         self.exp_ppm, self.exp_amp = np.asarray(ppm)[order], np.asarray(amp)[order]
         self._proc_base = None
+        self._exp_imag = None
         self.source_path = meta.get("expno", "")
         # the FULL processing record (every qcpmg_* key) rides along so a
         # saved fit of a QCPMG spectrum still says how it was made
@@ -421,6 +444,12 @@ class _FilesMixin:
         self._retarget_watch()
         self.exp_ppm, self.exp_amp = ppm, amp
         self._proc_base = None
+        # TopSpin's imaginary channel (pdata 1i) of a processed Bruker 1r --
+        # or of the 1r a reopened recipe points at -- so that phase
+        # corrections rotate the true complex spectrum; None when the source
+        # has none (CSV, dmfit, magnitude data): a Hilbert reconstruction
+        # then stands in (apply_processing)
+        self._exp_imag = _imag_for(path, recipe, ppm.size)
         if (Path(path).suffix.lower() == ".json" and recipe.get("processing")
                 and not recipe.get("processing_from_raw")):
             # a reopened recipe arrives ALREADY replayed; the live pipeline
@@ -429,8 +458,10 @@ class _FilesMixin:
             # of its own result (p0 40 became 80)
             try:
                 b_ppm, b_amp, *_ = _load_any(path, replay=False)
-                self._proc_base = (np.asarray(b_ppm, float),
-                                   np.asarray(b_amp, float))
+                b_amp = np.asarray(b_amp, float)
+                if self._exp_imag is not None and self._exp_imag.size == b_amp.size:
+                    b_amp = b_amp + 1j * self._exp_imag
+                self._proc_base = (np.asarray(b_ppm, float), b_amp)
             except Exception:
                 pass
         self.recipe = recipe
@@ -683,6 +714,7 @@ class _FilesMixin:
         self.central_stack.setCurrentWidget(self.view)
         self.exp_ppm, self.exp_amp = np.asarray(ppm), np.asarray(amp)
         self._proc_base = None
+        self._exp_imag = None
         self.recipe = Recipe(sample=title, source_kind="bruker",
                              source_path=expno, nucleus=nucleus,
                              larmor_frequency_MHz=larmor,

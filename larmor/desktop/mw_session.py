@@ -173,6 +173,7 @@ class _SessionMixin:
         self.hidden = set(w.get("hidden", []))
         self.source_path = w.get("source_path")
         self._proc_base = None
+        self._exp_imag = None
         self._overlays = []
         self.central_stack.setCurrentWidget(self.view)
         self.view.set_experiment(self.exp_ppm, self.exp_amp)
@@ -278,6 +279,7 @@ class _SessionMixin:
             snap["exp_ppm"] = np.array(self.exp_ppm, copy=True)
             snap["exp_amp"] = np.array(self.exp_amp, copy=True)
             snap["proc_base"] = self._proc_base
+            snap["exp_imag"] = self._exp_imag
             snap["overlays"] = [dict(o) for o in self._overlays]
             # in-memory only (like the arrays above; never serialised): the
             # verdict and covariance of this workspace's last fit, so that
@@ -302,6 +304,7 @@ class _SessionMixin:
         else:
             self.exp_ppm = snap["exp_ppm"]; self.exp_amp = snap["exp_amp"]
             self._proc_base = snap["proc_base"]
+            self._exp_imag = snap.get("exp_imag")
             self._overlays = list(snap["overlays"])
             self.central_stack.setCurrentWidget(self.view)
             self.view.set_experiment(self.exp_ppm, self.exp_amp)

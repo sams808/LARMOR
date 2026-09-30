@@ -19,6 +19,34 @@ import numpy as np
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 
+#: the frequency-domain ops that rotate the complex spectrum and therefore
+#: need a non-zero imaginary part to do anything
+_PHASE_OPS = frozenset({"phase", "autophase"})
+#: the ops that create a complex signal on their own (nothing to add before)
+_COMPLEX_MAKERS = frozenset({"hilbert", "ift", "ft"})
+
+
+def _complex_for_phase(s, ops: list) -> tuple[list, bool]:
+    """Insert ``{"op": "hilbert"}`` in front of the chain when it phases a
+    frequency-domain spectrum whose imaginary part is identically zero and
+    nothing earlier in the chain makes one. Returns (ops, inserted).
+
+    Pure function of the start spectrum and the chain, so the rule is
+    testable without a window: a 1r without its 1i, a CSV or a dmfit
+    spectrum is real-only, and ``y * exp(i*phi)`` taken real is just
+    ``y * cos(phi)`` -- Autophase 'did nothing' and a typed p0 merely
+    scaled the spectrum."""
+    if s.domain != "freq" or np.any(np.imag(s.y)):
+        return ops, False
+    for o in ops:
+        name = o.get("op")
+        if name in _COMPLEX_MAKERS:
+            return ops, False
+        if name in _PHASE_OPS:
+            return [{"op": "hilbert"}] + list(ops), True
+    return ops, False
+
+
 class _ProcessingMixin:
     """Live processing, phasing, calibration, baseline tools."""
 
@@ -305,7 +333,13 @@ class _ProcessingMixin:
                 # apply the pipeline from the UNPROCESSED baseline every time, so
                 # a live slider shows the absolute phase rather than compounding
                 if self._proc_base is None:
-                    self._proc_base = (self.exp_ppm.copy(), self.exp_amp.copy())
+                    base_amp = self.exp_amp.copy()
+                    imag = self._exp_imag
+                    if imag is not None and imag.size == base_amp.size:
+                        # TopSpin's own imaginary channel: phase corrections
+                        # rotate the true complex spectrum, as TopSpin would
+                        base_amp = base_amp + 1j * imag
+                    self._proc_base = (self.exp_ppm.copy(), base_amp)
                 base_ppm, base_amp = self._proc_base
                 sfo1 = self.recipe.get("larmor_frequency_MHz", 0.0) if self.recipe else 0.0
                 s = proc.from_processed(base_ppm, base_amp, sfo1)
@@ -314,6 +348,13 @@ class _ProcessingMixin:
             piv = self.view.phase_pivot_frac()
             ops = [dict(o, pivot_frac=piv) if o.get("op") == "phase" else o
                    for o in ops]
+            ops, hilbert_added = _complex_for_phase(s, ops)
+            if hilbert_added:
+                # a real-only source (CSV, dmfit, no 1i): a phase rotation of
+                # a spectrum with a zero imaginary part only scales it by
+                # cos(phi) -- the reason 'Autophase did nothing'. Reconstruct
+                # the imaginary part first and show the panel doing so.
+                self.proc_panel.arm_hilbert()
             # split at the LAST ft: the state just before it is the windowed,
             # zero-filled FID the transform sees (the FID display). Copied --
             # ops mutate the Spectrum1D in place and op_ft reassigns y / x_ppm
@@ -354,7 +395,9 @@ class _ProcessingMixin:
             self.recipe["processing_from_raw"] = bool(use_raw)
         self.request_simulation()
         self.statusBar().showMessage(
-            f"processing applied ({len(ops)} step(s), stored in the recipe)")
+            f"processing applied ({len(ops)} step(s), stored in the recipe)"
+            + (" — imaginary channel reconstructed by a Hilbert transform "
+               "(this source has no 1i)" if hilbert_added else ""))
         # draw whichever projection the panel selects (last, so a FID /
         # channel hint replaces the generic status line)
         self._refresh_display()
@@ -589,7 +632,9 @@ class _ProcessingMixin:
                 "imaginary channel, the window compounds with the one already "
                 "applied (raw-fid mode / Open FID are exact)")
         elif (channel != "real" and not pp.chain_has_ft()
-                and not pp.chkHilbert.isChecked()):
+                and not pp.chkHilbert.isChecked() and self._exp_imag is None):
+            # no 1i next to this spectrum: the imaginary channel has to be
+            # reconstructed (with a 1i the apply above already shows it)
             pp.arm_hilbert()
             need_apply = True
         if need_apply or (domain == "time" and self._proc_fid is None):

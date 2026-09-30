@@ -397,8 +397,13 @@ class ProcessingPanel(QWidget):
         ph.setContentsMargins(8, 4, 8, 6)
         ph.setHorizontalSpacing(6)
         ph.setVerticalSpacing(4)
-        self.btnAuto = QPushButton("Autophase (ACME)")
-        self.btnAuto.setToolTip("automatic p0 / p1 by entropy minimisation")
+        self.btnAuto = QPushButton("Autophase")
+        self.btnAuto.setToolTip(
+            "automatic p0 / p1: a p0 sweep maximising the positive real "
+            "signal, then a p0 / p1 refinement (robust on wide solid-state "
+            "lines). Phasing needs the imaginary channel: TopSpin's 1i is "
+            "used when the dataset has one, else it is reconstructed by a "
+            "Hilbert transform (Signal ▸ Hilbert first is ticked for you)")
         # TopSpin drag-to-phase: a checkable mode the workbench arms on the
         # plot (see MainWindow._phase_drag_mode); this button is the single
         # source of truth for the mode, the Process-menu entry toggles it

@@ -235,6 +235,33 @@ def _read_1r(ref: BrukerRef) -> NMRData:
                    axes=[ax], meta=meta, warnings=_conflicts(meta, title))
 
 
+def read_imag(path: str | Path) -> np.ndarray | None:
+    """The imaginary channel (``pdata/<procno>/1i``) of a processed 1D
+    spectrum, scaled like its ``1r`` and sorted onto the same ascending-ppm
+    order the reader gives the real part -- or None when the path is not a
+    processed 1D Bruker spectrum or TopSpin wrote no ``1i`` (a magnitude
+    dataset, an old export). Never raises: a phase correction without it
+    falls back to a Hilbert reconstruction, which is what the caller does
+    when this returns None. Read-only."""
+    try:
+        ref = resolve(path)
+    except (ValueError, FileNotFoundError, OSError):
+        return None
+    if ref.target != "1r":
+        return None
+    pdata = ref.expno / "pdata" / str(ref.procno)
+    if not (pdata / "1i").is_file():
+        return None
+    try:
+        dic, imag = ng.bruker.read_pdata(str(pdata), bin_files=["1i"])
+        procs = dic["procs"]
+        imag = np.asarray(imag, float).ravel()
+        ppm = _ppm_axis(procs, imag.size)
+    except Exception:                                    # noqa: BLE001
+        return None
+    return imag[np.argsort(ppm)]
+
+
 def _read_2rr(ref: BrukerRef) -> NMRData:
     pdata = ref.expno / "pdata" / str(ref.procno)
     hyper_raw = None
