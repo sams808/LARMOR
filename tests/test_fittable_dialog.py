@@ -84,7 +84,7 @@ def test_copy_has_headers_and_csv_round_trips_both_layouts(qapp, tmp_path):
     h2, r2 = d.current_table()
     assert h2 == list(F.LONG_HEADERS) and len(r2) == 12
     assert r2[0][:4] == ["pCABS2-4_27Al", "AlO$_4$", "czjzek", "isotropic_chemical_shift_ppm"]
-    assert r2[0][4] == "63.804249" and r2[0][6] == ""
+    assert r2[0][4] == "62.815324" and r2[0][6] == ""
     assert d.export_csv(tmp_path / "long")               # .csv appended
     with open(tmp_path / "long.csv", encoding="utf-8", newline="") as f:
         back2 = list(csv.reader(f))

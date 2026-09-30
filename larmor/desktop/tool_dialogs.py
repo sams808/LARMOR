@@ -8,8 +8,8 @@ from larmor.desktop import theme
 from larmor.desktop.axes import plain_units
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QApplication, QComboBox, QDialog, QFileDialog, QHBoxLayout, QLabel,
-    QLineEdit, QPushButton, QVBoxLayout,
+    QApplication, QComboBox, QDialog, QDoubleSpinBox, QFileDialog, QHBoxLayout,
+    QLabel, QLineEdit, QProgressBar, QPushButton, QSpinBox, QVBoxLayout,
 )
 
 
@@ -87,11 +87,24 @@ class RedorDialog(QDialog):
 
 
 class ErrorsDialog(QDialog):
+    """Errors Analysis (dmfit): the χ² profile of one parameter, every other
+    free parameter refitted at each scan point.
+
+    Runs synchronously (the scan is a plain function), but never freezes:
+    the profile's ``heartbeat`` pumps the event loop while the process pool
+    starts and between points, so the progress bar moves and Stop works.
+    Before 0.15.1 the pool's ~15 s start-up showed as a dead "scanning…"
+    label in a modal window, which on a single-line fit was the whole run
+    (2 s of actual work) -- the tool looked broken.
+    """
+
     def __init__(self, parent, recipe: dict, ppm, amp, window):
         super().__init__(parent)
         self.setWindowTitle("Errors Analysis — χ² profile")
-        self.resize(720, 520)
+        self.resize(760, 560)
         self.recipe, self.ppm, self.amp, self.window = recipe, ppm, amp, window
+        self._stop = False
+        self.prof = None
         v = QVBoxLayout(self)
 
         opts = QHBoxLayout()
@@ -103,14 +116,41 @@ class ErrorsDialog(QDialog):
         opts.addWidget(QLabel("parameter"))
         self.param = QComboBox()
         opts.addWidget(self.param)
+        opts.addWidget(QLabel("span"))
+        self.span = QDoubleSpinBox()
+        self.span.setRange(0.2, 30.0); self.span.setDecimals(1)
+        self.span.setSingleStep(0.5); self.span.setValue(3.0)
+        self.span.setToolTip("how far to scan each way, in multiples of the "
+                             "parameter's error bar (25 % of its value when the "
+                             "fit gave none); the 1σ crossings must fall inside "
+                             "the scan -- widen when 'not bracketed', narrow when "
+                             "'narrower than the scan step'")
+        opts.addWidget(self.span)
+        opts.addWidget(QLabel("points"))
+        self.points = QSpinBox()
+        self.points.setRange(5, 61); self.points.setValue(15)
+        self.points.setToolTip("scan points (each is a full refit of the other "
+                               "parameters)")
+        opts.addWidget(self.points)
         self.btnRun = QPushButton("Scan")
         self.btnRun.setDefault(True)
         self.btnRun.clicked.connect(self._run)
         opts.addWidget(self.btnRun)
+        self.btnStop = QPushButton("Stop")
+        self.btnStop.setEnabled(False)
+        self.btnStop.setToolTip("keep the points scanned so far (at least three "
+                                "are needed for an interval)")
+        self.btnStop.clicked.connect(lambda: setattr(self, "_stop", True))
+        opts.addWidget(self.btnStop)
         opts.addStretch(1)
         v.addLayout(opts)
         self.site.currentIndexChanged.connect(self._fill_params)
         self._fill_params()
+
+        self.prog = QProgressBar()
+        self.prog.setValue(0)
+        self.prog.setFormat("%v / %m points")
+        v.addWidget(self.prog)
 
         self.plot = pg.PlotWidget(background=theme.active().plot_bg)
         plain_units(self.plot)
@@ -119,8 +159,14 @@ class ErrorsDialog(QDialog):
         self.plot.showGrid(x=True, y=True, alpha=0.2)
         v.addWidget(self.plot, 1)
         self.res = QLabel("")
+        self.res.setWordWrap(True)
+        self.res.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self.res.setStyleSheet(f"font-weight: 700; color: {theme.active().accent};")
         v.addWidget(self.res)
+        self.note = QLabel("")
+        self.note.setWordWrap(True)
+        self.note.setStyleSheet(f"color: {theme.active().text_dim};")
+        v.addWidget(self.note)
 
     def _fill_params(self):
         i = self.site.currentData()
@@ -137,15 +183,36 @@ class ErrorsDialog(QDialog):
         pname = self.param.currentText()
         if not pname:
             return
-        self.res.setText("scanning…")
+        n = int(self.points.value())
+        self._stop = False
+        self.prof = None
+        self.btnRun.setEnabled(False)
+        self.btnStop.setEnabled(True)
+        self.prog.setRange(0, n)
+        self.prog.setValue(0)
+        self.res.setText("scanning — each point is a refit of the other parameters…")
+        self.note.setText("")
         QApplication.processEvents()
+
+        def prog(k, ntot, _value):
+            self.prog.setValue(k)
+            QApplication.processEvents()
+
         try:
             prof = autofit.error_profile(
                 Recipe.from_dict(self.recipe), self.ppm, self.amp,
-                site=i, param=pname, window_ppm=self.window, parallel=True)
+                site=i, param=pname, window_ppm=self.window,
+                n_points=n, span=float(self.span.value()),
+                progress=prog, should_stop=lambda: self._stop,
+                heartbeat=QApplication.processEvents, parallel="auto")
         except Exception as exc:
-            self.res.setText(f"failed: {exc}")
+            self.res.setText(("stopped — " if self._stop else "failed: ") + str(exc))
+            self.btnRun.setEnabled(True)
+            self.btnStop.setEnabled(False)
             return
+        self.btnRun.setEnabled(True)
+        self.btnStop.setEnabled(False)
+        self.prof = prof
         self.plot.clear()
         self.plot.plot(prof.values, prof.chi2, pen=pg.mkPen("#0e7c86", width=1.5),
                        symbol="o", symbolSize=5)
@@ -156,5 +223,17 @@ class ErrorsDialog(QDialog):
             line = pg.InfiniteLine(pos=lvl, angle=0,
                                    pen=pg.mkPen(col, style=Qt.DashLine))
             self.plot.addItem(line)
-        self.res.setText(prof.summary + ("   ·   " + " · ".join(prof.notes)
-                                         if prof.notes else ""))
+        # where the fit on screen sits: a vertical marker at its value
+        try:
+            fitted = float(self.recipe["sites"][i]["params"][pname]["value"])
+            self.plot.addItem(pg.InfiniteLine(
+                pos=fitted, angle=90,
+                pen=pg.mkPen(theme.active().text_dim, style=Qt.DashLine)))
+        except (KeyError, TypeError, ValueError):
+            pass
+        self.res.setText(prof.summary + ("   ·   stopped early" if self._stop else ""))
+        notes = list(prof.notes)
+        if notes:
+            self.note.setText(" · ".join(notes))
+            self.note.setStyleSheet(
+                f"color: {'#A8570F' if not prof.fit_at_minimum else theme.active().text_dim};")

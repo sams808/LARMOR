@@ -86,6 +86,33 @@ def _same_window(a, b) -> bool:
     return (abs(max(a) - max(b)) <= tol) and (abs(min(a) - min(b)) <= tol)
 
 
+def fraction_err_pct(integrals, errs, i: int) -> float | None:
+    """The 1σ error, in percentage points, of site ``i``'s population
+    f_i = I_i / Σ I, with the site integrals treated as independent (the
+    per-site basis: integral_err comes from each amplitude's own stderr).
+
+    The normalisation is part of the derivative: ∂f_i/∂I_i = (T − I_i)/T²
+    and ∂f_i/∂I_j = −I_i/T² for j ≠ i, so the error is
+    √( ((T−I_i)/T² σ_i)² + Σ_{j≠i} (I_i/T² σ_j)² ) × 100. A SINGLE line is
+    100 % by definition and its error is exactly 0 -- the previous
+    σ_i / T shortcut reported 100 ± 18 % for one line, the error of the
+    integral dressed up as the error of a share that cannot vary. None when
+    site i's own error is unknown (a fixed or unfitted amplitude)."""
+    ints = [abs(float(v)) for v in integrals]
+    T = sum(ints) or 1.0
+    if i >= len(ints) or errs[i] is None:
+        return None
+    if len(ints) == 1:
+        return 0.0
+    var = 0.0
+    for j, (I_j, s_j) in enumerate(zip(ints, errs)):
+        if s_j is None:
+            continue                         # an unfitted line: no spread from it
+        d = (T - ints[i]) / T ** 2 if j == i else -ints[i] / T ** 2
+        var += (d * float(s_j)) ** 2
+    return 100.0 * float(np.sqrt(var))
+
+
 def quantify(recipe: Recipe, window_ppm: tuple[float, float] | None = None,
              *, uvars: dict | None = None, mc=None) -> dict:
     """Integrate every site over the window. Returns a JSON-friendly table.
@@ -135,11 +162,11 @@ def quantify(recipe: Recipe, window_ppm: tuple[float, float] | None = None,
         })
 
     total = sum(abs(r["integral"]) for r in rows) or 1.0
-    for r in rows:
+    errs = [r["integral_err"] for r in rows]
+    for i, r in enumerate(rows):
         r["fraction_pct"] = 100.0 * abs(r["integral"]) / total
-        r["fraction_err_pct"] = (
-            100.0 * r["integral_err"] / total
-            if r["integral_err"] is not None else None)
+        r["fraction_err_pct"] = fraction_err_pct(
+            [abs(q["integral"]) for q in rows], errs, i)
 
     # ---- family sums and named ratios (only when a line is tagged)
     samples = None

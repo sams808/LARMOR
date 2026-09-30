@@ -16,12 +16,71 @@ chi-square profile.
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass, field
 
 import numpy as np
 
 from larmor import fit as fitmod
 from larmor.recipe import Recipe
+
+#: ``parallel="auto"``: the process pool is worth starting only when the
+#: sequential work it would replace is longer than its own start-up. That
+#: start-up is ~15 s on Windows (a spawned interpreter per worker, each
+#: importing mrsimulator and loading a kernel) -- measured on a single-line
+#: 23Na Czjzek profile: 16.8 s through the pool against 2.2 s sequentially,
+#: with nothing on screen for the first 15 s. The first item always runs in
+#: this process and is timed; the rest go to the pool when their estimated
+#: sequential time exceeds the threshold (a warm pool costs only dispatch).
+POOL_BREAKEVEN_S = 20.0
+POOL_BREAKEVEN_WARM_S = 4.0
+
+
+def _map_items(fn, items: list, *, parallel, max_workers=None, should_stop=None,
+               on_result=None, executor=None, heartbeat=None) -> tuple[list, bool]:
+    """``parallel_map`` with the ``"auto"`` strategy on top. Returns
+    ``(results, ran_parallel)``. ``parallel`` is True / False / "auto"."""
+    from larmor import parallel as par
+
+    if parallel != "auto" or not items:
+        use = bool(parallel)
+        res = par.parallel_map(fn, items, max_workers=max_workers,
+                               should_stop=should_stop, on_result=on_result,
+                               use_processes=use, executor=executor,
+                               heartbeat=heartbeat)
+        return res, use and (executor is not None
+                             or len(items) >= par.MIN_ITEMS_FOR_PROCESSES)
+    results: list = [None] * len(items)
+    if should_stop is not None and should_stop():
+        return results, False
+    t0 = time.perf_counter()
+    try:
+        first = fn(items[0])
+    except Exception:
+        first = None
+    t_first = time.perf_counter() - t0
+    results[0] = first
+    if on_result:
+        on_result(0, first)
+    if heartbeat is not None:
+        heartbeat()
+    rest = items[1:]
+    if not rest:
+        return results, False
+    threshold = (POOL_BREAKEVEN_WARM_S if (executor is not None or par.pool_is_warm())
+                 else POOL_BREAKEVEN_S)
+    use = len(rest) * t_first > threshold
+
+    def _shifted(i, r):
+        if on_result:
+            on_result(i + 1, r)
+
+    results[1:] = par.parallel_map(fn, rest, max_workers=max_workers,
+                                   should_stop=should_stop, on_result=_shifted,
+                                   use_processes=use, executor=executor,
+                                   heartbeat=heartbeat)
+    return results, use and (executor is not None
+                             or len(rest) >= par.MIN_ITEMS_FOR_PROCESSES)
 
 
 @dataclass
@@ -124,6 +183,14 @@ class ErrorProfile:
     noise_var: float = 0.0
     level68: float = 0.0            # chi2 at the 1-sigma crossing
     level95: float = 0.0            # chi2 at the 2-sigma (95 %) crossing
+    #: Σ residual² of the recipe as it was handed in (no refit), and whether
+    #: it sits within the 1σ level of the scan's minimum -- False means the
+    #: scan found a deeper minimum than the fit on screen
+    chi2_fit: float | None = None
+    fit_at_minimum: bool = True
+    #: did the scan points run through the process pool (``parallel="auto"``
+    #: decides from the first point's duration)
+    ran_parallel: bool = False
 
     @property
     def summary(self) -> str:
@@ -181,8 +248,9 @@ def error_profile(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
                   site: int, param: str,
                   window_ppm: tuple[float, float] | None = None,
                   n_points: int = 15, span: float = 3.0,
-                  progress=None, should_stop=None, parallel: bool = False,
-                  max_workers: int | None = None, executor=None) -> ErrorProfile:
+                  progress=None, should_stop=None, parallel="auto",
+                  max_workers: int | None = None, executor=None,
+                  heartbeat=None) -> ErrorProfile:
     """chi-square profile of one parameter (dmfit's Errors Analysis).
 
     The parameter is fixed at each scanned value while EVERY other free
@@ -204,14 +272,20 @@ def error_profile(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
     Every scan point is an independent refit -- ``parallel=True`` runs them
     across a process pool (larmor.parallel) instead of one at a time, which
     is where nearly all of this function's time goes for a nucleus/model
-    whose fit itself isn't instant. Off by default so existing callers (incl.
-    every test) see unchanged behaviour; GUI call sites opt in explicitly.
-    ``executor``: reuse an already-running pool instead of starting one just
-    for this call -- pass one when calling this many times back-to-back (see
-    ``batchfit.batch_error_analysis``).
-    """
-    from larmor.parallel import parallel_map
+    whose fit itself isn't instant; ``"auto"`` (the default) times the first
+    point in this process and uses the pool only when the remaining points
+    would take longer than the pool's own start-up (``POOL_BREAKEVEN_S``);
+    ``False`` never leaves this process. ``executor``: reuse an
+    already-running pool instead of starting one just for this call -- pass
+    one when calling this many times back-to-back (see
+    ``batchfit.batch_error_analysis``). ``heartbeat()`` is called while
+    waiting (see ``parallel.parallel_map``) so a dialog can stay alive.
 
+    ``notes`` says when the scan found a LOWER χ² than the recipe's own
+    (``fit_at_minimum`` False): the reported best value and interval then
+    belong to that deeper minimum, and the fit on screen should be run
+    again before its numbers are quoted.
+    """
     base = json.dumps(recipe.to_dict())
     p0 = recipe.sites[site].params[param]
     center = p0.value
@@ -231,9 +305,10 @@ def error_profile(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
         if progress:
             progress(i + 1, n_points, float(values[i]))
 
-    raw = parallel_map(_profile_point_worker, items, max_workers=max_workers,
-                       should_stop=should_stop, on_result=_cb,
-                       use_processes=parallel, executor=executor)
+    raw, ran_parallel = _map_items(_profile_point_worker, items, parallel=parallel,
+                                   max_workers=max_workers, should_stop=should_stop,
+                                   on_result=_cb, executor=executor,
+                                   heartbeat=heartbeat)
     chi2 = np.array([np.nan if c is None else c for c in raw])
     ok = np.isfinite(chi2)
     if ok.sum() < 3:
@@ -248,18 +323,60 @@ def error_profile(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
     level95 = chi2_min + 3.84 * noise_var
     ci68 = _crossings(values, chi2, level68, best)
     ci95 = _crossings(values, chi2, level95, best)
+    step_v = abs(float(values[1] - values[0])) if values.size > 1 else 0.0
     if ci68[0] is None or ci68[1] is None:
         notes.append("1σ not bracketed — widen `span`; the parameter may be "
                      "poorly determined")
-    elif ci68 == (best, best) or (ci68[1] - ci68[0]) < 0.05 * abs(
-            values[1] - values[0]):
+    elif ci68 == (best, best) or (ci68[1] - ci68[0]) < step_v:
+        # both crossings lie between the minimum and its neighbours: the
+        # interval is pure interpolation across one step; a narrower span
+        # resolves it (the old 5 %-of-a-step test let 90 % of such cases
+        # through unflagged)
         notes.append("1σ interval narrower than the scan step — rerun with "
                      "a smaller `span` to resolve it")
+    # the profile refits everything else at every point: when it finds a
+    # lower χ² than the fit reached, the fit was not at the minimum, and the
+    # best value / interval reported here belong to the DEEPER minimum, not
+    # to the numbers on screen. Say so rather than let the two disagree in
+    # silence (seen on a single-line 23Na Czjzek fit: σ(Cq) 2.16 in the
+    # table, 1.35 from the profile, χ² 16 % lower)
+    chi2_fit = _chi2_at(recipe, exp_ppm, exp_amp, window_ppm)
+    fit_at_minimum = True
+    if chi2_fit is not None and chi2_fit > level68:
+        fit_at_minimum = False
+        drop = 100.0 * (chi2_fit - chi2_min) / chi2_fit if chi2_fit else 0.0
+        notes.append(f"the scan reached a χ² {drop:.1f} % below the fit's own "
+                     f"({param} = {best:.4g} there): the fit had not converged "
+                     "— Fit again (Auto fit finds it), then rescan")
     return ErrorProfile(site=site, param=param, values=values, chi2=chi2,
                         best_value=best, chi2_min=chi2_min,
                         ci68=ci68, ci95=ci95, notes=notes, dof=dof,
                         noise_var=noise_var, level68=level68,
-                        level95=level95)
+                        level95=level95, chi2_fit=chi2_fit,
+                        fit_at_minimum=fit_at_minimum,
+                        ran_parallel=ran_parallel)
+
+
+def _chi2_at(recipe: Recipe, exp_ppm, exp_amp, window_ppm) -> float | None:
+    """Σ residual² of ``recipe`` AS GIVEN (no refit) over the fit window --
+    the χ² the profile's levels are compared with. None when the model
+    cannot be simulated."""
+    from larmor import engine
+
+    try:
+        x = np.asarray(exp_ppm, float)
+        y = np.asarray(exp_amp, float)
+        window_ppm = window_ppm or recipe.fit_window_ppm
+        if window_ppm is not None and len(window_ppm) == 2:
+            hi, lo = max(window_ppm), min(window_ppm)
+            sel = (x >= lo) & (x <= hi)
+        else:
+            sel = np.ones(x.shape, bool)
+        mx, model, _ = engine.simulate(recipe, exp_ppm=x)
+        yi = np.interp(x[sel], np.asarray(mx, float), np.asarray(model, float))
+        return float(np.sum((yi - y[sel]) ** 2))
+    except Exception:                                    # noqa: BLE001
+        return None
 
 
 def _profile_dof(recipe: Recipe, exp_ppm: np.ndarray,
@@ -318,11 +435,22 @@ class MonteCarloResult:
     site_integrals: np.ndarray | None = None
     #: the (hi, lo) ppm window those integrals were taken over
     window_ppm: tuple | None = None
+    #: did the trials run through the process pool (``parallel="auto"``)
+    ran_parallel: bool = False
+    #: parameters whose refitted best differs from the recipe's value by
+    #: more than the Monte-Carlo σ: the fit on screen was not at the
+    #: minimum the trials scatter around (labels)
+    moved: list[str] = field(default_factory=list)
 
     @property
     def summary(self) -> str:
-        return (f"Monte-Carlo errors from {self.n_ok}/{self.trials} synthetic "
-                f"refits · noise σ = {self.noise:.4g}")
+        s = (f"Monte-Carlo errors from {self.n_ok}/{self.trials} synthetic "
+             f"refits · noise σ = {self.noise:.4g}")
+        if self.moved:
+            s += (" · the refit moved " + ", ".join(self.moved)
+                  + " by more than σ: the fit on screen had not converged — "
+                  "Fit again, then rerun")
+        return s
 
     def report(self) -> str:
         lines = [self.summary, ""]
@@ -366,9 +494,9 @@ def monte_carlo_errors(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
                        window_ppm: tuple[float, float] | None = None,
                        n_trials: int = 200, seed: int = 0,
                        noise: float | None = None, progress=None,
-                       should_stop=None, parallel: bool = False,
+                       should_stop=None, parallel="auto",
                        max_workers: int | None = None,
-                       executor=None) -> MonteCarloResult:
+                       executor=None, heartbeat=None) -> MonteCarloResult:
     """Estimate parameter errors by Monte-Carlo (synthetic-noise refits).
 
     The recipe is fitted once to fix the best fit and estimate the noise level
@@ -383,13 +511,19 @@ def monte_carlo_errors(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
     a process pool (larmor.parallel) instead of one at a time; the synthetic
     noise draws themselves stay a single up-front SEQUENTIAL loop over `rng`
     so the trial set (and therefore the result, given a fixed seed) doesn't
-    depend on how work happens to be scheduled across worker processes. Off
-    by default so existing callers (incl. every test) see unchanged
-    behaviour; GUI call sites opt in explicitly. ``executor``: reuse an
-    already-running pool instead of starting one just for this call.
+    depend on how work happens to be scheduled across worker processes.
+    ``"auto"`` (the default) times the first trial in this process and uses
+    the pool only when the rest would outlast its start-up
+    (``POOL_BREAKEVEN_S``). ``executor``: reuse an already-running pool
+    instead of starting one just for this call. ``heartbeat()`` is called
+    while waiting so a dialog can stay alive.
+
+    The best fit the trials scatter around is a REFIT of ``recipe``; when
+    that refit moves a parameter by more than the Monte-Carlo σ the result's
+    ``moved`` names it (and ``summary`` says so): the numbers on screen were
+    not at the minimum.
     """
     from larmor import engine
-    from larmor.parallel import parallel_map
 
     rng = np.random.default_rng(seed)
     exp_ppm = np.asarray(exp_ppm, float)
@@ -399,6 +533,8 @@ def monte_carlo_errors(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
     # (Czjzek family) simulates on its OWN grid regardless of exp_ppm, so the
     # model must be interpolated onto exp_ppm before it can be compared to
     # exp_amp — the same pattern larmor.fit uses for its residual.
+    given = {(i, pn): float(p.value) for i, s in enumerate(recipe.sites)
+             for pn, p in s.params.items() if p.vary and not p.expr}
     best = Recipe.from_dict(json.loads(json.dumps(recipe.to_dict())))
     fitmod.fit(best, exp_ppm, exp_amp, window_ppm=window_ppm)
     mx, model_raw, _ = engine.simulate(best, exp_ppm=exp_ppm)
@@ -441,9 +577,10 @@ def monte_carlo_errors(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
         if progress:
             progress(done, n_trials)
 
-    raw = parallel_map(_mc_trial_worker, items, max_workers=max_workers,
-                       should_stop=should_stop, on_result=_cb,
-                       use_processes=parallel, executor=executor)
+    raw, ran_parallel = _map_items(_mc_trial_worker, items, parallel=parallel,
+                                   max_workers=max_workers, should_stop=should_stop,
+                                   on_result=_cb, executor=executor,
+                                   heartbeat=heartbeat)
     n_ok = 0
     integral_rows: list = []
     for r in raw:
@@ -483,6 +620,16 @@ def monte_carlo_errors(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
         params.append(MCParam(site=i, param=pn, label=label,
                               best=best_vals[(i, pn)], mean=mean, std=std,
                               values=vals))
+    # the refit's best against the values handed in: a move beyond the MC σ
+    # means the trials scatter around a minimum the screen does not show
+    moved = [label for i, pn, label in tracked
+             if (i, pn) in given and np.isfinite(best_vals[(i, pn)])
+             and abs(best_vals[(i, pn)] - given[(i, pn)])
+             > max(next((p.std for p in params if p.label == label), 0.0),
+                   1e-12 * max(1.0, abs(given[(i, pn)])))
+             and np.isfinite(next((p.std for p in params if p.label == label),
+                                  float("nan")))]
     return MonteCarloResult(trials=n_trials, n_ok=n_ok, noise=sigma, seed=seed,
                             params=params, site_integrals=site_ints,
-                            window_ppm=mc_window)
+                            window_ppm=mc_window, ran_parallel=ran_parallel,
+                            moved=moved)

@@ -193,8 +193,13 @@ RMSD; MQMAS δiso recovery 59.8 vs 60.0 ppm; two-field extrapolation recovering
 **The strongest regression net is real data.** `tests/test_qcpmg.py` reproduces
 published ssNake T₂ values for **12 ³⁵Cl samples within 7 %**, with period 293
 and echo top 147 on every one. `examples/pCABS2-4/` ships a real ²⁷Al and ¹¹B
-dataset whose fits must stay at RMSD 0.04676 and 0.00372. Run these before
-believing any change to the engine, the kernel or the fit is harmless.
+dataset whose fits must stay at RMSD 0.04580 and 0.00372 (since 0.15.1: the
+Jacobian-scaled solver's minimum for the ²⁷Al example; 0.04676 was the
+shallow minimum the unscaled step test stopped in — the multi-start Auto fit
+lands at 0.04580 too, and its 62.8 / 28.6 / −0.2 ppm agree with the 2D MQMAS
+fit's 62.2 / 29.7 / −1.1 better than the old 63.8 / 30.9 / −2.0 did). Run
+these before believing any change to the engine, the kernel or the fit is
+harmless.
 
 ---
 
@@ -235,6 +240,10 @@ comments in the source explain them; this is the index.
 | **The completion threshold is the solver's `ftol` only** — never an `iter_cb` rule, never a matched `xtol` | `desktop/workers.py` `_emit_progress`, `fit.py` `_tol_kws` | lmfit calls `iter_cb` on every residual EVALUATION, and most are Jacobian probes whose residual differs by 1e-8 (analytic) to 1e-4 (kernel models), so a "stdev changed by < 0.1 %" callback aborted every Fit-button fit after ~5 evaluations in 0.14.0–0.14.4 ("visibly not fitting": nfev 5, RMSD 0.082 on the shipped 27Al example against nfev 273, RMSD 0.0536) while Auto fit, which passes no threshold, converged. scipy's `xtol` tests the whole parameter vector, whose norm is the amplitude (1e5–1e7): a matched 0.002 stopped a synthetic line 1.1 ppm short as soon as the amplitude settled |
 | **A processed 1r is loaded WITH its 1i; a real-only spectrum gets `hilbert` inserted before its first phase step** | `io/bruker.py` `read_imag`, `desktop/mw_files.py` `_imag_for`, `desktop/mw_processing.py` `_complex_for_phase` | `y·e^{iφ}` taken real is `y·cos φ`: on the real-only 1r that `_read_1r` returned, Autophase changed nothing and a typed p0 merely scaled the spectrum (only Drag to phase worked, because it armed Hilbert itself). With the 1i a 90° p0 turns the real channel into exactly −1i; the CSV / dmfit fallback is the Hilbert reconstruction |
 | **`SSB_OFFER_KEY` (`ssbOfferOnLoad`, default off) is a fresh settings key**, not a new default on `ssbAutoOffer` | `desktop/mw_sidebands.py` | The old key defaulted to True and had been WRITTEN as True on every install that never touched the toggle, so changing its default would have silenced the banner for nobody; a behaviour change of a persisted boolean needs a new key |
+| **The solver scales its parameters by their Jacobian columns** (`fit.X_SCALE = "jac"`) | `fit.py` `_scale_kws` | With scipy's default (raw units) the amplitude, 1e5–1e7 counts, dominated the trust region and the `xtol` step test: a single-line ²³Na Czjzek fit "converged" at RMSD 0.116 with the position 60 ppm off (a second fit from that point walked on; the χ² profile then found a χ² 35–59 % lower than the fit's and disagreed with the table), and the shipped ²⁷Al example sat in a shallow minimum (0.0468 against 0.0458). With "jac" the 23Na fit reaches 0.073 at a sensible −9.8 ppm and the ²⁷Al fit the deeper minimum the multi-start finds |
+| **`parallel="auto"`, a heartbeat, and a sequential fallback for the error tools** | `autofit._map_items`, `parallel.parallel_map` | The χ² profile and Monte-Carlo dialogs used the process pool unconditionally: its ~15 s start-up (a spawned interpreter per worker importing mrsimulator) blocked a modal dialog with nothing on screen, on a single-line fit whose whole scan takes 2 s ("could not calculate error"). The first item is timed in-process and the pool used only when the rest outlasts `POOL_BREAKEVEN_S`; `heartbeat` pumps the event loop while a pool starts; a broken pool finishes the work sequentially with a warning instead of returning holes |
+| **A χ² profile or Monte-Carlo run says when the fit was not at the minimum** | `autofit.error_profile` (`fit_at_minimum`, `_chi2_at`), `monte_carlo_errors` (`moved`) | Both tools REFIT: the profile at every scan point, Monte-Carlo once for its best fit. When that refit goes lower than the fit on screen, the reported best value and interval belong to the deeper minimum and disagreed with the table in silence |
+| **A single line's population error is 0, and every fraction error goes through the normalisation** | `quantify.fraction_err_pct` | `100·σ_i/T` reported 100 ± 18 % for ONE line — the integral's error dressed up as the error of a share that cannot vary; the derivative of `I_i/ΣI` has a `−I_i/T²` term for every other line |
 
 ---
 

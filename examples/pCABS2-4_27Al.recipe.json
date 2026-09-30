@@ -15,32 +15,32 @@
       "label": "AlO$_4$",
       "params": {
         "isotropic_chemical_shift_ppm": {
-          "value": 63.80424874723367,
-          "stderr": 0.5797543983875325,
+          "value": 62.81532390562914,
+          "stderr": 1.0703761008872328,
           "vary": true,
           "min": null,
           "max": null,
           "expr": null
         },
         "sigma_Cq_MHz": {
-          "value": 1.7440916022519533,
-          "stderr": 0.14266815551059275,
+          "value": 1.4698706296532014,
+          "stderr": 0.338678819812817,
           "vary": true,
           "min": 0.05,
           "max": null,
           "expr": null
         },
         "shift_fwhm_ppm": {
-          "value": 13.03104799512949,
-          "stderr": 0.8306177339837091,
+          "value": 14.014253847533134,
+          "stderr": 0.9433873660666584,
           "vary": true,
           "min": 0.1,
           "max": null,
           "expr": null
         },
         "amplitude": {
-          "value": 3912184.988947562,
-          "stderr": 40501.112466791245,
+          "value": 3751815.840714538,
+          "stderr": 761667.173790174,
           "vary": true,
           "min": 0.0,
           "max": null,
@@ -55,32 +55,32 @@
       "label": "AlO$_5$",
       "params": {
         "isotropic_chemical_shift_ppm": {
-          "value": 31.346562852601295,
-          "stderr": 6.017460832801212,
+          "value": 28.591566669701482,
+          "stderr": 213.25027880151248,
           "vary": true,
           "min": null,
           "max": null,
           "expr": null
         },
         "sigma_Cq_MHz": {
-          "value": 1.3593262327212068,
-          "stderr": 0.6222344738613472,
+          "value": 0.6415537684383015,
+          "stderr": 25.50726803550982,
           "vary": true,
           "min": 0.05,
           "max": null,
           "expr": null
         },
         "shift_fwhm_ppm": {
-          "value": 21.452382218152234,
-          "stderr": 8.035484581775476,
+          "value": 33.253842049436805,
+          "stderr": 74.16238766579133,
           "vary": true,
           "min": 0.1,
           "max": null,
           "expr": null
         },
         "amplitude": {
-          "value": 736585.3619204527,
-          "stderr": 242885.56431995193,
+          "value": 1264940.6226773786,
+          "stderr": 697700.7556487959,
           "vary": true,
           "min": 0.0,
           "max": null,
@@ -95,32 +95,32 @@
       "label": "AlO$_6$",
       "params": {
         "isotropic_chemical_shift_ppm": {
-          "value": -2.185330628145537,
-          "stderr": 39.1221691546021,
+          "value": -0.18255056392921346,
+          "stderr": 6.208837272253865,
           "vary": true,
           "min": null,
           "max": null,
           "expr": null
         },
         "sigma_Cq_MHz": {
-          "value": 0.514624963864941,
-          "stderr": 5.8129771340544245,
+          "value": 0.8088475301357417,
+          "stderr": 0.6893569768386282,
           "vary": true,
           "min": 0.05,
           "max": null,
           "expr": null
         },
         "shift_fwhm_ppm": {
-          "value": 18.304870937524154,
-          "stderr": 19.898654266578077,
+          "value": 17.688993214709743,
+          "stderr": 8.200704817508763,
           "vary": true,
           "min": 0.1,
           "max": null,
           "expr": null
         },
         "amplitude": {
-          "value": 357429.42782417615,
-          "stderr": 142766.6475184614,
+          "value": 573644.3860436728,
+          "stderr": 559775.1975725739,
           "vary": true,
           "min": 0.0,
           "max": null,
@@ -138,12 +138,26 @@
     -80.0
   ],
   "fit_zones": [],
-  "fit_rmsd": 0.046772950530524146,
+  "fit_rmsd": 0.04579874786537412,
   "mqmas_f1_ref_ppm": 0.0,
   "mqmas_f1_scale": 1.0,
   "mqmas_f1_ref_vary": true,
   "notes": [
     "imported from dmfit 20200306 (Fit 1D); Czjzek sigma = sCZ_CQ x 0.5 (Phase 0 convention)"
   ],
+  "provenance": {},
+  "acquisition": {},
+  "software": {
+    "larmor": "0.15.0",
+    "mrsimulator": "1.0.0",
+    "lmfit": "1.3.4",
+    "numpy": "2.4.6",
+    "python": "3.11.15",
+    "git_commit": "7aed8bfda85c",
+    "scipy": "1.17.1",
+    "nmrglue": "0.11",
+    "platform": "Windows-10-10.0.26200-SP0",
+    "fitted": "2026-09-30T12:01:34"
+  },
   "larmor_recipe_version": 1
 }

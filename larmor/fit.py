@@ -86,6 +86,26 @@ def diff_step_for(recipe) -> float | None:
     return None
 
 
+#: scipy least_squares ``x_scale`` for the primary pass. "jac" scales every
+#: parameter by the norm of its Jacobian column, so a trust-region step and
+#: the ``xtol`` step test mean the same change in the residual for all of
+#: them. With scipy's default (None: every parameter in its own raw unit)
+#: the amplitude, 1e5-1e7 counts, dominated both: a step that moved a
+#: position by a few hundredths of a ppm already passed the step test, and
+#: the solver "converged" on a slope. Measured (0.15.1): a single-line 23Na
+#: Czjzek fit stopped at RMSD 0.116 with the position 60 ppm off (a second
+#: fit from that point walked on), and reaches 0.073 with "jac"; the shipped
+#: 27Al example goes from the 0.0468 of its file to 0.0458 -- the minimum a
+#: 12-start Auto fit finds too (4 of 5 restarts) -- while the 11B example is
+#: unchanged (0.00372); the 127 fit tests pass either way. None restores
+#: the old behaviour (tests/test_error_tools_single_line.py).
+X_SCALE = "jac"
+
+
+def _scale_kws() -> dict:
+    return {} if X_SCALE is None else {"x_scale": X_SCALE}
+
+
 def _tol_kws(tol) -> dict:
     """Solver stop tolerance from a completion threshold: ``ftol`` on the
     cost only; empty when no threshold is set.
@@ -403,7 +423,7 @@ def fit(recipe: Recipe, exp_ppm: np.ndarray, exp_amp: np.ndarray,
             residual, params, method="least_squares",
             iter_cb=(_main_cb if (frame_cb or iter_cb or cancel_registered())
                      else None),
-            **_step_kws, **_tol_kws(tol))
+            **_step_kws, **_tol_kws(tol), **_scale_kws())
     if _stop["hit"] and _stop["last_good"]:
         # back to the last point that was fully evaluated (see _stop above)
         for name, val in _stop["last_good"].items():

@@ -494,6 +494,53 @@ panel re-emits a chain recorded as `[baseline, phase]` as `[phase, baseline]`;
 `Baseline_Corrector.m` (the Yon 2020 MATLAB source) sits untracked in the
 repo root and is not part of the package.
 
+## 2026-09-30, later — "check all the error calculation when there is only one line" → v0.15.1
+
+Sam could not calculate errors on a single-line Czjzek fit of ²³Na. Reproduced
+on a real ²³Na MAS spectrum (a CEMHTI NaAlSiO glass, zg, 132 MHz) with one
+Czjzek site seeded the way the app seeds it: every tool *returned*, and four
+things were wrong.
+
+- **The χ² profile dialog looked dead.** It used the process pool
+  unconditionally; the pool's start-up (a spawned interpreter per worker
+  importing mrsimulator, ~15 s here, longer in the frozen exe) blocked the
+  modal window with a fixed "scanning…" label, while the whole scan was 2 s
+  of work. Now `parallel="auto"` (the first point is timed in-process; the
+  pool only when the rest would outlast `autofit.POOL_BREAKEVEN_S`), a
+  `heartbeat` that pumps the event loop while a pool starts, a progress bar,
+  Stop, and span / points controls in the dialog; Monte-Carlo the same. A
+  pool that breaks falls back to sequential work with a warning
+  (`parallel.parallel_map`).
+- **The profile disagreed with the table in silence.** It refits everything
+  else at each scan point and found a χ² 35–59 % below the fit's own: the
+  fit on screen had stopped on a slope. The profile now reports
+  `fit_at_minimum` and says "the fit had not converged — Fit again, then
+  rescan"; Monte-Carlo names the parameters its refit moved by more than σ.
+- **The fit really had stopped on a slope** — the root cause. scipy's
+  trust region and `xtol` step test work in raw parameter units, where the
+  amplitude (1e5–1e7 counts) dominates: a step moving a position by a few
+  hundredths of a ppm already "converged". `fit.X_SCALE = "jac"` scales every
+  parameter by its Jacobian column. Measured: the ²³Na line goes from RMSD
+  0.116 at a nonsensical +52.7 ppm to 0.073 at −9.8 ppm (σ(C_Q) 0.48 MHz,
+  dCS 38 ppm); the shipped ²⁷Al example from its 0.0468 to 0.0458 — the
+  minimum a 12-start Auto fit finds too (4 of 5 restarts), and whose
+  positions 62.8 / 28.6 / −0.2 ppm agree with the 2D MQMAS fit (62.2 / 29.7 /
+  −1.1) better than the old 63.8 / 30.9 / −2.0; the ¹¹B example is unchanged
+  (0.00372); the 127 fit-related tests pass either way. The shipped ²⁷Al
+  recipe was re-saved at the deeper minimum (`larmor fit … --window 150
+  -80`), the README figure re-rendered, the two tests that pin its numbers
+  and Tutorials 1, 5 and 6 re-measured.
+- **The Report gave one line a population of 100 ± 18 %.** The fraction
+  error was `100·σ_i/T`, the integral's error dressed up as the error of a
+  share that cannot vary; `quantify.fraction_err_pct` now differentiates
+  `I_i/ΣI` through the normalisation (a single line: exactly 0).
+
+Tests: `tests/test_error_tools_single_line.py` (the single-line population,
+the propagated fraction error against a numerical derivative, the
+not-at-minimum notes of both tools, the interval-narrower-than-step note,
+the "auto" decision, the pool fallback, the heartbeat through a real pool,
+the shipped ²⁷Al deeper minimum, the dialog with progress and Stop).
+
 ## Remaining
 
 1. **E7** — `dist/LARMOR-0.14.0-setup.exe` and the zip are built and tested

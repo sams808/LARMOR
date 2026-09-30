@@ -25,7 +25,18 @@ of becoming a worker.
 from __future__ import annotations
 
 import os
-from concurrent.futures import Future, ProcessPoolExecutor, as_completed
+import warnings
+from concurrent.futures import (FIRST_COMPLETED, Future, ProcessPoolExecutor,
+                                wait)
+from concurrent.futures.process import BrokenProcessPool
+
+#: how often ``heartbeat`` is called while a pool has nothing finished yet
+#: (its start-up: spawned interpreters importing the scientific stack)
+HEARTBEAT_S = 0.25
+
+
+class _PoolFailed(RuntimeError):
+    """The pool itself broke (not one item): fall back to sequential."""
 
 #: below this many items, process-pool startup overhead (a few hundred ms on
 #: Windows) would swamp any benefit -- run sequentially instead. Real batch/
@@ -84,6 +95,14 @@ def shutdown_shared_pool():
         _SHARED_POOL_WORKERS = 0
 
 
+def pool_is_warm() -> bool:
+    """Has the shared pool already been started in this process? Its first
+    use is the expensive part (a fresh interpreter per worker, each importing
+    mrsimulator and loading a kernel: ~15 s on the development machine);
+    later calls pay only the dispatch."""
+    return _SHARED_POOL is not None
+
+
 def default_worker_count() -> int:
     """Leave one core free for the UI/event loop -- a run that claims every
     last core makes the window itself sluggish while it's in flight."""
@@ -93,7 +112,8 @@ def default_worker_count() -> int:
 
 def parallel_map(fn, items: list, *, max_workers: int | None = None,
                  should_stop=None, on_result=None, use_processes: bool = True,
-                 executor: ProcessPoolExecutor | None = None) -> list:
+                 executor: ProcessPoolExecutor | None = None,
+                 heartbeat=None) -> list:
     """Apply ``fn`` to every item in ``items``; return results in ORIGINAL
     item order (not completion order).
 
@@ -129,62 +149,106 @@ def parallel_map(fn, items: list, *, max_workers: int | None = None,
     making MANY of these calls back-to-back (e.g. one profile per parameter,
     for every spectrum in a batch) should create ONE pool up front and pass
     it through every call, closing it only once, at the very end.
+
+    ``heartbeat()`` is called about every ``HEARTBEAT_S`` seconds while the
+    pool has produced nothing yet, and after every sequential item -- a GUI
+    passes ``QApplication.processEvents`` so its window stays alive (and its
+    Stop button works) through the pool's start-up, which used to freeze a
+    modal dialog for the whole ~15 s with nothing on screen.
+
+    A pool that BREAKS (a worker that cannot spawn, a frozen build whose
+    entry point forgot ``freeze_support``, a pool shut down underneath us)
+    is not a reason to give the caller a list of holes: the items still
+    unanswered are run sequentially here, with a ``RuntimeWarning`` saying
+    so, and the broken shared pool is discarded so the next call starts a
+    fresh one.
     """
     n = len(items)
     results: list = [None] * n
     if n == 0:
         return results
 
-    if not use_processes or (executor is None and n < MIN_ITEMS_FOR_PROCESSES):
-        for i, item in enumerate(items):
+    def _sequential(indices):
+        for i in indices:
             if should_stop is not None and should_stop():
                 break
             try:
-                r = fn(item)
+                r = fn(items[i])
             except Exception:
                 r = None
             results[i] = r
             if on_result:
                 on_result(i, r)
+            if heartbeat is not None:
+                heartbeat()
+
+    if not use_processes or (executor is None and n < MIN_ITEMS_FOR_PROCESSES):
+        _sequential(range(n))
         return results
 
     def _run(pool: ProcessPoolExecutor):
-        futures: dict[Future, int] = {pool.submit(fn, item): i
-                                      for i, item in enumerate(items)}
+        try:
+            futures: dict[Future, int] = {pool.submit(fn, item): i
+                                          for i, item in enumerate(items)}
+        except (BrokenProcessPool, RuntimeError, OSError) as exc:
+            raise _PoolFailed(str(exc)) from exc
         stopped = False
-        for fut in as_completed(futures):
-            i = futures[fut]
-            # a future cancelled below (not-yet-started when stop fired)
-            # raises CancelledError from .result() -- treated as a hole,
-            # same as anything that was never submitted at all
-            try:
-                r = fut.result()
-            except Exception:
-                r = None
-            results[i] = r
-            if on_result:
-                on_result(i, r)
+        pending = set(futures)
+        while pending:
+            done, pending = wait(pending, timeout=HEARTBEAT_S,
+                                 return_when=FIRST_COMPLETED)
+            if not done:
+                if heartbeat is not None:
+                    heartbeat()
+                if (not stopped and should_stop is not None and should_stop()):
+                    stopped = True
+                    for f2 in pending:
+                        f2.cancel()
+                continue
+            for fut in done:
+                i = futures[fut]
+                # a future cancelled below (not-yet-started when stop fired)
+                # raises CancelledError from .result() -- treated as a hole,
+                # same as anything that was never submitted at all
+                try:
+                    r = fut.result()
+                except BrokenProcessPool as exc:
+                    raise _PoolFailed(str(exc)) from exc
+                except Exception:
+                    r = None
+                results[i] = r
+                if on_result:
+                    on_result(i, r)
+            if heartbeat is not None:
+                heartbeat()
             if stopped:
                 continue
             if should_stop is not None and should_stop():
                 stopped = True
-                for f2 in futures:
-                    if not f2.done():
-                        f2.cancel()
+                for f2 in pending:
+                    f2.cancel()
 
-    if executor is not None:
-        _run(executor)
-    elif max_workers is None:
-        # the shared pool, NOT a throwaway one: pool startup is a fresh
-        # interpreter per worker on Windows, and callers like the error
-        # dialogs invoke parallel_map repeatedly
-        _run(shared_pool(None))
-    else:
-        # an EXPLICIT worker count is a contract (a test pinning dispatch
-        # behaviour, a user restricting cores): honour it exactly with a
-        # dedicated pool rather than quietly handing over the shared pool
-        # at whatever width it happens to be
-        workers = max(1, min(max_workers, n))
-        with ProcessPoolExecutor(max_workers=workers) as pool:
-            _run(pool)
+    try:
+        if executor is not None:
+            _run(executor)
+        elif max_workers is None:
+            # the shared pool, NOT a throwaway one: pool startup is a fresh
+            # interpreter per worker on Windows, and callers like the error
+            # dialogs invoke parallel_map repeatedly
+            _run(shared_pool(None))
+        else:
+            # an EXPLICIT worker count is a contract (a test pinning dispatch
+            # behaviour, a user restricting cores): honour it exactly with a
+            # dedicated pool rather than quietly handing over the shared pool
+            # at whatever width it happens to be
+            workers = max(1, min(max_workers, n))
+            with ProcessPoolExecutor(max_workers=workers) as pool:
+                _run(pool)
+    except _PoolFailed as exc:
+        warnings.warn(f"the process pool failed ({exc}); finishing the "
+                      f"remaining work in this process", RuntimeWarning,
+                      stacklevel=2)
+        if executor is None and max_workers is None:
+            shutdown_shared_pool()
+        _sequential([i for i in range(n) if results[i] is None])
     return results

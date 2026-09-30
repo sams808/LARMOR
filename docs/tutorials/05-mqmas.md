@@ -131,9 +131,11 @@ with the 1D, quantify from `3616`, not from the map (§10).
    `contours` between positive and both to see the residual sign.
 
 No fitted values are quoted here: the 2D fit was not re-run for this
-tutorial. Two references exist for comparison. Tutorial 1's 1D fit gave
-δiso = 63.8 / 30.9 / −2.0 ppm for AlO₄ / AlO₅ / AlO₆ (with a ±24 ppm error on
-the last). The validation report (`docs/validation.md`) records that a fit of
+tutorial. Two references exist for comparison. Tutorial 1's 1D fit gives
+δiso = 62.8 / 28.6 / −0.2 ppm for AlO₄ / AlO₅ / AlO₆ (with ±213 ppm on the
+middle one and ±6 ppm on the last — the 1D decomposition is degenerate; an
+earlier version of that fit sat in a shallower minimum at 63.8 / 30.9 / −2.0
+ppm). The validation report (`docs/validation.md`) records that a fit of
 this map reproduced the dmfit MQMAS analysis to about 0.5 ppm:
 62.2 / 29.7 / −1.1 ppm against dmfit's 62.7 / 30 / −0.35 ppm. A fit started
 from the three ridge clicks should land within a few ppm of those values for

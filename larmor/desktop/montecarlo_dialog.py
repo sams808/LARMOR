@@ -112,14 +112,18 @@ class MonteCarloDialog(QDialog):
 
         def prog(k, ntot):
             self.prog.setValue(k)
-            if k % 5 == 0 or k == ntot:
-                QApplication.processEvents()
+            QApplication.processEvents()
 
+        # parallel="auto": the pool only when the trials outlast its ~15 s
+        # start-up; heartbeat keeps the window (and Stop) alive while the
+        # pool starts -- the old fixed parallel=True showed a dead window
+        # for that long on a single-line fit that then took 2 s
         try:
             self._result = autofit.monte_carlo_errors(
                 Recipe.from_dict(self.recipe), self.ppm, self.amp,
                 window_ppm=self.window, n_trials=n, seed=self.seed.value(),
-                progress=prog, should_stop=lambda: self._stop, parallel=True)
+                progress=prog, should_stop=lambda: self._stop, parallel="auto",
+                heartbeat=QApplication.processEvents)
         except Exception as exc:
             self.status.setText(f"failed: {exc}")
             self.btnRun.setEnabled(True); self.btnStop.setEnabled(False)
@@ -130,6 +134,11 @@ class MonteCarloDialog(QDialog):
         self.btnApply.setEnabled(True); self.btnCopy.setEnabled(True)
         self.status.setText(self._result.summary
                             + ("  ·  stopped early" if self._stop else ""))
+        if getattr(self._result, "moved", None):
+            self.status.setStyleSheet("font-weight:600; color:#A8570F;")
+        else:
+            self.status.setStyleSheet(
+                f"font-weight:600; color:{theme.active().accent};")
 
     def _extra_rows(self) -> list[tuple[str, np.ndarray, float]]:
         """``(label, per-trial values, best-fit value)`` for the derived

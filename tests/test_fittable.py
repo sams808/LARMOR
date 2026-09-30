@@ -57,7 +57,7 @@ def test_load_the_shipped_fits():
     assert (al.name, al.nucleus) == ("pCABS2-4_27Al", "27Al")
     assert al.larmor_MHz == pytest.approx(130.3175616)
     assert al.spin_rate_Hz == 26000.0
-    assert al.rmsd == pytest.approx(0.04677, abs=1e-4)      # the README anchor
+    assert al.rmsd == pytest.approx(0.04580, abs=1e-4)      # the README anchor (0.15.1: the deeper minimum)
     assert al.source == str(REC_AL)
     assert [s["model"] for s in al.sites] == ["czjzek"] * 3
 
