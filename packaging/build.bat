@@ -49,8 +49,16 @@ if not exist "%ISCC%" (
 )
 "%ISCC%" /Q /DMyAppVersion=%VER% packaging\larmor.iss || exit /b 1
 
-echo [5/5] zip
+echo [5/6] zip
 powershell -NoProfile -Command "Compress-Archive -Path 'dist\LARMOR' -DestinationPath 'dist\LARMOR-%VER%-win64.zip' -CompressionLevel Optimal -Force" || exit /b 1
+
+echo [6/6] desktop shortcut
+rem Sam's standing request (2026-09-30): every build replaces the desktop
+rem shortcut so it points at dist\LARMOR\LARMOR.exe -- the runnable copy.
+rem A shortcut to build\larmor\LARMOR.exe (PyInstaller's intermediate exe,
+rem no _internal beside it) dies with "Failed to load Python DLL
+rem ...\build\larmor\_internal\python311.dll".
+powershell -NoProfile -ExecutionPolicy Bypass -File packaging\desktop_shortcut.ps1 -Version %VER% || echo       (shortcut not refreshed)
 
 echo.
 echo done:

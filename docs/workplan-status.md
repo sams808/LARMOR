@@ -59,9 +59,18 @@ Workplan"; this file is the ground truth for progress.
   the 0.1 % default a fresh install gets (151 / 281 evaluations, RMSD
   0.0524 as at full precision); silent install 38 s (1994 files), Apps
   entry "LARMOR 0.15.0", installed exe self-test PASS, silent uninstall 7 s
-  with no folder and no entry left; crash log empty. **Hand out the 0.15.0
-  setup** — it is the first build whose Fit button works at the default
-  threshold; every earlier file in `dist/` is superseded.
+  with no folder and no entry left; crash log empty. **0.15.1** built the
+  same day after its full suite (`dist/LARMOR-0.15.1-setup.exe` 111 MB,
+  `dist/LARMOR-0.15.1-win64.zip` 159 MB): frozen exe `--selftest` PASS
+  (core czjzek 557 evaluations with the scaled solver), silent install 39 s
+  (1994 files), Apps entry "LARMOR 0.15.1", installed exe self-test PASS,
+  silent uninstall clean, crash log empty. `packaging/build.bat` now ends
+  with step [6/6], `packaging/desktop_shortcut.ps1`: Sam's standing request
+  ("always replace the shortcut to the larmor.exe on the desktop") after a
+  shortcut to PyInstaller's intermediate `build\larmor\LARMOR.exe` died with
+  "Failed to load Python DLL …\build\larmor\_internal\python311.dll" — the
+  step rewrites `Desktop\LARMOR.lnk` to `dist\LARMOR\LARMOR.exe`. **Hand out
+  the 0.15.1 setup**; every earlier file in `dist/` is superseded.
 - **Full suite**: at v0.14.0 (0de34c7), **1324 passed / 0 failed** in 20 min 39 s,
   real-data layer complete (all 19 datasets present). v0.14.1 (faab8f9) adds
   `larmor/selftest.py`, the quick overlays and their tests (scoped runs
