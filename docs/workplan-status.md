@@ -51,8 +51,17 @@ Workplan"; this file is the ground truth for progress.
   (`dist/LARMOR-0.14.4-setup.exe` 105 MB, `dist/LARMOR-0.14.4-win64.zip`
   151 MB): frozen exe `--selftest` pass, silent install 35 s (1993 files),
   installed exe self-test pass, Apps entry "LARMOR 0.14.4", silent
-  uninstall clean. **Hand out the 0.14.4 setup**; every earlier file in
-  `dist/` is superseded.
+  uninstall clean. **0.15.0** built 2026-09-30 after the full suite
+  (`dist/LARMOR-0.15.0-setup.exe` 111 MB, `dist/LARMOR-0.15.0-win64.zip`
+  159 MB; `packaging/build.bat` run from PowerShell — its version read
+  had to be repaired first, see 10eb5d1): frozen exe `--selftest` PASS with
+  "solver: ran" on all four fits, also with the completion threshold set to
+  the 0.1 % default a fresh install gets (151 / 281 evaluations, RMSD
+  0.0524 as at full precision); silent install 38 s (1994 files), Apps
+  entry "LARMOR 0.15.0", installed exe self-test PASS, silent uninstall 7 s
+  with no folder and no entry left; crash log empty. **Hand out the 0.15.0
+  setup** — it is the first build whose Fit button works at the default
+  threshold; every earlier file in `dist/` is superseded.
 - **Full suite**: at v0.14.0 (0de34c7), **1324 passed / 0 failed** in 20 min 39 s,
   real-data layer complete (all 19 datasets present). v0.14.1 (faab8f9) adds
   `larmor/selftest.py`, the quick overlays and their tests (scoped runs
