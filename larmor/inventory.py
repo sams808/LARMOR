@@ -25,6 +25,16 @@ sample of the session, a leading nucleus token that is not NUC1, ``zg`` in
 the title of a non-zg pulse program, two folders sharing one sample name,
 and an unprocessed EXPNO with at least the pick's NS.
 
+**Fixes** (:func:`fixes_for`) are the remedies a row's findings admit, each a
+``Fix`` the window turns into a menu entry: apply the audited SR when the
+EXPNO opens in LARMOR (``referencing.set_override``; the files stay as they
+are, the correction is logged and reversible), undo such a correction, copy
+the TopSpin ``sr`` command that fixes the file for good, open the 1H
+reference, give a mis-titled EXPNO or a mis-named folder a display name (or
+rename it on disk), process an unprocessed fid in LARMOR, pick a demoted
+spectrum anyway, or read the dataset's own description. A row whose
+override is active reports the SR verdict ``corrected (LARMOR)``.
+
 Qt-free; the desktop window (larmor/desktop/inventory_dialog.py) and the
 ``larmor inventory`` command are consumers. Instrument folders are never
 written to.
@@ -44,8 +54,9 @@ __all__ = [
     "DEFAULT_NS_FRAC", "HARD_TITLE_RE", "SOFT_TITLE_RE", "ROTOR_TOKEN_RE",
     "TITLE_NUCLEUS_RE", "SETUP_KINDS_1D", "RELAX_KINDS", "ROLES", "Row",
     "Inventory", "inventory_root", "classify_title", "assign_roles",
-    "flag_titles", "build", "join_sr", "to_csv", "picks_text", "grid_text",
-    "text_report",
+    "flag_titles", "build", "join_sr", "refresh_sr", "refresh_names",
+    "SR_CORRECTED", "Fix", "FIX_KINDS", "INFO_KINDS", "fixes_for", "remedies",
+    "sr_candidates", "to_csv", "picks_text", "grid_text", "text_report",
 ]
 
 #: a pick whose NS is below this fraction of the block's maximum is a short shot
@@ -70,6 +81,10 @@ RELAX_KINDS = ("Saturation recovery (T1)", "Inversion recovery (T1)", "T1ρ",
 ROLES = ("production", "candidate", "short", "setup", "failed", "arrayed", "2D",
          "reference", "unprocessed")
 _ZG_RE = re.compile(r"\bzg\b", re.IGNORECASE)
+#: the SR verdict of a row whose LARMOR-side correction is active
+SR_CORRECTED = "corrected (LARMOR)"
+#: the audit verdicts a correction applies to
+_SR_FLAGGED = ("unreferenced", "off")
 
 
 # ---------------------------------------------------------------- rows
@@ -82,8 +97,18 @@ class Row:
     reasons: list[str] = field(default_factory=list)
     flags: list[str] = field(default_factory=list)
     pick: bool = False
-    sr_verdict: str = ""
+    sr_verdict: str = ""             # what is shown: the audit's verdict or SR_CORRECTED
     sr_note: str = ""
+    # the referencing audit's own findings (join_sr) ...
+    sr_audit: str = ""               # the audit verdict before the override state
+    sr_audit_note: str = ""
+    sr_expected_hz: float | None = None
+    sr_stored_hz: float | None = None
+    sr_delta_ppm: float | None = None
+    sr_ref: str = ""                 # the 1H reference EXPNO the value came from
+    # ... and the LARMOR-side correction (refresh_sr)
+    sr_override: dict | None = None
+    sr_stale: bool = False           # an override exists but the file's SR moved on
 
     @property
     def expno(self) -> int:
@@ -261,6 +286,15 @@ class Inventory:
 
     def n_folders(self) -> int:
         return len({r.folder for r in self.rows})
+
+    def n_sr_flagged(self) -> int:
+        """Picks the referencing audit flagged (unreferenced / off) whose
+        correction is not yet active in LARMOR."""
+        return sum(1 for r in self.picks() if r.sr_verdict in _SR_FLAGGED)
+
+    def n_corrected(self) -> int:
+        """Rows whose LARMOR-side SR correction is active."""
+        return sum(1 for r in self.rows if r.sr_verdict == SR_CORRECTED)
 
 
 # ---------------------------------------------------------------- the rules
@@ -488,6 +522,9 @@ def build(path, *, ns_frac: float = DEFAULT_NS_FRAC, sr_audit: bool = True,
         acqs = referencing.scan_session(root)
         if acqs:
             join_sr(inv, referencing.audit(acqs))
+            return inv
+    for r in inv.rows:                 # no audit: the override state alone
+        refresh_sr(r)
     return inv
 
 
@@ -496,13 +533,206 @@ def _norm(p) -> str:
 
 
 def join_sr(inv: Inventory, rows: list[referencing.AuditRow]) -> None:
-    """Attach the referencing audit's verdict and note to each row (by path)."""
+    """Attach the referencing audit's verdict, note, expected and stored SR
+    and the reference to each row (by path), then the override state."""
     by_path = {_norm(a.acq.path): a for a in rows}
     for r in inv.rows:
         a = by_path.get(_norm(r.path))
         if a is not None:
-            r.sr_verdict = a.verdict
-            r.sr_note = "; ".join([a.note] + list(a.notes)).strip("; ")
+            r.sr_audit = a.verdict
+            r.sr_audit_note = "; ".join([a.note] + list(a.notes)).strip("; ")
+            r.sr_expected_hz = a.expected_sr_hz
+            r.sr_stored_hz = a.acq.sr_hz
+            r.sr_delta_ppm = a.delta_ppm
+            r.sr_ref = a.ref.path if a.ref else ""
+        refresh_sr(r)
+
+
+def refresh_sr(r: Row) -> None:
+    """``r.sr_verdict`` / ``r.sr_note`` from the audit's findings and the
+    LARMOR override store: ``corrected (LARMOR)`` while an override's old SR
+    still matches the file's, the audit's own verdict otherwise (a stale
+    override -- TopSpin corrected the file since -- is noted, not applied,
+    exactly as the loader treats it)."""
+    ov = referencing.override_for(r.path) if r.info.ndim == 1 else None
+    r.sr_override, r.sr_stale = ov, False
+    if ov is None:
+        r.sr_verdict, r.sr_note = r.sr_audit, r.sr_audit_note
+        return
+    if r.sr_stored_hz is None:         # no audit ran: read the file's SR
+        a = referencing.read_acquisition(r.path)
+        r.sr_stored_hz = a.sr_hz if a is not None else None
+    old, new = float(ov["old_sr_hz"]), float(ov["new_sr_hz"])
+    stored = r.sr_stored_hz
+    when = str(ov.get("time", ""))[:16].replace("T", " ")
+    if stored is not None and abs(float(stored) - old) <= referencing.OVERRIDE_MATCH_HZ:
+        r.sr_verdict = SR_CORRECTED
+        r.sr_note = (f"LARMOR applies SR {new:.2f} Hz when this EXPNO opens (the file "
+                     f"says {old:.2f} Hz)" + (f", set {when}" if when else "")
+                     + (f" — {ov['note']}" if ov.get("note") else ""))
+    else:
+        r.sr_stale = True
+        r.sr_verdict = r.sr_audit
+        now = f"{float(stored):.2f} Hz" if stored is not None else "unreadable"
+        r.sr_note = "; ".join(s for s in [
+            r.sr_audit_note,
+            f"a LARMOR SR correction ({old:.2f} → {new:.2f} Hz) is stale: the file's SR "
+            f"is now {now}, so it is ignored — clear it (Fix…)"] if s)
+
+
+def refresh_names(inv: Inventory) -> None:
+    """Re-derive every row's sample identity (a display name was set or
+    cleared in LARMOR), then the roles and the flags; the SR findings stay
+    on the rows and manual picks survive where their block still exists."""
+    manual = {_norm(r.path) for r in inv.rows if r.pick and "chosen by user" in r.reasons}
+    for r in inv.rows:
+        r.name = scan.sample_name(r.info.path, r.info.title_full or r.info.title)
+    assign_roles(inv.rows, inv.ns_frac)
+    flag_titles(inv)
+    for r in inv.rows:
+        if _norm(r.path) in manual:
+            inv.set_pick(r.sample_id, r.nucleus, r.expno)
+
+
+# ---------------------------------------------------------------- fixes
+@dataclass(frozen=True)
+class Fix:
+    """One remedy a row admits: ``kind`` (one of FIX_KINDS), the menu
+    ``label``, a one-line ``detail`` (tooltip / status message) and the
+    ``payload`` the window acts on."""
+    kind: str
+    label: str
+    detail: str
+    payload: dict = field(default_factory=dict)
+
+
+FIX_KINDS = ("sr_override", "sr_undo", "sr_topspin", "sr_open_reference", "alias",
+             "process_fid", "pick", "open_info")
+#: kinds that read rather than remedy (no wrench for them)
+INFO_KINDS = ("open_info",)
+_SAMPLE_FLAG_RE = re.compile(r"^title says rotor |is shared with folder ")
+_EXPNO_FLAG_RE = re.compile(r"^title names another sample|^title starts with |^title says zg")
+
+
+def _sr_fixes(r: Row) -> list[Fix]:
+    out: list[Fix] = []
+    ov = r.sr_override
+    flagged = r.sr_audit in _SR_FLAGGED and r.sr_expected_hz is not None
+    stored = float(r.sr_stored_hz) if r.sr_stored_hz is not None else 0.0
+    if ov is not None:
+        old, new = float(ov["old_sr_hz"]), float(ov["new_sr_hz"])
+        if r.sr_stale:
+            out.append(Fix(
+                "sr_undo", "Clear the stale LARMOR SR correction",
+                f"the file's SR is now {stored:.2f} Hz, not the {old:.2f} Hz the "
+                "correction was made against (TopSpin fixed it): LARMOR already ignores "
+                "it; clearing it is logged", {"path": r.path}))
+        else:
+            out.append(Fix(
+                "sr_undo", f"Undo the LARMOR SR correction ({old:.2f} → {new:.2f} Hz)",
+                "LARMOR stops moving this EXPNO's axis when it opens; the instrument "
+                "files were never touched; the undo is logged", {"path": r.path}))
+    elif flagged and r.info.ndim == 1:       # the loader corrects 1D spectra only
+        exp = float(r.sr_expected_hz)
+        # delta_ppm is (stored SF - expected SF): a stored SF too HIGH by d
+        # shows every peak too LOW by d, and the correction moves it up by d
+        shift = f" by {float(r.sr_delta_ppm):+.3f} ppm" if r.sr_delta_ppm is not None else ""
+        out.append(Fix(
+            "sr_override", f"Apply the audited SR in LARMOR ({stored:.2f} → {exp:.2f} Hz)",
+            f"when this EXPNO opens in LARMOR (workbench, Batch fit, Sequential fit, CLI) "
+            f"its axis moves{shift} onto the ¹H reference; the instrument files stay "
+            "untouched; logged and reversible (Undo in this menu)",
+            {"path": r.path, "new_sr_hz": exp, "old_sr_hz": stored,
+             "reference": r.sr_ref, "nucleus": r.nucleus,
+             "note": f"SR {stored:.2f} → {exp:.2f} Hz from the ¹H reference "
+                     f"{_ref_label(r.sr_ref)} (Session inventory, Ξ indirect)"}))
+    if flagged:
+        exp = float(r.sr_expected_hz)
+        out.append(Fix(
+            "sr_topspin", f"Copy the TopSpin command:  sr {exp:.2f}",
+            f"paste it in TopSpin on {r.folder}/{r.expno} procno 1 (was {stored:.2f} Hz); "
+            "this changes the file for good — a LARMOR correction, if any, then "
+            "becomes stale and can be cleared",
+            {"command": f"sr {exp:.2f}", "path": r.path}))
+    if r.sr_ref and (flagged or (ov is not None and not r.sr_stale)):
+        ref = Path(r.sr_ref)
+        one_r = ref / "pdata" / "1" / "1r"
+        out.append(Fix(
+            "sr_open_reference", f"Open the ¹H reference ({_ref_label(r.sr_ref)})",
+            "the adamantane spectrum the expected SR was derived from — check that its "
+            "line sits at the reference shift", {"path": str(one_r if one_r.exists() else ref)}))
+    return out
+
+
+def _ref_label(path: str) -> str:
+    p = Path(path)
+    return f"{p.parent.name}/{p.name}" if path else "?"
+
+
+def fixes_for(r: Row, inv: Inventory) -> list[Fix]:
+    """The remedies ``r``'s findings admit, in menu order: the SR fixes, the
+    display-name fixes for title / folder flags, processing an unprocessed
+    fid (the row's own, or -- on a pick -- its unprocessed siblings with at
+    least the pick's NS), picking a demoted 1D anyway, and the dataset
+    info that every row has."""
+    out = _sr_fixes(r)
+    sample_dir = Path(r.path).parent
+    sample_flags = [f for f in r.flags if _SAMPLE_FLAG_RE.search(f)]
+    expno_flags = [f for f in r.flags if _EXPNO_FLAG_RE.search(f)]
+    if sample_flags and sample_dir != Path(inv.root):
+        out.append(Fix(
+            "alias", f"Rename the sample folder {r.folder}…",
+            "a display name kept by LARMOR (the folder stays as it is on disk) or a "
+            "rename on disk after a confirmation, both traceable — because: "
+            + "; ".join(sample_flags), {"path": str(sample_dir), "scope": "sample"}))
+    elif sample_flags:                         # an EXPNO-per-sample set: no sample folder
+        expno_flags = sample_flags + expno_flags
+    if expno_flags:
+        out.append(Fix(
+            "alias", f"Rename EXPNO {r.expno}…",
+            "the title cannot be edited here (instrument data are read-only): give the "
+            "EXPNO a display name in LARMOR that says what it is, or renumber it on "
+            "disk — because: " + "; ".join(expno_flags),
+            {"path": r.path, "scope": "expno"}))
+    if r.role == "unprocessed" and r.info.ndim == 1 and r.info.has_fid:
+        out.append(Fix(
+            "process_fid", f"Process the fid of EXPNO {r.expno} in LARMOR…",
+            f"NS {r.ns}: apodise, zero-fill, phase and transform it in File ▸ Open FID; "
+            "the EXPNO stays unprocessed on disk (TopSpin can still process it)",
+            {"path": str(Path(r.path) / "fid")}))
+    if r.pick:
+        for sib in inv.candidates(r.sample_id, r.nucleus):
+            if sib.role == "unprocessed" and sib.info.ndim == 1 and sib.info.has_fid \
+                    and sib.ns > 0 and sib.ns >= r.ns:
+                out.append(Fix(
+                    "process_fid", f"Process the fid of EXPNO {sib.expno} (NS {sib.ns}) "
+                    "in LARMOR…",
+                    f"it has at least this pick's NS ({r.ns}) but no pdata/1/1r: transform "
+                    "it in File ▸ Open FID, then compare or pick it; the EXPNO stays "
+                    "unprocessed on disk", {"path": str(Path(sib.path) / "fid")}))
+    if r.role in ("short", "setup", "failed") and r.info.ndim == 1 and r.info.has_1r \
+            and r.nucleus != "1H" and not r.pick:
+        out.append(Fix(
+            "pick", f"Pick EXPNO {r.expno} anyway",
+            "make it the block's production spectrum despite: "
+            + ("; ".join(r.reasons) or r.role) + " (recorded as 'chosen by user')",
+            {"sample": r.sample_id, "nucleus": r.nucleus, "expno": r.expno}))
+    out.append(Fix("open_info", "Dataset info…",
+                   "the acquisition summary and the full title text, read-only",
+                   {"path": r.path}))
+    return out
+
+
+def remedies(fixes: list[Fix]) -> list[Fix]:
+    """The fixes that change something (the wrench), without the read-only ones."""
+    return [f for f in fixes if f.kind not in INFO_KINDS]
+
+
+def sr_candidates(inv: Inventory) -> list[Row]:
+    """The picks whose audited SR can be applied in LARMOR now (flagged by
+    the audit, no correction active yet), in grid order."""
+    return [r for r in inv.picks()
+            if any(f.kind == "sr_override" for f in _sr_fixes(r))]
 
 
 # ---------------------------------------------------------------- outputs

@@ -474,11 +474,23 @@ class _ToolsMixin:
             dlg.batch_requested.connect(self.run_batch_fit)
             dlg.seq_requested.connect(self.run_seq_fit)
             dlg.open_requested.connect(self.load_source)
+            # the Fix… menu: process an unprocessed fid, rename (alias or on
+            # disk -- a folder holding an open document is refused)
+            dlg.fid_requested.connect(self.open_fid_path)
+            dlg.renamed.connect(self._on_inventory_renamed)
+            dlg.open_paths = self._open_source_paths
             self._inventory_dlg = dlg
         elif start and (folder or not dlg.folder.text()):
             dlg.folder.setText(start)
         dlg.show()
         dlg.raise_()
+
+    def _on_inventory_renamed(self, old: str, new: str):
+        """The Session inventory renamed a sample folder or an EXPNO: the
+        Explorer tree follows, then the open documents are relabelled /
+        retargeted exactly as after an Explorer rename."""
+        self.explorer.apply_rename(old, new)
+        self._on_explorer_renamed(old, new)
 
     def _apply_sr_correction(self, expno_path: str, new_sr: float, old_sr: float,
                              note: str = ""):
