@@ -7,11 +7,12 @@ Workplan"; this file is the ground truth for progress.
 
 ## State of the repository
 
-- **Version**: 0.14.0 (`larmor/__init__.py` + `pyproject.toml`, bumped in step).
+- **Version**: 0.15.0 (`larmor/__init__.py` + `pyproject.toml`, bumped in step;
+  committed 2026-09-30 as f627a89, **not pushed** — no push word this session).
 - **Pushed** to `origin/master` on 2026-09-23 on Sam's go-ahead ("once done
   make sure the version on github is up to date, and push if needed"):
   v0.13.0 → v0.14.0, the eleven merged branches of the next-ten batch below.
-- **Tests**: 1324 collected in 107 files. Last full run, at v0.14.0: see the
+- **Tests**: 1728 collected in 135 files at v0.15.0 (1324 in 107 at v0.14.0). Last full run: see the
   line "Full suite" at the end of this section. Trust a green bar only when
   the terminal banner says "real-data layer: complete (all 19 datasets
   present)" — five datasets were added this session (the CaF₂ / NaF magres
@@ -65,12 +66,24 @@ Workplan"; this file is the ground truth for progress.
   the review touched (set_experiment, set_overlays, setXRange, zoom_full,
   set_model, Y-mode round trip) shows no regression: every one is within
   a millisecond of 0.14.3 except zoom_full, 0.97 → 2.15 ms.
+  **v0.15.0 (f627a89, 2026-09-30): 1728 passed / 0 failed** in 23 min 31 s,
+  run alone after the four worktree merges, real-data layer complete (all 19
+  datasets present).
 - **0.14.1 (2026-09-23, same day)**: a student's frozen 0.14.0 opened spectra
   but "fitting did not work". The fit path was verified in the exe's own
   package set — console-less Python of `packaging/.buildenv`, then the frozen
   exe itself — on synthetic and on a real 32k-point ²⁷Al spectrum (Gauss/
   Lorentz 1.7 s, Czjzek 18 s with the kernel build), so the cause is on that
-  machine. Shipped for it: **`LARMOR.exe --selftest [spectrum]`** fits
+  machine. **Resolved in 0.15.0 — it was not that machine**: the completion
+  threshold's callback abort (b70e9a7, in every 0.14.x) ended every
+  Fit-button fit after ~5 evaluations at the default 0.1 %. The verification
+  and the self-test below judged a fit by "a parameter changed by more than
+  1e-9", which the amplitude pre-scale and the first Jacobian probe satisfy
+  even when the solver is aborted at once — so they could not see it; since
+  0.15.0 the self-test also requires that the lmfit result was not aborted
+  and ran past its first Jacobian sweep (`selftest.solver_verdict`). See
+  the 2026-09-30 section. Shipped
+  then: **`LARMOR.exe --selftest [spectrum]`** fits
   through the core and through the window's own Fit path and writes
   `%USERPROFILE%\LARMOR_selftest.log` (every step, timing, traceback, dialogs
   the user may not have seen); the spec now collects every larmor / lmfit /

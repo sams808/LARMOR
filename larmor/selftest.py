@@ -121,6 +121,31 @@ def _start_recipe(model: str):
                   sites=sites, sample="selftest")
 
 
+#: fewer solver evaluations than this means the optimiser never got past its
+#: first Jacobian (a gauss_lor site has four parameters: one sweep is 5)
+MIN_EVALUATIONS = 8
+
+
+def solver_verdict(lmfit_result) -> str:
+    """'' when the solver ran to its own stopping rule, else why it did not.
+
+    'Parameters moved' is not evidence: the analytic amplitude pre-scale and
+    the first Jacobian probe both change values by more than 1e-9, so the
+    0.14.x self-test passed while every Fit-button fit was being aborted
+    by the completion-threshold callback after five evaluations. The
+    lmfit result knows: an aborted fit says so, and one that stopped inside
+    its first Jacobian sweep has too few evaluations."""
+    if lmfit_result is None:
+        return "no lmfit result was kept"
+    if getattr(lmfit_result, "aborted", False):
+        return f"the solver was aborted: {getattr(lmfit_result, 'message', '')}"
+    nfev = getattr(lmfit_result, "nfev", None)
+    if isinstance(nfev, int) and nfev < MIN_EVALUATIONS:
+        return (f"the solver stopped after {nfev} evaluations, inside its first "
+                f"Jacobian sweep: {getattr(lmfit_result, 'message', '')}")
+    return ""
+
+
 def core_fits(say) -> bool:
     """larmor.fit.fit on the synthetic spectrum, both models. True when both
     converge with moved parameters and a finite RMSD."""
@@ -144,11 +169,16 @@ def core_fits(say) -> bool:
             after = {k: p.value for k, p in res.recipe.sites[0].params.items()}
             moved = any(abs(after[k] - before[k]) > 1e-9 for k in before)
             stderr = res.recipe.sites[0].params["amplitude"].stderr
+            verdict = solver_verdict(getattr(res, "lmfit_result", None))
             say(f"core {model}: {len(calls)} evaluations, {time.time() - t0:.1f} s, "
                 f"rmsd {res.rmsd:.4g}, amplitude {after['amplitude']:.3g} ± {stderr}, "
-                f"shift {after['isotropic_chemical_shift_ppm']:.2f} ppm, moved: {moved}")
+                f"shift {after['isotropic_chemical_shift_ppm']:.2f} ppm, moved: {moved}, "
+                f"solver: {verdict or 'ran'}")
             if not moved or not (res.rmsd == res.rmsd):
                 say.fail(f"core {model}: the fit did not change the parameters")
+                ok = False
+            if verdict:
+                say.fail(f"core {model}: {verdict}")
                 ok = False
         except Exception as exc:                          # noqa: BLE001
             say.fail(f"core {model}", exc)
@@ -232,14 +262,19 @@ def desktop_fits(say, timeout_s: float = 300.0, spectrum: str | None = None) -> 
                          for s in win.recipe["sites"]]
                 moved = any(abs(a[k] - b[k]) > 1e-9 for a, b in zip(after, before) for k in a)
                 health = getattr(win, "_health", None)
+                verdict = solver_verdict(getattr(win, "_last_lmfit", None))
                 say(f"desktop {model}: finished in {time.time() - t0:.1f} s, status "
                     f"{win.statusBar().currentMessage()!r}, parameters moved: {moved}, "
                     f"model curve: {getattr(win, '_last_model', None) is not None}, "
-                    f"health: {health.summary() if health is not None else None}")
+                    f"health: {health.summary() if health is not None else None}, "
+                    f"solver: {verdict or 'ran'}")
                 if dialogs:
                     say("desktop dialogs:", *dialogs)
                 if dialogs or not moved:
                     say.fail(f"desktop {model}: a dialog appeared or nothing changed")
+                    ok = False
+                if verdict:
+                    say.fail(f"desktop {model}: {verdict}")
                     ok = False
                 dialogs.clear()
             except Exception as exc:                      # noqa: BLE001
