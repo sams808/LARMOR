@@ -40,8 +40,10 @@ hiddenimports += [
 # name at run time), the whole of lmfit and the scipy subpackages the fit
 # path reaches lazily (least_squares, chi2 levels); a missing one surfaces
 # only when Fit is pressed, as "No module named ..." on the user's machine
+# -- plus pybaselines (Process > Baseline > pybaselines), which
+# larmor.pybaseline.compute imports lazily on the first preview
 for pkg in ("larmor", "lmfit", "scipy.optimize", "scipy.stats", "scipy.special",
-            "scipy.linalg", "scipy.interpolate", "scipy.signal"):
+            "scipy.linalg", "scipy.interpolate", "scipy.signal", "pybaselines"):
     hiddenimports += collect_submodules(pkg)
 # dist-info so importlib.metadata.version() works in the software stamp
 for dist in ("larmor", "lmfit", "mrsimulator", "numpy", "scipy", "asteval",

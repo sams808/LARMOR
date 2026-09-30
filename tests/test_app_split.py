@@ -62,7 +62,7 @@ HOMES = {"FitWorker": "larmor.desktop.workers",
 #: which LARMOR_NO_SESSION does not gate, so they vary per machine
 EXCLUDE_CHILDREN = frozenset({"Open &recent", "&Apply recipe"})
 
-# 317 MainWindow members
+# 318 MainWindow members
 SURFACE = (
     'remove_sites', 'add_sidebands_for_line',
     '__init__', '_build_menus', '_menu', '_add', '_MODEL_GROUPS',
@@ -86,7 +86,8 @@ SURFACE = (
     'edit_fit_tol', 'save_constraint_set', 'apply_constraint_set',
     'restrict_glass_protocol', 'edit_experiment', '_baseline_mode',
     'start_twopoint_bg', '_twopoint_mode', 'apply_twopoint_bg',
-    'apply_manual_baseline', 'apply_iterbaseline', 'add_zone', 'clear_zones',
+    'apply_manual_baseline', 'apply_iterbaseline', 'apply_pybaseline',
+    'add_zone', 'clear_zones',
     '_sync_zones', '_zones_changed', 'zoom_full', 'zoom_sites', 'autoscale_y',
     '_toggle_resid', '_toggle_comp', '_toggle_labels', '_toggle_paddles',
     '_build_theme_menu', '_set_aesthetic_override', '_build_textsize_menu',
@@ -238,6 +239,15 @@ GOLDEN_MENU = (
     (('&Process', '&Baseline'), '&Iterative (dead-time; Yon 2020)…', '', False, False),
     (('&Process', '&Baseline'), '&2-point background…', '', False, False),
     (('&Process', '&Baseline'), 'Subtract &averages', '', False, False),
+    (('&Process', '&Baseline'), 'py&baselines', '', False, True),
+    (('&Process', '&Baseline', 'py&baselines'), '&arPLS…', '', False, False),
+    (('&Process', '&Baseline', 'py&baselines'), 'a&sLS…', '', False, False),
+    (('&Process', '&Baseline', 'py&baselines'), 'a&irPLS…', '', False, False),
+    (('&Process', '&Baseline', 'py&baselines'), '&SNIP…', '', False, False),
+    (('&Process', '&Baseline', 'py&baselines'), '&ModPoly…', '', False, False),
+    (('&Process', '&Baseline', 'py&baselines'), '&Rolling ball…', '', False, False),
+    (('&Process', '&Baseline', 'py&baselines'), 'M&orphological…', '', False, False),
+    (('&Process', '&Baseline', 'py&baselines'), 'A&ll methods…', '', False, False),
     (('&Process',), '&Reference', '', False, True),
     (('&Process', '&Reference'), '&Calibrate axis…', '', False, False),
     (('&Process', '&Reference'), '&Measure Δ (ppm / Hz)', '', True, False),

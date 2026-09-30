@@ -291,6 +291,26 @@ def op_iterbaseline(s: Spectrum1D, dead_time_pts: int = 0,
     return s
 
 
+def op_pybaseline(s: Spectrum1D, method: str = "arpls", **params) -> Spectrum1D:
+    """Baseline correction by a pybaselines algorithm (Erb 2022).
+
+    ``method`` is a key of ``larmor.pybaseline.METHODS`` (arpls, asls,
+    airpls, iarpls, drpls, aspls, modpoly, imodpoly, penalized_poly, snip,
+    rolling_ball, mor, mormol) and ``params`` its parameters exactly as the
+    dialog recorded them -- ``larmor.pybaseline.compute`` validates both and
+    fills the length-scaled defaults for any left out. The baseline is
+    subtracted from the real part and the imaginary part is kept, like
+    op_baseline, so a later phase step still works.
+    """
+    if s.domain != "freq":
+        raise ValueError("baseline correction needs frequency-domain data")
+    from larmor.pybaseline import compute
+
+    base = compute(s.x_ppm, s.y.real, method, **params)
+    s.y = (s.y.real - base) + 1j * s.y.imag
+    return s
+
+
 def op_flat_baseline(s: Spectrum1D, edge_frac: float = 0.05) -> Spectrum1D:
     """Flat baseline: subtract the median of the two spectrum edges (a quick
     DC-offset correction when the baseline is genuinely flat, not rolling).
@@ -695,6 +715,7 @@ OPS = {
     "autophase": op_autophase,
     "baseline": op_baseline,
     "iterbaseline": op_iterbaseline,
+    "pybaseline": op_pybaseline,
     "flat_baseline": op_flat_baseline,
     "twopoint_bg": op_twopoint_bg,
     "sr": op_sr,

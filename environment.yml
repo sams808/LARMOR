@@ -14,6 +14,7 @@ dependencies:
       - lmfit
       - csdmpy
       - nmrglue
+      - pybaselines
       - fastapi
       - uvicorn[standard]
       - PySide6
