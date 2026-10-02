@@ -260,7 +260,7 @@ the Methods text.
   the software versions. Check every `[bracket]` before pasting — a bracket
   marks what the files do not prove;
 - for a series, **Series ▸ Experimental section…** (or the **Acquisition
-  table…** button of Batch fit / Sequential fit) builds Table S1 and
+  table…** button of Batch fit, **Acquisition…** on the series bar) builds Table S1 and
   highlights every parameter that varies across the set, printing it as a
   range — a recycle delay written once for a series acquired at 12.5–36 s
   is exactly the error it prevents.

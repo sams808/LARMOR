@@ -1,5 +1,5 @@
-"""Comparability widgets shared by the Batch fit dialog, the Sequential fit
-dialog and the Datasets dock (front-end for :mod:`larmor.comparability`).
+"""Comparability widgets shared by the Batch fit dialog, the series bar's
+chip and the Datasets dock (front-end for :mod:`larmor.comparability`).
 
 - :class:`ComparabilityBar` -- the one-line verdict under a dialog's banner:
   hidden for CSV/fxmla-only series, a dim "alike" line, or the fit-health

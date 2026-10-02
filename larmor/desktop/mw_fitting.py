@@ -257,6 +257,7 @@ class _FittingMixin:
         self.lines_table.btnFit.setEnabled(True)
         self.view.stop_fit_animation()
         self._progress_end(False)
+        self._series_on_fit_failed()     # a red dot, and a Fit → next chain stops
         QMessageBox.warning(self, "Fit failed", humanize_error(msg))
         self.statusBar().showMessage("fit failed")
 
@@ -351,6 +352,7 @@ class _FittingMixin:
             self.results_summary.setToolTip(h.summary_tooltip())
         self._update_enabled()
         self._health_show()
+        self._series_on_health(h)        # the series bar's dot for this member
 
     def _health_show(self, *_):
         on = (self.central_stack.currentWidget() is self.view
@@ -371,6 +373,7 @@ class _FittingMixin:
         self.health_strip.set_health(None)
         self._update_enabled()
         self._health_show()
+        self._series_on_health(None)
 
     def show_fit_health(self, *_):
         """Fit ▸ Fit health details (F7) and the pill click: every

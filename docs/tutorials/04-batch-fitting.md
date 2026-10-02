@@ -26,9 +26,11 @@ Two tools in LARMOR fit a series; they answer different questions.
   known to drift can be *released* within a ±fraction. Use it when the sites
   are the same in every sample and only their populations change.
 - **Sequential fit** (**Series > Sequential fit…**, `larmor seqfit`):
-  independent fits, each warm-started from its fitted neighbour, in forward
-  and backward passes. Use it when positions or widths march along the
-  series and a shared value would be wrong for every member.
+  independent fits, each warm-started from its fitted neighbour. In the app
+  every spectrum of the series becomes a workspace of the main window and a
+  series bar above the plot walks them — Fit → next by hand, or an auto
+  sweep in forward and backward passes. Use it when positions or widths
+  march along the series and a shared value would be wrong for every member.
 
 The *Multi-dataset & co-fitting* manual, §6 and §8, describes both in
 detail.

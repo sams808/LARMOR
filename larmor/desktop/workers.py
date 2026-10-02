@@ -1,9 +1,10 @@
 """Background threads of the main window, and the lmfit callback glue.
 
 ``FitWorker`` / ``Fit2DWorker`` run a 1D / 2D fit off the GUI thread and
-report progress through Qt signals; ``SimWorker`` runs one simulation;
-``KernelWarmWorker`` pre-builds the Czjzek kernel for a freshly loaded
-dataset. ``_emit_progress`` is the lmfit ``iter_cb`` that feeds the progress
+report progress through Qt signals; ``SeqWorker`` runs the series mode's
+auto sweep (``larmor.seqfit.run_sequential``); ``SimWorker`` runs one
+simulation; ``KernelWarmWorker`` pre-builds the Czjzek kernel for a freshly
+loaded dataset. ``_emit_progress`` is the lmfit ``iter_cb`` that feeds the progress
 bar and honours Stop / Cancel, ``humanize_error`` turns an lmfit / numpy
 message into one a user can act on, and ``_fit_tol`` reads the saved
 tolerance. ``MainWindow`` (``larmor.desktop.app``) re-exports every public
@@ -165,6 +166,42 @@ class Fit2DWorker(QThread, _StoppableFit):
                                      converge_frac=(_fit_tol() / 100.0) or None))
             self.done.emit(result, self._stop_mode)
         except Exception as exc:
+            self.failed.emit(str(exc))
+
+
+class SeqWorker(QThread, _StoppableFit):
+    """The series mode's auto sweep: ``larmor.seqfit.run_sequential`` over
+    the members' ``(Recipe, ppm, amp, window)`` entries, off the GUI thread.
+    ``step`` fires after every spectrum of every pass; the Stop (keep) /
+    Cancel (revert) buttons reach it through ``request_stop`` -- the mode
+    comes back with ``done`` so the window keeps what was fitted or applies
+    nothing. The entries are copies, so a cancel costs nothing."""
+
+    done = Signal(object, str)              # (SeqFitResult, stop_mode)
+    failed = Signal(str)
+    step = Signal(int, int, float)          # (pass, spectrum index, rmsd)
+
+    def __init__(self, entries, passes, start, propagate, smooth, tol):
+        super().__init__()
+        # NOT ``self.start``: that is QThread.start(), and the old dialog's
+        # worker shadowed it with the 'first' / 'last' string, so its Auto
+        # button raised "'str' object is not callable" (its tests only ever
+        # called run() directly)
+        self.entries, self.passes, self.start_end = entries, int(passes), start
+        self.propagate, self.smooth, self.tol = tuple(propagate or ()), int(smooth), tol
+        self._init_stop()
+
+    def run(self):
+        try:
+            from larmor.seqfit import run_sequential
+
+            res = run_sequential(
+                self.entries, passes=self.passes, start=self.start_end,
+                propagate=self.propagate or None, smooth=self.smooth, tol=self.tol,
+                progress=lambda p, k, r: self.step.emit(p, k, r),
+                should_stop=lambda: self._stop)
+            self.done.emit(res, self._stop_mode)
+        except Exception as exc:                           # noqa: BLE001
             self.failed.emit(str(exc))
 
 

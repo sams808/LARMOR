@@ -16,7 +16,7 @@ Layout (G5). This module is the facade: ``MainWindow`` holds ``__init__``
 (window state and build order), ``keyPressEvent`` and ``closeEvent``; every
 other method is defined on one mixin in ``larmor/desktop/mw_<block>.py`` --
 menus, chrome, files, session, overlays, editing, sidebands, fitting,
-processing, cofit, tools -- and the QThreads live in
+processing, cofit, tools, series -- and the QThreads live in
 ``larmor/desktop/workers.py``. A new window method goes in the mixin that
 owns the state it touches, never here. Mixins define no ``__init__``, no
 ``Signal`` and no Qt event override, never import this module, and keep
@@ -51,6 +51,7 @@ from larmor.desktop.mw_processing import _ProcessingMixin
 from larmor.desktop.mw_fitting import _FittingMixin
 from larmor.desktop.mw_cofit import _CofitMixin
 from larmor.desktop.mw_tools import _ToolsMixin
+from larmor.desktop.mw_series import _SeriesMixin
 from larmor.desktop.mw_chrome import _ChromeMixin
 from larmor.desktop.mw_menus import _MenusMixin, TUTORIALS
 
@@ -71,7 +72,8 @@ class ClickableLabel(QLabel):
 
 class MainWindow(_MenusMixin, _ChromeMixin, _FilesMixin, _SessionMixin,
                  _OverlaysMixin, _EditingMixin, _SidebandsMixin, _FittingMixin,
-                 _ProcessingMixin, _CofitMixin, _ToolsMixin, QMainWindow):
+                 _ProcessingMixin, _CofitMixin, _ToolsMixin, _SeriesMixin,
+                 QMainWindow):
     def __init__(self):
         super().__init__()
         # kill pyqtgraph's crash-prone native export dialog app-wide (LARMOR has
@@ -203,6 +205,7 @@ class MainWindow(_MenusMixin, _ChromeMixin, _FilesMixin, _SessionMixin,
         self._build_bottom_docks()
         self._build_right_dock()
         self._build_panels_menu()
+        self._build_series_bar()                     # above the central stack
 
         # fit-health strip: every click is navigation, never a recipe edit
         self.health_strip.pill.clicked.connect(self.show_fit_health)
@@ -304,7 +307,8 @@ class MainWindow(_MenusMixin, _ChromeMixin, _FilesMixin, _SessionMixin,
         # ("QThread: Destroyed while thread is still running") -- seen as test
         # runs that printed every dot and died before the summary, or hung,
         # right after a fixture window that had started a kernel pre-build.
-        for name in ("_warm_worker", "_sim_worker", "_fit_worker", "_fit2d_worker"):
+        for name in ("_warm_worker", "_sim_worker", "_fit_worker", "_fit2d_worker",
+                     "_seq_worker"):
             w = getattr(self, name, None)
             if w is None or not hasattr(w, "isRunning"):
                 continue

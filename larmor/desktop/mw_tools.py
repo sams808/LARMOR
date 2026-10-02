@@ -734,17 +734,6 @@ class _ToolsMixin:
         dlg.exec()
         self._remember_batch(dlg)
 
-    def run_seq_fit(self, paths=None):
-        """Sequential (forward-backward) fit of the Explorer-selected series."""
-        paths = [p for p in (paths or self.explorer.selected_spectra()) if p]
-        if len(paths) < 2:
-            self.statusBar().showMessage(
-                "Ctrl/Shift-select at least two spectra in the Explorer first")
-            return
-        from larmor.desktop.seqfit_dialog import SeqFitDialog
-        model = self.recipe if (self.recipe and self.recipe.get("sites")) else None
-        SeqFitDialog(self, paths, model).exec()
-
     def open_plotting_studio(self, spec=None, *, ws_index=None):
         """Open the Plotting studio, optionally seeded with a figure spec.
 
