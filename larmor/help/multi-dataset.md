@@ -332,7 +332,7 @@ manual, §2, describes the rule and the flags.
    beside the long CSV — position, name, group, folder, title, source path,
    every column and the RMSD — the wide table a notebook otherwise rebuilds
    by hand. The batch session and the project bundle carry the table; the
-   Sequential fit (§8) shares the same dialog.
+   series mode (§8) opens the same dialog from its **Table…** button.
 4. **Baseline, per spectrum.** **Fit baseline…** estimates and subtracts a
    baseline from every spectrum *independently* before fitting — **Polynomial**
    (robust asymmetric, choose the order), **Iterative** (Yon 2020), or a flat
@@ -584,48 +584,83 @@ figure without hand-assembling panels:
    nucleus/method rather than a hand-typed slope, and stay fully editable
    afterward.
 
-## 8 · Sequential fit — forward / backward series sweep (1D)
+## 8 · Series mode — one spectrum at a time, in the main window (1D)
 
 The batch tool (§6) assumes one *shared* model. Some series don't work that way:
 the lineshape **evolves smoothly** from one end-member to the other (a
 composition or temperature series), and each spectrum deserves its own fit — just
-one that starts from where its neighbour ended. **Series ▸ Sequential fit** does
-exactly that. Ctrl/Shift-select the series in the Explorer in any order —
-**Series table…** sets the sweep order and the names (§6, step 3) — open it,
-and you get a **one-spectrum-at-a-time** workbench:
+one that starts from where its neighbour ended. **Series ▸ Sequential fit…**
+does exactly that, in the main window. Ctrl/Shift-select the series in the
+Explorer (or hand over the Session inventory's picks) and every spectrum opens
+as a **workspace of its own** — the Workspaces dock reads `1· …`, `2· …` in
+series order — with a thin **series bar above the plot**. The model on screen
+when you start lands on the first spectrum. **Series ▸ Series from open
+spectra** makes a series of what is already open, in dock order, and with
+fewer than two spectra selected **Sequential fit…** does the same.
 
-1. **Precise, per-spectrum control.** The current spectrum shows with its model
-   and components, and its **full fit-parameters table** — set values, bounds,
-   fixes and links exactly as in the main window. **Fit current** fits just this
-   one.
-2. **Carry it forward.** **◀ Prev / Next ▶** move along the series; when you move,
-   the spectrum you land on is **seeded from the one you left** (tick which
-   parameters carry — positions/widths/quadrupolar by default, amplitudes always
-   re-fit fresh). **Fit → seed next ▶** fits the current spectrum and steps on.
-   This is the manual forward (or backward) chain.
-3. **Automate it.** **Auto ⇄ forward–backward fit** runs the whole sweep itself:
-   choose the number of **passes** (1, 2, 4, 8, 16 — each pass sweeps one
-   direction, so 2 = forward then back), which end to **start** from, and an
-   optional **smoothing** window that gently smooths each parameter's trajectory
-   *between* passes so the series doesn't jitter. A live plot shows the **RMSD of
-   every spectrum** updating and the **mean RMSD falling** pass over pass, plus a
-   **trajectory plot** of any chosen parameter across the series. **Cancel**
-   reverts; **Stop** keeps what's done.
-4. **Save.** **Save individual fits…** (auto `sample_nucleus_seq_YYYYMMDD_HHMM` or
-   a name per fit) and **Series plot…** (parameter/population evolution, with
-   export) — as in the batch tool; every saved recipe carries its source
-   path, the SHA-256 of its data file and its acquisition block, and
-   **Acquisition table…** opens the Experimental-section window over the
-   series (no fit needed). **Publication bundle…** is the batch tool's
-   bundle (§6, step 7) for the series — `seq_table.csv` instead of
-   `batch_table.csv`, otherwise the same files — and works after manual **Fit
-   current** steps as well as after an auto sweep (a member never fitted gets a
-   manifest row marked *not fitted*); the saved recipes carry their source
-   path. `larmor seqfit … --curves` writes the same from the command line.
-   The comparability line of §6 (with **Details…**, without the reprocess —
-   every member gets its own model here) sits under **◀ Prev / Next ▶**, and
-   the current spectrum's title carries the amber ⚠ when it was acquired or
-   processed unlike the rest of the series.
+Because every member is an ordinary workspace, **every tool of the main window
+applies to every member**: add or remove lines, set bounds and links, drag the
+paddles, the processing panel, Auto fit, the fit-health strip, undo. There is
+no second lines table to learn, and nothing freezes: a fit runs in the window's
+own fit thread with its progress bar and Stop / Cancel.
+
+**The bar.** One button per spectrum with a **status dot** — grey *not fitted*,
+green *fitted*, amber *edited since its fit*, red *the last fit failed* — and its
+name, RMSD and source in the tooltip (a ⚠ marks a spectrum acquired or processed
+unlike the rest; the chip near the right end carries the comparability sentence
+of §6 and opens its **Details**). Click a name, or **◀ ▶**, to switch.
+
+**Carry rules (Carry ▾).** With *seed the next spectrum from this one when I
+move* ticked, the spectrum you land on takes the model of the one you left:
+
+- a spectrum **without lines** gets a **copy** of the model — structure, labels,
+  families, links — with every amplitude scaled to its own height (a display
+  seed; the fit's own pre-scale does the rest);
+- a spectrum **with its own lines keeps them**: only the ticked parameters
+  (positions, widths and shapes by default; amplitudes are always re-fitted)
+  are seeded onto matching lines, clipped to that spectrum's own bounds; a
+  linked parameter follows its master.
+
+So a line you add on spectrum 4 stays on spectrum 4, a line you remove there
+stays removed, and the status line says what moved; every seed is one undo
+step. **Copy this model to every spectrum** does the same from the current
+spectrum to all the others at once; **Replace every spectrum's lines with this
+model** overwrites them (their fits start over).
+
+**Fit → next ▶** fits the current spectrum through the ordinary Fit — the
+progress bar, **Stop (keep)** / **Cancel (revert)** and the animation are the
+usual ones — then moves to the next spectrum and seeds it from the result.
+Repeat to walk the series by hand; a stopped or failed fit ends the chain (a
+failed one turns the dot red).
+
+**Auto sweep ▾** runs the whole series in a worker: choose the **passes** (1–6;
+each pass sweeps one direction, so 2 = forward then back), which end to
+**start** from and an optional **smooth** window (0 / 3 / 5) that smooths each
+parameter's trajectory *between* passes so the series doesn't jitter. Every
+spectrum needs at least one line first (copy the model). The bar reads
+`pass 2/2 · 4/7 · RMSD 0.012` as it goes; **Stop** keeps what was fitted,
+**Cancel** (beside the progress bar) reverts everything. When it lands, every
+spectrum carries its fitted model and its fit verdict, the dots turn green and
+the status line gives the mean RMSD of each pass.
+
+**Table… / Plot… / Acquisition… / Save ▾.** **Table…** is the Series table of
+§6, step 3: names, replicate groups, the order of the series and composition
+columns joined from a CSV — OK renames and **reorders** the members (the bar,
+the dock prefixes and the walk follow). **Plot…** is the Series plot
+(parameter and population evolution, with export) over the spectra that carry
+lines. **Acquisition…** opens the Experimental-section window over the series
+(no fit needed). **Save ▾ Save all fits…** writes one `.recipe.json` per
+spectrum (auto `sample_nucleus_seq_YYYYMMDD_HHMM`, or a name per fit); every
+saved recipe carries its source path, the SHA-256 of its data file and its
+acquisition block. **Save ▾ Publication bundle…** is the batch tool's bundle
+(§6, step 7) for the series — `seq_table.csv` instead of `batch_table.csv`,
+otherwise the same files; a spectrum never fitted gets a manifest row marked
+*not fitted*. `larmor seqfit … --curves` writes the same from the command line.
+
+**File ▸ Save project…** keeps the series: the members reopen tagged, in
+order, with their names and options, and the bar comes back. **✕ End series**
+(or **Series ▸ End series**) removes the bar and the tags; the spectra stay
+open.
 
 Use §6 when the sites are genuinely the *same* everywhere and only populations
 change; use §8 when the sites themselves **evolve** along the series.

@@ -171,8 +171,7 @@ def test_value_returning_dialogs_stay_modal():
            / "mw_tools.py").read_text(encoding="utf-8")
     for kept in ("ComputingParamsDialog(self).exec()", "dlg.exec() and dlg.result",
                  "SatrecDialog(self, expno).exec()", "RedorDialog(self, expno).exec()",
-                 "TwoDDialog(self, expno).exec()", "BatchReportDialog(self, start).exec()",
-                 "SeqFitDialog(self, paths, model).exec()"):
+                 "TwoDDialog(self, expno).exec()", "BatchReportDialog(self, start).exec()"):
         assert kept in src, kept
     for gone in ("NmrTableDialog(self, h1).exec()", "ConvertDialog(self, sfo).exec()",
                  "VtDialog(self).exec()", "CorrelationDialog(self, lm).exec()",

@@ -62,7 +62,7 @@ HOMES = {"FitWorker": "larmor.desktop.workers",
 #: which LARMOR_NO_SESSION does not gate, so they vary per machine
 EXCLUDE_CHILDREN = frozenset({"Open &recent", "&Apply recipe"})
 
-# 318 MainWindow members
+# 337 MainWindow members
 SURFACE = (
     'remove_sites', 'add_sidebands_for_line',
     '__init__', '_build_menus', '_menu', '_add', '_MODEL_GROUPS',
@@ -163,9 +163,16 @@ SURFACE = (
     '_remember_figure', '_remember_batch', '_open_batch_session',
     '_session_file', '_persist_session', '_flush_session', '_autosave_tick',
     'closeEvent', '_restore_session', 'on_family_changed',
+    # the series mode (wip/SEQ): the bar, the walk, the sweep, the outputs
+    '_build_series_bar', 'start_series', 'start_series_from_workspaces',
+    'end_series', 'series_go', 'series_prev', 'series_next',
+    'series_fit_then_next', 'series_auto_sweep', 'series_copy_model',
+    'series_table', 'series_plot', 'series_acquisition_table',
+    'series_save_all', 'series_bundle', '_series_refresh_bar',
+    '_series_on_health', '_series_on_fit_failed', '_series_restore_from_tags',
 )
 
-# 232 menu rows: (menu path, text, shortcut, checkable, has submenu)
+# 234 menu rows: (menu path, text, shortcut, checkable, has submenu)
 GOLDEN_MENU = (
     ((), '&File', '', False, True),
     (('&File',), '&Open…', 'Ctrl+O', False, False),
@@ -290,6 +297,8 @@ GOLDEN_MENU = (
     ((), '&Series', '', False, True),
     (('&Series',), 'Batch &fit spectra…', '', False, False),
     (('&Series',), 'Se&quential fit…', '', False, False),
+    (('&Series',), 'Series from &open spectra', '', False, False),
+    (('&Series',), '&End series', '', False, False),
     (('&Series',), '&Batch fit report…', '', False, False),
     (('&Series',), '&Session inventory…', '', False, False),
     (('&Series',), 'E&xperimental section…', '', False, False),

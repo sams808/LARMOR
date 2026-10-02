@@ -341,19 +341,6 @@ def test_batchfit_grid_cells_are_plain(qapp, tmp_path):
         dlg.close()
 
 
-def test_seqfit_dialog_plots_are_plain(qapp, tmp_path):
-    from larmor.desktop.seqfit_dialog import SeqFitDialog
-    paths, model = _csv_series(tmp_path)
-    dlg = SeqFitDialog(None, paths, model)
-    try:
-        _assert_plain(dlg, n_plots=3)               # spectrum, RMSD, trajectory
-        assert _labelled(dlg) == [("bottom", "spectrum", ""),
-                                  ("bottom", "spectrum", ""),
-                                  ("left", "RMSD", "")]
-    finally:
-        dlg.close()
-
-
 def test_cofit_dialog_result_plots_are_plain(qapp):
     from types import SimpleNamespace
 

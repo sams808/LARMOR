@@ -209,7 +209,7 @@ def entry_1d(ws: dict) -> dict | None:
                  "source": o.get("source", ""),
                  **{k: num_or(o.get(k), d) for k, d in display.OVERLAY_DEFAULTS.items()}}
                 for o in snap.get("overlays", []) if o.get("source")]
-    return {
+    entry = {
         "kind": "1d",
         "title": ws.get("title", ""),
         "source_path": snap.get("source_path"),
@@ -219,6 +219,12 @@ def entry_1d(ws: dict) -> dict | None:
         "exp_amp": np.asarray(snap["exp_amp"], float).tolist(),
         "overlays": overlays,
     }
+    # a member of a series (larmor.seriesmode): its tag -- series id, order,
+    # name, group, options, fit state -- rides along, so reopening the
+    # project brings the series bar back; absent for an ordinary spectrum
+    if isinstance(ws.get("series"), dict):
+        entry["series"] = json_safe(ws["series"])
+    return entry
 
 
 def entry_2d(ws: dict, project_dir: str | Path) -> dict | None:

@@ -388,8 +388,18 @@ class _MenusMixin:
                   tip="one shared model over the spectra selected in the "
                       "Explorer (1D)")
         self._add(m_ser, "Se&quential fit…", self.run_seq_fit,
-                  tip="a forward–backward sweep along a series, each fit "
-                      "starting from its neighbour (1D)")
+                  tip="walk a series spectrum by spectrum in this window: the "
+                      "spectra selected in the Explorer (or the inventory's "
+                      "picks) open as workspaces with a series bar above the "
+                      "plot — Fit → next, Auto sweep, Series table / plot, "
+                      "Save all (1D)")
+        self._add(m_ser, "Series from &open spectra", self.start_series_from_workspaces,
+                  tip="the open 1D spectra, in the order of the Workspaces "
+                      "dock, become a series")
+        self.actEndSeries = self._add(m_ser, "&End series", self.end_series,
+                                      tip="remove the series bar and the series "
+                                          "tags; the spectra stay open")
+        self.actEndSeries.setEnabled(False)
         self._add(m_ser, "&Batch fit report…", self.run_batch_report,
                   tip="publication table and plots from a batch fit")
         m_ser.addSeparator()
@@ -931,6 +941,8 @@ class _MenusMixin:
         self.actRedo.setEnabled(bool(self.redo_stack))
         if getattr(self, "actHealth", None) is not None:
             self.actHealth.setEnabled(self._health is not None)
+        if getattr(self, "actEndSeries", None) is not None:
+            self.actEndSeries.setEnabled(getattr(self, "_series", None) is not None)
 
     # ------------------------------------------------------------- axis unit
     def _build_axis_unit_menu(self, m_view):
@@ -1157,6 +1169,8 @@ class _MenusMixin:
         # signal roles; the request_simulation() below then re-runs
         # _health_live, whose signature check leaves a fit verdict untouched
         self.health_strip.apply_theme()
+        if getattr(self, "series_bar", None) is not None:
+            self.series_bar.apply_theme()           # the member dots and the chip
         if getattr(self, "_addline_toolbar", None) is not None:
             self._addline_toolbar.apply_theme()
         # re-theme both plot canvases

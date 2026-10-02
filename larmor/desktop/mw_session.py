@@ -130,6 +130,7 @@ class _SessionMixin:
         if (isinstance(act, int) and 0 <= act + offset < len(self.workspaces)
                 and self.workspaces[act + offset]["kind"] in DOC_KINDS):
             self.switch_workspace(act + offset)
+        self._series_restore_from_tags()      # 1D entries tagged as one series
         self._refresh_ws_panel()
         self._add_recent(path)
         self.statusBar().showMessage(f"project opened — {project.summary(data)}")
@@ -207,6 +208,10 @@ class _SessionMixin:
         self._ws_mode = "new"
         self._register_ws("1d")
         self._restore_custom_title(w.get("title"))
+        if isinstance(w.get("series"), dict) and self.active_ws is not None:
+            # a member of a series: the tag comes back; the series itself is
+            # rebuilt once every entry is in (_series_restore_from_tags)
+            self.workspaces[self.active_ws]["series"] = dict(w["series"])
         self._update_paddles(); self._update_exp_label(); self._update_enabled()
 
     def _restore_2d_entry(self, w: dict, project_dir: str, notes: list):
@@ -372,6 +377,11 @@ class _SessionMixin:
                      and len(snap["exp_ppm"]) == 0)
             reuse = kind == "1d" and empty
         if reuse:
+            # a member of a series reloaded in place (Reset to original) stays
+            # a member: the tag is the row's identity in the series
+            tag = self.workspaces[self.active_ws].get("series")
+            if isinstance(tag, dict):
+                entry["series"] = tag
             self.workspaces[self.active_ws] = entry
         else:
             self.workspaces.append(entry)
@@ -388,11 +398,19 @@ class _SessionMixin:
         return len(self.workspaces) - 1
 
     def _refresh_ws_panel(self):
+        # the series bar mirrors the dock: it syncs its members (a closed
+        # member drops out) and redraws before the rows are built, so the
+        # series indices below are current
+        self._series_refresh_bar()
         items, info = [], []
         for ws in self.workspaces:
             icon = ({"2d": "▦", "figure": "◫", "batch": "☷"}.get(ws["kind"])
                     or ("⤳" if ws["has_fit"] else "∿"))
-            items.append((icon, ws["title"]))
+            title = ws["title"]
+            tag = ws.get("series")
+            if isinstance(tag, dict) and tag.get("index") is not None:
+                title = f"{int(tag['index']) + 1}· {title}"    # the series order
+            items.append((icon, title))
             info.append({"kind": ws["kind"], "has_fit": bool(ws["has_fit"])})
         self.ws_panel.rebuild(items, self.active_ws if self.active_ws is not None
                               else -1, info)
