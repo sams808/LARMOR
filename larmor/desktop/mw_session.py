@@ -358,8 +358,19 @@ class _SessionMixin:
         if mode == "reuse":
             reuse = self.active_ws is not None
         elif mode == "auto" and self.active_ws is not None:
+            # An opened spectrum STAYS open. The rule used to reuse the active
+            # 1D workspace whenever it carried no fit, so double-clicking
+            # through a sample folder replaced the previous spectrum each
+            # time and only the fitted ones accumulated ("I cannot open more
+            # than 4-5 spectra ... they are not staying open"). Only a
+            # workspace that holds no spectrum at all is reused now; an
+            # explicit "reuse" (Reset to original, Make active) still
+            # replaces in place.
             cur = self.workspaces[self.active_ws]
-            reuse = (kind == "1d" and cur["kind"] == "1d" and not cur["has_fit"])
+            snap = cur.get("snap") or {}
+            empty = (cur["kind"] == "1d" and snap.get("exp_ppm") is not None
+                     and len(snap["exp_ppm"]) == 0)
+            reuse = kind == "1d" and empty
         if reuse:
             self.workspaces[self.active_ws] = entry
         else:

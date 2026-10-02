@@ -240,6 +240,8 @@ def scan_session(month_dir, progress=None) -> list[Acquisition]:
                 a = read_acquisition(e)
                 if a is not None:
                     out.append(a)
+                if progress:
+                    progress(k, len(samples), f"{sample.name}/{e.name}")   # per EXPNO
     # an EXPNO directly under the given folder (a sample folder was passed)
     for e in samples:
         if (e / "acqus").exists():

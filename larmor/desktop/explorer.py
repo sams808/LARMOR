@@ -141,6 +141,7 @@ class ExplorerPanel(QWidget):
     inventory_requested = Signal(str)   # a month or sample folder -> Session inventory
     overlay_requested = Signal(str)     # an EXPNO -> overlay on the active spectrum
     fit_table_requested = Signal(list)  # saved fit files -> the Fit parameter table
+    apply_fit_requested = Signal(str)   # a saved fit -> its lines on the open spectrum
     pulseprog_requested = Signal(str)   # an EXPNO -> the pulse program viewer
     renamed = Signal(str, str)          # (old path, new path) -- equal for an alias
 
@@ -619,6 +620,11 @@ class ExplorerPanel(QWidget):
         a = m.addAction("Open", lambda: self.open_requested.emit(path))
         a.setToolTip("load this fit with its spectrum on the workbench "
                      "(double-click does the same)")
+        a = m.addAction("Apply to the open spectrum",
+                        lambda: self.apply_fit_requested.emit(path))
+        a.setToolTip("put this fit's lines on the spectrum already on screen "
+                     "(its own data stays where it is) — File ▸ Open a fit on "
+                     "this spectrum… browses for one")
         n = len(fits)
         a = m.addAction("Fit parameter table…" if n <= 1
                         else f"Fit parameter table…  ({n} fits)",

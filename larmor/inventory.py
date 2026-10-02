@@ -515,6 +515,12 @@ def build(path, *, ns_frac: float = DEFAULT_NS_FRAC, sr_audit: bool = True,
             else:
                 for info in scan.scan_sample(child):
                     rows.append(_row(info, child.name))
+                    if progress:
+                        # per EXPNO, not only per folder: a sample folder of
+                        # thirty experiments reads for seconds, and a window
+                        # that cannot pump its events meanwhile is shown by
+                        # Windows as "(Not Responding)"
+                        progress(k, len(children), f"{child.name}/{info.expno}")
     inv = Inventory(root=root, rows=rows, ns_frac=ns_frac)
     assign_roles(inv.rows, ns_frac)
     flag_titles(inv)

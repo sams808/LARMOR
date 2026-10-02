@@ -67,6 +67,11 @@ class _MenusMixin:
                   tip="a Varian / Agilent .fid folder")
         self.m_recent = self._menu(m_file, "Open &recent")
         self._rebuild_recent()
+        self._add(m_file, "Open a f&it on this spectrum…", self.apply_recipe_browse,
+                  tip="apply a saved fit (.recipe.json, dmfit .fxml / .fxmla) to "
+                      "the spectrum on screen: its lines, not its data — the "
+                      "recent fits are under Edit ▸ Apply recipe; a fit file in "
+                      "the Explorer does the same from its right-click menu")
         m_file.addSeparator()
         self._add(m_file, "O&verlay a spectrum…", self.add_overlay_dialog,
                   "Ctrl+Shift+A",

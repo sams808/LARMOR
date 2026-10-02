@@ -165,7 +165,7 @@ SURFACE = (
     'closeEvent', '_restore_session', 'on_family_changed',
 )
 
-# 231 menu rows: (menu path, text, shortcut, checkable, has submenu)
+# 232 menu rows: (menu path, text, shortcut, checkable, has submenu)
 GOLDEN_MENU = (
     ((), '&File', '', False, True),
     (('&File',), '&Open…', 'Ctrl+O', False, False),
@@ -174,6 +174,7 @@ GOLDEN_MENU = (
     (('&File',), 'Open &FID…', 'Ctrl+F', False, False),
     (('&File',), 'Open &Varian / Agilent…', '', False, False),
     (('&File',), 'Open &recent', '', False, True),
+    (('&File',), 'Open a f&it on this spectrum…', '', False, False),
     (('&File',), 'O&verlay a spectrum…', 'Ctrl+Shift+A', False, False),
     (('&File',), 'Auto-reload &when the file changes', '', True, False),
     (('&File',), 'Open pro&ject…', '', False, False),
