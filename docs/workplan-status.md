@@ -556,6 +556,49 @@ not-at-minimum notes of both tools, the interval-narrower-than-step note,
 the "auto" decision, the pool fallback, the heartbeat through a real pool,
 the shipped ²⁷Al deeper minimum, the dialog with progress and Stop).
 
+## 2026-10-02 — three items and two frozen windows → v0.15.2
+
+- **"Why I cannot open more than 4-5 spectra … they are not staying open in
+  the workspace"** — `_register_ws` reused the active 1D workspace whenever
+  it carried no fit, so browsing a sample folder replaced the previous
+  spectrum each time and only fitted ones accumulated. Only a workspace that
+  holds no spectrum is reused now (Reset to original / Make active still
+  replace in place). Six double-clicks are six workspaces
+  (`tests/test_workspace_policy.py`).
+- **"need in the File Menu a open recipe or open fit to use on currently
+  open data"** — File ▸ Open a fit on this spectrum… (the browse half of
+  Edit ▸ Apply recipe), and the Explorer's fit rows offer "Apply to the open
+  spectrum".
+- **"Rethink the sequential fit … really rethink and rework it completely"**
+  (with two screenshots of the old dialog "(Not Responding)") — replaced by
+  a **series mode of the main workbench** (worktree wip/SEQ, merged as
+  b87cd4f): Series ▸ Sequential fit… (Explorer selection, inventory picks,
+  or the open spectra) opens every member as its own workspace and shows a
+  series bar above the spectrum — member buttons with status dots (grey
+  unfitted, green fitted, amber edited since fit, red failed), ◀ ▶, Carry ▾
+  (seed the next spectrum when I move; which parameter groups; copy or
+  replace the model everywhere), Fit → next (the window's own Fit, in its
+  thread, then move and seed), Auto sweep ▾ (passes / start / smooth; the
+  `seqfit.run_sequential` sweep in a `SeqWorker` thread with Stop), Table…,
+  Plot…, Acquisition…, Save ▾ (all fits, publication bundle), the
+  comparability chip, End series. Because a member is an ordinary workspace,
+  every tool applies per spectrum: add / remove lines, the full lines table,
+  right-click menus, processing, paddles, constraints, Auto fit, the
+  fit-health strip, undo. Carry rule: an empty member gets a copy of the
+  model with amplitudes scaled by the intensity ratio; a member with its own
+  lines keeps them and receives only the carried values (matching index and
+  name, clipped to its bounds). The series survives a project save / open.
+  Found on the way: the old dialog's "Auto ⇄ forward–backward fit" button
+  had been broken since its worker stored the start choice as `self.start`,
+  shadowing `QThread.start()`.
+- The Session inventory also showed "(Not Responding)": its scan and the
+  referencing audit ticked progress per sample folder; they tick per EXPNO
+  now.
+
+Tests: `tests/test_seriesmode.py` (10), `tests/test_series_mode_ui.py`
+(14, through the FitWorker and the SeqWorker), `tests/test_workspace_policy.py`
+(4); `seqfit_dialog.py` and its tests removed; golden menu 234 rows.
+
 ## Remaining
 
 1. **E7** — `dist/LARMOR-0.14.0-setup.exe` and the zip are built and tested
