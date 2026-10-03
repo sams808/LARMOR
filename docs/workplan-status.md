@@ -12,7 +12,7 @@ Workplan"; this file is the ground truth for progress.
 - **Pushed** to `origin/master` on 2026-09-23 on Sam's go-ahead ("once done
   make sure the version on github is up to date, and push if needed"):
   v0.13.0 → v0.14.0, the eleven merged branches of the next-ten batch below.
-- **Tests**: 1728 collected in 135 files at v0.15.0 (1324 in 107 at v0.14.0). Last full run: see the
+- **Tests**: 1761 collected in 139 files at v0.15.2 (1728 in 135 at v0.15.0, 1324 in 107 at v0.14.0). Last full run: see the
   line "Full suite" at the end of this section. Trust a green bar only when
   the terminal banner says "real-data layer: complete (all 19 datasets
   present)" — five datasets were added this session (the CaF₂ / NaF magres
@@ -69,8 +69,15 @@ Workplan"; this file is the ground truth for progress.
   ("always replace the shortcut to the larmor.exe on the desktop") after a
   shortcut to PyInstaller's intermediate `build\larmor\LARMOR.exe` died with
   "Failed to load Python DLL …\build\larmor\_internal\python311.dll" — the
-  step rewrites `Desktop\LARMOR.lnk` to `dist\LARMOR\LARMOR.exe`. **Hand out
-  the 0.15.1 setup**; every earlier file in `dist/` is superseded.
+  step rewrites `Desktop\LARMOR.lnk` to `dist\LARMOR\LARMOR.exe`. **0.15.2**
+  built 2026-10-02 after its full suite (`dist/LARMOR-0.15.2-setup.exe`
+  111 MB, `dist/LARMOR-0.15.2-win64.zip` 159 MB; build.bat's step [6/6]
+  refreshed the desktop shortcut): frozen exe `--selftest` PASS, silent
+  install 33 s (1994 files), Apps entry "LARMOR 0.15.2", installed exe
+  self-test PASS, silent uninstall 6 s clean, the desktop shortcut restored
+  afterwards (the setup's own desktop icon shares its name), crash log
+  empty. **Hand out the 0.15.2 setup**; every earlier file in `dist/` is
+  superseded.
 - **Full suite**: at v0.14.0 (0de34c7), **1324 passed / 0 failed** in 20 min 39 s,
   real-data layer complete (all 19 datasets present). v0.14.1 (faab8f9) adds
   `larmor/selftest.py`, the quick overlays and their tests (scoped runs
@@ -92,7 +99,9 @@ Workplan"; this file is the ground truth for progress.
   ("all six stderr None"), which the Jacobian-scaled solver no longer
   satisfies for every spectrum of the degenerate pair (2 of 6 None); the
   assertion now requires at least one spectrum without error bars, and the
-  test passes.
+  test passes. **v0.15.2 (8bbc39d, 2026-10-02): 1761 passed / 0 failed** in
+  52 min 08 s, run alone, real-data layer complete (all 19 datasets
+  present).
 - **0.14.1 (2026-09-23, same day)**: a student's frozen 0.14.0 opened spectra
   but "fitting did not work". The fit path was verified in the exe's own
   package set — console-less Python of `packaging/.buildenv`, then the frozen
