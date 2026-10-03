@@ -12,7 +12,7 @@ Workplan"; this file is the ground truth for progress.
 - **Pushed** to `origin/master` on 2026-09-23 on Sam's go-ahead ("once done
   make sure the version on github is up to date, and push if needed"):
   v0.13.0 → v0.14.0, the eleven merged branches of the next-ten batch below.
-- **Tests**: 1761 collected in 139 files at v0.15.2 (1728 in 135 at v0.15.0, 1324 in 107 at v0.14.0). Last full run: see the
+- **Tests**: 1774 collected in 140 files at v0.15.3 (1761 in 139 at v0.15.2, 1728 in 135 at v0.15.0, 1324 in 107 at v0.14.0). Last full run: see the
   line "Full suite" at the end of this section. Trust a green bar only when
   the terminal banner says "real-data layer: complete (all 19 datasets
   present)" — five datasets were added this session (the CaF₂ / NaF magres
@@ -101,7 +101,8 @@ Workplan"; this file is the ground truth for progress.
   assertion now requires at least one spectrum without error bars, and the
   test passes. **v0.15.2 (8bbc39d, 2026-10-02): 1761 passed / 0 failed** in
   52 min 08 s, run alone, real-data layer complete (all 19 datasets
-  present).
+  present). **v0.15.3 (2026-10-02): 1774 passed / 0 failed** in 26 min 56 s,
+  run alone, real-data layer complete (all 19 datasets present).
 - **0.14.1 (2026-09-23, same day)**: a student's frozen 0.14.0 opened spectra
   but "fitting did not work". The fit path was verified in the exe's own
   package set — console-less Python of `packaging/.buildenv`, then the frozen
@@ -607,6 +608,45 @@ the shipped ²⁷Al deeper minimum, the dialog with progress and Stop).
 Tests: `tests/test_seriesmode.py` (10), `tests/test_series_mode_ui.py`
 (14, through the FitWorker and the SeqWorker), `tests/test_workspace_policy.py`
 (4); `seqfit_dialog.py` and its tests removed; golden menu 234 rows.
+
+## 2026-10-02 (later) — the series mode's carry rule, label pairing, the bar's black box → v0.15.3
+
+- **"by using the sequential fit, it is never well fitting the previous one
+  … keep the fit of the sample 1 good when changing to sample 2, so when I'm
+  going back to sample 1 it is still good"** — the first series mode
+  re-seeded the spectrum you landed on from the one you left, fitted or not,
+  so walking back ruined finished fits. Now **moving never changes a spectrum
+  that has lines**: only an empty member takes a copy of the model you leave;
+  the value carry is explicit (Carry ▾ *Seed this spectrum from the previous /
+  next one*, or the member's right-click menu) and lands only on lines that
+  share a **label**; **Keep this fit (🔒)** protects a member from every carry
+  and from the sweep, which still starts its neighbours from it
+  (`run_sequential(fixed=…)`). The member menu also renames and removes a
+  spectrum from the series.
+- **"multiple 19F spectra … evolution of the components along a series with
+  different components"** — lines are paired across spectra by label
+  (`larmor/components.py`: `pair_sites`, `component_map`), by index only
+  where a label cannot identify its line: the carry, the sweep's warm start
+  and smoothing, and the Series plot (components read `(n/N)` in its list;
+  a gap in the shape parameters and 0 % population where a spectrum's model
+  has no such line; the Species bar follows).
+- **The screenshot's black box over the plot and the nameless current
+  member** — one cause: the strip body's bare `background: transparent`
+  style sheet cascaded onto every member button (the checked one lost its
+  accent background: white name on white) and onto their tool tips (a
+  transparent top-level window, painted black; only the colour-emoji ⚠
+  survived). Every rule in the bar now carries a selector; the strip's
+  scrollbar is hidden (wheel / ◀ ▶ scroll it) so it never overlays the
+  buttons.
+- Found on the way: `SeqWorker` turned an all-unticked Carry list (`()`)
+  into "carry everything".
+
+Tests: `tests/test_components.py` (3), `tests/test_seqfit.py` (+3),
+`tests/test_seriesmode.py` (+2), `tests/test_series_mode_ui.py` (the carry
+tests rewritten, +4: a fitted member untouched by moves, the explicit seed by
+label, keep-this-fit through seeding / copy / sweep / project, member-menu
+removal, the bar's rendering), `tests/test_series_export.py` (+1 series whose
+members differ).
 
 ## Remaining
 

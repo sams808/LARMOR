@@ -14,6 +14,17 @@ own FitWorker and runs the forward / backward auto sweep in a ``SeqWorker``
 Series table, the Series plot, the Acquisition table, Save all fits and the
 publication bundle live on the bar.
 
+The carry rule, after the first version ruined fits ("by using the
+sequential fit, it is never well fitting the previous one ... keep the fit
+of the sample 1 good when changing to sample 2, so when I'm going back to
+sample 1 it is still good"): **moving never changes a spectrum that has
+lines.** A spectrum without lines takes a copy of the model you leave (the
+Carry option); one with lines -- fitted or not -- is left exactly as it is,
+and the value carry onto the lines that share a label is an explicit action
+(Carry ▾ Seed this spectrum from the previous / next one, or the member's
+right-click menu). A member can be **kept** (🔒): no carry reaches it and the
+sweep never refits it, while its neighbours still start from it.
+
 Owned state: ``_series`` (the active ``larmor.seriesmode.SeriesSpec`` or
 None), ``series_bar`` (built once by ``_build_series_bar``, inserted above
 the central stack), ``_seq_worker`` (the ``SeqWorker`` of a running auto
@@ -62,6 +73,10 @@ class _SeriesMixin:
         bar.carry_changed.connect(self.series_set_carry)
         bar.carry_menu_opening.connect(self._series_fill_carry_menu)
         bar.copy_model_requested.connect(self.series_copy_model)
+        bar.seed_requested.connect(self.series_seed)
+        bar.lock_toggled.connect(self.series_set_locked)
+        bar.rename_requested.connect(self._series_rename_member)
+        bar.remove_requested.connect(self.series_remove_member)
         bar.table_requested.connect(self.series_table)
         bar.plot_requested.connect(self.series_plot)
         bar.acquisition_requested.connect(self.series_acquisition_table)
@@ -205,11 +220,14 @@ class _SeriesMixin:
             r = sm.rmsd_of(rec)
             flag = spec.comparability_flag(k)
             tip = m.name + (f" · RMSD {r:.4g}" if r is not None else " · not fitted")
+            if m.locked:
+                tip += " · kept 🔒"
             if m.source_path:
                 tip += f" · {m.source_path}"
             if flag:
                 tip += f"\n⚠ {flag} — unlike the series majority"
-            members.append({"name": m.name, "status": st, "tip": tip, "flag": bool(flag)})
+            members.append({"name": m.name, "status": st, "tip": tip, "flag": bool(flag),
+                            "locked": bool(m.locked)})
         if renamed:
             spec.refresh_comparison()
             self._series_retag()
@@ -386,9 +404,11 @@ class _SeriesMixin:
         self._series_refresh_bar()
         n = spec.n
         self.statusBar().showMessage(
-            f"series of {n} spectra — click a name or ◀ ▶ to walk it (the next "
-            "spectrum takes this one's model), Fit → next fits and moves on, "
-            "Auto sweep fits them all" + (f" · {note}" if note else ""), 15000)
+            f"series of {n} spectra — click a name or ◀ ▶ to walk it (a spectrum "
+            "without lines takes a copy of the model you leave; one with lines is "
+            "never changed by moving), Fit → next fits and moves on, Auto sweep fits "
+            "them all; right-click a name to keep its fit or seed it"
+            + (f" · {note}" if note else ""), 15000)
 
     def end_series(self, quiet=False):
         """Series ▸ End series and the bar's ✕: the bar goes, the tags go,
@@ -416,11 +436,12 @@ class _SeriesMixin:
 
     # ------------------------------------------------------------- walking
     def series_go(self, k, seed=None):
-        """Switch to member ``k``; with seed-on-move (or ``seed=True``) the
-        spectrum landed on takes the model of the member just left
-        (``seriesmode.carry_into``: a copy with scaled amplitudes into an
-        empty one, carried values into one with its own lines), behind one
-        undo snapshot."""
+        """Switch to member ``k``. With the Carry option (or ``seed=True``)
+        a spectrum landed on that has NO lines takes a copy of the model of
+        the member just left (``seriesmode.carry_into``: scaled amplitudes,
+        one undo snapshot); a spectrum with lines -- fitted or not -- is
+        never changed by a move (the first version re-seeded it from the
+        neighbour and ruined finished fits)."""
         spec = getattr(self, "_series", None)
         if spec is None:
             return
@@ -441,7 +462,7 @@ class _SeriesMixin:
         note = ""
         want = spec.options.seed_on_move if seed is None else bool(seed)
         if want and src_i is not None and src_i != dst_i and src_k is not None:
-            note = self._series_seed_from_ws(src_i, spec.members[src_k].name)
+            note = self._series_carry(k, src_k, explicit=False)
         self._series_refresh_bar()
         self.statusBar().showMessage(
             f"series {k + 1}/{len(rows)}: {spec.members[k].name}"
@@ -466,22 +487,138 @@ class _SeriesMixin:
         else:
             self.statusBar().showMessage("last spectrum of the series")
 
-    def _series_seed_from_ws(self, src_i: int, src_name: str = "") -> str:
-        """Carry workspace ``src_i``'s model into the active member."""
+    def _series_carry(self, dst_k: int, src_k: int, explicit: bool) -> str:
+        """Carry member ``src_k``'s model into member ``dst_k``; returns the
+        status note.
+
+        On a move (``explicit=False``) only a member WITHOUT lines takes
+        anything -- a copy with scaled amplitudes; a member with lines,
+        fitted or not, is left exactly as it is and the note says so.
+        Explicitly (Carry ▾, the member menu) a member with lines receives
+        the carried parameters on the lines that share a label
+        (``seriesmode.carry_into``); a kept (🔒) member refuses. On the
+        active member the change is one undo step; on another member it
+        lands in its workspace snapshot."""
         spec = self._series
-        snap = self.workspaces[src_i].get("snap") or {}
-        src_rec = snap.get("recipe") or {}
-        if not src_rec.get("sites") or self.recipe is None:
+        rows = self._series_rows()
+        if not (0 <= dst_k < len(rows) and 0 <= src_k < len(rows)) or dst_k == src_k:
             return ""
-        carry = spec.carry_for([self.recipe, src_rec])
-        new, note = sm.carry_into(self.recipe, src_rec, carry, sm.amp_max(self.exp_amp),
-                                  sm.amp_max(snap.get("exp_amp")), src_name=src_name)
-        if new == self.recipe:
+        self._sync_active()
+        src_i, dst_i = rows[src_k][0], rows[dst_k][0]
+        src_snap = self.workspaces[src_i].get("snap") or {}
+        src_rec = src_snap.get("recipe") or {}
+        src_name = spec.members[src_k].name
+        m = spec.members[dst_k]
+        live = dst_i == self.active_ws
+        dst_snap = self.workspaces[dst_i].get("snap") or {}
+        dst_rec = (self.recipe if live else dst_snap.get("recipe")) or {}
+        n = len(dst_rec.get("sites") or [])
+        own = f"{m.name} keeps its own {n} line{'s' if n != 1 else ''}"
+        if n and not explicit:
+            if m.locked:
+                return own + " (kept 🔒)"
+            if sm.rmsd_of(dst_rec) is not None:
+                return own + " (fitted)"
+            return own + " — Carry ▾ seeds it from a neighbour on request"
+        if n and m.locked:
+            return f"{m.name} is kept 🔒 — release it first (right-click its name)"
+        if not src_rec.get("sites"):
+            return f"nothing to carry — {src_name} has no lines"
+        carry = spec.carry_for([dst_rec, src_rec]) if n else None
+        dst_amp = self.exp_amp if live else dst_snap.get("exp_amp")
+        new, note = sm.carry_into(dst_rec, src_rec, carry, sm.amp_max(dst_amp),
+                                  sm.amp_max(src_snap.get("exp_amp")), src_name=src_name)
+        if new == dst_rec:
             return note
-        self.snapshot()
-        self.recipe = new
-        self.on_structure_changed()
+        if live:
+            self.snapshot()
+            self.recipe = new
+            self.on_structure_changed()
+        else:
+            dst_snap["recipe"] = new
+            self.workspaces[dst_i]["has_fit"] = bool(new.get("sites"))
+        if not n:
+            m.fit_sig, m.failed = "", False
         return note
+
+    def series_seed(self, dst_k, src_k):
+        """Carry ▾ Seed this spectrum from the previous / next one, and the
+        member menu's Seed it from…: the explicit value carry (a member
+        without lines takes a whole copy), by label."""
+        spec = getattr(self, "_series", None)
+        if spec is None or self._series_busy():
+            return
+        try:
+            dst_k, src_k = int(dst_k), int(src_k)
+        except (TypeError, ValueError):
+            return
+        note = self._series_carry(dst_k, src_k, explicit=True)
+        self._series_retag()
+        self._refresh_ws_panel()
+        self._series_refresh_bar()
+        self.statusBar().showMessage(note or "nothing seeded", 15000)
+
+    def series_set_locked(self, k, on: bool):
+        """Keep this fit (🔒): the member is left alone by every carry and by
+        the sweep, which still starts its neighbours from it."""
+        spec = getattr(self, "_series", None)
+        if spec is None:
+            return
+        try:
+            k = int(k)
+        except (TypeError, ValueError):
+            return
+        if not (0 <= k < spec.n):
+            return
+        m = spec.members[k]
+        m.locked = bool(on)
+        self._series_retag()
+        self._series_refresh_bar()
+        self.statusBar().showMessage(
+            f"{m.name} kept 🔒 — moving, seeding and Copy to every spectrum leave it "
+            "alone; a sweep starts its neighbours from it and never refits it"
+            if on else f"{m.name} released — it takes part in seeding and sweeps again",
+            12000)
+
+    def _series_rename_member(self, k):
+        rows = self._series_rows()
+        try:
+            k = int(k)
+        except (TypeError, ValueError):
+            return
+        if 0 <= k < len(rows):
+            self.rename_workspace(rows[k][0])
+
+    def series_remove_member(self, k):
+        """The member menu's Remove from the series: the workspace loses its
+        tag and stays open; the others re-number. The last member out ends
+        the series."""
+        spec = getattr(self, "_series", None)
+        if spec is None or self._series_busy():
+            return
+        rows = self._series_rows()
+        try:
+            k = int(k)
+        except (TypeError, ValueError):
+            return
+        if not (0 <= k < len(rows)):
+            return
+        name = spec.members[k].name
+        self.workspaces[rows[k][0]].pop("series", None)
+        self._series_rows()                       # drops it from the spec
+        if spec.n == 0:
+            self.end_series(quiet=True)
+            self.statusBar().showMessage(f"{name} left the series — it was the last "
+                                         "member, so the series ended")
+            return
+        self._series_retag()
+        self._refresh_ws_panel()
+        self._update_enabled()
+        self._series_fill_carry_menu()
+        self._series_refresh_bar()
+        self.statusBar().showMessage(
+            f"{name} left the series (still open in the Workspaces dock) — "
+            f"{spec.n} spectr{'um' if spec.n == 1 else 'a'} remain", 12000)
 
     # ------------------------------------------------------------- Fit → next
     def series_fit_then_next(self):
@@ -550,6 +687,12 @@ class _SeriesMixin:
         passes = int(passes) if passes else int(opts.passes)
         start = str(start) if start in sm.START_CHOICES else str(opts.start)
         smooth = int(smooth) if smooth is not None and str(smooth).isdigit() else int(opts.smooth)
+        fixed = [k for k, m in enumerate(spec.members) if m.locked]
+        if len(fixed) >= len(data):
+            self.statusBar().showMessage(
+                "every spectrum is kept 🔒 — release at least one (right-click its "
+                "name) before a sweep", 15000)
+            return
         try:
             entries = sm.entries_for_sweep(data, default_window=self.view.current_xrange())
         except ValueError as exc:
@@ -560,7 +703,8 @@ class _SeriesMixin:
         self._series_sweep_passes = passes
         from larmor.desktop.workers import SeqWorker, _fit_tol
 
-        w = SeqWorker(entries, passes, start, carry, smooth, _fit_tol() or None)
+        w = SeqWorker(entries, passes, start, carry, smooth, _fit_tol() or None,
+                      fixed=fixed)
         w.step.connect(self._series_sweep_step)
         w.done.connect(self._series_sweep_done)
         w.failed.connect(self._series_sweep_failed)
@@ -574,7 +718,10 @@ class _SeriesMixin:
         self._series_retag()
         self.statusBar().showMessage(
             f"auto sweep: {passes} pass{'es' if passes != 1 else ''} from the {start} "
-            f"spectrum over {len(data)} spectra …")
+            f"spectrum over {len(data)} spectra"
+            + (f", {len(fixed)} kept as seed{'s' if len(fixed) != 1 else ''}" if fixed else "")
+            + ("" if carry else " · nothing carried: every spectrum refits from its own model")
+            + " …")
         w.start()
 
     def _series_sweep_step(self, p: int, k: int, rmsd: float):
@@ -657,6 +804,9 @@ class _SeriesMixin:
             msg += " · pass means " + " → ".join(f"{m:.4g}" for m in means)
         if stop_mode == "stop":
             msg += f" · stopped early, {n_ok} of {len(rows)} fitted"
+        kept = len(getattr(result, "fixed", ()) or ())
+        if kept:
+            msg += f" · {kept} kept spectr{'um' if kept == 1 else 'a'} untouched"
         self.statusBar().showMessage(msg, 20000)
 
     @staticmethod
@@ -742,9 +892,12 @@ class _SeriesMixin:
             return
         src_amp = sm.amp_max(src_snap.get("exp_amp"))
         src_name = spec.members[k].name
-        n_copied = n_seeded = 0
+        n_copied = n_seeded = n_kept = 0
         for j, (ws_i, _tag) in enumerate(rows):
             if ws_i == src_i:
+                continue
+            if spec.members[j].locked:
+                n_kept += 1
                 continue
             ws = self.workspaces[ws_i]
             snap = ws.get("snap") or {}
@@ -768,7 +921,9 @@ class _SeriesMixin:
         msg = f"model of {src_name} copied into {n_copied} spectr{'um' if n_copied == 1 else 'a'}"
         if n_seeded:
             msg += (f"; {n_seeded} with their own lines kept them and received the "
-                    "carried values")
+                    "carried values on the lines that share a label")
+        if n_kept:
+            msg += f"; {n_kept} kept 🔒 left alone"
         self.statusBar().showMessage(msg, 12000)
 
     # ------------------------------------------------------------- outputs

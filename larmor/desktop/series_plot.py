@@ -1,9 +1,18 @@
 """Series evolution plot: how fitted parameters change along a batch series.
 
-Pick one or more **sites** (lines) on the left; the right shows **one subplot per
-parameter** (δ_iso, width, C_Q, η, amplitude, and the integral **population %**),
-each tracing the chosen sites across the series. Export the numbers as CSV or the
-whole panel as a figure.
+Pick one or more **components** (lines) on the left; the right shows **one
+subplot per parameter** (δ_iso, width, C_Q, η, amplitude, and the integral
+**population %**), each tracing the chosen components across the series.
+Export the numbers as CSV or the whole panel as a figure.
+
+The members need not share one model: components are paired across the
+series by their **label** (``larmor.components.component_map``; by index only
+where a label cannot identify its line), so a series fitted one spectrum at a
+time with a component removed here and another added there still plots each
+component's own trajectory. Where a spectrum's model has no such line, its
+shape parameters are blank (a gap in the line) and its population reads 0 --
+the model says it contributes nothing there -- which is also what the
+100 %-stacked Species bar needs.
 """
 from __future__ import annotations
 
@@ -19,6 +28,7 @@ from PySide6.QtWidgets import (
 )
 
 from larmor import series_table as stab
+from larmor.components import component_map, display_names
 from larmor.desktop import theme
 from larmor.desktop.axes import plain_units
 from larmor.desktop.panels import PARAM_LABELS
@@ -26,15 +36,15 @@ from larmor.desktop.plot import site_color
 
 
 def _param_specs(result) -> list[dict]:
-    """One entry per plottable parameter (union across the master sites, minus the
-    Gauss/Lorentz mix), then amplitude and the integral population %."""
-    master = result.recipes[0]
+    """One entry per plottable parameter (union across every member's sites,
+    minus the Gauss/Lorentz mix), then amplitude and the integral population %."""
     seen: list[str] = []
-    for s in master.sites:
-        for pn in s.params:
-            if pn == "gl" or pn == "amplitude" or pn in seen:
-                continue
-            seen.append(pn)
+    for rec in result.recipes:
+        for s in rec.sites:
+            for pn in s.params:
+                if pn == "gl" or pn == "amplitude" or pn in seen:
+                    continue
+                seen.append(pn)
     specs = [{"param": pn, "kind": "param", "label": PARAM_LABELS.get(pn, pn)}
              for pn in seen]
     specs.append({"param": "amplitude", "kind": "param", "label": "amplitude"})
@@ -47,18 +57,43 @@ def _param_specs(result) -> list[dict]:
 
 
 def _group_names(result) -> tuple[list[str], list[str]]:
-    """(family names, defined ratio names) of the master recipe's tags
-    (larmor.families) -- ([], []) when nothing is tagged or quantify fails."""
+    """(family names, defined ratio names) of the members' tags
+    (larmor.families) -- ([], []) when nothing is tagged or quantify fails.
+    Members are quantified in order until one carries every family tag the
+    series uses (with one shared model: the master alone)."""
     from larmor.quantify import quantify
-    master = result.recipes[0]
-    try:
-        q = quantify(master, getattr(master, "fit_window_ppm", None))
-    except Exception:
-        return [], []
-    fams = [f["family"] for f in q.get("families") or []]
-    ratios = [r["name"] for r in q.get("ratios") or []
-              if r.get("defined") and r.get("value") is not None]
+    union: list[str] = []
+    for rec in result.recipes:
+        for s in rec.sites:
+            f = str(getattr(s, "family", "") or "")
+            if f and f not in union:
+                union.append(f)
+    fams: list[str] = []
+    ratios: list[str] = []
+    for rec in result.recipes:
+        try:
+            q = quantify(rec, getattr(rec, "fit_window_ppm", None))
+        except Exception:
+            continue
+        for f in q.get("families") or []:
+            if f["family"] not in fams:
+                fams.append(f["family"])
+        for r in q.get("ratios") or []:
+            if r.get("defined") and r.get("value") is not None and r["name"] not in ratios:
+                ratios.append(r["name"])
+        tagged = {str(getattr(s, "family", "") or "") for s in rec.sites} - {""}
+        if set(union) <= tagged:
+            break
     return fams, ratios
+
+
+def _site_of(comps: list, c, k: int):
+    """The site index component ``c`` has in member ``k`` (None when that
+    member's model has no such line, or ``c`` is not a component)."""
+    try:
+        return comps[int(c)]["index"][k]
+    except (IndexError, TypeError, ValueError):
+        return None
 
 
 def _stored_group_error(result, k: int, key: str, method) -> float:
@@ -127,45 +162,55 @@ def population_integral(result, error_method: str | None = None
     (the other sites' amplitude errors, which also shift the total, are
     neglected)."""
     from larmor.quantify import quantify
-    n = len(result.recipes)
-    ns = len(result.recipes[0].sites)
-    vals = np.full((n, ns), np.nan)
-    errs = np.full((n, ns), np.nan)
+    comps = component_map(result.recipes)
+    n, nc = len(result.recipes), len(comps)
+    vals = np.full((n, nc), np.nan)
+    errs = np.full((n, nc), np.nan)
     for k, rec in enumerate(result.recipes):
         try:
             q = quantify(rec, getattr(rec, "fit_window_ppm", None))
         except Exception:
             continue
-        for i, row in enumerate(q["rows"]):
-            if i >= ns:
+        rows = q["rows"]
+        for c, comp in enumerate(comps):
+            i = comp["index"][k]
+            if i is None:
+                vals[k, c] = 0.0        # this spectrum's model has no such line
                 continue
-            vals[k, i] = row["fraction_pct"]
+            if i >= len(rows):
+                continue
+            vals[k, c] = rows[i]["fraction_pct"]
             amp = rec.sites[i].params.get("amplitude")
             if amp is None or not amp.value:
                 continue
             amp_err = _param_error(result, i, "amplitude", k, error_method)
             if np.isfinite(amp_err):
-                errs[k, i] = row["fraction_pct"] * abs(amp_err / amp.value)
+                errs[k, c] = rows[i]["fraction_pct"] * abs(amp_err / amp.value)
     return vals, errs
 
 
 # ----- kept for scripting / CSV export / tests -----------------------------
 def series_options(result) -> list[dict]:
-    """Every (site, parameter) pair, plus amplitude-fraction and integral
-    population per site."""
+    """Every (component, parameter) pair, plus amplitude-fraction and
+    integral population per component (``opt["site"]`` is the component's
+    index in ``larmor.components.component_map``; with one shared model that
+    is the site index)."""
     out: list[dict] = []
-    master = result.recipes[0]
-    for i, site in enumerate(master.sites):
-        label = site.label or site.model
+    comps = component_map(result.recipes)
+    names = display_names(comps)
+    for c, comp in enumerate(comps):
+        label = names[c]
+        k0 = comp["first"]
+        site = result.recipes[k0].sites[comp["index"][k0]]
         for pn in site.params:
             if pn == "gl":
                 continue
-            out.append({"site": i, "param": pn, "kind": "param",
-                        "text": f"s{i} {label}: {PARAM_LABELS.get(pn, pn)}"})
-        out.append({"site": i, "param": "amplitude", "kind": "popfrac",
-                    "text": f"s{i} {label}: population % (by amplitude)"})
-        out.append({"site": i, "param": "population_pct", "kind": "pop_integral",
-                    "text": f"s{i} {label}: population % (integral)"})
+            out.append({"site": c, "param": pn, "kind": "param",
+                        "text": f"s{c} {label}: {PARAM_LABELS.get(pn, pn)}"})
+        out.append({"site": c, "param": "amplitude", "kind": "popfrac",
+                    "text": f"s{c} {label}: population % (by amplitude)"})
+        out.append({"site": c, "param": "population_pct", "kind": "pop_integral",
+                    "text": f"s{c} {label}: population % (integral)"})
     fams, ratios = _group_names(result)
     for name in fams:
         out.append({"kind": "family", "family": name, "param": "family_pct",
@@ -221,21 +266,29 @@ def series_values(result, opt: dict, error_method: str | None = "covariance"):
         vals, errs = population_integral(result, error_method)
         return np.asarray(vals[:, opt["site"]], float), \
                np.asarray(errs[:, opt["site"]], float)
+    comps = component_map(result.recipes)
     vals, errs = [], []
     for k, rec in enumerate(result.recipes):
-        site = rec.sites[opt["site"]]
+        i = _site_of(comps, opt["site"], k)
+        if i is None:
+            # no such line in this spectrum's model: a gap for a shape
+            # parameter, nothing (0 %) for a population
+            vals.append(0.0 if opt["kind"] == "popfrac" else np.nan)
+            errs.append(np.nan)
+            continue
+        site = rec.sites[i]
         p = site.params.get(opt["param"])
         v = float(p.value) if p is not None else np.nan
         if opt["kind"] == "popfrac":
             tot = sum(abs(float(s.params["amplitude"].value))
                       for s in rec.sites if "amplitude" in s.params) or 1.0
             frac = 100.0 * abs(v) / tot
-            amp_err = _param_error(result, opt["site"], "amplitude", k, error_method)
+            amp_err = _param_error(result, i, "amplitude", k, error_method)
             e = (frac * abs(amp_err / v)
                  if (np.isfinite(amp_err) and v) else np.nan)
             v = frac
         else:
-            e = _param_error(result, opt["site"], opt["param"], k, error_method)
+            e = _param_error(result, i, opt["param"], k, error_method)
         vals.append(v); errs.append(e)
     return np.array(vals, float), np.array(errs, float)
 
@@ -297,10 +350,22 @@ class SeriesPlotDialog(QDialog):
         self.list = QListWidget()
         self.list.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.list.setMaximumWidth(220)
-        for i, s in enumerate(result.recipes[0].sites):
-            it = QListWidgetItem(f"s{i}  {s.label or s.model}")
-            it.setData(Qt.UserRole, i)
-            it.setForeground(pg.mkColor(site_color(i)))
+        # one row per COMPONENT (paired by label across the series), with
+        # "(present/total)" when only some spectra carry it
+        self._comps = component_map(result.recipes)
+        self._comp_names = display_names(self._comps)
+        nmem = len(result.recipes)
+        for c, comp in enumerate(self._comps):
+            text = f"s{c}  {self._comp_names[c]}"
+            if comp["n"] < nmem:
+                text += f"  ({comp['n']}/{nmem})"
+            it = QListWidgetItem(text)
+            it.setData(Qt.UserRole, c)
+            it.setForeground(pg.mkColor(site_color(c)))
+            if comp["n"] < nmem:
+                it.setToolTip(f"a line of this name is in {comp['n']} of {nmem} spectra: "
+                              "where a spectrum's model has none, its population reads "
+                              "0 and its shape parameters are blank")
             self.list.addItem(it)
         # Σ families feed the population subplot, ratios the ratio subplot
         # (N3); UserRole 'f:NAME' / 'r:NAME' beside the sites' ints
@@ -352,6 +417,13 @@ class SeriesPlotDialog(QDialog):
         v.addLayout(btns)
         self.msg = QLabel("")
         self.msg.setWordWrap(True)
+        partial = [f"{self._comp_names[c]} ({comp['n']}/{nmem})"
+                   for c, comp in enumerate(self._comps) if comp["n"] < nmem]
+        if partial:
+            self.msg.setText(
+                "components paired by their label across the series; present in only "
+                "some spectra: " + ", ".join(partial) + " — where a spectrum's model has "
+                "no such line its population reads 0 and its shape parameters are blank")
         v.addWidget(self.msg)
 
         bb = QDialogButtonBox(QDialogButtonBox.Close)
@@ -395,11 +467,15 @@ class SeriesPlotDialog(QDialog):
             return None
         return {"site": sel, "param": spec["param"], "kind": spec["kind"]}
 
-    @staticmethod
-    def _sel_label(sel) -> str:
+    def _sel_label(self, sel) -> str:
+        """The legend / message name of a selection: a component's display
+        name (its label; ``s<k> <model>`` when unlabelled), Σ family, ratio."""
         if isinstance(sel, str):
             kind, name = sel.split(":", 1)
             return f"Σ {name}" if kind == "f" else name
+        names = getattr(self, "_comp_names", None) or []
+        if 0 <= int(sel) < len(names):
+            return names[int(sel)]
         return f"s{sel}"
 
     def _sel_color(self, sel, j: int | None = None) -> str:
@@ -525,18 +601,24 @@ class SeriesPlotDialog(QDialog):
             if pts is None:
                 continue
             ref = pts
-            data = {"x": [float(v) for v in pts["x"]], "y": [float(v) for v in pts["y"]]}
+            # a spectrum whose model lacks this component is a gap: it is
+            # left out of the studio trace rather than sent as NaN
+            xx, yy = np.asarray(pts["x"], float), np.asarray(pts["y"], float)
+            ok = np.isfinite(xx) & np.isfinite(yy)
+            data = {"x": [float(v) for v in xx[ok]], "y": [float(v) for v in yy[ok]]}
             if np.isfinite(pts["yerr"]).any():
-                data["yerr"] = [float(e) if np.isfinite(e) else 0.0 for e in pts["yerr"]]
+                data["yerr"] = [float(e) if np.isfinite(e) else 0.0
+                                for e in np.asarray(pts["yerr"], float)[ok]]
             if pts["xerr"] is not None and np.isfinite(pts["xerr"]).any():
-                data["xerr"] = [float(e) if np.isfinite(e) else 0.0 for e in pts["xerr"]]
+                data["xerr"] = [float(e) if np.isfinite(e) else 0.0
+                                for e in np.asarray(pts["xerr"], float)[ok]]
             label, col = self._sel_label(sel), self._sel_color(sel)
             traces.append({"data": data, "label": label, "marker": "o",
                            "color": col, "linestyle": "-"})
             if self.chkOls.isChecked():
-                fit = stab.ols(pts["x"], pts["y"])
+                fit = stab.ols(xx[ok], yy[ok])
                 if fit["n"] >= 3 and np.isfinite(fit["slope"]):
-                    traces.append(stab.ols_trace(pts["x"], fit, label, col))
+                    traces.append(stab.ols_trace(xx[ok], fit, label, col))
         out = {"kind": "1d", "x_is_ppm": False, "hide_yaxis": False,
                "xlabel": ax["label"], "ylabel": spec["label"],
                "xtick_rotation": 45, "traces": traces,
@@ -562,18 +644,23 @@ class SeriesPlotDialog(QDialog):
                 if pts is None:
                     continue
                 x, vals, errs, xerr = pts["x"], pts["y"], pts["yerr"], pts["xerr"]
+                x, vals = np.asarray(x, float), np.asarray(vals, float)
+                ok = np.isfinite(x) & np.isfinite(vals)
                 col = self._sel_color(sel)
+                # connect="finite": a spectrum without this component is a
+                # gap in the line, not a stroke to zero
                 pw.plot(x, vals, pen=pg.mkPen(col, width=2), symbol="o",
-                        symbolBrush=col, symbolSize=7, name=self._sel_label(sel))
+                        symbolBrush=col, symbolSize=7, name=self._sel_label(sel),
+                        connect="finite")
                 bars = {}
                 if np.isfinite(errs).any():
-                    bars["height"] = 2 * np.nan_to_num(errs)
+                    bars["height"] = (2 * np.nan_to_num(np.asarray(errs, float)))[ok]
                 if xerr is not None and np.isfinite(xerr).any():
-                    bars["width"] = 2 * np.nan_to_num(xerr)
-                if bars:
-                    pw.addItem(pg.ErrorBarItem(x=x, y=vals, pen=col, **bars))
+                    bars["width"] = (2 * np.nan_to_num(np.asarray(xerr, float)))[ok]
+                if bars and ok.any():
+                    pw.addItem(pg.ErrorBarItem(x=x[ok], y=vals[ok], pen=col, **bars))
                 if self.chkOls.isChecked():
-                    fit = stab.ols(x, vals)
+                    fit = stab.ols(x[ok], vals[ok])
                     if fit["n"] >= 3 and np.isfinite(fit["slope"]):
                         xx = np.array([np.nanmin(x), np.nanmax(x)])
                         pw.plot(xx, fit["slope"] * xx + fit["intercept"],
@@ -638,6 +725,8 @@ class SeriesPlotDialog(QDialog):
                 if pts is None:
                     continue
                 x, vals, errs, xerr = pts["x"], pts["y"], pts["yerr"], pts["xerr"]
+                x, vals = np.asarray(x, float), np.asarray(vals, float)
+                ok = np.isfinite(x) & np.isfinite(vals)
                 label, col = self._sel_label(sel), self._sel_color(sel)
                 ax.errorbar(x, vals,
                             yerr=np.nan_to_num(errs) if np.isfinite(errs).any() else None,
@@ -645,7 +734,7 @@ class SeriesPlotDialog(QDialog):
                                   and np.isfinite(xerr).any() else None),
                             marker="o", capsize=2, label=label, color=col)
                 if self.chkOls.isChecked():
-                    fit = stab.ols(x, vals)
+                    fit = stab.ols(x[ok], vals[ok])
                     if fit["n"] >= 3 and np.isfinite(fit["slope"]):
                         xx = np.array([np.nanmin(x), np.nanmax(x)])
                         ax.plot(xx, fit["slope"] * xx + fit["intercept"], "--", lw=1.0,
@@ -670,16 +759,15 @@ class SeriesPlotDialog(QDialog):
         stacked bar of a subset would renormalise among the subset), categories
         = the names (or replicate groups) in the current x order."""
         pop = next(s for s in self._params if s["kind"] == "pop_integral")
-        sites = list(range(len(self._result.recipes[0].sites)))
-        pts = [self._points(pop, j) for j in sites]
+        comps = list(range(len(self._comps)))
+        pts = [self._points(pop, c) for c in comps]
         values = np.column_stack([p["y"] for p in pts])
-        labels = [f"s{j} {s.label or s.model}"
-                  for j, s in enumerate(self._result.recipes[0].sites)]
+        labels = [f"s{c} {self._comps[c]['name']}" for c in comps]
         ax = self._axis()
         return stab.species_bar_spec(
             pts[0]["names"], labels, values,
             xlabel=None if ax["categorical"] else f"in order of {ax['label']}",
-            colors=[site_color(j) for j in sites])
+            colors=[site_color(c) for c in comps])
 
     def _species_bar(self):
         from larmor.desktop.plotting_studio import PlottingStudio

@@ -58,6 +58,8 @@ def test_carry_into_empty_target_copies_the_model_and_rescales_amplitudes():
 def test_carry_into_target_with_lines_seeds_only_carried_params_on_matching_indices():
     from larmor.seriesmode import carry_into
 
+    # the source's two lines are both called "A": labels that identify
+    # nothing, so the lines pair by INDEX (the rule unlabelled recipes keep)
     src = _recipe([_site(13.0, fwhm=6.0, amp=100.0), _site(20.0, fwhm=3.0, amp=50.0)])
     # the target has its OWN structure: four lines, the second one linked
     dst = _recipe([_site(12.0, fwhm=5.0, amp=80.0, label="own0"),
@@ -81,8 +83,65 @@ def test_carry_into_target_with_lines_seeds_only_carried_params_on_matching_indi
     assert new["sites"][2]["params"]["isotropic_chemical_shift_ppm"]["value"] == 25.0
     assert new["sites"][3]["params"]["isotropic_chemical_shift_ppm"]["value"] == 28.0
     assert note == ("positions and widths of 2 matching lines seeded from s0; "
-                    "this spectrum keeps its own 4 lines")
+                    "this spectrum keeps its own 4 lines (own2, own3 have no "
+                    "counterpart there)")
     assert dst["sites"][0]["params"]["isotropic_chemical_shift_ppm"]["value"] == 12.0
+
+
+def test_carry_into_pairs_lines_by_label_and_names_the_ones_without_a_counterpart():
+    """A series fitted one spectrum at a time rarely keeps one model: the
+    carry pairs lines by their label, wherever they sit in the list, and a
+    line without a namesake on the other side is left exactly as it is."""
+    from larmor.seriesmode import carry_into
+
+    src = _recipe([_site(13.0, fwhm=6.0, amp=100.0, label="A"),
+                   _site(20.0, fwhm=3.0, amp=50.0, label="B")])
+    dst = _recipe([_site(19.0, fwhm=5.0, amp=10.0, label="B"),
+                   _site(25.0, fwhm=4.0, amp=5.0, label="C"),
+                   _site(12.0, fwhm=5.0, amp=80.0, label="A")])
+    new, note = carry_into(dst, src, ("isotropic_chemical_shift_ppm", "shift_fwhm_ppm"),
+                           1.0, 1.0, src_name="s0")
+    assert [s["label"] for s in new["sites"]] == ["B", "C", "A"]        # own order kept
+    b, c, a = (s["params"] for s in new["sites"])
+    assert (b["isotropic_chemical_shift_ppm"]["value"], b["shift_fwhm_ppm"]["value"]) == (20.0, 3.0)
+    assert (a["isotropic_chemical_shift_ppm"]["value"], a["shift_fwhm_ppm"]["value"]) == (13.0, 6.0)
+    assert (c["isotropic_chemical_shift_ppm"]["value"], c["shift_fwhm_ppm"]["value"]) == (25.0, 4.0)
+    assert [s["params"]["amplitude"]["value"] for s in new["sites"]] == [10.0, 5.0, 80.0]
+    assert note == ("positions and widths of 2 matching lines seeded from s0; this "
+                    "spectrum keeps its own 3 lines (C has no counterpart there)")
+    # two labelled models with no name in common: nothing moves, and the note
+    # says how to make them pair
+    other = _recipe([_site(1.0, label="X"), _site(2.0, label="Y")])
+    same, note2 = carry_into(other, src, None, 1.0, 1.0, src_name="s0")
+    assert same == other
+    assert note2.startswith("no line here shares a name with s0's (X, Y vs A, B) — nothing "
+                            "seeded; this spectrum keeps its own 2 lines")
+    assert "label column" in note2
+
+
+def test_series_member_lock_round_trips_and_apply_sweep_result_skips_kept_members():
+    from larmor.seriesmode import SeriesMember, SeriesSpec, apply_sweep_result
+
+    spec = SeriesSpec(id="s", members=[SeriesMember(key="a", name="a"),
+                                       SeriesMember(key="b", name="b", locked=True)])
+    tags = [spec.tag_for(0), spec.tag_for(1)]
+    assert tags[0]["locked"] is False and tags[1]["locked"] is True
+    back = SeriesSpec.from_tags(tags)
+    assert [m.locked for m in back.members] == [False, True]
+    # a sweep result names the members it kept: they get None, so the
+    # window leaves their fit, errors and verdict exactly as they were
+    rec = _recipe([_site(10.0)], fit_rmsd=0.01)
+
+    class R:
+        recipes = [rec, rec]
+        history = [{"rmsd": [0.1, 0.1]}]
+        rmsd = [0.1, 0.1]
+        per_dataset = []
+        fixed = (1,)
+
+    members = [{"recipe": rec, "name": "a"}, {"recipe": rec, "name": "b"}]
+    out = apply_sweep_result(members, R())
+    assert out[0] is not None and out[1] is None
 
 
 def test_carry_into_clips_to_the_target_bounds_and_matches_seqfit_seed_from():

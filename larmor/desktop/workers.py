@@ -181,14 +181,20 @@ class SeqWorker(QThread, _StoppableFit):
     failed = Signal(str)
     step = Signal(int, int, float)          # (pass, spectrum index, rmsd)
 
-    def __init__(self, entries, passes, start, propagate, smooth, tol):
+    def __init__(self, entries, passes, start, propagate, smooth, tol, fixed=()):
         super().__init__()
         # NOT ``self.start``: that is QThread.start(), and the old dialog's
         # worker shadowed it with the 'first' / 'last' string, so its Auto
         # button raised "'str' object is not callable" (its tests only ever
         # called run() directly)
         self.entries, self.passes, self.start_end = entries, int(passes), start
-        self.propagate, self.smooth, self.tol = tuple(propagate or ()), int(smooth), tol
+        # None = the sweep's default (all but amplitude); an EMPTY tuple
+        # carries nothing -- every spectrum refits from its own model. The
+        # first version turned () into None, so unticking every Carry entry
+        # silently carried everything.
+        self.propagate = None if propagate is None else tuple(propagate)
+        self.smooth, self.tol = int(smooth), tol
+        self.fixed = tuple(int(k) for k in (fixed or ()))
         self._init_stop()
 
     def run(self):
@@ -197,9 +203,9 @@ class SeqWorker(QThread, _StoppableFit):
 
             res = run_sequential(
                 self.entries, passes=self.passes, start=self.start_end,
-                propagate=self.propagate or None, smooth=self.smooth, tol=self.tol,
+                propagate=self.propagate, smooth=self.smooth, tol=self.tol,
                 progress=lambda p, k, r: self.step.emit(p, k, r),
-                should_stop=lambda: self._stop)
+                should_stop=lambda: self._stop, fixed=self.fixed)
             self.done.emit(res, self._stop_mode)
         except Exception as exc:                           # noqa: BLE001
             self.failed.emit(str(exc))

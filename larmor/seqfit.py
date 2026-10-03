@@ -9,8 +9,14 @@ smooth the trajectory. Each spectrum keeps its own fit; the neighbour only warm-
 starts it, so parameters track the physics of the series without being forced
 equal.
 
-Qt-free and testable; the desktop dialog drives it interactively and with an
-auto "N passes forward–backward" mode plus optional trajectory smoothing.
+The members need not share one model. Lines are paired across spectra by their
+**label** (:mod:`larmor.components`): a component the user removed on one
+spectrum or added on another is simply absent there — nothing is carried onto
+it, and the trajectory smoother skips it. Members listed in ``fixed`` are
+**kept**: the sweep starts their neighbours from them but never refits them.
+
+Qt-free and testable; the series mode of the main window (``mw_series``) and
+the CLI ``larmor seqfit`` both call :func:`run_sequential`.
 """
 from __future__ import annotations
 
@@ -20,17 +26,23 @@ import numpy as np
 
 from larmor import fit as fitmod
 from larmor.batchfit import all_but_amplitude
+from larmor.components import component_map, pair_sites
 from larmor.recipe import Recipe
 
 
-def seed_from(dst: Recipe, src: Recipe, params=None) -> None:
-    """Copy fitted parameter **values** from ``src`` into ``dst`` (matched by site
-    index and name), clipped into ``dst``'s own bounds. ``dst`` keeps its bounds,
-    vary flags, links and its own nucleus/Larmor. ``params=None`` → all params."""
+def seed_from(dst: Recipe, src: Recipe, params=None) -> list:
+    """Copy fitted parameter **values** from ``src`` into ``dst`` on the lines
+    that pair (:func:`larmor.components.pair_sites`: by label, by index only
+    when a label cannot identify its line), clipped into ``dst``'s own bounds.
+    ``dst`` keeps its bounds, vary flags, links and its own nucleus/Larmor.
+    ``params=None`` → every parameter; ``()`` → nothing. Returns the pairing
+    (per ``dst`` line the ``src`` index or None)."""
+    pairs = pair_sites(dst.sites, src.sites)
     for i, site in enumerate(dst.sites):
-        if i >= len(src.sites):
-            break
-        src_site = src.sites[i]
+        j = pairs[i]
+        if j is None:
+            continue
+        src_site = src.sites[j]
         for pn, p in site.params.items():
             if p.expr:                          # linked — follows its master
                 continue
@@ -45,6 +57,7 @@ def seed_from(dst: Recipe, src: Recipe, params=None) -> None:
             if p.max is not None and np.isfinite(p.max):
                 v = min(v, p.max)
             p.value = v
+    return pairs
 
 
 def _rmsd(recipe: Recipe, ppm, amp, window) -> float:
@@ -76,22 +89,32 @@ def _smooth(vals: np.ndarray, window: int) -> np.ndarray:
 
 def smooth_trajectories(recipes, params, order, window: int) -> None:
     """Smooth each parameter's value across the series (in ``order``) and write it
-    back — used between passes so the next sweep starts from a smoother guess."""
+    back — used between passes so the next sweep starts from a smoother guess.
+    Components are paired by label (:func:`larmor.components.component_map`);
+    one that only some members carry is smoothed over those members, and one
+    present in fewer than three is left alone."""
     if window < 3 or len(order) < 3:
         return
-    nsite = len(recipes[order[0]].sites)
-    for i in range(nsite):
+    comps = component_map([recipes[k] for k in order])
+    for c in comps:
+        where = [(j, k) for j, k in enumerate(order) if c["index"][j] is not None]
+        if len(where) < 3:
+            continue
         for pn in params:
-            try:
-                vals = np.array([recipes[k].sites[i].params[pn].value
-                                 for k in order], float)
-            except (KeyError, IndexError):
+            vals = []
+            for j, k in where:
+                p = recipes[k].sites[c["index"][j]].params.get(pn)
+                if p is None:
+                    vals = None
+                    break
+                vals.append(p.value)
+            if vals is None:
                 continue
-            sm = _smooth(vals, window)
-            for j, k in enumerate(order):
-                p = recipes[k].sites[i].params.get(pn)
+            sm = _smooth(np.array(vals, float), window)
+            for (j, k), v in zip(where, sm):
+                p = recipes[k].sites[c["index"][j]].params.get(pn)
                 if p is not None and not p.expr:
-                    p.value = float(sm[j])
+                    p.value = float(v)
 
 
 @dataclass
@@ -104,6 +127,7 @@ class SeqFitResult:
     passes: int
     propagated: tuple                # parameters carried between spectra
     warnings: list = field(default_factory=list)
+    fixed: tuple = ()                # members kept as seeds, never refitted
 
     @property
     def summary(self) -> str:
@@ -111,22 +135,27 @@ class SeqFitResult:
         if len(self.history) >= 2:
             trend = (f" · mean RMSD {self.history[0]['mean']:.4g} → "
                      f"{self.history[-1]['mean']:.4g}")
-        return (f"sequential fit: {len(self.recipes)} spectra, {self.passes} pass"
+        kept = f", {len(self.fixed)} kept" if self.fixed else ""
+        return (f"sequential fit: {len(self.recipes)} spectra{kept}, {self.passes} pass"
                 f"{'es' if self.passes != 1 else ''}{trend}")
 
 
 def run_sequential(entries, *, passes: int = 2, start: str = "first",
                    propagate=None, smooth: int = 0, tol=None,
-                   progress=None, should_stop=None) -> SeqFitResult:
+                   progress=None, should_stop=None, fixed=None) -> SeqFitResult:
     """Fit a series by warm-starting each spectrum from its fitted neighbour.
 
     ``entries`` = list of ``(recipe, ppm, amp, window)`` in **series order** (each
     recipe already carries the model to fit). Passes alternate direction
     (forward, backward, …); ``start`` picks the first direction. ``propagate``
     defaults to *all but amplitude* (positions/widths/quadrupolar carry; each
-    amplitude is re-fit fresh). ``smooth`` (window ≥ 3) smooths the parameter
-    trajectories between passes. ``progress(pass, k, rmsd)`` fires after each
-    spectrum; ``should_stop()`` aborts between spectra.
+    amplitude is re-fit fresh); an empty tuple carries nothing, so every
+    spectrum simply refits from its own model. ``smooth`` (window ≥ 3) smooths
+    the parameter trajectories between passes. ``fixed`` lists the series
+    indices to keep: their recipes are never refitted or seeded, but they seed
+    their neighbours like any fitted member (their RMSD is still measured).
+    ``progress(pass, k, rmsd)`` fires after each spectrum; ``should_stop()``
+    aborts between spectra.
     """
     if len(entries) < 2:
         raise ValueError("sequential fit needs at least two spectra")
@@ -135,6 +164,9 @@ def run_sequential(entries, *, passes: int = 2, start: str = "first",
     amps = [np.asarray(e[2], float) for e in entries]
     windows = [e[3] for e in entries]
     n = len(entries)
+    fixed = frozenset(int(k) for k in (fixed or ()) if 0 <= int(k) < n)
+    if len(fixed) >= n:
+        raise ValueError("every spectrum is kept — release at least one to fit")
     if propagate is None:
         propagate = all_but_amplitude(recipes)
     propagate = tuple(propagate)
@@ -156,6 +188,14 @@ def run_sequential(entries, *, passes: int = 2, start: str = "first",
             if should_stop is not None and should_stop():
                 stopped = True
                 break
+            if k in fixed:
+                # kept: measured as it is, and the seed of the next one
+                r = _rmsd(recipes[k], ppms[k], amps[k], windows[k])
+                rmsds[k] = r
+                if progress is not None:
+                    progress(p, k, r)
+                prev = k
+                continue
             if prev is not None:
                 seed_from(recipes[k], recipes[prev], propagate)
             fitmod.fit(recipes[k], ppms[k], amps[k],
@@ -186,4 +226,4 @@ def run_sequential(entries, *, passes: int = 2, start: str = "first",
     labels = [(r.sample or f"spectrum {k + 1}") for k, r in enumerate(recipes)]
     return SeqFitResult(recipes=recipes, labels=labels, rmsd=final_rmsd,
                         per_dataset=per, history=history, passes=max(1, passes),
-                        propagated=propagate)
+                        propagated=propagate, fixed=tuple(sorted(fixed)))

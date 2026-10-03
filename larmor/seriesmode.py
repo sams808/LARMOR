@@ -21,8 +21,15 @@ holds what that mode needs without Qt:
   the ratio of the two spectra's maxima (a display seed; the fit's own
   analytic pre-scale does the rest); a target WITH lines keeps its own
   structure (the user's add / remove per spectrum is respected) and receives
-  :func:`larmor.seqfit.seed_from` values for the carried parameters on
-  matching site index + name, clipped to its own bounds, links untouched.
+  :func:`larmor.seqfit.seed_from` values for the carried parameters on the
+  lines that pair by LABEL (:func:`larmor.components.pair_sites`; by index
+  only where a label cannot identify its line), clipped to its own bounds,
+  links untouched. When the two carry happens is the window's business
+  (``mw_series``): on a move only an empty member takes anything, so a fit
+  already made is never disturbed by walking the series; the value carry is
+  an explicit action. A member marked ``locked`` ("keep this fit") is left
+  alone by every carry and by the sweep, which still starts its neighbours
+  from it.
 * :func:`member_status` / :func:`rmsd_of` -- what the bar's status dots say.
 * :func:`entries_for_sweep` / :func:`apply_sweep_result` -- the bridge to
   :func:`larmor.seqfit.run_sequential` (the auto sweep; ``larmor seqfit``
@@ -42,6 +49,7 @@ from pathlib import Path
 import numpy as np
 
 from larmor import fithealth
+from larmor.components import label_of, pair_sites, usable_labels
 from larmor.recipe import Recipe
 
 __all__ = [
@@ -180,6 +188,9 @@ class SeriesMember:
     #: that raised
     fit_sig: str = ""
     failed: bool = False
+    #: "keep this fit": no carry reaches it and a sweep never refits it (it
+    #: still seeds its neighbours)
+    locked: bool = False
 
 
 @dataclass
@@ -290,7 +301,8 @@ class SeriesSpec:
                 proc=str(t.get("proc") or ""),
                 source_path=str(t.get("source_path") or ""),
                 params=(params[i] if params is not None and i < len(params) else None),
-                fit_sig=str(t.get("fit_sig") or ""), failed=bool(t.get("failed"))))
+                fit_sig=str(t.get("fit_sig") or ""), failed=bool(t.get("failed")),
+                locked=bool(t.get("locked"))))
             if table is None and isinstance(t.get("table"), dict):
                 table = t["table"]
         opts = SeriesOptions.from_dict(tags[order[0]].get("options"))
@@ -336,7 +348,7 @@ class SeriesSpec:
                "group": m.group, "folder": m.folder, "title": m.title,
                "proc": m.proc, "source_path": m.source_path,
                "options": self.options.to_dict(), "fit_sig": m.fit_sig,
-               "failed": bool(m.failed)}
+               "failed": bool(m.failed), "locked": bool(m.locked)}
         if k == 0 and self.table is not None and hasattr(self.table, "to_dict"):
             tag["table"] = self.table.to_dict()
         return tag
@@ -435,8 +447,12 @@ def carry_into(dst_recipe, src_recipe, carry, dst_amp_max: float,
       unfitted (no ``fit_rmsd``).
     * ``dst`` HAS lines: its structure is kept and :func:`seqfit.seed_from`
       semantics apply for ``carry`` (``None`` = every parameter except
-      amplitude) on matching site index + name, clipped to the
-      destination's own bounds; linked parameters follow their master.
+      amplitude) on the lines that pair (:func:`larmor.components.pair_sites`:
+      by label, by index only where a label cannot identify its line),
+      clipped to the destination's own bounds; linked parameters follow
+      their master. A destination line without a counterpart -- a component
+      the source does not have -- is left exactly as it is, and the note
+      names it.
     """
     dst = copy.deepcopy(dst_recipe) if dst_recipe else {}
     src = src_recipe or {}
@@ -477,12 +493,14 @@ def carry_into(dst_recipe, src_recipe, carry, dst_amp_max: float,
 
     names = (carry_candidates([src]) if carry is None
              else tuple(str(n) for n in carry))
+    pairs = pair_sites(dst["sites"], src_sites)
     matched_sites = 0
     matched_names: set = set()
     for i, site in enumerate(dst["sites"]):
-        if i >= len(src_sites):
-            break
-        sparams = src_sites[i].get("params") or {}
+        j = pairs[i]
+        if j is None:
+            continue
+        sparams = src_sites[j].get("params") or {}
         hit = False
         for pn, p in (site.get("params") or {}).items():
             if not isinstance(p, dict) or p.get("expr"):
@@ -504,12 +522,24 @@ def carry_into(dst_recipe, src_recipe, carry, dst_amp_max: float,
             hit = True
         matched_sites += int(hit)
     n_dst = len(dst["sites"])
+    own = f"this spectrum keeps its own {n_dst} line{'s' if n_dst != 1 else ''}"
     if not matched_sites:
-        return dst, (f"no matching parameters to seed{who}; this spectrum keeps "
-                     f"its own {n_dst} line{'s' if n_dst != 1 else ''}")
+        if all(j is None for j in pairs) and all(usable_labels(dst["sites"])) \
+                and all(usable_labels(src_sites)):
+            mine = ", ".join(label_of(s) for s in dst["sites"])
+            theirs = ", ".join(label_of(s) for s in src_sites)
+            return dst, (f"no line here shares a name with {src_name or 'the source'}'s "
+                         f"({mine} vs {theirs}) — nothing seeded; {own}. Name the "
+                         "same component alike on both (the label column) to "
+                         "seed between them")
+        return dst, f"no matching parameters to seed{who}; {own}"
     note = (f"{_describe_carried(matched_names)} of {matched_sites} matching "
-            f"line{'s' if matched_sites != 1 else ''} seeded{who}; this spectrum "
-            f"keeps its own {n_dst} line{'s' if n_dst != 1 else ''}")
+            f"line{'s' if matched_sites != 1 else ''} seeded{who}; {own}")
+    alone = [label_of(s) or f"line {i + 1}" for i, (s, j) in enumerate(zip(dst["sites"], pairs))
+             if j is None]
+    if alone:
+        note += (f" ({', '.join(alone)} {'has' if len(alone) == 1 else 'have'} no "
+                 "counterpart there)")
     return dst, note
 
 
@@ -577,7 +607,9 @@ def apply_sweep_result(members: list, result) -> list:
     member -- ``{"recipe": dict, "rmsd": float, "x", "y_fit"}`` for a member
     the sweep fitted in at least one pass, None for one it never reached (a
     Stop keeps what was fitted; a member the sweep never touched keeps its
-    own model and status)."""
+    own model and status) and None for a kept member (``result.fixed``: it
+    seeded its neighbours and was never refitted, so its own fit, errors and
+    verdict stand)."""
     n = len(members)
     recs = list(getattr(result, "recipes", []) or [])
     if len(recs) != n:
@@ -585,8 +617,12 @@ def apply_sweep_result(members: list, result) -> list:
     hist = list(getattr(result, "history", []) or [])
     rmsd = list(getattr(result, "rmsd", []) or [])
     per = list(getattr(result, "per_dataset", []) or [])
+    fixed = set(getattr(result, "fixed", ()) or ())
     out = []
     for k in range(n):
+        if k in fixed:
+            out.append(None)
+            continue
         if hist:
             fitted = any(k < len(h.get("rmsd") or []) and _finite(h["rmsd"][k])
                          for h in hist)

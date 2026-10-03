@@ -6,15 +6,26 @@
 Every spectrum of a series is an ordinary workspace of the main window
 (``larmor.desktop.mw_series``); this widget only shows the members with a
 status dot (grey not fitted · green fitted · amber edited since its fit ·
-red the last fit failed), walks them, and emits what the user asked for.
-It holds no model state: the window's series mixin feeds ``set_members`` /
-``set_options`` / ``set_comparison`` and listens to the signals. Hidden
+red the last fit failed; 🔒 before the name = kept), walks them, and emits
+what the user asked for. It holds no model state: the window's series mixin
+feeds ``set_members`` / ``set_options`` / ``set_comparison`` and listens to
+the signals. A right-click on a member name opens ``build_member_menu``
+(switch, keep this fit, seed it from a neighbour, rename, remove). Hidden
 until a series is active; constructible on its own, so tests drive it
 without a MainWindow.
+
+Styling note: nothing here sets a style sheet made of bare declarations.
+``widget.setStyleSheet("background: transparent")`` is ``* { … }`` for the
+widget AND every descendant, with precedence over the application sheet --
+on the member strip's body it stripped the accent background off the
+checked member button (white text on white: the name vanished) and gave the
+members' tool tips a transparent background on a top-level window, painted
+black on Windows (a black box with only the colour-emoji ⚠ readable). Every
+rule here carries a selector.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtCore import QEvent, QSize, Qt, Signal
 from PySide6.QtGui import QAction, QColor, QFontMetrics, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (QButtonGroup, QComboBox, QFrame, QHBoxLayout,
                                QLabel, QMenu, QPushButton, QScrollArea,
@@ -24,7 +35,7 @@ from larmor.desktop import theme
 from larmor.desktop.panels import PARAM_LABELS
 from larmor.seriesmode import PASS_CHOICES, SMOOTH_CHOICES, START_CHOICES
 
-__all__ = ["SeriesBar", "status_color", "STATUS_WORDS"]
+__all__ = ["SeriesBar", "status_color", "STATUS_WORDS", "LOCK_MARK"]
 
 #: what the status dot means, for tooltips
 STATUS_WORDS = {"unfitted": "not fitted yet", "fitted": "fitted",
@@ -32,6 +43,8 @@ STATUS_WORDS = {"unfitted": "not fitted yet", "fitted": "fitted",
                 "failed": "the last fit failed"}
 #: a member button's text is elided beyond this width (px); the tooltip has it all
 NAME_MAX_PX = 150
+#: the prefix of a kept member's name
+LOCK_MARK = "🔒 "
 
 
 def status_color(status: str) -> str:
@@ -66,6 +79,10 @@ class SeriesBar(QFrame):
     carry_changed = Signal(object)               # tuple of parameter names ticked
     carry_menu_opening = Signal()                # refresh the checklist before it shows
     copy_model_requested = Signal(bool)          # True = replace every member's lines
+    seed_requested = Signal(int, int)            # (member to seed, member to seed from)
+    lock_toggled = Signal(int, bool)             # (member, keep its fit)
+    rename_requested = Signal(int)
+    remove_requested = Signal(int)
     table_requested = Signal()
     plot_requested = Signal()
     acquisition_requested = Signal()
@@ -90,23 +107,30 @@ class SeriesBar(QFrame):
         h.setSpacing(6)
 
         self.lblTitle = QLabel("Series")
-        self.lblTitle.setStyleSheet("font-weight:600;")
+        self.lblTitle.setObjectName("seriesTitle")
         self.lblTitle.setToolTip(
             "every spectrum of the series is a workspace of its own: add or "
             "remove lines, set bounds and links, process, fit and undo on each "
             "one with the usual tools; this bar walks the series and runs the "
             "sweeps. Dots: grey not fitted · green fitted · amber edited since "
-            "its fit · red the last fit failed")
+            "its fit · red the last fit failed · 🔒 kept (right-click a name)")
         h.addWidget(self.lblTitle)
 
         # the member strip: checkable buttons in a horizontally scrolling area
+        # (the scrollbar stays hidden: the wheel, ◀ ▶ and the current member
+        # scroll it, so it never overlays the buttons)
         self.strip = QScrollArea()
+        self.strip.setObjectName("seriesStrip")
         self.strip.setWidgetResizable(True)
         self.strip.setFrameShape(QFrame.NoFrame)
-        self.strip.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.strip.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.strip.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.strip.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.strip.viewport().setAutoFillBackground(False)
+        self.strip.viewport().installEventFilter(self)
         self._stripBody = QWidget()
+        self._stripBody.setObjectName("seriesStripBody")
+        self._stripBody.setAutoFillBackground(False)
         self._stripLay = QHBoxLayout(self._stripBody)
         self._stripLay.setContentsMargins(0, 0, 0, 0)
         self._stripLay.setSpacing(2)
@@ -117,43 +141,70 @@ class SeriesBar(QFrame):
         self._group.buttonClicked.connect(self._member_button_clicked)
         h.addWidget(self.strip, 1)
 
-        self.btnPrev = self._tool("◀", "previous spectrum of the series (seeds it "
-                                       "from this one when 'seed on move' is on)")
+        self.btnPrev = self._tool("◀", "previous spectrum of the series (a spectrum "
+                                       "without lines takes a copy of this model when "
+                                       "the Carry option is on; one with lines is left "
+                                       "as it is)")
         self.btnPrev.clicked.connect(self.prev_requested)
-        self.btnNext = self._tool("▶", "next spectrum of the series (seeds it from "
-                                       "this one when 'seed on move' is on)")
+        self.btnNext = self._tool("▶", "next spectrum of the series (a spectrum "
+                                       "without lines takes a copy of this model when "
+                                       "the Carry option is on; one with lines is left "
+                                       "as it is)")
         self.btnNext.clicked.connect(self.next_requested)
         h.addWidget(self.btnPrev)
         h.addWidget(self.btnNext)
 
         # Carry ▾
-        self.btnCarry = self._tool("Carry ▾", "what moves from one spectrum to the "
-                                              "next, and the copy-to-all actions")
+        self.btnCarry = self._tool("Carry ▾", "what moves from one spectrum to another, "
+                                              "the seed-from-a-neighbour actions, keep "
+                                              "this fit, and the copy-to-all actions")
         self.btnCarry.setPopupMode(QToolButton.InstantPopup)
         self.mCarry = QMenu(self.btnCarry)
         self.mCarry.setToolTipsVisible(True)
         self.mCarry.aboutToShow.connect(self.carry_menu_opening)
-        self.actSeedOnMove = QAction("Seed the next spectrum from this one when I move", self)
+        self.actSeedOnMove = QAction(
+            "Copy this model into a spectrum without lines when I move to it", self)
         self.actSeedOnMove.setCheckable(True)
         self.actSeedOnMove.setChecked(True)
         self.actSeedOnMove.setToolTip(
-            "on ◀ ▶ (and after Fit → next) the spectrum you land on takes this "
-            "one's model: a spectrum without lines gets a copy (amplitudes scaled "
-            "to its height), one with its own lines keeps them and only receives "
-            "the ticked parameters on matching lines")
+            "on ◀ ▶, a click on a name and after Fit → next: a spectrum that has "
+            "no lines yet takes a copy of the model you leave (amplitudes scaled "
+            "to its height). A spectrum that already has lines — fitted or not — "
+            "is never changed by moving; seed it on request with the actions below")
         self.actSeedOnMove.toggled.connect(self.seed_on_move_toggled)
-        self.actCarryHead = QAction("Carried parameters:", self)
+        self.actSeedPrev = QAction("Seed this spectrum from the previous one", self)
+        self.actSeedPrev.setToolTip(
+            "copy the carried parameters (ticked below) of the previous spectrum's "
+            "lines onto the lines of this one that share a label, clipped to this "
+            "spectrum's bounds; amplitudes and lines without a namesake stay. One "
+            "undo step")
+        self.actSeedPrev.triggered.connect(
+            lambda: self.seed_requested.emit(self._current, self._current - 1))
+        self.actSeedNext = QAction("Seed this spectrum from the next one", self)
+        self.actSeedNext.setToolTip(
+            "the same, from the next spectrum of the series")
+        self.actSeedNext.triggered.connect(
+            lambda: self.seed_requested.emit(self._current, self._current + 1))
+        self.actCarryHead = QAction("Carried parameters (seeding and sweeps):", self)
         self.actCarryHead.setEnabled(False)
+        self.actLock = QAction("Keep this spectrum's fit  🔒", self)
+        self.actLock.setCheckable(True)
+        self.actLock.setToolTip(
+            "no carry reaches a kept spectrum and the Auto sweep never refits it "
+            "(it still starts its neighbours from it); untick to release")
+        self.actLock.toggled.connect(self._lock_toggled)
         self.actCopyModel = QAction("Copy this model to every spectrum", self)
         self.actCopyModel.setToolTip(
             "spectra without lines get a copy of this model (amplitudes scaled "
             "to each height); spectra with their own lines keep them and receive "
-            "the carried values on matching lines")
+            "the carried values on the lines that share a label; kept spectra "
+            "are left alone")
         self.actCopyModel.triggered.connect(lambda: self.copy_model_requested.emit(False))
         self.actReplaceModel = QAction("Replace every spectrum's lines with this model", self)
         self.actReplaceModel.setToolTip(
             "every other spectrum drops its own lines and takes a copy of this "
-            "model (amplitudes scaled to each height) — their fits start over")
+            "model (amplitudes scaled to each height) — their fits start over; "
+            "kept spectra are left alone")
         self.actReplaceModel.triggered.connect(lambda: self.copy_model_requested.emit(True))
         self._rebuild_carry_menu()
         self.btnCarry.setMenu(self.mCarry)
@@ -162,14 +213,18 @@ class SeriesBar(QFrame):
         self.btnFitNext = self._tool("Fit → next ▶",
                                      "fit this spectrum (the usual Fit: progress bar, "
                                      "Stop / Cancel, animation), then move to the "
-                                     "next one and seed it from the result")
+                                     "next one — a spectrum without lines takes a "
+                                     "copy of the result, one with lines is left as "
+                                     "it is")
         self.btnFitNext.clicked.connect(self.fit_next_requested)
         h.addWidget(self.btnFitNext)
 
         # Auto sweep ▾ with its small form, progress text and Stop
         self.btnSweep = self._tool("Auto sweep ▾",
                                    "fit every spectrum in turn, each one starting "
-                                   "from its fitted neighbour, forward and back")
+                                   "from its fitted neighbour, forward and back; "
+                                   "kept spectra (🔒) seed their neighbours and are "
+                                   "not refitted")
         self.btnSweep.setPopupMode(QToolButton.InstantPopup)
         self.mSweep = QMenu(self.btnSweep)
         form = QWidget()
@@ -207,7 +262,7 @@ class SeriesBar(QFrame):
         self.btnSweep.setMenu(self.mSweep)
         h.addWidget(self.btnSweep)
         self.lblProgress = QLabel("")
-        self.lblProgress.setStyleSheet("font-weight:600;")
+        self.lblProgress.setObjectName("seriesProgress")
         self.lblProgress.setVisible(False)
         h.addWidget(self.lblProgress)
         self.btnStop = self._tool("⏹ Stop", "stop the sweep after the current spectrum "
@@ -223,7 +278,8 @@ class SeriesBar(QFrame):
                                              "reorders the members)")
         self.btnTable.clicked.connect(self.table_requested)
         self.btnPlot = self._tool("Plot…", "the Series plot: every parameter and "
-                                           "population across the series, with export")
+                                           "population across the series, components "
+                                           "paired by their label, with export")
         self.btnPlot.clicked.connect(self.plot_requested)
         self.btnAcq = self._tool("Acquisition…", "Table S1 and the Experimental "
                                                  "paragraph for these spectra, from "
@@ -250,6 +306,7 @@ class SeriesBar(QFrame):
 
         # comparability chip (acquired / processed alike?)
         self.chip = self._tool("", "")
+        self.chip.setObjectName("seriesChip")
         self.chip.clicked.connect(self.details_requested)
         self.chip.setVisible(False)
         h.addWidget(self.chip)
@@ -274,19 +331,36 @@ class SeriesBar(QFrame):
         return b
 
     def apply_theme(self) -> None:
+        """Every rule with a selector (see the module note): the bar's own
+        surface, the strip and its body transparent, the two bold labels."""
         t = theme.active()
         self.setStyleSheet(
-            f"#seriesBar {{ background: {t.surface}; border-bottom: 1px solid {t.border}; }}")
-        self.strip.setStyleSheet("QScrollArea { background: transparent; }")
-        self._stripBody.setStyleSheet("background: transparent;")
+            f"#seriesBar {{ background: {t.surface}; border-bottom: 1px solid {t.border}; }}"
+            " #seriesStrip, #seriesStripBody { background: transparent; }"
+            " #seriesTitle, #seriesProgress { font-weight: 600; }")
+        self.strip.setStyleSheet("")
+        self._stripBody.setStyleSheet("")
         self._paint_members()
         if self.chip.isVisible():
             self.set_comparison(getattr(self, "_cmp", None))
+
+    def eventFilter(self, obj, ev):
+        # the wheel over the member strip scrolls it sideways (its scrollbar
+        # is hidden so it never overlays the buttons)
+        if obj is self.strip.viewport() and ev.type() == QEvent.Wheel:
+            bar = self.strip.horizontalScrollBar()
+            d = ev.angleDelta().y() or ev.angleDelta().x()
+            bar.setValue(bar.value() - int(d / 2))
+            return True
+        return super().eventFilter(obj, ev)
 
     def _rebuild_carry_menu(self) -> None:
         m = self.mCarry
         m.clear()
         m.addAction(self.actSeedOnMove)
+        m.addSeparator()
+        m.addAction(self.actSeedPrev)
+        m.addAction(self.actSeedNext)
         m.addSeparator()
         m.addAction(self.actCarryHead)
         for name in self._candidates:
@@ -295,13 +369,34 @@ class SeriesBar(QFrame):
             a = m.addAction("(no lines on the series yet)")
             a.setEnabled(False)
         m.addSeparator()
+        m.addAction(self.actLock)
+        m.addSeparator()
         m.addAction(self.actCopyModel)
         m.addAction(self.actReplaceModel)
+        self._sync_current_actions()
+
+    def _sync_current_actions(self) -> None:
+        """The seed-from-neighbour and keep actions follow the current member."""
+        n = len(self._members)
+        k = self._current
+        here = 0 <= k < n
+        locked = bool(here and self._members[k].get("locked"))
+        self.actSeedPrev.setEnabled(here and k > 0 and not locked and not self._running)
+        self.actSeedNext.setEnabled(here and k < n - 1 and not locked and not self._running)
+        self.actLock.blockSignals(True)
+        self.actLock.setChecked(locked)
+        self.actLock.setEnabled(here and not self._running)
+        self.actLock.blockSignals(False)
+
+    def _lock_toggled(self, on: bool) -> None:
+        if 0 <= self._current < len(self._members):
+            self.lock_toggled.emit(int(self._current), bool(on))
 
     # ------------------------------------------------------------ members
     def set_members(self, members: list) -> None:
-        """``members``: ``[{"name", "status", "tip", "flag"}, …]`` in series
-        order. Buttons are updated in place when the count is unchanged."""
+        """``members``: ``[{"name", "status", "tip", "flag", "locked"}, …]``
+        in series order. Buttons are updated in place when the count is
+        unchanged."""
         members = [dict(m) for m in members]
         if len(members) != len(self._buttons):
             for b in self._buttons:
@@ -316,6 +411,9 @@ class SeriesBar(QFrame):
                 b.setFocusPolicy(Qt.NoFocus)
                 b.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
                 b.setIconSize(QSize(10, 10))
+                b.setContextMenuPolicy(Qt.CustomContextMenu)
+                b.customContextMenuRequested.connect(
+                    lambda pos, btn=b: self._member_context(btn, pos))
                 self._group.addButton(b, k)
                 self._stripLay.insertWidget(k, b)
                 self._buttons.append(b)
@@ -323,19 +421,25 @@ class SeriesBar(QFrame):
         self._paint_members()
         if not (0 <= self._current < len(self._buttons)):
             self._current = -1
+        self._sync_current_actions()
 
     def _paint_members(self) -> None:
         fm = QFontMetrics(self.font())
         for k, (b, m) in enumerate(zip(self._buttons, self._members)):
             name = str(m.get("name") or f"spectrum {k + 1}")
             text = fm.elidedText(name, Qt.ElideMiddle, NAME_MAX_PX)
+            if m.get("locked"):
+                text = LOCK_MARK + text
             if m.get("flag"):
                 text += " ⚠"
             b.setText(text)
             st = str(m.get("status") or "unfitted")
             b.setIcon(_dot_icon(status_color(st)))
             tip = str(m.get("tip") or name)
-            b.setToolTip(f"{tip}\n{STATUS_WORDS.get(st, st)} — click to switch to it")
+            words = STATUS_WORDS.get(st, st)
+            if m.get("locked"):
+                words += " · kept: no carry reaches it, sweeps start from it and never refit it"
+            b.setToolTip(f"{tip}\n{words} — click to switch to it, right-click for more")
             f = b.font()
             f.setBold(k == self._current)
             b.setFont(f)
@@ -359,11 +463,66 @@ class SeriesBar(QFrame):
         n = len(self._buttons)
         self.btnPrev.setEnabled(not self._running and n > 0 and self._current != 0)
         self.btnNext.setEnabled(not self._running and n > 0 and self._current != n - 1)
+        self._sync_current_actions()
 
     def _member_button_clicked(self, btn) -> None:
         k = self._group.id(btn)
         if k >= 0:
             self.member_clicked.emit(int(k))
+
+    def _member_context(self, btn, pos) -> None:
+        k = self._group.id(btn)
+        if k < 0 or self._running:
+            return
+        menu = self.build_member_menu(int(k))
+        menu.exec(btn.mapToGlobal(pos))
+
+    def build_member_menu(self, k: int) -> QMenu:
+        """The right-click menu of member ``k`` (built, not shown -- tests
+        trigger its actions): switch to it, keep its fit, seed it from the
+        previous / next / current spectrum, rename, remove from the series."""
+        m = QMenu(self)
+        m.setToolTipsVisible(True)
+        n = len(self._members)
+        if not (0 <= k < n):
+            return m
+        mem = self._members[k]
+        name = str(mem.get("name") or f"spectrum {k + 1}")
+        locked = bool(mem.get("locked"))
+        a = m.addAction(f"Switch to {name}")
+        a.setEnabled(k != self._current)
+        a.triggered.connect(lambda *_: self.member_clicked.emit(k))
+        m.addSeparator()
+        a = m.addAction("Keep this fit  🔒")
+        a.setCheckable(True)
+        a.setChecked(locked)
+        a.setToolTip("no carry reaches a kept spectrum and the Auto sweep never refits "
+                     "it (it still starts its neighbours from it); untick to release")
+        a.toggled.connect(lambda on, kk=k: self.lock_toggled.emit(kk, bool(on)))
+        m.addSeparator()
+        a = m.addAction("Seed it from the previous spectrum")
+        a.setToolTip("copy the carried parameters of the previous spectrum's lines onto "
+                     "the lines of this one that share a label (a spectrum without "
+                     "lines takes a whole copy)")
+        a.setEnabled(k > 0 and not locked)
+        a.triggered.connect(lambda *_, kk=k: self.seed_requested.emit(kk, kk - 1))
+        a = m.addAction("Seed it from the next spectrum")
+        a.setEnabled(k < n - 1 and not locked)
+        a.triggered.connect(lambda *_, kk=k: self.seed_requested.emit(kk, kk + 1))
+        cur = self._current
+        a = m.addAction("Seed it from the current spectrum")
+        a.setEnabled(0 <= cur < n and cur != k and not locked)
+        a.triggered.connect(lambda *_, kk=k, c=cur: self.seed_requested.emit(kk, c))
+        m.addSeparator()
+        a = m.addAction("Rename…")
+        a.setToolTip("the name on the bar, in the Workspaces dock, in the Series table "
+                     "and plot")
+        a.triggered.connect(lambda *_, kk=k: self.rename_requested.emit(kk))
+        a = m.addAction("Remove from the series")
+        a.setToolTip("this spectrum leaves the series (it stays open in the "
+                     "Workspaces dock); the others re-number")
+        a.triggered.connect(lambda *_, kk=k: self.remove_requested.emit(kk))
+        return m
 
     def member_buttons(self) -> list:
         return list(self._buttons)
@@ -374,10 +533,13 @@ class SeriesBar(QFrame):
     def statuses(self) -> list:
         return [str(m.get("status") or "unfitted") for m in self._members]
 
+    def locked(self) -> list:
+        return [bool(m.get("locked")) for m in self._members]
+
     # ------------------------------------------------------------ options
     def set_options(self, seed_on_move: bool, candidates, carried, passes: int,
                     start: str, smooth: int) -> None:
-        """Mirror the series options: the seed-on-move toggle, the Carry
+        """Mirror the series options: the copy-on-move toggle, the Carry
         checklist (``candidates`` offered, ``carried`` ticked, labels from
         PARAM_LABELS) and the sweep form."""
         self.actSeedOnMove.blockSignals(True)
@@ -390,7 +552,7 @@ class SeriesBar(QFrame):
             if a is None:
                 a = QAction(PARAM_LABELS.get(name, name), self)
                 a.setCheckable(True)
-                a.setToolTip(f"carry {name} from one spectrum to the next")
+                a.setToolTip(f"carry {name} from one spectrum to another")
                 a.toggled.connect(self._carry_toggled)
                 self._carry_actions[name] = a
             a.blockSignals(True)
@@ -438,17 +600,18 @@ class SeriesBar(QFrame):
             pass
         if level == "ok":
             self.chip.setText("✓ alike")
-            self.chip.setStyleSheet(f"color:{t.text_dim};")
+            self.chip.setStyleSheet(f"#seriesChip {{ color: {t.text_dim}; }}")
         elif level == "bad":
             self.chip.setText("✖ mixed")
             self.chip.setStyleSheet(
-                f"background:{t.model}; color:{theme.best_text_on(t.model)}; "
-                "font-weight:600; padding:1px 6px; border-radius:3px;")
+                f"#seriesChip {{ background: {t.model}; color: {theme.best_text_on(t.model)}; "
+                "font-weight: 600; padding: 1px 6px; border-radius: 3px; }")
         else:
             self.chip.setText("⚠ check")
             self.chip.setStyleSheet(
-                f"background:{t.baseline}; color:{theme.best_text_on(t.baseline)}; "
-                "font-weight:600; padding:1px 6px; border-radius:3px;")
+                f"#seriesChip {{ background: {t.baseline}; "
+                f"color: {theme.best_text_on(t.baseline)}; "
+                "font-weight: 600; padding: 1px 6px; border-radius: 3px; }")
         self.chip.setToolTip((summary + "\n\n" if summary else "")
                              + "click for every acqus / procs parameter of every "
                              "spectrum (the deviants in amber)")

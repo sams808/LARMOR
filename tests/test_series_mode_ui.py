@@ -133,6 +133,10 @@ def test_series_bar_widget_alone(qapp):
     bar.member_clicked.connect(got.append)
     bar.carry_changed.connect(lambda names: got.append(("carry", names)))
     bar.sweep_requested.connect(lambda p, s, m: got.append(("sweep", p, s, m)))
+    bar.seed_requested.connect(lambda d, s: got.append(("seed", d, s)))
+    bar.lock_toggled.connect(lambda k, on: got.append(("lock", k, on)))
+    bar.remove_requested.connect(lambda k: got.append(("remove", k)))
+    bar.rename_requested.connect(lambda k: got.append(("rename", k)))
     bar.set_members([{"name": "a", "status": "unfitted", "tip": "a"},
                      {"name": "b", "status": "fitted", "tip": "b", "flag": True},
                      {"name": "c", "status": "edited", "tip": "c"}])
@@ -143,10 +147,48 @@ def test_series_bar_widget_alone(qapp):
     bar.set_current(1)
     assert btns[1].isChecked() and bar.current() == 1 and btns[1].font().bold()
     assert bar.btnPrev.isEnabled() and bar.btnNext.isEnabled()
+    assert bar.actSeedPrev.isEnabled() and bar.actSeedNext.isEnabled()
+    assert not bar.actLock.isChecked()
     bar.set_current(2)
-    assert not bar.btnNext.isEnabled()
+    assert not bar.btnNext.isEnabled() and not bar.actSeedNext.isEnabled()
     btns[0].click()
     assert got[-1] == 0
+    # a kept member: the mark before its name, the Carry menu's keep entry
+    # ticked and its seed entries off; the member menu carries the same
+    bar.set_members([{"name": "a", "status": "unfitted"},
+                     {"name": "b", "status": "fitted", "locked": True, "flag": True},
+                     {"name": "c", "status": "edited"}])
+    assert [b.text() for b in bar.member_buttons()] == ["a", "🔒 b ⚠", "c"]
+    assert bar.locked() == [False, True, False]
+    assert "kept" in bar.member_buttons()[1].toolTip()
+    bar.set_current(1)
+    assert bar.actLock.isChecked() and not bar.actSeedPrev.isEnabled()
+    bar.actLock.setChecked(False)
+    assert got[-1] == ("lock", 1, False)
+    bar.set_current(0)
+    bar.actSeedNext.trigger()
+    assert got[-1] == ("seed", 0, 1)
+    assert not bar.actSeedPrev.isEnabled()
+    menu = bar.build_member_menu(1)
+    acts = {a.text(): a for a in menu.actions() if a.text()}
+    assert list(acts)[0] == "Switch to b"
+    assert acts["Keep this fit  🔒"].isChecked()
+    assert not acts["Seed it from the previous spectrum"].isEnabled()      # kept
+    acts["Keep this fit  🔒"].setChecked(False)
+    assert got[-1] == ("lock", 1, False)
+    menu2 = bar.build_member_menu(2)
+    acts2 = {a.text(): a for a in menu2.actions() if a.text()}
+    assert not acts2["Seed it from the next spectrum"].isEnabled()         # last member
+    acts2["Seed it from the previous spectrum"].trigger()
+    assert got[-1] == ("seed", 2, 1)
+    acts2["Seed it from the current spectrum"].trigger()
+    assert got[-1] == ("seed", 2, 0)
+    acts2["Remove from the series"].trigger()
+    assert got[-1] == ("remove", 2)
+    acts2["Rename…"].trigger()
+    assert got[-1] == ("rename", 2)
+    acts2["Switch to c"].trigger()
+    assert got[-1] == 2
     # options: the Carry checklist with PARAM_LABELS, the sweep form
     bar.set_options(False, ("isotropic_chemical_shift_ppm", "shift_fwhm_ppm"),
                     ("isotropic_chemical_shift_ppm",), 4, "last", 3)
@@ -259,55 +301,254 @@ def test_added_line_on_a_member_survives_moving_away_and_back(win, qapp, tmp_pat
     assert len(win.recipe["sites"]) == 1
 
 
-def test_member_with_its_own_lines_only_receives_carried_values(win, qapp, tmp_path):
+def test_moving_never_changes_a_member_that_has_lines(win, qapp, tmp_path):
+    """Sam's case: sample 1 fitted, sample 2 worked on, back to sample 1 --
+    its fit must still be there (the first version re-seeded it from the
+    neighbour on every move and ruined it)."""
+    from larmor.seriesmode import rmsd_of
+
     paths, model = _start(win, qapp, tmp_path)
+    win.series_fit_then_next()                     # fits s0, lands on s1 with a copy
+    _pump(qapp, lambda: _fit_idle(win) and win._series_chain is None and win.active_ws == 1,
+          what="Fit → next to land on member 2")
+    _settle(win, qapp)
+    fitted0 = json.loads(json.dumps(win.workspaces[0]["snap"]["recipe"]))
+    assert rmsd_of(fitted0) is not None
+    # on s1, work as a user does on sample 2: move the copied line, add one
+    win.recipe["sites"][0]["params"]["isotropic_chemical_shift_ppm"]["value"] = 25.0
+    win.on_params_changed()
+    _settle(win, qapp)
+    win._model_actions["gauss_lor"].setChecked(True)
+    win.add_site_at(28.0, 5.0)
+    _settle(win, qapp)
+    assert len(win.recipe["sites"]) == 2
+    # back to s0: nothing moved, the dot is still green
+    win.series_prev()
+    _settle(win, qapp)
+    assert win.active_ws == 0
+    assert win.recipe["sites"] == fitted0["sites"]
+    assert rmsd_of(win.recipe) == rmsd_of(fitted0)
+    assert win.series_bar.statuses()[0] == "fitted"
+    assert "s0 keeps its own 1 line (fitted)" in win.statusBar().currentMessage()
+    # forward again: s1 keeps its two lines where the user put them
+    win.series_next()
+    _settle(win, qapp)
+    assert win.active_ws == 1 and len(win.recipe["sites"]) == 2 and _pos(win.recipe) == 25.0
+    assert "s1 keeps its own 2 lines" in win.statusBar().currentMessage()
+    assert "Carry ▾" in win.statusBar().currentMessage()        # the unfitted hint
+    # an empty member still takes a copy of the model you leave
+    win.series_next()
+    _settle(win, qapp)
+    assert win.active_ws == 2 and len(win.recipe["sites"]) == 2
+    assert "2 lines copied from s1" in win.statusBar().currentMessage()
+
+
+def test_seeding_from_a_neighbour_is_explicit_and_pairs_lines_by_label(win, qapp, tmp_path):
+    paths, model = _start(win, qapp, tmp_path)          # s0: one line "A" at 12
     win.series_set_seed_on_move(False)
     win.series_go(1)
     _settle(win, qapp)
-    own = json.loads(json.dumps(model["sites"][0]))
-    own["label"] = "ownA"
-    own["params"]["isotropic_chemical_shift_ppm"] = {"value": 14.0, "min": 0, "max": 14.5}
-    own["params"]["amplitude"]["value"] = 33.0
-    own2 = json.loads(json.dumps(own))
-    own2["label"] = "ownB"
-    own2["params"]["isotropic_chemical_shift_ppm"] = {"value": 25.0, "min": 0, "max": 40}
-    win.recipe["sites"] = [own, own2]
+    own_a = json.loads(json.dumps(model["sites"][0]))   # the same component, named alike
+    own_a["params"]["isotropic_chemical_shift_ppm"] = {"value": 14.0, "min": 0, "max": 14.5}
+    own_a["params"]["amplitude"]["value"] = 33.0
+    own_c = json.loads(json.dumps(model["sites"][0]))
+    own_c["label"] = "C"                                 # a component s0 does not have
+    own_c["params"]["isotropic_chemical_shift_ppm"] = {"value": 25.0, "min": 0, "max": 40}
+    win.recipe["sites"] = [own_c, own_a]                 # its own order
     win.on_structure_changed()
     _settle(win, qapp)
     win.series_set_seed_on_move(True)
     win.series_go(0)
     _settle(win, qapp)
-    assert win.active_ws == 0
     p = win.recipe["sites"][0]["params"]
     p["isotropic_chemical_shift_ppm"]["value"] = 16.0
     p["shift_fwhm_ppm"]["value"] = 9.0
     p["amplitude"]["value"] = 999.0
     win.on_params_changed()
     _settle(win, qapp)
-    win.series_go(1)
+    win.series_go(1)                                     # a move: untouched
+    _settle(win, qapp)
+    assert win.recipe["sites"][1]["params"]["isotropic_chemical_shift_ppm"]["value"] == 14.0
+    # Carry ▾ Seed this spectrum from the previous one: by label, clipped,
+    # amplitudes and the nameless-elsewhere line untouched, one undo step
+    win.series_seed(1, 0)
     _settle(win, qapp)
     rec = win.recipe
-    assert [s["label"] for s in rec["sites"]] == ["ownA", "ownB"]      # own structure kept
-    a, b = rec["sites"][0]["params"], rec["sites"][1]["params"]
+    assert [s["label"] for s in rec["sites"]] == ["C", "A"]
+    c, a = rec["sites"][0]["params"], rec["sites"][1]["params"]
     assert a["isotropic_chemical_shift_ppm"]["value"] == 14.5             # clipped to ITS bound
-    assert a["shift_fwhm_ppm"]["value"] == 9.0                            # width carried
-    assert a["amplitude"]["value"] == 33.0                                # amplitude never
-    assert b["isotropic_chemical_shift_ppm"]["value"] == 25.0             # no matching source line
-    assert "keeps its own 2 lines" in win.statusBar().currentMessage()
-    # the Carry checklist: untick widths and the next seed leaves them alone
+    assert a["shift_fwhm_ppm"]["value"] == 9.0
+    assert a["amplitude"]["value"] == 33.0
+    assert c["isotropic_chemical_shift_ppm"]["value"] == 25.0
+    msg = win.statusBar().currentMessage()
+    assert "1 matching line seeded from s0" in msg and "(C has no counterpart there)" in msg
+    assert win.series_bar.statuses()[1] == "unfitted"
+    win.undo()
+    _settle(win, qapp)
+    assert win.recipe["sites"][1]["params"]["isotropic_chemical_shift_ppm"]["value"] == 14.0
+    # the same action onto a member that is not on screen lands in its snapshot
+    win.series_go(0)
+    _settle(win, qapp)
+    win.series_seed(1, 0)
+    snap = win.workspaces[1]["snap"]["recipe"]
+    assert snap["sites"][1]["params"]["isotropic_chemical_shift_ppm"]["value"] == 14.5
+    assert win.active_ws == 0
+    # no name in common: nothing moves, the status says why
+    snap["sites"][1]["label"] = "Q"
+    win.series_seed(1, 0)
+    assert "shares a name" in win.statusBar().currentMessage()
+    assert snap["sites"][1]["params"]["shift_fwhm_ppm"]["value"] == 9.0
+    snap["sites"][1]["label"] = "A"
+    # the Carry checklist rules the explicit seed too
     win._series_fill_carry_menu()
     cands = win.series_bar.carry_candidates()
     assert "shift_fwhm_ppm" in cands
     win.series_set_carry(tuple(n for n in cands if n != "shift_fwhm_ppm"))
     assert win._series.options.carry_off == ("shift_fwhm_ppm",)
-    win.series_go(0)
-    _settle(win, qapp)
     win.recipe["sites"][0]["params"]["shift_fwhm_ppm"]["value"] = 3.3
     win.on_params_changed()
     _settle(win, qapp)
-    win.series_go(1)
+    win.series_seed(1, 0)
+    assert win.workspaces[1]["snap"]["recipe"]["sites"][1]["params"]["shift_fwhm_ppm"]["value"] == 9.0
+    # seeding an EMPTY member explicitly is a whole copy
+    win.series_seed(2, 0)
+    assert len(win.workspaces[2]["snap"]["recipe"]["sites"]) == 1
+    assert "1 line copied from s0" in win.statusBar().currentMessage()
+
+
+def test_keep_this_fit_protects_a_member_from_seeding_copies_and_the_sweep(
+        win, qapp, tmp_path):
+    paths, model = _start(win, qapp, tmp_path)
+    win.series_copy_model()
+    win.series_fit_then_next()
+    _pump(qapp, lambda: _fit_idle(win) and win._series_chain is None and win.active_ws == 1,
+          what="Fit → next")
     _settle(win, qapp)
-    assert win.recipe["sites"][0]["params"]["shift_fwhm_ppm"]["value"] == 9.0
+    fitted0 = json.loads(json.dumps(win.workspaces[0]["snap"]["recipe"]))
+    win.series_set_locked(0, True)
+    assert win._series.members[0].locked and win.workspaces[0]["series"]["locked"] is True
+    assert win.series_bar.locked() == [True, False, False]
+    assert win.series_bar.member_buttons()[0].text().startswith("🔒")
+    assert "kept 🔒" in win.statusBar().currentMessage()
+    # seeding into it refuses; copy-to-all walks past it
+    win.series_seed(0, 1)
+    assert "is kept 🔒" in win.statusBar().currentMessage()
+    assert win.workspaces[0]["snap"]["recipe"] == fitted0
+    win.recipe["sites"][0]["params"]["isotropic_chemical_shift_ppm"]["value"] = 20.0
+    win.on_params_changed()
+    _settle(win, qapp)
+    win.series_copy_model()
+    assert "1 kept 🔒 left alone" in win.statusBar().currentMessage()
+    assert win.workspaces[0]["snap"]["recipe"] == fitted0
+    assert _pos(win.workspaces[2]["snap"]["recipe"]) == 20.0
+    # the sweep: s0 seeds s1 and is never refitted; the others are fitted
+    win.series_auto_sweep(2, "first", 0)
+    assert win._seq_worker is not None and win._seq_worker.fixed == (0,)
+    assert "1 kept as seed" in win.statusBar().currentMessage()
+    _pump(qapp, lambda: _sweep_idle(win), what="the auto sweep")
+    _settle(win, qapp)
+    assert win.workspaces[0]["snap"]["recipe"] == fitted0
+    assert win.series_bar.statuses() == ["fitted"] * 3
+    pos = [_pos(win._series_recipe_at(i)) for i in range(3)]
+    assert pos == pytest.approx([13.0, 15.0, 17.0], abs=0.4)
+    msg = win.statusBar().currentMessage()
+    assert "3 spectra, 1 kept" in msg and "1 kept spectrum untouched" in msg
+    # release, and a series kept whole cannot sweep
+    win.series_set_locked(0, False)
+    assert not win._series.members[0].locked and "released" in win.statusBar().currentMessage()
+    for k in range(3):
+        win.series_set_locked(k, True)
+    w = win._seq_worker
+    win.series_auto_sweep(2, "first", 0)
+    assert win._seq_worker is w and "every spectrum is kept" in win.statusBar().currentMessage()
+    # the lock survives a project round trip
+    win._sync_active()
+    from larmor import project
+    bundle, _dropped = project.build_bundle(win.workspaces, win.active_ws, str(tmp_path))
+    assert all(w_["series"]["locked"] is True for w_ in bundle["workspaces"])
+
+
+def test_member_menu_removes_a_spectrum_from_the_series(win, qapp, tmp_path):
+    paths, model = _start(win, qapp, tmp_path)
+    menu = win.series_bar.build_member_menu(1)
+    acts = {a.text(): a for a in menu.actions() if a.text()}
+    assert list(acts)[0] == "Switch to s1"
+    acts["Keep this fit  🔒"].setChecked(True)
+    assert win._series.members[1].locked
+    acts["Remove from the series"].trigger()
+    qapp.processEvents()
+    assert win._series.n == 2 and win._series.names() == ["s0", "s2"]
+    assert len(win.workspaces) == 3 and "series" not in win.workspaces[1]
+    assert [t.split("  ", 1)[1] for t in _dock_titles(win)] == ["1· s0", "s1", "2· s2"]
+    assert [b.text() for b in win.series_bar.member_buttons()] == ["s0", "s2"]
+    assert "left the series" in win.statusBar().currentMessage()
+    # the walk follows the shorter series
+    win.series_next()
+    _settle(win, qapp)
+    assert win.active_ws == 2
+    # the last members out end the series
+    win.series_remove_member(1)
+    win.series_remove_member(0)
+    assert win._series is None and not win.series_bar.isVisibleTo(win)
+    assert len(win.workspaces) == 3 and not any("series" in ws for ws in win.workspaces)
+    assert "series ended" in win.statusBar().currentMessage()
+
+
+def test_series_bar_paints_the_current_member_readable_and_cascades_no_bare_style(
+        win, qapp, tmp_path):
+    """The screenshot bugs: the strip body's bare 'background: transparent'
+    cascaded onto the checked member (accent background gone, white name on
+    white) and onto the member tool tips (a black box). Every style sheet
+    on the way down to a member button now carries a selector, and under
+    the application theme (applied here the way main() does; MainWindow
+    itself does not) the checked button renders in the accent colour with
+    readable text. Measured offscreen on the Light theme: 0 accent pixels
+    and 3913 transparent ones with the bare sheet, 3533 accent pixels of
+    4225 with the fix."""
+    from PySide6.QtGui import QColor
+    from larmor.desktop import theme
+
+    paths, model = _start(win, qapp, tmp_path)
+    bar = win.series_bar
+    btn = bar.member_buttons()[0]
+    w = btn
+    while w is not None:
+        ss = w.styleSheet().strip()
+        assert not ss or "{" in ss.split(";")[0], (w.objectName() or type(w).__name__, ss)
+        if w is bar:
+            break
+        w = w.parentWidget()
+    old_ss, old_pal = qapp.styleSheet(), qapp.palette()
+    theme.apply(qapp, theme.DEFAULT)
+    win.show()
+    qapp.processEvents()
+    try:
+        img = btn.grab().toImage()
+        t = theme.active()
+        acc, txt = QColor(t.accent), QColor(t.accent_text)
+
+        def near(c, ref, tol):
+            return (abs(c.red() - ref.red()) + abs(c.green() - ref.green())
+                    + abs(c.blue() - ref.blue())) <= tol
+
+        n_acc = n_txt = n_clear = 0
+        for y in range(img.height()):
+            for x in range(img.width()):
+                c = img.pixelColor(x, y)
+                if c.alpha() == 0:
+                    n_clear += 1
+                elif near(c, acc, 40):
+                    n_acc += 1
+                elif near(c, txt, 60):
+                    n_txt += 1
+        area = img.width() * img.height()
+        assert n_clear == 0, n_clear                    # nothing shows through
+        assert n_acc > 0.3 * area, (n_acc, area)
+        assert n_txt > 8, n_txt
+    finally:
+        win.hide()
+        qapp.setStyleSheet(old_ss)
+        qapp.setPalette(old_pal)
 
 
 # ------------------------------------------------------------------ fitting

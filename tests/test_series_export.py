@@ -355,7 +355,7 @@ def test_series_dialog_species_bar_and_dust_export(qapp, tmp_path, monkeypatch):
         assert float(r[2]) == pytest.approx(pop[k, 0] / 100.0, abs=1e-6)   # .6g cells
         assert r[3] == ""                                    # no error computed
     msg = dlg.msg.text()
-    assert "dust.csv" in msg and "N4_measured = s0" in msg and "Ignore" in msg
+    assert "dust.csv" in msg and "N4_measured = A" in msg and "Ignore" in msg
     assert "Na2O" in msg and "skipped" not in msg
     # both sites selected: N4 = their sum; no series table: Sample + N4 only
     dlg.list.item(1).setSelected(True)
@@ -363,7 +363,7 @@ def test_series_dialog_species_bar_and_dust_export(qapp, tmp_path, monkeypatch):
     with open(out, newline="", encoding="utf-8") as f:
         rows = list(csv.reader(f))
     assert float(rows[1][2]) == pytest.approx((pop[0, 0] + pop[0, 1]) / 100.0, abs=1e-6)
-    assert "N4_measured = s0 + s1" in dlg.msg.text()
+    assert "N4_measured = A + B" in dlg.msg.text()
     bare = SeriesPlotDialog(None, res)
     bare._export_dust(str(out))
     with open(out, newline="", encoding="utf-8") as f:
@@ -374,6 +374,65 @@ def test_series_dialog_species_bar_and_dust_export(qapp, tmp_path, monkeypatch):
     bare.list.clearSelection()
     bare._export_dust(str(out))
     assert "select the site" in bare.msg.text()
+
+
+def test_series_plot_pairs_components_by_label_when_the_members_differ(qapp):
+    """A series fitted one spectrum at a time: B vanishes, C appears, the
+    order changes -- each component keeps its own trajectory, with a gap
+    where a spectrum's model has no such line and 0 % population there."""
+    from larmor.batchfit import BatchFitResult
+    from larmor.components import component_map
+    from larmor.desktop.series_plot import (SeriesPlotDialog, population_integral,
+                                            series_options, series_values)
+    from larmor.recipe import Param, Recipe, SiteModel
+
+    def site(label, pos, amp):
+        return SiteModel(model="gauss_lor", label=label, params={
+            "isotropic_chemical_shift_ppm": Param(pos), "shift_fwhm_ppm": Param(4.0),
+            "amplitude": Param(amp), "gl": Param(1.0, vary=False)})
+
+    specs = [[("A", 15.0, 100), ("B", 2.0, 50)],
+             [("B", 2.2, 40), ("A", 15.3, 100), ("C", 30.0, 20)],
+             [("A", 14.7, 100), ("C", 31.0, 60)]]
+    recs = [Recipe(nucleus="11B", larmor_frequency_MHz=160.0, spin_rate_Hz=0.0,
+                   sample=f"g{k}", sites=[site(*s) for s in sp]) for k, sp in enumerate(specs)]
+    res = BatchFitResult(recipes=recs, labels=["g0", "g1", "g2"], rmsd=[0.0] * 3,
+                         per_dataset=[], shared=(), released=())
+    comps = component_map(res.recipes)
+    assert [c["name"] for c in comps] == ["A", "B", "C"]
+    P = "isotropic_chemical_shift_ppm"
+    pos_a = series_values(res, {"site": 0, "param": P, "kind": "param"})[0]
+    assert list(pos_a) == pytest.approx([15.0, 15.3, 14.7])
+    pos_c = series_values(res, {"site": 2, "param": P, "kind": "param"})[0]
+    assert np.isnan(pos_c[0]) and list(pos_c[1:]) == pytest.approx([30.0, 31.0])
+    pop = population_integral(res)[0]
+    assert pop.shape == (3, 3)
+    assert pop[2, 1] == 0.0 and pop[0, 2] == 0.0                 # absent: 0 %
+    assert pop[0, 0] + pop[0, 1] == pytest.approx(100.0, abs=0.5)
+    assert pop[2, 0] + pop[2, 2] == pytest.approx(100.0, abs=0.5)
+    frac_b = series_values(res, {"site": 1, "param": "amplitude", "kind": "popfrac"})[0]
+    assert frac_b[2] == 0.0 and frac_b[0] == pytest.approx(100.0 * 50 / 150)
+    assert any(o["site"] == 2 and o["text"].startswith("s2 C:") for o in series_options(res))
+
+    dlg = SeriesPlotDialog(None, res)
+    try:
+        assert [dlg.list.item(i).text() for i in range(dlg.list.count())][:3] == \
+            ["s0  A", "s1  B  (2/3)", "s2  C  (2/3)"]
+        assert "present in only some spectra: B (2/3), C (2/3)" in dlg.msg.text()
+        assert dlg._sel_label(2) == "C" and dlg._sel_key(2, {"param": P}) == "s2:isotropic_chemical_shift_ppm"
+        spec = dlg._species_bar_spec()
+        assert [s["label"] for s in spec["series"]] == ["s0 A", "s1 B", "s2 C"]
+        assert spec["series"][1]["values"][2] == 0.0 and spec["series"][2]["values"][0] == 0.0
+        for i in range(3):
+            dlg.list.item(i).setSelected(True)
+        dlg._draw()                                               # NaN-safe
+        pos_spec = next(s for s in dlg._params if s["param"] == P)
+        studio = dlg._studio_spec_for(pos_spec)
+        by_label = {t["label"]: t for t in studio["traces"]}
+        assert len(by_label["C"]["data"]["y"]) == 2 and by_label["C"]["data"]["x"] == [2.0, 3.0]
+        assert len(by_label["A"]["data"]["y"]) == 3
+    finally:
+        dlg.close()
 
 
 def test_estimate_baseline_recovers_a_slope():

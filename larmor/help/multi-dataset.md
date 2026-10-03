@@ -605,50 +605,77 @@ no second lines table to learn, and nothing freezes: a fit runs in the window's
 own fit thread with its progress bar and Stop / Cancel.
 
 **The bar.** One button per spectrum with a **status dot** — grey *not fitted*,
-green *fitted*, amber *edited since its fit*, red *the last fit failed* — and its
-name, RMSD and source in the tooltip (a ⚠ marks a spectrum acquired or processed
-unlike the rest; the chip near the right end carries the comparability sentence
-of §6 and opens its **Details**). Click a name, or **◀ ▶**, to switch.
+green *fitted*, amber *edited since its fit*, red *the last fit failed* — a 🔒
+before the name when its fit is kept, and its name, RMSD and source in the
+tooltip (a ⚠ marks a spectrum acquired or processed unlike the rest; the chip
+near the right end carries the comparability sentence of §6 and opens its
+**Details**). Click a name, or **◀ ▶**, to switch; **right-click a name** for
+its menu (switch, keep this fit, seed it from the previous / next / current
+spectrum, rename, remove from the series — it stays open).
 
-**Carry rules (Carry ▾).** With *seed the next spectrum from this one when I
-move* ticked, the spectrum you land on takes the model of the one you left:
+**Carry rules (Carry ▾).** *Moving never changes a spectrum that has lines.*
+With *copy this model into a spectrum without lines when I move to it* ticked,
+the spectrum you land on takes a **copy** of the model you leave — structure,
+labels, families, links, every amplitude scaled to its own height (a display
+seed; the fit's own pre-scale does the rest) — **only when it has no lines
+yet**. A spectrum that already has lines, fitted or not, is left exactly as it
+is: fit sample 1, work on sample 2, come back to sample 1 and its fit is still
+there. The value carry is an explicit action: **Seed this spectrum from the
+previous / next one** (or *Seed it from…* in a member's right-click menu)
+copies the **carried parameters** — the ticked list; positions, widths and
+shapes by default, amplitudes are always re-fitted — onto the lines of this
+spectrum that have the **same label** as a line of the source, clipped to this
+spectrum's own bounds. A linked parameter follows its master; a line with no
+namesake on the other side keeps its values, and the status line names it.
+Every seed is one undo step.
 
-- a spectrum **without lines** gets a **copy** of the model — structure, labels,
-  families, links — with every amplitude scaled to its own height (a display
-  seed; the fit's own pre-scale does the rest);
-- a spectrum **with its own lines keeps them**: only the ticked parameters
-  (positions, widths and shapes by default; amplitudes are always re-fitted)
-  are seeded onto matching lines, clipped to that spectrum's own bounds; a
-  linked parameter follows its master.
+**Components are paired by their label**, never by their position in the list.
+The label is the name in the lines table's first column: a copied model keeps
+its labels and Add line names every new line, so a series started from one
+model stays consistently labelled, and you rename two lines alike to say they
+are the same component (or differently to say they are not). Two labelled
+models with no name in common seed nothing, and the status line says so.
 
-So a line you add on spectrum 4 stays on spectrum 4, a line you remove there
-stays removed, and the status line says what moved; every seed is one undo
-step. **Copy this model to every spectrum** does the same from the current
-spectrum to all the others at once; **Replace every spectrum's lines with this
-model** overwrites them (their fits start over).
+**Keep this fit (🔒).** Once a spectrum is fitted to your satisfaction, tick
+*Keep this spectrum's fit* in Carry ▾ (or right-click its name): no carry
+reaches it, *Copy this model to every spectrum* walks past it, and an Auto
+sweep starts its neighbours from it but never refits it. Untick to release.
+
+**Copy this model to every spectrum** does from the current spectrum to all
+the others what a move and a seed do: spectra without lines take a copy,
+spectra with lines receive the carried values on the lines that share a label,
+kept ones are left alone. **Replace every spectrum's lines with this model**
+overwrites the others (their fits start over; kept ones are left alone).
 
 **Fit → next ▶** fits the current spectrum through the ordinary Fit — the
 progress bar, **Stop (keep)** / **Cancel (revert)** and the animation are the
-usual ones — then moves to the next spectrum and seeds it from the result.
-Repeat to walk the series by hand; a stopped or failed fit ends the chain (a
-failed one turns the dot red).
+usual ones — then moves to the next spectrum, which takes a copy of the result
+when it has no lines yet and is left as it is otherwise. Repeat to walk the
+series by hand; a stopped or failed fit ends the chain (a failed one turns the
+dot red).
 
 **Auto sweep ▾** runs the whole series in a worker: choose the **passes** (1–6;
 each pass sweeps one direction, so 2 = forward then back), which end to
 **start** from and an optional **smooth** window (0 / 3 / 5) that smooths each
 parameter's trajectory *between* passes so the series doesn't jitter. Every
-spectrum needs at least one line first (copy the model). The bar reads
-`pass 2/2 · 4/7 · RMSD 0.012` as it goes; **Stop** keeps what was fitted,
-**Cancel** (beside the progress bar) reverts everything. When it lands, every
-spectrum carries its fitted model and its fit verdict, the dots turn green and
-the status line gives the mean RMSD of each pass.
+spectrum needs at least one line first (copy the model). Each spectrum starts
+from its fitted neighbour's carried parameters on the lines that share a
+label; kept spectra (🔒) seed their neighbours and are not refitted; with every
+entry of the Carry list unticked, the sweep refits each spectrum from its own
+model. The bar reads `pass 2/2 · 4/7 · RMSD 0.012` as it goes; **Stop** keeps
+what was fitted, **Cancel** (beside the progress bar) reverts everything. When
+it lands, every refitted spectrum carries its fitted model and its fit verdict,
+the dots turn green and the status line gives the mean RMSD of each pass.
 
 **Table… / Plot… / Acquisition… / Save ▾.** **Table…** is the Series table of
 §6, step 3: names, replicate groups, the order of the series and composition
 columns joined from a CSV — OK renames and **reorders** the members (the bar,
 the dock prefixes and the walk follow). **Plot…** is the Series plot
 (parameter and population evolution, with export) over the spectra that carry
-lines. **Acquisition…** opens the Experimental-section window over the series
+lines; its components are paired by label across the series, so a component
+present in only some spectra reads `(2/5)` in its list, draws a gap in its
+shape parameters and 0 % population where a spectrum's model has no such line
+(the Species bar follows). **Acquisition…** opens the Experimental-section window over the series
 (no fit needed). **Save ▾ Save all fits…** writes one `.recipe.json` per
 spectrum (auto `sample_nucleus_seq_YYYYMMDD_HHMM`, or a name per fit); every
 saved recipe carries its source path, the SHA-256 of its data file and its
