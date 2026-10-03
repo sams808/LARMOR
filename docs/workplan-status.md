@@ -76,7 +76,16 @@ Workplan"; this file is the ground truth for progress.
   install 33 s (1994 files), Apps entry "LARMOR 0.15.2", installed exe
   self-test PASS, silent uninstall 6 s clean, the desktop shortcut restored
   afterwards (the setup's own desktop icon shares its name), crash log
-  empty. **Hand out the 0.15.2 setup**; every earlier file in `dist/` is
+  empty. **0.15.3** built 2026-10-02 after its full suite
+  (`dist/LARMOR-0.15.3-setup.exe` 111 MB, `dist/LARMOR-0.15.3-win64.zip`
+  159 MB; step [6/6] refreshed the desktop shortcut): frozen exe
+  `--selftest` PASS (core czjzek 557 evaluations, desktop fits ok), silent
+  install 21 s (1994 files into `%LOCALAPPDATA%\Programs\LARMOR`), Apps
+  entry "LARMOR 0.15.3" (uninstall key `{A5B3F6C2-…}_is1` under HKCU — not
+  `LARMOR_is1`), installed exe self-test PASS, silent uninstall 3 s with no
+  folder and no entry left, the desktop shortcut (deleted by the uninstaller,
+  which shares its name) restored to `dist\LARMOR\LARMOR.exe`, crash log
+  empty. **Hand out the 0.15.3 setup**; every earlier file in `dist/` is
   superseded.
 - **Full suite**: at v0.14.0 (0de34c7), **1324 passed / 0 failed** in 20 min 39 s,
   real-data layer complete (all 19 datasets present). v0.14.1 (faab8f9) adds
