@@ -220,3 +220,25 @@ def test_version_notes_only_for_applicable_readout_changes():
     assert P.version_notes({"software": {"larmor": "0.15.0"},
                             "sites": [{"model": "czjzek"}]}, "0.13.0") == []
     assert P.version_notes(cz) == P.version_notes(cz, __import__("larmor").__version__)
+
+
+def test_the_shipped_example_recipes_reopen_without_a_provenance_warning(monkeypatch):
+    """examples/*.recipe.json were fitted on the bundled EXPNOs as they are:
+    the 1r hash matches and the stored SR is the data's own, so reopening
+    one (File ▸ Open, the tutorials) reports neither changed data nor a moved
+    axis. They once stored sr_hz 0.0 against data referenced at SR −607.40 /
+    −929.11 Hz (the fitted line positions sit on the current axis) and opened
+    with a false 're-referenced since the fit (SR 0.00 → −607.40 Hz)'."""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    recipes = sorted((root / "examples").glob("*.recipe.json"))
+    if not recipes:
+        pytest.skip("example recipes not present")
+    monkeypatch.chdir(root)            # the recipes name their data relative to the repository
+    for p in recipes:
+        stored = json.loads(p.read_text(encoding="utf-8"))
+        assert P.verify_source(stored, load_any(stored["source_path"])[2]) == [], p.name
+        warns = load_any(str(p))[4]
+        assert not [w for w in warns if w.startswith((P.SOURCE_CHANGED_PREFIX,
+                                                      P.REREFERENCED_PREFIX))], (p.name, warns)

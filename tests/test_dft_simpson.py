@@ -518,3 +518,29 @@ def test_parse_fid_rejects_junk(tmp_path):
     p.write_text("not a simpson file")
     with pytest.raises(ValueError, match="not a SIMPSON"):
         simpson.parse_fid(p)
+
+
+def test_a_negative_cq_seeds_its_magnitude(tmp_path):
+    """sign(C_Q) = sign(Vzz) x sign(Q) is a property of the crystal, which
+    quadrupolar() reports as computed; the lineshape depends on |C_Q| only and
+    every model bounds Cq_MHz at >= 0.01, so the seed is |C_Q|. A signed seed
+    (27Al with Vzz < 0, 17O whose Q < 0 with Vzz > 0) was flagged unphysical
+    by sanity and clamped to 0.01 MHz by the fit: the DFT value was lost."""
+    from larmor import sanity
+
+    al_pos = "efg Al 1  -0.30 0.0 0.0  0.0 -0.40 0.0  0.0 0.0 0.70"
+    assert al_pos in MAGRES
+    p = tmp_path / "neg.magres"
+    p.write_text(MAGRES.replace(al_pos, "efg Al 1  0.30 0.0 0.0  0.0 0.40 0.0  0.0 0.0 -0.70"))
+    sites = dft.read_magres(p)
+    dft.assign_isotopes(sites)
+    assert sorted(s.isotope for s in sites) == ["17O", "27Al"]
+    for s in sites:
+        q = s.quadrupolar()
+        assert q["Cq_MHz"] < 0                       # reported signed, as computed
+        sd = s.to_site_dict("quad_ct", reference_ppm=560.0)
+        assert sd["params"]["Cq_MHz"]["value"] == pytest.approx(abs(q["Cq_MHz"]), rel=1e-12)
+        rec = Recipe.from_dict({"nucleus": s.isotope, "larmor_frequency_MHz": 130.3,
+                                "spin_rate_Hz": 20000.0,
+                                "sites": [{k: v for k, v in sd.items() if k != "notes"}]})
+        assert not [w for w in sanity.check_recipe(rec) if w["param"] == "Cq_MHz"], s.label

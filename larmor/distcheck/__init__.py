@@ -17,9 +17,10 @@ Stages are plain callables ``fn(say, ctx)``: ``say(*parts)`` logs a line,
 bundled example data), "quick": bool, "gui": bool, "frozen": bool}``; a
 stage passes by returning, fails by raising (the traceback goes to the log).
 ``core_stages`` holds the environment / imports / resources / exports / pool
-/ CLI stages, ``engines`` the Qt-free capabilities, ``gui_tools`` the
-desktop workflows, ``gui_workflows`` the tool dialogs and ``gui_menus`` the
-menu sweep (offscreen). Unless ``--real-settings`` is given, a run never
+/ CLI stages, ``engines`` the Qt-free capabilities (with ``engine_records``,
+``engine_specialty`` and ``engine_figures``), ``gui_tools`` the desktop
+workflows, ``gui_workflows`` the tool dialogs and ``gui_menus`` the menu
+sweep (offscreen). Unless ``--real-settings`` is given, a run never
 touches the user's own stores: the preferences go to a scratch .ini
 (``LARMOR_SETTINGS_FILE``), %LOCALAPPDATA% and each store's override point
 into a sandbox, and ``run`` puts the environment back on the way out.

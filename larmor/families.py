@@ -24,9 +24,12 @@ member. This module carries that propagation on three stated bases:
     integrals, not amplitudes -- amplitude is the peak height for
     gauss_lor / Czjzek / quadrupolar models and an area only for gl_norm.
 ``independent``
-    neither available: quadrature of the per-site integral errors for a
-    family and the delta method for a ratio, FLAGGED as independent so no
-    table passes an independence assumption off as a propagated error.
+    neither available: first-order propagation with the site integrals
+    treated as independent -- the quadrature of the members' integral errors
+    for a family's integral, its share of the total with the normalisation
+    in the derivative (as quantify does for a site row), the delta method for
+    a ratio -- FLAGGED as independent so no table passes an independence
+    assumption off as a propagated error.
 
 Reported values are always the best-fit numbers, never a trial mean. Family
 percentages are of the FULL total (untagged lines included, listed in the
@@ -254,6 +257,7 @@ def summarize(integrals: Sequence[float], amplitudes: Sequence[float],
     sig = list(sigma) if sigma is not None else [None] * n
 
     fam_err: dict[str, float | None] = {}
+    fam_sig: dict[str, float | None] = {}     # independent basis: σ of each family INTEGRAL
     ratio_rows = []
     basis = "independent"
     note_bits: list[str] = []
@@ -286,13 +290,26 @@ def summarize(integrals: Sequence[float], amplitudes: Sequence[float],
                          "integral/amplitude fixed at the best fit; "
                          "lineshape covariance neglected)")
     else:
+        # first-order propagation over independent site integrals: a family's
+        # integral F has σ_F = √Σσ_i² over its members, and its share
+        # p = F/T of the total T = F + R (R: every other line) has
+        # ∂p/∂F = R/T², ∂p/∂R = −F/T² -- the normalisation is part of the
+        # derivative, as in quantify.fraction_err_pct for a site row: a
+        # one-line family IS its row, a family holding every line is 100 %
+        # with error 0 (σ_F/T, the integral's error dressed up as a share's,
+        # gave 100 ± 2.6 % there and disagreed with the covariance basis fed
+        # the same independent errors)
         for f, idx in members.items():
             s = [sig[i] for i in idx]
-            if any(not _finite(v) for v in s):
-                fam_err[f] = None
-            else:
-                fam_err[f] = (100.0 * float(np.sqrt(sum(v * v for v in s))) / total
-                              if total > 0 else None)
+            if total <= 0 or any(not _finite(v) for v in s):
+                fam_err[f] = fam_sig[f] = None
+                continue
+            var_f = sum(float(v) ** 2 for v in s)
+            var_r = sum(float(sig[i]) ** 2 for i in range(n)
+                        if i not in idx and _finite(sig[i]))   # an unfitted line: no spread
+            rest = total - F[f]
+            fam_sig[f] = float(np.sqrt(var_f))
+            fam_err[f] = 100.0 * float(np.sqrt(rest * rest * var_f + F[f] * F[f] * var_r)) / total ** 2
         note_bits.append("independent — lines treated as independent "
                          "(quadrature of the site errors); run a fit or "
                          "Monte-Carlo errors for a propagated value")
@@ -335,11 +352,10 @@ def summarize(integrals: Sequence[float], amplitudes: Sequence[float],
             # delta method, families independent: dr/dF_f = (w_n D - N w_d)/D²
             var = 0.0
             for f in present:
-                s_f = fam_err[f]
-                if s_f is None:
+                s_abs = fam_sig.get(f)                # the family integral's own σ
+                if s_abs is None:
                     var = None
                     break
-                s_abs = s_f * total / 100.0           # back to integral units
                 d = (rd.numerator.get(f, 0.0) * den - num * rd.denominator.get(f, 0.0)) / den ** 2
                 var += (d * s_abs) ** 2
             row["err"] = float(np.sqrt(var)) if var is not None else None

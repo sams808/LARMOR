@@ -7,7 +7,7 @@
   "larmor_frequency_MHz": 130.3175616,
   "spin_rate_Hz": 26000.0,
   "mas_uncertain": false,
-  "sr_hz": 0.0,
+  "sr_hz": -607.4000240232635,
   "engine": "czjzek-kernel+lmfit",
   "sites": [
     {

@@ -9,7 +9,7 @@ on the dipolar coupling D (Gullion & Schaefer, J. Magn. Reson. 81, 196, 1989).
 Two analysis levels, both provided:
 
 1. **Universal short-time parabola** (model-free, robust):
-       ΔS/S0 ≈ (4/15) (D Ntr)^2 ... valid while ΔS/S0 < ~0.2
+       ΔS/S0 ≈ (16/15) (D Ntr)^2 ... valid while ΔS/S0 < ~0.2
    This is the standard way to extract D without assuming a spin geometry,
    and the only defensible one when the number of neighbours is unknown
    (Bertmer & Eckert, Solid State Nucl. Magn. Reson. 15, 139, 1999).
@@ -17,9 +17,11 @@ Two analysis levels, both provided:
 2. **Full isolated-pair curve** (Bessel expansion): the exact powder-averaged
    S/S0 for one I-S pair, fitted over the whole curve.
 
+D is the dipolar coupling constant in Hz, (mu0/4pi) gI gS hbar / (2 pi r^3).
 For a heterogeneous sample the meaningful quantity is the second moment
-M2 = (4/15)·D²·... -- LARMOR reports D, M2 and the equivalent pair distance,
-and states which regime was used.
+(van Vleck, one spin-1/2 partner: M2 = (2 pi D)^2 / 5, so that
+ΔS/S0 ≈ (4/(3 pi^2)) M2 (Ntr)^2 at short times) -- LARMOR reports D, M2 and
+the equivalent pair distance, and states which regime was used.
 """
 from __future__ import annotations
 
@@ -60,21 +62,29 @@ def distance_angstrom(iso1: str, iso2: str, d_hz: float) -> float:
 
 #: Dephasing phase after N rotor periods for an isolated pair, derived by
 #: integrating the MAS dipolar frequency over a rotor cycle with a pi pulse at
-#: Tr/2 (Gullion & Schaefer):
+#: Tr/2 (Gullion & Schaefer). The secular heteronuclear coupling
+#: H/hbar = -2 pi D (3 cos^2 theta - 1) I_z S_z puts the I-spin line of the
+#: m_S = +-1/2 partner at +-(D/2)(3 cos^2 theta - 1) Hz -- the Pake doublet of
+#: a heteronuclear pair, horns D apart -- which at the magic angle reads
 #:
-#:   omega_D(t)/2pi = -D [ sqrt2 sin2b cos(a + w_r t) + sin^2 b cos(2a + 2w_r t) ]
+#:   omega_D(t)/2pi = -+(D/2) [ sqrt2 sin2b cos(a + w_r t) + sin^2 b cos(2a + 2w_r t) ]
 #:   dphi_1 = int_0^{Tr/2} - int_{Tr/2}^{Tr}  ->  the cos(2a+2w_r t) term
 #:            integrates to zero over each half rotor period
-#:   dphi   = N * 4 sqrt2 * D * Tr * sin(2b) * sin(a)
+#:   dphi   = N * 2 sqrt2 * D * Tr * sin(2b) * sin(a)
 #:
 #: so with lambda = D * N * Tr  (D in Hz, N*Tr in s):
 #:   dphi = GEOM_PREFACTOR * lambda * sin(2b) * sin(a)
-GEOM_PREFACTOR = 4.0 * np.sqrt(2.0)
+#: and the powder average is the exact isolated-pair curve of Mueller et al.
+#: (J. Magn. Reson. A 113, 81, 1995), S/S0 = (sqrt2 pi/4) J_1/4(sqrt2 lambda)
+#: J_-1/4(sqrt2 lambda): dS/S0 = 0.5 at lambda = 0.77, first maximum 1.04 at
+#: lambda = 1.67 (tests/test_series_redor.py holds the curve to it).
+GEOM_PREFACTOR = 2.0 * np.sqrt(2.0)
 
 #: small-lambda limit of the powder average (see test_redor_parabola_is_the_
-#: small_lambda_limit): 1 - <cos(dphi)> ~ <dphi^2>/2 = (64/15) lambda^2
-#: because <sin^2 a> = 1/2 and <sin^2 2b>_powder = 8/15.
-SHORT_TIME_COEFF = 64.0 / 15.0
+#: small_lambda_limit): 1 - <cos(dphi)> ~ <dphi^2>/2 = (16/15) lambda^2
+#: because <sin^2 a> = 1/2 and <sin^2 2b>_powder = 8/15 -- Bertmer & Eckert's
+#: (4/(3 pi^2)) M2 (N Tr)^2 with the van Vleck M2 = (2 pi D)^2 / 5.
+SHORT_TIME_COEFF = 16.0 / 15.0
 
 
 def _powder_grid(na: int = 200, nb: int = 100):
@@ -101,7 +111,7 @@ def redor_pair_curve(d_hz: float, ntr_s: np.ndarray) -> np.ndarray:
 
 
 def short_time_curve(d_hz: float, ntr_s: np.ndarray) -> np.ndarray:
-    """Universal short-time parabola: ΔS/S0 = (64/15)(D·N·Tr)^2.
+    """Universal short-time parabola: ΔS/S0 = (16/15)(D·N·Tr)^2.
 
     Valid while ΔS/S0 < ~0.2. Model-free: it assumes only the second-order
     expansion of the powder average, no spin geometry and no neighbour count.
@@ -210,8 +220,11 @@ def analyze(ntr_s: np.ndarray, ds_s0: np.ndarray,
         notes.append("assumes ONE isolated I–S pair; invalid for multi-spin "
                      "environments (D would be overestimated)")
 
-    # van Vleck second moment of the heteronuclear pair, rad^2 s^-2
-    m2 = (4.0 / 15.0) * (2 * np.pi * d) ** 2
+    # van Vleck second moment of the heteronuclear pair, rad^2 s^-2:
+    # (4/15) S(S+1) (2 pi D)^2 with S(S+1) = 3/4 for a spin-1/2 partner --
+    # the M2 that the short-time law (4/(3 pi^2)) M2 (N Tr)^2 turns back
+    # into the fitted parabola (16/15)(D N Tr)^2
+    m2 = 0.2 * (2 * np.pi * d) ** 2
     dist = None
     if pair:
         try:
