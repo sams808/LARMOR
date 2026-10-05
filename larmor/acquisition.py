@@ -1084,14 +1084,6 @@ def table(blocks, spin_rates: dict | None = None) -> AcqTable:
                 varying.add(k)
         else:
             constants[k] = first
-    # keys the Experimental paragraph reads that are not Table S1 columns: a
-    # differing one must still become a range in the merged view, or the
-    # first spectrum's value is stated for all of them (the p1 power of a
-    # single-pulse spectrum and an MQMAS in one 27Al paragraph)
-    for k in ("p1_power_W", "p1_power_level"):
-        vals = [r.get(k) for r in rows]
-        if len(rows) > 1 and any(not _same(v, vals[0], k) for v in vals[1:]):
-            varying.add(k)
     return AcqTable(columns=cols, rows=rows, varying=varying, constants=constants)
 
 
@@ -1173,6 +1165,13 @@ def table_markdown(t: AcqTable) -> str:
 
 
 # ------------------------------------------------------------- paragraph
+#: record keys the Experimental paragraph reads that are not Table S1 columns:
+#: when they differ across a nucleus group, the merged view makes them ranges
+#: (the p1 power of a single-pulse spectrum and an MQMAS in one paragraph used
+#: to be stated as the first spectrum's)
+_PARAGRAPH_ONLY_KEYS = ("p1_power_W", "p1_power_level")
+
+
 def _merged_view(t: AcqTable) -> dict:
     """One block-like dict for a nucleus group: constant keys keep their
     value, varying keys become ranges."""
@@ -1184,6 +1183,12 @@ def _merged_view(t: AcqTable) -> dict:
         vals = [r.get(k) for r in t.rows]
         present = [v for v in vals if v is not None and v != ""]
         if k in t.varying:
+            view[k] = _Range(present) if present else None
+            continue
+        if k in _PARAGRAPH_ONLY_KEYS and len(t.rows) > 1 \
+                and any(not _same(v, vals[0], k) for v in vals[1:]):
+            # not a Table S1 column (so never in t.varying), but read by the
+            # paragraph: a differing value must not be stated for all
             view[k] = _Range(present) if present else None
             continue
         if k in ALWAYS_VARIES and k not in ("mas_uncertain",):

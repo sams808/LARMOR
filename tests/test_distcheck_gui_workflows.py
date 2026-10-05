@@ -48,9 +48,10 @@ def test_dialog_stages_pass_in_a_development_install(tmp_path, monkeypatch):
     report = json.loads(log.with_suffix(".json").read_text(encoding="utf-8"))
     assert [s["name"] for s in report["stages"]] == names
     assert all(s["ok"] for s in report["stages"]), text[-8000:]
-    ctx = {"out": out}
-    # the exports the stages promise are where the ctx said
-    out = ctx["out"]
+    # the exports the stages promise are where the ctx said (the GUI groups
+    # run in a child process of their own, under <out>/dialog_stages)
+    if (out / "dialog_stages").is_dir():
+        out = out / "dialog_stages"
     assert (out / "error_tools" / "chi2_map.png").stat().st_size > 1000
     assert (out / "batch" / "bundle" / "manifest.csv").is_file()
     assert (out / "batch" / "series.csv").is_file()

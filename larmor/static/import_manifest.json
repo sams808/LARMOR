@@ -1755,6 +1755,7 @@
    "larmor.autofit",
    "larmor.batchfit",
    "larmor.desktop.app",
+   "larmor.distcheck",
    "larmor.distcheck.core_stages"
   ],
   "larmor.paramstatus": [
@@ -1806,6 +1807,7 @@
    "larmor.project"
   ],
   "larmor.pulseprog": [
+   "larmor.acquisition",
    "larmor.desktop.explorer",
    "larmor.desktop.pulseprog_dialog",
    "larmor.distcheck.engine_records"
@@ -2552,6 +2554,7 @@
   ],
   "subprocess": [
    "larmor.desktop.batch_dialog",
+   "larmor.distcheck",
    "larmor.distcheck.gui_common",
    "larmor.methods",
    "larmor.simpson"

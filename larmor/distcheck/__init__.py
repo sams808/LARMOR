@@ -86,6 +86,76 @@ def _examples_dir() -> Path | None:
     return p if (p / "pCABS2-4").is_dir() else None
 
 
+_GUI_GROUPS = ("tool", "dialog", "menu")
+
+
+def _child_command(names: list, out: Path, quick: bool) -> list:
+    """The command line of a child check over ``names``: the frozen exe
+    re-enters itself with --distcheck, a development install runs the
+    module."""
+    if getattr(sys, "frozen", False):
+        cmd = [sys.executable, "--distcheck"]
+    else:
+        cmd = [sys.executable, "-m", "larmor.distcheck"]
+    cmd += ["--gui", "--only", ",".join(names), "--out", str(out)]
+    if quick:
+        cmd.append("--quick")
+    return cmd
+
+
+def _run_child(names: list, group: str, ctx: dict, say) -> list:
+    """Run one GUI group in a child process and relay its log; returns its
+    stage records. A stage the child never reported (a crash, a timeout)
+    comes back failed, with the exit code and the tail of the child's log."""
+    import subprocess
+
+    out = Path(ctx["out"]) / f"{group}_stages"
+    out.mkdir(parents=True, exist_ok=True)
+    log = out / "distcheck.log"
+    env = dict(os.environ, LARMOR_DISTCHECK_CHILD="1", LARMOR_DISTCHECK_LOG=str(log))
+    say(f"--- {group} stages in a child process: {', '.join(names)}")
+    t0 = time.perf_counter()
+    try:
+        r = subprocess.run(_child_command(names, out, ctx["quick"]), env=env,
+                           timeout=(3600 if ctx["quick"] else 6 * 3600),
+                           stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        rc = r.returncode
+        err_tail = (r.stderr or b"").decode("utf-8", "replace")[-3000:]
+    except subprocess.TimeoutExpired:
+        rc, err_tail = "timeout", ""
+    text = log.read_text(encoding="utf-8", errors="replace") if log.exists() else ""
+    for line in text.splitlines():
+        if line.startswith("=== ") or line.startswith("(log:"):
+            continue
+        say(line)
+    stages = []
+    rep = log.with_suffix(".json")
+    if rep.exists():
+        try:
+            stages = list(json.loads(rep.read_text(encoding="utf-8")).get("stages") or [])
+        except ValueError:
+            stages = []
+    got = {s.get("name") for s in stages}
+    for n in names:
+        if n not in got:
+            why = (f"the {group} stages' process ended (exit {rc}) before this stage "
+                   "reported" + (f"; its stderr ends:\n{err_tail}" if err_tail else ""))
+            say(f"FAIL {n} ({why.splitlines()[0]})")
+            if err_tail:
+                say(err_tail)
+            stages.append({"name": n, "ok": False, "seconds": 0.0, "notes": [], "error": why})
+    if rc not in (0, 1) and all(n in got for n in names):
+        # every stage reported, then the process died: still a failure
+        why = f"the {group} stages' process crashed after its stages (exit {rc})"
+        say(f"FAIL {group}-process ({why})")
+        if err_tail:
+            say(err_tail)
+        stages.append({"name": f"{group}-process", "ok": False, "seconds": 0.0, "notes": [],
+                       "error": why + (f"; its stderr ends:\n{err_tail}" if err_tail else "")})
+    say(f"    {group} stages' process: exit {rc}, {time.perf_counter() - t0:.0f} s")
+    return stages
+
+
 def run(argv=None) -> int:
     """Run the check (``argv`` as on the command line; None = sys.argv);
     returns the exit code. The sandbox variables it sets -- the scratch
@@ -94,13 +164,33 @@ def run(argv=None) -> int:
     back exactly as it was."""
     env_before = dict(os.environ)
     try:
-        return _run(argv)
+        rc = _run(argv)
     finally:
         for k in [k for k in os.environ if k not in env_before]:
             del os.environ[k]
         for k, v in env_before.items():
             if os.environ.get(k) != v:
                 os.environ[k] = v
+    if os.environ.get("LARMOR_DISTCHECK_CHILD") and not os.environ.get("PYTEST_CURRENT_TEST"):
+        # a child GUI group ends here, its report written: the interpreter's
+        # own teardown of the dozens of windows a group leaves behind crashed
+        # with an access violation after every stage had passed (LARMOR's
+        # real exit, one window, is clean -- docs/development-notes.md §8)
+        # (the tool group's process also spent 50 minutes in that teardown
+        # after its stages had taken one: the process pool's workers are
+        # shut down here, explicitly, instead of by the atexit join)
+        try:
+            from larmor import parallel
+            parallel.shutdown_shared_pool()
+        except Exception:                                # noqa: BLE001
+            pass
+        for stream in (sys.stdout, sys.stderr):
+            try:
+                stream.flush()
+            except Exception:                            # noqa: BLE001
+                pass
+        os._exit(rc)
+    return rc
 
 
 def _run(argv) -> int:
@@ -115,6 +205,9 @@ def _run(argv) -> int:
     ap.add_argument("--skip", default="", help="comma-separated stage names to skip")
     ap.add_argument("--out", default="", help="keep the scratch outputs in this folder")
     ap.add_argument("--list", action="store_true", help="list the stages and exit")
+    ap.add_argument("--no-isolate", action="store_true",
+                    help="run the GUI stage groups in this process instead of one child "
+                         "process per group")
     ap.add_argument("--real-settings", action="store_true",
                     help="use the user's real preferences and %%LOCALAPPDATA%%\\LARMOR "
                          "stores (default: scratch copies, so nothing of yours is touched)")
@@ -173,7 +266,26 @@ def _run(argv) -> int:
               "stages": []}
     failed = []
     t_all = time.perf_counter()
-    for name, fn in stages:
+    # each GUI group (tool / dialog / menu) runs in a process of its own: a
+    # fresh application per group, and a crash in one group is a failed
+    # group in the report instead of the end of the whole check. In one
+    # process the menu sweep's text-size switch died in QApplication.setFont
+    # after the thirty GUI stages before it (it passes on its own).
+    isolate = gui and not os.environ.get("LARMOR_DISTCHECK_CHILD") and not args.no_isolate
+    queue = list(stages)
+    while queue:
+        name, fn = queue[0]
+        group = name.split("-")[0]
+        if isolate and group in _GUI_GROUPS:
+            batch = []
+            while queue and queue[0][0].split("-")[0] == group:
+                batch.append(queue.pop(0)[0])
+            for st in _run_child(batch, group, ctx, say):
+                report["stages"].append(st)
+                if not st["ok"] and st["name"] not in failed:
+                    failed.append(st["name"])
+            continue
+        queue.pop(0)
         say(f"--- {name}")
         notes: list = []
 
