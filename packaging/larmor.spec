@@ -45,6 +45,20 @@ hiddenimports += [
 for pkg in ("larmor", "lmfit", "scipy.optimize", "scipy.stats", "scipy.special",
             "scipy.linalg", "scipy.interpolate", "scipy.signal", "pybaselines"):
     hiddenimports += collect_submodules(pkg)
+# matplotlib's backends hook collects only the backends it sees in
+# matplotlib.use() calls (Agg) plus the one imported by name (qtagg); the
+# file-format backends are loaded by savefig(format=...) through a string,
+# so the first SVG / PDF / EPS export of the 0.15.3 exe died with "No module
+# named 'matplotlib.backends.backend_svg'". Named here; LARMOR.exe
+# --distcheck imports every one of them (larmor/distcheck/manifest.py DYNAMIC)
+hiddenimports += [
+    "matplotlib.backends.backend_agg", "matplotlib.backends.backend_svg",
+    "matplotlib.backends.backend_pdf", "matplotlib.backends.backend_ps",
+    "matplotlib.backends.backend_qtagg",
+    "pyqtgraph.exporters.ImageExporter", "pyqtgraph.exporters.SVGExporter",
+    "pyqtgraph.exporters.CSVExporter",
+    "PIL.TiffImagePlugin", "PIL.JpegImagePlugin", "PIL.PngImagePlugin",
+]
 # dist-info so importlib.metadata.version() works in the software stamp
 for dist in ("larmor", "lmfit", "mrsimulator", "numpy", "scipy", "asteval",
              "uncertainties"):
@@ -69,6 +83,15 @@ for doc in ("README.md", "ROADMAP.md"):
         datas.append((str(ROOT / doc), "."))
 if (ROOT / "docs" / "tutorials").exists():
     datas.append((str(ROOT / "docs" / "tutorials"), "docs/tutorials"))
+# the example data set (a 27Al / 11B Bruker sample folder, its two fits and
+# their figure; 3.9 MB): what a first-time user and the distribution check
+# open without data of their own. examples/bib (reference PDFs) stays out.
+_ex = ROOT / "examples"
+if _ex.exists():
+    for item in sorted(_ex.iterdir()):
+        if item.name == "bib":
+            continue
+        datas.append((str(item), f"examples/{item.name}" if item.is_dir() else "examples"))
 
 a = Analysis(
     [str(ROOT / "packaging" / "launcher.py")],

@@ -33,6 +33,14 @@ def _crash_log(exc_type, exc, tb):
 
 def main() -> int:
     sys.excepthook = _crash_log
+    if "--distcheck" in sys.argv[1:]:
+        # `LARMOR.exe --distcheck [--gui] [--quick]`: the whole capability
+        # list -- every module, resource, engine, export format, the process
+        # pool, the CLI and (with --gui) every window -- into
+        # ~/LARMOR_distcheck.log; exit 0 only when all of it passed
+        from larmor.distcheck import run as distcheck_run
+
+        return distcheck_run([a for a in sys.argv[1:] if a != "--distcheck"])
     if "--selftest" in sys.argv[1:]:
         # `LARMOR.exe --selftest`: fit a synthetic spectrum through the core
         # and through the window, write ~/LARMOR_selftest.log, exit 0/1 --
