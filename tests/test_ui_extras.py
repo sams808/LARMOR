@@ -14,6 +14,7 @@ os.environ.setdefault("LARMOR_NO_SESSION", "1")
 
 pytest.importorskip("PySide6")
 from PySide6.QtWidgets import QApplication, QTreeWidgetItem  # noqa: E402
+from larmor.desktop.prefs import settings as app_settings
 
 
 @pytest.fixture(scope="module")
@@ -839,10 +840,9 @@ def test_czjzek_display_convention_rescales_cell_and_header(qapp):
 def test_pin_rename_persists_and_updates_label(qapp, tmp_path):
     """Right-click > Rename pin: the display name sticks to the pin, survives a
     restart (fresh panel), resets on empty input, and is dropped on unpin."""
-    from PySide6.QtCore import QSettings
 
     from larmor.desktop import explorer
-    s = QSettings("LARMOR", "app")
+    s = app_settings()
     old_pins = s.value("pinnedFolders", [])
     old_names = s.value("pinnedNames", "")
     try:
@@ -1082,7 +1082,6 @@ def test_figure_exports_remember_their_folder(qapp, tmp_path, monkeypatch):
     """Exporting a second figure must start where the first one landed, not
     back in the LARMOR root. Gated on LARMOR_NO_SESSION so the suite itself
     never touches the real setting."""
-    from PySide6.QtCore import QSettings
 
     from larmor.desktop import paths
 
@@ -1090,7 +1089,7 @@ def test_figure_exports_remember_their_folder(qapp, tmp_path, monkeypatch):
     assert paths.remembered_dir(paths.FIGURE_DIR_KEY, "FB") == "FB"
     paths.remember_dir(paths.FIGURE_DIR_KEY, tmp_path / "x.png")
 
-    s = QSettings("LARMOR", "app")
+    s = app_settings()
     old = s.value(paths.FIGURE_DIR_KEY)
     monkeypatch.delenv("LARMOR_NO_SESSION", raising=False)
     try:

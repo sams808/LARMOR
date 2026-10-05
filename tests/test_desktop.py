@@ -13,6 +13,7 @@ pyside = pytest.importorskip("PySide6")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication  # noqa: E402
+from larmor.desktop.prefs import settings as app_settings
 
 
 @pytest.fixture(scope="module")
@@ -24,12 +25,11 @@ def qapp():
 @pytest.fixture()
 def win(qapp, monkeypatch):
     monkeypatch.setenv("LARMOR_NO_SESSION", "1")  # never inherit a real session
-    from PySide6.QtCore import QSettings
 
     from larmor.desktop.app import MainWindow
     from larmor.desktop.mw_sidebands import SSB_OFFER_KEY
 
-    settings = QSettings("LARMOR", "app")
+    settings = app_settings()
     before = settings.value(SSB_OFFER_KEY)
     w = MainWindow()
     # the sideband offer on load is OFF by default since 0.15; the offer
@@ -861,10 +861,9 @@ def test_set_aesthetic_override_applies_live_and_normal_restores_it(win):
     """Choosing a hidden style writes the setting AND applies it immediately
     (no restart needed); choosing "Normal" restores whichever normal theme
     was active before, also live."""
-    from PySide6.QtCore import QSettings
     from larmor.desktop import theme
 
-    settings = QSettings("LARMOR", "app")
+    settings = app_settings()
     original_override = settings.value("appearanceOverride", "")
     original_theme = settings.value("theme", theme.DEFAULT)
     try:
@@ -1428,7 +1427,6 @@ def test_sideband_offer_copy_action_adds_held_copies_seeded_from_the_teeth(
 
 def test_sideband_offer_warns_on_a_wrong_rate_and_writes_it_only_when_uncertain(
         win, qapp, tmp_path):
-    from PySide6.QtCore import QSettings
 
     from larmor.desktop.mw_sidebands import SSB_OFFER_KEY
 
@@ -1480,13 +1478,12 @@ def test_sideband_offer_warns_on_a_wrong_rate_and_writes_it_only_when_uncertain(
     assert p["shift_fwhm_ppm"]["value"] == pytest.approx(4.0, abs=0.4)
     assert win.recipe["spin_rate_Hz"] == pytest.approx(20000.0, rel=3e-3)
     assert "`sidebands` line" in win.statusBar().currentMessage()
-    assert QSettings("LARMOR", "app").value(SSB_OFFER_KEY, False, type=bool) \
+    assert app_settings().value(SSB_OFFER_KEY, False, type=bool) \
         == win.actSsbOffer.isChecked()
 
 
 def test_sideband_offer_is_silent_for_plain_static_and_toggled_off_data(
         win, qapp, tmp_path, monkeypatch):
-    from PySide6.QtCore import QSettings
 
     from larmor.desktop.mw_sidebands import SSB_OFFER_KEY
 
@@ -1520,7 +1517,7 @@ def test_sideband_offer_is_silent_for_plain_static_and_toggled_off_data(
     monkeypatch.undo()
 
     # (c) the View toggle, persisted in QSettings
-    settings = QSettings("LARMOR", "app")
+    settings = app_settings()
     before = settings.value(SSB_OFFER_KEY, False, type=bool)
     try:
         win.actSsbOffer.setChecked(False)

@@ -24,13 +24,14 @@ import os
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QSettings, QSize, Qt, QTimer
+from PySide6.QtCore import QEvent, QSize, Qt, QTimer
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (QDialog, QHBoxLayout, QLabel, QPushButton,
                                QSizePolicy, QTextBrowser, QToolBar,
                                QVBoxLayout, QWidget)
 
 from larmor.desktop.windowtray import TOOL_WINDOW_FLAGS, is_alive
+from larmor.desktop.prefs import settings as _settings
 
 __all__ = ["help_path", "tutorial_path", "show_help", "HelpWindow",
            "ZOOM_STEPS", "text_scale", "set_text_scale"]
@@ -68,8 +69,7 @@ def tutorial_path(name: str) -> Path | None:
 
 
 # --------------------------------------------------------------- settings
-def _settings() -> QSettings:
-    return QSettings("LARMOR", "app")
+# ``_settings`` is larmor.desktop.prefs.settings (the one store factory)
 
 
 def _persist() -> bool:

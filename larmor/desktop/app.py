@@ -32,7 +32,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
-from PySide6.QtCore import QFileSystemWatcher, QSettings, Qt, QTimer, Signal
+from PySide6.QtCore import QFileSystemWatcher, Qt, QTimer, Signal
 from PySide6.QtWidgets import (QApplication, QLabel, QMainWindow, QVBoxLayout,
                                QWidget)
 
@@ -54,6 +54,7 @@ from larmor.desktop.mw_tools import _ToolsMixin
 from larmor.desktop.mw_series import _SeriesMixin
 from larmor.desktop.mw_chrome import _ChromeMixin
 from larmor.desktop.mw_menus import _MenusMixin, TUTORIALS
+from larmor.desktop.prefs import settings as _settings
 
 __all__ = [
     'MainWindow', 'main', 'asset_path', 'TUTORIALS', 'FitWorker',
@@ -402,7 +403,7 @@ def main() -> int:
     # A hidden "aesthetic" override (View ▸ Theme ▸ More styles…) takes
     # precedence when set, so the app opens back into whichever style —
     # normal or aesthetic — was live when it last closed.
-    settings = QSettings("LARMOR", "app")
+    settings = _settings()
     override = settings.value("appearanceOverride", "")
     if override and override in theme.AESTHETIC_THEMES:
         theme.apply(app, override)

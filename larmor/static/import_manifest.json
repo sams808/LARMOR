@@ -70,17 +70,12 @@
    "larmor.desktop.montecarlo_dialog",
    "larmor.desktop.mw_chrome",
    "larmor.desktop.mw_cofit",
-   "larmor.desktop.mw_editing",
-   "larmor.desktop.mw_files",
    "larmor.desktop.mw_fitting",
    "larmor.desktop.mw_menus",
-   "larmor.desktop.mw_session",
-   "larmor.desktop.mw_sidebands",
    "larmor.desktop.mw_tools",
    "larmor.desktop.paddle",
    "larmor.desktop.palette_dialog",
    "larmor.desktop.panels",
-   "larmor.desktop.paths",
    "larmor.desktop.plot",
    "larmor.desktop.plotting_studio",
    "larmor.desktop.prefs",
@@ -1060,12 +1055,26 @@
    "larmor.desktop.series_plot"
   ],
   "larmor.desktop.prefs": [
+   "larmor.desktop.addline_toolbar",
    "larmor.desktop.app",
    "larmor.desktop.batchfit_dialog",
+   "larmor.desktop.dialogs",
    "larmor.desktop.explorer",
+   "larmor.desktop.fittable_dialog",
+   "larmor.desktop.help_dialog",
+   "larmor.desktop.mw_chrome",
    "larmor.desktop.mw_editing",
+   "larmor.desktop.mw_files",
    "larmor.desktop.mw_menus",
-   "larmor.desktop.mw_tools"
+   "larmor.desktop.mw_session",
+   "larmor.desktop.mw_sidebands",
+   "larmor.desktop.mw_tools",
+   "larmor.desktop.panels",
+   "larmor.desktop.paths",
+   "larmor.desktop.plotting_studio",
+   "larmor.desktop.qcpmg_dialog",
+   "larmor.desktop.workers",
+   "larmor.distcheck.gui_common"
   ],
   "larmor.desktop.pulseprog_dialog": [
    "larmor.desktop.mw_tools"
@@ -2004,6 +2013,7 @@
    "larmor.desktop.mw_session",
    "larmor.desktop.panels",
    "larmor.desktop.paths",
+   "larmor.desktop.prefs",
    "larmor.desktop.qcpmg_dialog",
    "larmor.distcheck",
    "larmor.distcheck.core_stages",
@@ -2236,6 +2246,7 @@
   ],
   "shutil": [
    "larmor.distcheck",
+   "larmor.distcheck.gui_common",
    "larmor.simpson"
   ],
   "string": [

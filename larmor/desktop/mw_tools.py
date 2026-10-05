@@ -16,12 +16,12 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
-from PySide6.QtCore import QSettings
 from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
 from larmor.desktop.windowtray import show_tool_window
 from larmor.desktop.workers import _fit_tol
 from larmor.recipe import Recipe
+from larmor.desktop.prefs import settings as _settings
 
 
 class _ToolsMixin:
@@ -165,7 +165,7 @@ class _ToolsMixin:
             "default 0.1 % ≈ dmfit's 1.0e-3;  0 = fit to full precision.", cur,
             0.0, 50.0, 3)
         if ok:
-            QSettings("LARMOR", "app").setValue("fitStdevPct", float(val))
+            _settings().setValue("fitStdevPct", float(val))
             self.statusBar().showMessage(
                 "fit completion threshold: "
                 + ("full precision" if val <= 0 else f"Δσ < {val:g}%"))
@@ -186,7 +186,7 @@ class _ToolsMixin:
         if not ok or not name.strip():
             return
         from larmor.desktop.prefs import json_setting
-        s = QSettings("LARMOR", "app")
+        s = _settings()
         lib = json_setting("constraintLibrary", {})
         lib[name.strip()] = cset
         s.setValue("constraintLibrary", json.dumps(lib))
@@ -202,7 +202,7 @@ class _ToolsMixin:
         if not self.recipe or not self.recipe.get("sites"):
             self.statusBar().showMessage("open/build a model first")
             return
-        lib = json.loads(QSettings("LARMOR", "app").value(
+        lib = json.loads(_settings().value(
             "constraintLibrary", "{}") or "{}")
         if not lib:
             self.statusBar().showMessage("no saved constraint sets yet")
@@ -404,7 +404,7 @@ class _ToolsMixin:
         if self.source_path and Path(self.source_path).exists():
             start = str(session_root(self.source_path))
         else:
-            start = str(QSettings("LARMOR", "app").value("lastDir", "") or "")
+            start = str(_settings().value("lastDir", "") or "")
         dlg = getattr(self, "_ref_audit", None)
         if dlg is None:
             dlg = ReferencingAuditDialog(self, start, self.source_path)
@@ -433,7 +433,7 @@ class _ToolsMixin:
         if self.source_path and Path(self.source_path).exists():
             hint = str(session_root(self.source_path))
         else:
-            hint = str(QSettings("LARMOR", "app").value("lastDir", "") or "")
+            hint = str(_settings().value("lastDir", "") or "")
         spin = {}
         if self.recipe and self.source_path and self.recipe.get("source_kind") == "bruker":
             spin[self.source_path] = (self.recipe.get("spin_rate_Hz"),
@@ -493,7 +493,7 @@ class _ToolsMixin:
         elif self.source_path and Path(self.source_path).exists():
             start = str(inventory_root(self.source_path))
         else:
-            start = str(QSettings("LARMOR", "app").value("lastDir", "") or "")
+            start = str(_settings().value("lastDir", "") or "")
         dlg = getattr(self, "_inventory_dlg", None)
         if dlg is None:
             dlg = SessionInventoryDialog(self, start)
@@ -718,7 +718,7 @@ class _ToolsMixin:
     def run_batch_report(self):
         from larmor.desktop.batch_dialog import BatchReportDialog
 
-        start = str(QSettings("LARMOR", "app").value("lastDir", "") or "")
+        start = str(_settings().value("lastDir", "") or "")
         BatchReportDialog(self, start).exec()
 
     def run_batch_fit(self, paths):

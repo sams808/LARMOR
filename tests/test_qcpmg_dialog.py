@@ -15,6 +15,7 @@ os.environ.setdefault("LARMOR_NO_SESSION", "1")
 
 pytest.importorskip("PySide6")
 from PySide6.QtWidgets import QApplication  # noqa: E402
+from larmor.desktop.prefs import settings as app_settings
 
 
 @pytest.fixture(scope="module")
@@ -288,9 +289,8 @@ def test_dialog_shrinks_far_below_the_old_floor(qapp, tmp_path):
 def test_dialog_remembers_the_size_the_user_chose(qapp, tmp_path, monkeypatch):
     """The size/position the dialog is closed at comes back on the next open
     (gated on LARMOR_NO_SESSION so tests do not pollute real settings)."""
-    from PySide6.QtCore import QSettings
 
-    s = QSettings("LARMOR", "app")
+    s = app_settings()
     old = s.value("qcpmgDialogGeometry")
     monkeypatch.delenv("LARMOR_NO_SESSION", raising=False)
     try:

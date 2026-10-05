@@ -15,7 +15,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from PySide6.QtCore import QSettings, Qt
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (QFileDialog, QHBoxLayout, QMessageBox,
                                QPushButton, QToolBar, QVBoxLayout)
@@ -24,6 +24,7 @@ from larmor import models as model_registry
 from larmor.desktop import theme
 from larmor.desktop.mw_sidebands import SSB_OFFER_KEY
 from larmor.recipe import Recipe
+from larmor.desktop.prefs import settings as _settings
 
 #: (file stem under docs/tutorials, menu title) -- the Help ▸ Tutorials entries.
 #: tests/test_tutorials.py holds the same list and checks the files ship.
@@ -188,7 +189,7 @@ class _MenusMixin:
         # SSB_OFFER_KEY: a fresh key so the off-by-default applies to every
         # install -- the old 'ssbAutoOffer' defaulted to True and was written
         # as such on machines that never touched the toggle
-        self.actSsbOffer.setChecked(bool(QSettings("LARMOR", "app").value(
+        self.actSsbOffer.setChecked(bool(_settings().value(
             SSB_OFFER_KEY, False, type=bool)))
         self.actSsbOffer.toggled.connect(self._toggle_ssb_offer)
         m_ssb.addAction(self.actSsbOffer)
@@ -375,10 +376,10 @@ class _MenusMixin:
         self.actAnimateFit.setToolTip("draw the model curve as it converges during "
                                       "a 1D fit (a fading trail shows the last few "
                                       "iterations) — watch convergence or divergence")
-        self.actAnimateFit.setChecked(bool(QSettings("LARMOR", "app").value(
+        self.actAnimateFit.setChecked(bool(_settings().value(
             "animateFit", True, type=bool)))
         self.actAnimateFit.toggled.connect(
-            lambda on: QSettings("LARMOR", "app").setValue("animateFit", bool(on)))
+            lambda on: _settings().setValue("animateFit", bool(on)))
         m_set.addAction(self.actAnimateFit)
 
         # ---------------------------------------------------------- Series
@@ -461,7 +462,7 @@ class _MenusMixin:
                                  tip="each line's own curve")
         self.actLabels = self._add(
             m_view, "Component &labels", self._toggle_labels, checkable=True,
-            checked=bool(QSettings("LARMOR", "app").value(
+            checked=bool(_settings().value(
                 "compLabels", False, type=bool)),
             tip="write each component's letter and name at its maximum; when "
                 "off, hovering a component still shows its name")
@@ -483,7 +484,7 @@ class _MenusMixin:
             "shade the typical literature δiso range of each species for the "
             "current nucleus (labels carry the P_Q/C_Q ranges) — an "
             "assignment guide, sourced from Edén 2023")
-        self.actRefRanges.setChecked(bool(QSettings("LARMOR", "app").value(
+        self.actRefRanges.setChecked(bool(_settings().value(
             "refRanges", False, type=bool)))
         self.actRefRanges.toggled.connect(self._toggle_ref_ranges)
         m_view.addAction(self.actRefRanges)
@@ -492,7 +493,7 @@ class _MenusMixin:
         self.actScrollNudge.setToolTip("when on, scrolling over a parameter cell "
                                        "nudges its value (off by default so a "
                                        "stray scroll never changes a fit)")
-        self.actScrollNudge.setChecked(bool(QSettings("LARMOR", "app").value(
+        self.actScrollNudge.setChecked(bool(_settings().value(
             "scrollNudge", False, type=bool)))
         # setChecked() above fires no signal (connect comes next), so push the
         # saved state into the table module DIRECTLY — otherwise a remembered
@@ -606,7 +607,7 @@ class _MenusMixin:
 
     def _add_recent(self, path: str):
         from larmor.desktop.prefs import list_setting
-        s = QSettings("LARMOR", "app")
+        s = _settings()
         paths = list_setting("recent")
         paths = [p for p in paths if p != path]
         paths.insert(0, path)
@@ -616,7 +617,7 @@ class _MenusMixin:
     # -------- Apply recipe: re-use a recent fit's model on the open data ------
     def _add_recent_recipe(self, path: str):
         from larmor.desktop.prefs import list_setting
-        s = QSettings("LARMOR", "app")
+        s = _settings()
         paths = list_setting("recentRecipes")
         paths = [p for p in paths if p != path]
         paths.insert(0, path)
@@ -826,7 +827,7 @@ class _MenusMixin:
         from larmor.desktop import table as _table
 
         _table.set_scroll_nudge(on)
-        QSettings("LARMOR", "app").setValue("scrollNudge", bool(on))
+        _settings().setValue("scrollNudge", bool(on))
         if getattr(self, "sbScroll", None) is not None:
             self.sbScroll.setChecked(on)            # keep the sidebar in sync
         if getattr(self, "lines_table", None) and self.recipe:
@@ -836,7 +837,7 @@ class _MenusMixin:
             + ("ON" if on else "off (default)"))
 
     def _toggle_ref_ranges(self, on: bool):
-        QSettings("LARMOR", "app").setValue("refRanges", bool(on))
+        _settings().setValue("refRanges", bool(on))
         self._update_ref_ranges()
         self.statusBar().showMessage(
             "literature shift ranges: " + ("ON — shaded spans are typical "
@@ -878,7 +879,7 @@ class _MenusMixin:
                      "— saved fits and CSVs always store σ")
         # restore the saved choice into the module BEFORE building the actions
         # (setChecked below fires no signal — same init pattern as scroll-nudge)
-        saved = str(QSettings("LARMOR", "app").value("czjzekDisplay", "sigma")
+        saved = str(_settings().value("czjzekDisplay", "sigma")
                     or "sigma")
         _table.set_czjzek_display(saved)
         group = QActionGroup(self)
@@ -898,7 +899,7 @@ class _MenusMixin:
         from larmor.desktop import table as _table
 
         _table.set_czjzek_display(mode)
-        QSettings("LARMOR", "app").setValue("czjzekDisplay", mode)
+        _settings().setValue("czjzekDisplay", mode)
         if getattr(self, "lines_table", None) and self.recipe:
             self.lines_table.rebuild(self.recipe, self.hidden)
         label = _table.CZJZEK_DISPLAYS[_table.czjzek_display_mode()][0]
@@ -922,13 +923,13 @@ class _MenusMixin:
         self.actHealthStrip.setToolTip("the verdict line under the spectrum: "
                                        "residual, physical values, degenerate "
                                        "pairs, bounds, error bars")
-        self.actHealthStrip.setChecked(bool(QSettings("LARMOR", "app").value(
+        self.actHealthStrip.setChecked(bool(_settings().value(
             "fitHealthStrip", True, type=bool)))
         self.actHealthStrip.toggled.connect(self._toggle_health_strip)
         m.addAction(self.actHealthStrip)
 
     def _toggle_health_strip(self, on: bool):
-        QSettings("LARMOR", "app").setValue("fitHealthStrip", bool(on))
+        _settings().setValue("fitHealthStrip", bool(on))
         self._health_show()
 
     def _update_enabled(self):
@@ -951,7 +952,7 @@ class _MenusMixin:
 
         from larmor.desktop.plot import AXIS_UNITS
 
-        self._axis_unit = str(QSettings("LARMOR", "app").value(
+        self._axis_unit = str(_settings().value(
             "axisUnit", "ppm") or "ppm")
         if self._axis_unit not in AXIS_UNITS:
             self._axis_unit = "ppm"
@@ -973,7 +974,7 @@ class _MenusMixin:
     def _set_axis_unit(self, unit: str):
         self._axis_unit = unit
         if not os.environ.get("LARMOR_NO_SESSION"):
-            QSettings("LARMOR", "app").setValue("axisUnit", unit)
+            _settings().setValue("axisUnit", unit)
         self._apply_axis_unit()
 
     def _apply_axis_unit(self):
@@ -988,7 +989,7 @@ class _MenusMixin:
 
         if os.environ.get("LARMOR_NO_SESSION"):
             return "raw", None
-        s = QSettings("LARMOR", "app")
+        s = _settings()
         mode = str(s.value("yAxisMode", "raw") or "raw")
         region = display.parse_region(s.value("yAxisRegion", ""))
         if mode not in display.Y_MODES or (mode == "region" and region is None):
@@ -1080,7 +1081,7 @@ class _MenusMixin:
         more.addSection("just-for-fun styles · swatch = window | accent | plot")
         self._aesthetic_group = QActionGroup(self)
         self._aesthetic_group.setExclusive(True)
-        current_override = QSettings("LARMOR", "app").value("appearanceOverride", "")
+        current_override = _settings().value("appearanceOverride", "")
         act_normal = more.addAction("Normal")
         act_normal.setCheckable(True)
         act_normal.setChecked(not current_override)
@@ -1111,7 +1112,7 @@ class _MenusMixin:
         settings key (``appearanceOverride``) from the main list's ``theme``
         key so "Normal" always knows what to restore, and so picking a
         normal theme later cleanly drops any aesthetic override."""
-        settings = QSettings("LARMOR", "app")
+        settings = _settings()
         settings.setValue("appearanceOverride", name)
         effective = name or settings.value("theme", theme.DEFAULT)
         self._apply_theme_live(effective)
@@ -1148,7 +1149,7 @@ class _MenusMixin:
         f = app.font()
         f.setPointSize(int(pt))
         app.setFont(f)
-        QSettings("LARMOR", "app").setValue("fontPt", int(pt))
+        _settings().setValue("fontPt", int(pt))
         self.statusBar().showMessage(f"text size: {pt} pt")
 
     def _apply_theme_live(self, name: str):
@@ -1189,7 +1190,7 @@ class _MenusMixin:
         """Switch to a normal theme live, remember it, and drop any hidden
         aesthetic override (picking from the visible list is an explicit
         "no, use THIS one" that should always win)."""
-        settings = QSettings("LARMOR", "app")
+        settings = _settings()
         settings.setValue("theme", name)
         if settings.value("appearanceOverride", ""):
             settings.setValue("appearanceOverride", "")

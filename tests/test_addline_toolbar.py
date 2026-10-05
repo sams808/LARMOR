@@ -14,9 +14,9 @@ pytest.importorskip("PySide6")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("LARMOR_NO_SESSION", "1")
 
-from PySide6.QtCore import QSettings  # noqa: E402
 from PySide6.QtGui import QAction  # noqa: E402
 from PySide6.QtWidgets import QApplication, QToolBar  # noqa: E402
+from larmor.desktop.prefs import settings as app_settings
 
 
 @pytest.fixture(scope="module")
@@ -87,7 +87,7 @@ def test_toolbar_holds_the_split_button_quick_buttons_and_the_same_actions(qapp,
 
 def test_split_button_shows_the_current_model_and_the_placing_state(qapp, win):
     tbw = win._addline_toolbar
-    QSettings("LARMOR", "app").remove("addLine/model")
+    app_settings().remove("addLine/model")
     assert tbw.placing_model() is None and not tbw.placing.isVisibleTo(win)
     assert tbw.button.text().startswith("＋ Add line: ")
     # a model action checked anywhere (menu, quick button, Decomposition menu)
@@ -113,12 +113,12 @@ def test_split_button_shows_the_current_model_and_the_placing_state(qapp, win):
     assert tbw.placing_model() is None
     assert not any(a.isChecked() for a in win._model_actions.values())
     # the choice is remembered (globally, and per nucleus once one is known)
-    assert QSettings("LARMOR", "app").value("addLine/model") == "czjzek"
+    assert app_settings().value("addLine/model") == "czjzek"
     from larmor.desktop.addline_toolbar import AddLineToolbar
 
     fresh = AddLineToolbar(win, QToolBar())
     assert fresh.current_model() == "czjzek"
-    QSettings("LARMOR", "app").remove("addLine/model")
+    app_settings().remove("addLine/model")
 
 
 def test_palette_lists_every_model_once_through_the_edit_menu(qapp, win):

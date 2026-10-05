@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import os
 
-from PySide6.QtCore import QSettings, Qt
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
     QFormLayout, QGridLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
 )
 
 from larmor.desktop import theme
+from larmor.desktop.prefs import settings as _settings
 
 
 class BoundsDialog(QDialog):
@@ -284,7 +285,7 @@ class ExperimentDialog(QDialog):
             p90 = a.p90_us_title
         if not p90 and not os.environ.get("LARMOR_NO_SESSION"):
             try:
-                p90 = float(QSettings("LARMOR", "app").value(self._p90_key, 0.0) or 0.0)
+                p90 = float(_settings().value(self._p90_key, 0.0) or 0.0)
             except (TypeError, ValueError):
                 p90 = 0.0
         self.p90.setValue(float(p90 or 0.0))
@@ -499,7 +500,7 @@ class ExperimentDialog(QDialog):
                 q["t1_s"] = float(t1)
             prov["quantitativity"] = q
             if p90 > 0 and not os.environ.get("LARMOR_NO_SESSION"):
-                QSettings("LARMOR", "app").setValue(self._p90_key, p90)
+                _settings().setValue(self._p90_key, p90)
         self.accept()
 
     def _copy_sr(self):

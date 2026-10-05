@@ -13,11 +13,11 @@ behind the menu toggle.
 from __future__ import annotations
 
 import numpy as np
-from PySide6.QtCore import QSettings
 from PySide6.QtWidgets import QLabel, QMessageBox
 
 from larmor import models as model_registry
 from larmor import sidebands as _sb
+from larmor.desktop.prefs import settings as _settings
 
 #: QSettings key of Edit > Spinning sidebands > Offer ... on load. OFF by
 #: default since 0.15: the banner popping up over every loaded spectrum was
@@ -274,7 +274,7 @@ class _SidebandsMixin:
             banner.dismiss()
 
     def _toggle_ssb_offer(self, on: bool):
-        QSettings("LARMOR", "app").setValue(SSB_OFFER_KEY, bool(on))
+        _settings().setValue(SSB_OFFER_KEY, bool(on))
         self.statusBar().showMessage(
             "spinning-sideband offer: "
             + ("ON — a banner appears when a loaded spectrum repeats at ±νrot"

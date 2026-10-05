@@ -80,6 +80,23 @@ def _examples_dir() -> Path | None:
 
 
 def run(argv=None) -> int:
+    """Run the check (``argv`` as on the command line; None = sys.argv);
+    returns the exit code. The sandbox variables it sets -- the scratch
+    preferences, LOCALAPPDATA, the per-store overrides -- are undone on the
+    way out, so an in-process caller (the test suite) gets its environment
+    back exactly as it was."""
+    env_before = dict(os.environ)
+    try:
+        return _run(argv)
+    finally:
+        for k in [k for k in os.environ if k not in env_before]:
+            del os.environ[k]
+        for k, v in env_before.items():
+            if os.environ.get(k) != v:
+                os.environ[k] = v
+
+
+def _run(argv) -> int:
     import argparse
 
     ap = argparse.ArgumentParser(prog="larmor distcheck", add_help=True,
@@ -91,8 +108,31 @@ def run(argv=None) -> int:
     ap.add_argument("--skip", default="", help="comma-separated stage names to skip")
     ap.add_argument("--out", default="", help="keep the scratch outputs in this folder")
     ap.add_argument("--list", action="store_true", help="list the stages and exit")
+    ap.add_argument("--real-settings", action="store_true",
+                    help="use the user's real preferences and %%LOCALAPPDATA%%\\LARMOR "
+                         "stores (default: scratch copies, so nothing of yours is touched)")
     args = ap.parse_args([a for a in (argv if argv is not None else sys.argv[1:])])
     gui = bool(args.gui) and not args.no_gui
+    if not args.real_settings:
+        # a check run on a user's machine must leave every one of their
+        # stores as it found it: the preferences go to a scratch .ini (the
+        # GUI stages change themes, recent files, options), and everything
+        # LARMOR keeps under %LOCALAPPDATA%\LARMOR -- the crash-recovery
+        # session, the kernel cache, aliases, the rename / referencing logs,
+        # MAS confirmations, SR overrides -- to a scratch LOCALAPPDATA
+        sandbox = Path(tempfile.mkdtemp(prefix="larmor_distcheck_user_"))
+        if not os.environ.get("LARMOR_SETTINGS_FILE"):
+            os.environ["LARMOR_SETTINGS_FILE"] = str(sandbox / "settings.ini")
+        os.environ.setdefault("LARMOR_REAL_LOCALAPPDATA", os.environ.get("LOCALAPPDATA", ""))
+        os.environ["LOCALAPPDATA"] = str(sandbox / "LocalAppData")
+        (sandbox / "LocalAppData").mkdir(parents=True, exist_ok=True)
+        for var, name in (("LARMOR_ALIASES", "aliases.json"),
+                          ("LARMOR_RENAME_LOG", "rename_log.jsonl"),
+                          ("LARMOR_MAS_LOG", "mas_confirmations.jsonl"),
+                          ("LARMOR_REF_LOG", "referencing_log.jsonl"),
+                          ("LARMOR_SR_OVERRIDES", "sr_overrides.json")):
+            os.environ[var] = str(sandbox / name)
+        os.environ.setdefault("LARMOR_NO_SESSION", "1")
     if gui:
         # before any Qt import: no window ever shows, native dialogs become
         # widgets the sweep can dismiss, nothing of the user's session is read

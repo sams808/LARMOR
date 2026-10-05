@@ -14,6 +14,7 @@ from larmor.desktop import theme
 from larmor.desktop.plot import site_color
 from larmor.phasedrag import wrap_p0
 from larmor.processing import CHANNELS, OPS, TIME_DOMAIN_OPS
+from larmor.desktop.prefs import settings as _settings
 
 PARAM_LABELS = {
     "isotropic_chemical_shift_ppm": "δiso (ppm)",
@@ -618,7 +619,6 @@ class ProcessingPanel(QWidget):
         chain -- are not recorded; LARMOR_NO_SESSION disables both ends)."""
         import os
 
-        from PySide6.QtCore import QSettings
 
         btn = QToolButton()
         btn.setCheckable(True)
@@ -630,14 +630,14 @@ class ProcessingPanel(QWidget):
         body.setVisible(False)
         btn.setText("▸ " + title)
         if not os.environ.get("LARMOR_NO_SESSION"):
-            remembered = QSettings("LARMOR", "app").value(
+            remembered = _settings().value(
                 self._SETTINGS_PREFIX + key, False, type=bool)
             if remembered:
                 btn.setChecked(True)      # toggled is connected later: sync now
                 body.setVisible(True)
                 btn.setText("▾ " + title)
             btn.clicked.connect(
-                lambda on, k=key: QSettings("LARMOR", "app").setValue(
+                lambda on, k=key: _settings().setValue(
                     self._SETTINGS_PREFIX + k, bool(on)))
         return btn, body
 

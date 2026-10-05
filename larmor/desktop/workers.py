@@ -16,6 +16,7 @@ import numpy as np
 from PySide6.QtCore import QThread, Signal
 
 from larmor.recipe import Recipe
+from larmor.desktop.prefs import settings as _settings
 
 
 def _emit_progress(sig, should_stop=None, converge_frac=None):
@@ -83,9 +84,8 @@ def _fit_tol():
     the full-precision solver default. Honoured by every fit button in the app
     through the solver tolerances (``fit.ftol_from_pct``), never through the
     progress callback (see ``_emit_progress``)."""
-    from PySide6.QtCore import QSettings
     try:
-        return float(QSettings("LARMOR", "app").value("fitStdevPct", 0.1) or 0.0)
+        return float(_settings().value("fitStdevPct", 0.1) or 0.0)
     except (TypeError, ValueError):
         return 0.1
 

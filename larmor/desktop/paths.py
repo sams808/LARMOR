@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from larmor.desktop.prefs import settings as _settings
 
 #: the files that ARE the measurement / its processing, by exact name
 _INSTRUMENT_FILES = {
@@ -53,8 +54,7 @@ def remembered_dir(key: str, fallback: str = "") -> str:
     if os.environ.get("LARMOR_NO_SESSION"):
         return fallback
     try:
-        from PySide6.QtCore import QSettings
-        d = str(QSettings("LARMOR", "app").value(key, "") or "")
+        d = str(_settings().value(key, "") or "")
     except Exception:
         return fallback
     return d if d and Path(d).is_dir() else fallback
@@ -65,8 +65,7 @@ def remember_dir(key: str, chosen_file) -> None:
     if os.environ.get("LARMOR_NO_SESSION") or not chosen_file:
         return
     try:
-        from PySide6.QtCore import QSettings
-        QSettings("LARMOR", "app").setValue(
+        _settings().setValue(
             key, str(Path(str(chosen_file)).parent))
     except Exception:
         pass

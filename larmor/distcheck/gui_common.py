@@ -57,15 +57,15 @@ class SettingsGuard:
     backup_path = None
 
     def __enter__(self):
-        from PySide6.QtCore import QSettings
+        from larmor.desktop.prefs import settings
         self.backup_path = backup_settings()
-        s = QSettings(*_SETTINGS)
+        s = settings()
         self._saved = {k: s.value(k) for k in s.allKeys()}
         return self
 
     def __exit__(self, *exc):
-        from PySide6.QtCore import QSettings
-        s = QSettings(*_SETTINGS)
+        from larmor.desktop.prefs import settings
+        s = settings()
         s.clear()
         for k, v in self._saved.items():
             s.setValue(k, v)
@@ -80,8 +80,11 @@ def backup_settings():
     ``reg delete HKCU\\Software\\LARMOR /f``); elsewhere a JSON of the keys."""
     import datetime
     import json
+    import shutil
     import subprocess
     from pathlib import Path
+
+    from larmor.desktop.prefs import SETTINGS_FILE_ENV, settings
 
     base = Path(os.environ.get("LOCALAPPDATA") or Path.home()) / "LARMOR" / "settings_backup"
     try:
@@ -90,15 +93,22 @@ def backup_settings():
         return None
     stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S") + f"_{os.getpid()}"
     try:
-        if sys.platform == "win32":
+        ini = os.environ.get(SETTINGS_FILE_ENV)
+        if ini:
+            # an .ini store (the test suite, the distribution check): a copy
+            src = Path(ini)
+            if not src.exists():
+                return None
+            target = base / f"LARMOR_settings_{stamp}.ini"
+            shutil.copyfile(src, target)
+        elif sys.platform == "win32":
             target = base / f"LARMOR_settings_{stamp}.reg"
             r = subprocess.run(["reg", "export", r"HKCU\Software\LARMOR", str(target), "/y"],
                                capture_output=True, text=True, timeout=30)
             if r.returncode != 0:            # no key yet: nothing to back up
                 target = None
         else:
-            from PySide6.QtCore import QSettings
-            s = QSettings(*_SETTINGS)
+            s = settings()
             target = base / f"LARMOR_settings_{stamp}.json"
             target.write_text(json.dumps({k: s.value(k) for k in s.allKeys()},
                                          default=str, indent=1), encoding="utf-8")

@@ -19,6 +19,7 @@ os.environ.setdefault("LARMOR_NO_SESSION", "1")
 
 pytest.importorskip("PySide6")
 from PySide6.QtWidgets import QApplication  # noqa: E402
+from larmor.desktop.prefs import settings as app_settings
 
 STALE = " · edited since fit"
 
@@ -284,9 +285,8 @@ def test_residual_chip_turns_the_residual_view_on(qapp, win):
 
 
 def test_panels_toggle_hides_the_strip_and_persists(qapp, win):
-    from PySide6.QtCore import QSettings
 
-    s = QSettings("LARMOR", "app")
+    s = app_settings()
     saved = s.value("fitHealthStrip")
     try:
         _fitted(win, qapp)

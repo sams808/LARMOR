@@ -7,7 +7,6 @@ import os
 import re
 from pathlib import Path
 
-import pytest
 
 from larmor.distcheck import manifest as mf
 

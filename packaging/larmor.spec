@@ -31,10 +31,11 @@ for pkg in ("mrsimulator", "csdmpy", "nmrglue"):
     binaries += collect_dynamic_libs(pkg)
     hiddenimports += collect_submodules(pkg)
 
+# (scipy.special._cdflib and pkg_resources.py2_warn used to be listed here;
+# neither exists in the current scipy / setuptools and PyInstaller logged
+# "Hidden import not found" as an ERROR on every build)
 hiddenimports += [
-    "lmfit", "asteval", "uncertainties",
-    "scipy.special._cdflib", "scipy._lib.messagestream",
-    "pkg_resources.py2_warn",
+    "lmfit", "asteval", "uncertainties", "scipy._lib.messagestream",
 ]
 # every LARMOR module (the registry and the mixins import some of them by
 # name at run time), the whole of lmfit and the scipy subpackages the fit

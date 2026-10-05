@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from larmor import aliases
+from larmor.desktop.prefs import settings as _settings
 
 _ROLE_PATH = Qt.UserRole
 _ROLE_OPEN = Qt.UserRole + 1        # the openable data path (None for folders)
@@ -147,7 +148,6 @@ class ExplorerPanel(QWidget):
 
     def __init__(self):
         super().__init__()
-        from PySide6.QtCore import QSettings
         #: the data paths open in LARMOR (the window sets this) -- a folder
         #: holding one of them is never renamed on disk
         self.open_paths = lambda: []
@@ -177,7 +177,7 @@ class ExplorerPanel(QWidget):
         # the round-trip is platform-independent
         try:
             import json
-            raw = QSettings("LARMOR", "app").value("pinnedNames", "") or ""
+            raw = _settings().value("pinnedNames", "") or ""
             self._pin_names = {k: v for k, v in json.loads(raw).items()
                                if isinstance(v, str)} if raw else {}
         except Exception:
@@ -250,8 +250,7 @@ class ExplorerPanel(QWidget):
     def _save_pin_names(self):
         import json
 
-        from PySide6.QtCore import QSettings
-        QSettings("LARMOR", "app").setValue("pinnedNames",
+        _settings().setValue("pinnedNames",
                                             json.dumps(self._pin_names))
 
     def _readd_pins(self):
@@ -270,18 +269,16 @@ class ExplorerPanel(QWidget):
             return False
 
     def _pin(self, path: str):
-        from PySide6.QtCore import QSettings
         if path not in self._pinned:
             self._pinned.insert(0, path)
-            QSettings("LARMOR", "app").setValue("pinnedFolders", self._pinned)
+            _settings().setValue("pinnedFolders", self._pinned)
             it = self._folder_item(self._pin_label(path), path,
                                    is_sample=self._is_sample(path), pinned=True)
             self.tree.insertTopLevelItem(0, it)
 
     def _unpin(self, path: str):
-        from PySide6.QtCore import QSettings
         self._pinned = [p for p in self._pinned if p != path]
-        QSettings("LARMOR", "app").setValue("pinnedFolders", self._pinned)
+        _settings().setValue("pinnedFolders", self._pinned)
         if self._pin_names.pop(path, None) is not None:
             self._save_pin_names()
         for i in range(self.tree.topLevelItemCount()):
@@ -709,9 +706,8 @@ class ExplorerPanel(QWidget):
                 elif kind is None and base:
                     it.setData(0, _ROLE_BASE, Path(new).name)
         if any(moved(p) != p for p in self._pinned):
-            from PySide6.QtCore import QSettings
             self._pinned = [moved(p) for p in self._pinned]
-            QSettings("LARMOR", "app").setValue("pinnedFolders", self._pinned)
+            _settings().setValue("pinnedFolders", self._pinned)
             self._pin_names = {moved(k): v for k, v in self._pin_names.items()}
             self._save_pin_names()
         self._relabel(new)

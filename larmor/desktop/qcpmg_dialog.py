@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
     QFileDialog, QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea,
     QSpinBox, QSplitter, QTabWidget, QToolButton, QVBoxLayout, QWidget,
 )
+from larmor.desktop.prefs import settings as _settings
 
 
 _log = logging.getLogger(__name__)
@@ -102,8 +103,7 @@ class QcpmgDialog(QDialog):
         restored = False
         if not os.environ.get("LARMOR_NO_SESSION"):
             try:
-                from PySide6.QtCore import QSettings
-                geo = QSettings("LARMOR", "app").value("qcpmgDialogGeometry")
+                geo = _settings().value("qcpmgDialogGeometry")
                 if geo is not None:
                     restored = bool(self.restoreGeometry(geo))
             except Exception:
@@ -583,8 +583,7 @@ class QcpmgDialog(QDialog):
         remember the size/position the user chose for the next open."""
         if not os.environ.get("LARMOR_NO_SESSION"):
             try:
-                from PySide6.QtCore import QSettings
-                QSettings("LARMOR", "app").setValue("qcpmgDialogGeometry",
+                _settings().setValue("qcpmgDialogGeometry",
                                                     self.saveGeometry())
             except Exception:
                 pass
@@ -1041,8 +1040,7 @@ class QcpmgDialog(QDialog):
         if os.environ.get("LARMOR_NO_SESSION"):
             return False
         try:
-            from PySide6.QtCore import QSettings
-            val = QSettings("LARMOR", "app").value(cls.PHASING_OPEN_KEY, False)
+            val = _settings().value(cls.PHASING_OPEN_KEY, False)
         except Exception:                                     # noqa: BLE001
             return False
         return str(val).lower() in ("true", "1", "yes")
@@ -1059,8 +1057,7 @@ class QcpmgDialog(QDialog):
             self.phaseToggle.blockSignals(False)
         if remember and not os.environ.get("LARMOR_NO_SESSION"):
             try:
-                from PySide6.QtCore import QSettings
-                QSettings("LARMOR", "app").setValue(self.PHASING_OPEN_KEY, on)
+                _settings().setValue(self.PHASING_OPEN_KEY, on)
             except Exception:                                 # noqa: BLE001
                 pass
 

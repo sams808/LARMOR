@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QSettings
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QColorDialog, QComboBox, QDialog,
     QDialogButtonBox, QDoubleSpinBox, QFileDialog, QFormLayout, QHBoxLayout,
@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
 )
 
 from larmor import figures, series_grid
+from larmor.desktop.prefs import settings as _settings
 
 _KINDS = ["1D overlay / stack", "2D contour", "Series", "Batch grid",
          "Species distribution"]
@@ -781,7 +782,7 @@ class PlottingStudio(QDialog):
 
     @staticmethod
     def _grid_data_roots() -> list[str]:
-        raw = QSettings("LARMOR", "app").value("plottingStudio/dataRoots", "")
+        raw = _settings().value("plottingStudio/dataRoots", "")
         if isinstance(raw, (list, tuple)):
             raw = ";".join(str(r) for r in raw)
         return [r.strip() for r in str(raw or "").split(";") if r.strip()]
@@ -793,7 +794,7 @@ class PlottingStudio(QDialog):
             "Default folder(s) for 'locate data for…' — separate multiple "
             "with ';':", text=current)
         if ok:
-            QSettings("LARMOR", "app").setValue(
+            _settings().setValue(
                 "plottingStudio/dataRoots",
                 "; ".join(p.strip() for p in text.split(";") if p.strip()))
 

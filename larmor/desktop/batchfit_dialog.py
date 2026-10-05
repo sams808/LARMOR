@@ -42,6 +42,7 @@ from larmor.desktop.plot import site_color
 from larmor.families import GROUP_PARAMS
 from larmor.io.scan import disambiguate, sample_label
 from larmor.series_table import SeriesTable
+from larmor.desktop.prefs import settings as _settings
 
 PER_TAB = 9        # 3×3 grid per tab
 
@@ -1665,14 +1666,13 @@ class BatchFitDialog(QDialog):
 
     def _save_template(self):
         import json
-        from PySide6.QtCore import QSettings
         from PySide6.QtWidgets import QInputDialog
         name, ok = QInputDialog.getText(self, "Save batch setup", "Template name:")
         if not ok or not name.strip():
             return
         tpl = self._template_dict()
         from larmor.desktop.prefs import json_setting
-        s = QSettings("LARMOR", "app")
+        s = _settings()
         lib = json_setting("batchTemplates", {})
         lib[name.strip()] = tpl
         s.setValue("batchTemplates", json.dumps(lib))
@@ -1680,9 +1680,8 @@ class BatchFitDialog(QDialog):
 
     def _load_template(self):
         import json
-        from PySide6.QtCore import QSettings
         from PySide6.QtWidgets import QInputDialog
-        lib = json.loads(QSettings("LARMOR", "app").value(
+        lib = json.loads(_settings().value(
             "batchTemplates", "{}") or "{}")
         if not lib:
             self.status.setText("no saved batch setups yet"); return
@@ -2197,13 +2196,11 @@ def _proc_number(path: str) -> str:
 
 
 def _saved_tol() -> float:
-    from PySide6.QtCore import QSettings
     try:
-        return float(QSettings("LARMOR", "app").value("fitStdevPct", 0.1) or 0.0)
+        return float(_settings().value("fitStdevPct", 0.1) or 0.0)
     except (TypeError, ValueError):
         return 0.1
 
 
 def _save_tol(v: float):
-    from PySide6.QtCore import QSettings
-    QSettings("LARMOR", "app").setValue("fitStdevPct", float(v))
+    _settings().setValue("fitStdevPct", float(v))

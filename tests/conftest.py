@@ -37,6 +37,29 @@ os.environ.setdefault(
     "LARMOR_MAS_LOG",
     str(Path(tempfile.mkdtemp(prefix="larmor_mas_")) / "mas_confirmations.jsonl"))
 
+# The saved preferences (QSettings "LARMOR"/"app") are the developer's REAL
+# registry: QSettings(org, app) always means the native store, whatever
+# setDefaultFormat says, so every test that touched a setting rewrote it for
+# real -- and a test that hung in a modal dialog and had to be killed took
+# the saved recent files, pinned folders and libraries with it (2026-10-05).
+# Every construction goes through larmor.desktop.prefs.settings(), which
+# honours this variable: each run gets an empty .ini of its own.
+os.environ.setdefault(
+    "LARMOR_SETTINGS_FILE",
+    str(Path(tempfile.mkdtemp(prefix="larmor_settings_")) / "settings.ini"))
+
+# Every other per-user store lives under %LOCALAPPDATA%\LARMOR: the
+# crash-recovery session.json, the on-disk kernel cache, the aliases and
+# rename log, the MAS confirmations, the referencing log and SR overrides.
+# A handful of tests switch LARMOR_NO_SESSION off for their duration, and a
+# window an EARLIER test left alive keeps its autosave timer running into
+# them -- which is how a test spectrum from tests/test_startup_robustness.py
+# became the developer's real crash-recovery session (2026-10-05). The whole
+# run gets a LOCALAPPDATA of its own; the real one is kept for the rare test
+# that must name it.
+os.environ.setdefault("LARMOR_REAL_LOCALAPPDATA", os.environ.get("LOCALAPPDATA", ""))
+os.environ["LOCALAPPDATA"] = str(Path(tempfile.mkdtemp(prefix="larmor_localappdata_")))
+
 
 def _data(rel: str) -> Path:
     return DATA_ROOT / rel

@@ -17,7 +17,7 @@ import os
 from pathlib import Path
 
 import numpy as np
-from PySide6.QtCore import QSettings, QTimer, Qt
+from PySide6.QtCore import QTimer, Qt
 from PySide6.QtWidgets import (QApplication, QDockWidget, QHBoxLayout, QLabel,
                                QMessageBox, QPlainTextEdit, QProgressBar,
                                QPushButton, QSizePolicy, QStackedWidget,
@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (QApplication, QDockWidget, QHBoxLayout, QLabel,
 from larmor.desktop import theme
 from larmor.desktop.panels import ProcessingPanel
 from larmor.desktop.table import LinesTable
+from larmor.desktop.prefs import settings as _settings
 
 
 class _ChromeMixin:
@@ -473,7 +474,7 @@ class _ChromeMixin:
         self.request_simulation()
 
     def _toggle_labels(self, on):
-        QSettings("LARMOR", "app").setValue("compLabels", bool(on))
+        _settings().setValue("compLabels", bool(on))
         self.view.set_show_labels(on)
 
     def _toggle_paddles(self, on):
@@ -498,7 +499,7 @@ class _ChromeMixin:
         self.view.set_y_mode(mode, region)
         mode, region = self.view.y_mode()
         if not os.environ.get("LARMOR_NO_SESSION"):
-            s = QSettings("LARMOR", "app")
+            s = _settings()
             s.setValue("yAxisMode", mode)
             s.setValue("yAxisRegion",
                        "" if region is None else f"{region[0]:g},{region[1]:g}")

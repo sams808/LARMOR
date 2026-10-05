@@ -10,6 +10,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
 from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtWidgets import QApplication, QTableWidgetItem  # noqa: E402
+from larmor.desktop.prefs import settings as app_settings
 
 
 @pytest.fixture(scope="module")
@@ -548,9 +549,8 @@ def test_studio_grid_reconstructs_fit_from_csv_and_marks_it(qapp, tmp_path):
 
 
 def test_studio_grid_data_roots_setting_seeds_locate_dialog(qapp, tmp_path, monkeypatch):
-    from PySide6.QtCore import QSettings
     from larmor.desktop.plotting_studio import PlottingStudio
-    QSettings("LARMOR", "app").remove("plottingStudio/dataRoots")
+    app_settings().remove("plottingStudio/dataRoots")
     try:
         root = tmp_path / "raw_data"
         root.mkdir()
@@ -571,7 +571,7 @@ def test_studio_grid_data_roots_setting_seeds_locate_dialog(qapp, tmp_path, monk
         st._grid_ask_manual_path("g0")
         assert seen["dir"] == str(root)
     finally:
-        QSettings("LARMOR", "app").remove("plottingStudio/dataRoots")
+        app_settings().remove("plottingStudio/dataRoots")
 
 
 def test_studio_batch_grid_spec_roundtrips_through_apply_spec(qapp, tmp_path):

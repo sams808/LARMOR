@@ -18,12 +18,12 @@ import os
 from pathlib import Path
 
 import numpy as np
-from PySide6.QtCore import QSettings
 from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
 from larmor import aliases as _aliases
 from larmor.desktop.workers import KernelWarmWorker, humanize_error
 from larmor.recipe import Recipe
+from larmor.desktop.prefs import settings as _settings
 
 
 def _load_any(path: str, replay: bool = True):
@@ -284,7 +284,7 @@ class _FilesMixin:
         dlg.exec()
 
     def _last_dir(self) -> str:
-        return QSettings("LARMOR", "app").value("lastDir", "")
+        return _settings().value("lastDir", "")
 
     def _suggest_dir(self) -> str:
         """Save dialogs follow the CURRENT dataset (its sample folder),
@@ -475,7 +475,7 @@ class _FilesMixin:
         self.hidden.clear()
         self.undo_stack.clear()
         self.redo_stack.clear()
-        QSettings("LARMOR", "app").setValue("lastDir", str(Path(path).parent))
+        _settings().setValue("lastDir", str(Path(path).parent))
         self.setWindowTitle(f"LARMOR — {_aliases.window_label(path)}")
         self.view.set_experiment(ppm, amp)
         if not self.recipe["sites"]:
@@ -515,7 +515,7 @@ class _FilesMixin:
             return False
 
         self.source_path = path
-        QSettings("LARMOR", "app").setValue("lastDir", str(Path(path).parent))
+        _settings().setValue("lastDir", str(Path(path).parent))
         self.setWindowTitle(f"LARMOR — {_aliases.window_label(path)}")
 
         if data.ndim == 2 and data.domain == "freq":

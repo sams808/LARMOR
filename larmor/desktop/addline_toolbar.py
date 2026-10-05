@@ -20,12 +20,13 @@ makes; it returns the ``AddLineToolbar`` (kept as ``win._addline_toolbar``).
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QSettings, Qt
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QLabel, QMenu, QToolButton
 
 from larmor import models as model_registry
 from larmor.desktop import theme
+from larmor.desktop.prefs import settings as _settings
 
 #: (group title, registry names) -- the order of the split-button menu. A
 #: registered model missing here is appended to "Other", never hidden.
@@ -150,7 +151,7 @@ class AddLineToolbar:
             return ""
 
     def _remembered(self) -> str:
-        s = QSettings("LARMOR", "app")
+        s = _settings()
         nuc = self._nucleus()
         for key in ((f"{SETTINGS_KEY}/{nuc}",) if nuc else ()) + (SETTINGS_KEY,):
             v = s.value(key, "")
@@ -159,7 +160,7 @@ class AddLineToolbar:
         return DEFAULT_MODEL if DEFAULT_MODEL in self.actions else next(iter(self.actions), "")
 
     def _remember(self, name: str) -> None:
-        s = QSettings("LARMOR", "app")
+        s = _settings()
         s.setValue(SETTINGS_KEY, name)
         nuc = self._nucleus()
         if nuc:

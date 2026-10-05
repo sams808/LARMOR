@@ -13,16 +13,34 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 
 from PySide6.QtCore import QSettings
 
-__all__ = ["settings", "json_setting", "list_setting", "str_setting", "font_pt_setting"]
+__all__ = ["settings", "settings_store", "json_setting", "list_setting", "str_setting",
+           "font_pt_setting", "SETTINGS_FILE_ENV"]
 
 ORG, APP = "LARMOR", "app"
+#: an .ini path here replaces the registry for the whole process: the test
+#: suite and the distribution check set it, so neither ever touches the
+#: user's real preferences (QSettings(org, app) always means the registry
+#: on Windows, whatever setDefaultFormat says)
+SETTINGS_FILE_ENV = "LARMOR_SETTINGS_FILE"
 
 
 def settings() -> QSettings:
+    """The one QSettings of the application: the registry (``LARMOR`` /
+    ``app``), or the .ini file named by ``LARMOR_SETTINGS_FILE``."""
+    path = os.environ.get(SETTINGS_FILE_ENV)
+    if path:
+        return QSettings(path, QSettings.Format.IniFormat)
     return QSettings(ORG, APP)
+
+
+def settings_store() -> str:
+    """Where the preferences live right now, for logs: the .ini path or
+    'registry HKCU\\Software\\LARMOR\\app'."""
+    return os.environ.get(SETTINGS_FILE_ENV) or "registry HKCU\\Software\\LARMOR\\app"
 
 
 def font_pt_setting(default: int = 9) -> int:

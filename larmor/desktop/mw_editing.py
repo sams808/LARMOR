@@ -17,11 +17,11 @@ import os
 from pathlib import Path
 
 import numpy as np
-from PySide6.QtCore import QSettings
 from PySide6.QtWidgets import QCheckBox, QFileDialog, QLabel, QMessageBox
 
 from larmor import cellparse, models as model_registry
 from larmor.desktop.mw_files import _load_any
+from larmor.desktop.prefs import settings as _settings
 
 
 class _EditingMixin:
@@ -213,7 +213,7 @@ class _EditingMixin:
                     keep[pn] = float(v)
             if keep:
                 lib[f"{nucleus}/{s.get('model')}"] = keep
-        QSettings("LARMOR", "app").setValue("siteDefaults", json.dumps(lib))
+        _settings().setValue("siteDefaults", json.dumps(lib))
 
     def add_site_at(self, ppm: float, amp: float):
         name = next((n for n, a in self._model_actions.items()

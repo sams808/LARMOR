@@ -7,6 +7,7 @@ import numpy as np
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("LARMOR_NO_SESSION", "1")
 import pytest
+from larmor.desktop.prefs import settings as app_settings
 
 pytest.importorskip("PySide6")
 
@@ -30,12 +31,11 @@ def test_residual_noise_ratio():
 
 
 def test_per_nucleus_seed():
-    from PySide6.QtCore import QSettings
 
     # this key holds the shape parameters the user's own fits have taught the
     # app; LARMOR_NO_SESSION does not cover a DIRECT write, so clearing it
     # without restoring destroys real work on every test run
-    s = QSettings("LARMOR", "app")
+    s = app_settings()
     saved = s.value("siteDefaults")
     try:
         s.setValue("siteDefaults", "{}")        # the literature-default path

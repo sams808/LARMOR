@@ -2,7 +2,8 @@
 saved preference LARMOR reads is set to garbage here, and the window must
 still build, show its first-run hint, add a line, rebuild its recent menus
 and open its tools. The user's real settings are snapshotted and restored
-(QSettings is the live registry; see larmor.distcheck.gui_common)."""
+(the store is larmor.desktop.prefs.settings(): the per-run .ini the
+conftest sets, never the registry)."""
 import json
 import os
 
@@ -12,9 +13,9 @@ pytest.importorskip("PySide6")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("LARMOR_NO_SESSION", "1")
 
-from PySide6.QtCore import QSettings  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
+from larmor.desktop.prefs import settings as app_settings  # noqa: E402
 from larmor.distcheck.gui_common import SettingsGuard  # noqa: E402
 
 GARBAGE = {
@@ -41,7 +42,7 @@ def garbage_settings():
     # killed mid-test must leave as little damage as possible)
     with SettingsGuard() as guard:
         assert guard.backup_path is None or guard.backup_path.exists()
-        s = QSettings("LARMOR", "app")
+        s = app_settings()
         for k, v in GARBAGE.items():
             s.setValue(k, v)
         s.sync()
@@ -115,6 +116,7 @@ def test_window_builds_and_works_with_garbage_in_every_saved_setting(
     finally:
         dismiss.__exit__(None, None, None)
         win.close()
+        win.deleteLater()            # no autosave timer may outlive the test
         qapp.processEvents()
 
 
@@ -137,4 +139,5 @@ def test_corrupt_session_file_is_ignored(qapp, tmp_path, monkeypatch):
                 assert win.exp_ppm is None or len(win.exp_ppm) == 0
             finally:
                 win.close()
+                win.deleteLater()
                 qapp.processEvents()

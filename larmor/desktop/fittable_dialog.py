@@ -17,7 +17,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from PySide6.QtCore import QSettings, Qt
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QDialog, QFileDialog,
     QHBoxLayout, QLabel, QPushButton, QTableWidget, QTableWidgetItem,
@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 from larmor import fittable
 from larmor.desktop import theme
 from larmor.desktop.paths import is_instrument_file, suggest_save_dir
+from larmor.desktop.prefs import settings as _settings
 
 _NUM = re.compile(r"^\s*([-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?)")
 _ROLE_ENTRY = Qt.UserRole          # column 0 carries the entry index of its row
@@ -273,7 +274,7 @@ class FitTableDialog(QDialog):
         return True
 
     def _start_dir(self) -> str:
-        fallback = str(QSettings("LARMOR", "app").value("lastDir", "") or "")
+        fallback = str(_settings().value("lastDir", "") or "")
         for e in reversed(self.entries):
             d = suggest_save_dir(e.source, "")
             if d:

@@ -17,11 +17,11 @@ import os
 from pathlib import Path
 
 import numpy as np
-from PySide6.QtCore import QSettings
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 from larmor import display, project
 from larmor.project import DOC_KINDS, SESSION_KINDS
+from larmor.desktop.prefs import settings as _settings
 
 
 class _SessionMixin:
@@ -708,7 +708,7 @@ class _SessionMixin:
             pass
         if not src:
             # migrate a pre-0.12 registry session once, then remove the keys
-            s = QSettings("LARMOR", "app")
+            s = _settings()
             src = s.value("session/source", "")
             saved = s.value("session/recipe", "")
             try:
