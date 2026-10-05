@@ -60,7 +60,8 @@ BLOCK_KEYS: tuple[str, ...] = (
     "expno_path", "expno", "procno", "data_file", "sample", "sample_folder",
     "title", "nucleus", "bf1_MHz", "sfo1_MHz", "sf_MHz", "sr_hz",
     "magnet_1h_MHz", "b0_T", "spectrometer", "topspin", "probe", "pulprog",
-    "ns", "ds", "rg", "d1_s", "aq_s", "p1_us", "plw1_W", "p90_us", "flip_deg",
+    "ns", "ds", "rg", "d1_s", "aq_s", "p1_us", "plw1_W", "p1_power_W", "p1_power_level",
+    "p90_us", "flip_deg",
     "flip_source", "tip_words", "rotor", "vt_note", "decoupling_note", "sw_Hz",
     "td", "date_utc", "mas_acqus_Hz", "mas_title_Hz", "mas_booking_Hz",
     "spin_rate_Hz", "mas_uncertain", "mas_source", "wdw", "lb_hz", "gb", "ssb",
@@ -184,6 +185,48 @@ def parse_title(title: str) -> dict:
             "mas_title_Hz": masrate.parse_title_rate(text).hz}
 
 
+def _p1_power(expno, plw: list, pulprog: str) -> tuple[str, float | None]:
+    """The power level the pulse program plays p1 at, and its PLW value (W).
+
+    The level named on the p1 statement itself (``(p1 pl11 ph1):f1``),
+    else the last level set on f1 before it (``pl1:f1``), else pl1 --
+    TopSpin's own convention for a program that sets none (``zg``). An
+    EXPNO without its ``pulseprogram`` file is resolved only for the zg
+    family. ``('', None)`` when the level cannot be resolved, when p1 is
+    not played on f1, or when the level reads 0 W (unset): the Experimental
+    paragraph then states no power. The paragraph used to put PLW1 after
+    every P1, which for an MQMAS (mp3qdfsz plays p1 at pl11) read "a 3.1 µs
+    pulse at 0 W"."""
+    level = ""
+    try:
+        from larmor import pulseprog
+        f = pulseprog.find_pulseprogram(expno)
+        if f is None:
+            level = "pl1" if (pulprog or "").lower().startswith("zg") else ""
+        else:
+            prog = pulseprog.parse(f.read_text(encoding="latin-1", errors="replace"), f.name)
+            last_f1 = ""
+            for s in prog.walk():
+                if (s.kind == "set_power" and (s.channel or "f1") == "f1"
+                        and re.fullmatch(r"plw?\d+", s.power or "")):
+                    last_f1 = s.power
+                elif s.kind == "pulse" and s.name == "p1":
+                    if (s.channel or "f1") != "f1":
+                        return "", None
+                    level = s.power or last_f1 or "pl1"
+                    break
+    except Exception:                                    # noqa: BLE001
+        level = ""
+    m = re.fullmatch(r"plw?(\d+)", level or "")
+    if not m:
+        return "", None
+    n = int(m.group(1))
+    watts = plw[n] if n < len(plw) else None
+    if watts is None or not (float(watts) > 0):
+        return f"pl{n}", None
+    return f"pl{n}", float(watts)
+
+
 def flip_angle(p1_us, p90_us, title: str) -> tuple[float | None, str]:
     """(flip angle in degrees, source): a tip angle stated in the title
     ('30 deg tip', '11 degree tip angle', '30 degree pulse'; <= 90) wins as
@@ -293,6 +336,7 @@ def _read_block(path, procno) -> dict:
     plw = bruker._num_list(acqus.get("PLW"))
     p1 = p_us[1] if len(p_us) > 1 else None
     plw1 = plw[1] if len(plw) > 1 else None
+    p1_level, p1_power = _p1_power(expno, plw, _clean(acqus.get("PULPROG")))
     flip, flip_src = flip_angle(p1, claims["p90_us"], title)
     td = _i(acqus.get("TD"))
     sw = _f(acqus.get("SW_h"))
@@ -313,7 +357,8 @@ def _read_block(path, procno) -> dict:
         "pulprog": _clean(acqus.get("PULPROG")), "ns": _i(acqus.get("NS")),
         "ds": _i(acqus.get("DS")), "rg": _f(acqus.get("RG")),
         "d1_s": meta.get("d1_s"), "aq_s": meta.get("aq_s"), "p1_us": p1,
-        "plw1_W": plw1, "p90_us": claims["p90_us"], "flip_deg": flip,
+        "plw1_W": plw1, "p1_power_W": p1_power, "p1_power_level": p1_level,
+        "p90_us": claims["p90_us"], "flip_deg": flip,
         "flip_source": flip_src, "tip_words": claims["tip_words"],
         "rotor": _rotor(title, expno.parent.name), "vt_note": claims["vt_note"],
         "decoupling_note": claims["decoupling_note"], "sw_Hz": sw, "td": td,
@@ -724,13 +769,23 @@ def sentences(block: dict, *, spin_rate_Hz=None, mas_uncertain=None,
     pp = b.get("pulprog")
     pp_first = pp.values[0] if _is_range(pp) else pp
     kind_txt = scan._classify(str(pp_first or ""))
+    # merged spectra of DIFFERENT kinds (a single pulse and an MQMAS) get no
+    # experiment name: the first program's kind used to name them all
+    kinds = {scan._classify(str(v)) for v in (pp.values if _is_range(pp) else [pp])} if pp else set()
     if pp:
-        if kind_txt and kind_txt not in ("unknown", str(pp_first)):
+        if len(kinds) > 1:
+            head = f"The {spectra} (pulse programs {_val(pp)})"
+        elif kind_txt and kind_txt not in ("unknown", str(pp_first)):
             # 'Single pulse' -> 'a single pulse acquisition'; an acronym
             # ('CPMG (T2)', 'MQMAS') keeps its case
             low = (kind_txt[0].lower() + kind_txt[1:]
                    if len(kind_txt) > 1 and kind_txt[1].islower() else kind_txt)
-            art = "An" if low[:1].lower() in "aeiou" else "A"
+            # an acronym takes the article of its first LETTER's sound:
+            # "an MQMAS", "an NMR", "a CPMG"
+            acronym = len(low) > 1 and low[:2].isupper()
+            vowel = (low[:1].upper() in "AEFHILMNORSX" if acronym
+                     else low[:1].lower() in "aeiou")
+            art = "An" if vowel else "A"
             head = f"{kind_txt} acquisitions" if many else f"{art} {low} acquisition"
             head += f" (pulse program {_val(pp)})"
         else:
@@ -754,8 +809,20 @@ def sentences(block: dict, *, spin_rate_Hz=None, mas_uncertain=None,
             pulse += f" ({_val(flip, lambda v: f'{float(v):.0f}', '°')} flip angle)"
         elif b.get("tip_words"):
             pulse += f" ({_val(b['tip_words'])})"
-        if b.get("plw1_W") is not None:
-            pulse += f" at {_val(b['plw1_W'], lambda v: format(float(v), 'g'), 'W')}"
+        # the power p1 is actually played at (acquisition._p1_power), never a
+        # range: a series whose spectra used different levels gets it from
+        # its Table S1 PLW columns, not from a merged sentence
+        pw, lvl = b.get("p1_power_W"), b.get("p1_power_level")
+        if ("p1_power_W" not in b and not _is_range(pp)
+                and str(pp or "").lower().startswith("zg")):
+            # a record saved before 0.16 has no resolved power: for the zg
+            # family p1 is played at pl1, so PLW1 is still the right number
+            pw, lvl = b.get("plw1_W"), "pl1"
+            pw = pw if (pw is not None and not _is_range(pw) and float(pw) > 0) else None
+        if pw is not None and not _is_range(pw) and not _is_range(lvl):
+            pulse += f" at {format(float(pw), 'g')} W"
+            if lvl and str(lvl).lower() != "pl1":
+                pulse += f" ({str(lvl).upper().replace('PL', 'PLW')})"
         parts.append(pulse)
     if b.get("decoupling_note"):
         parts.append(str(_val(b["decoupling_note"])))
@@ -1017,6 +1084,14 @@ def table(blocks, spin_rates: dict | None = None) -> AcqTable:
                 varying.add(k)
         else:
             constants[k] = first
+    # keys the Experimental paragraph reads that are not Table S1 columns: a
+    # differing one must still become a range in the merged view, or the
+    # first spectrum's value is stated for all of them (the p1 power of a
+    # single-pulse spectrum and an MQMAS in one 27Al paragraph)
+    for k in ("p1_power_W", "p1_power_level"):
+        vals = [r.get(k) for r in rows]
+        if len(rows) > 1 and any(not _same(v, vals[0], k) for v in vals[1:]):
+            varying.add(k)
     return AcqTable(columns=cols, rows=rows, varying=varying, constants=constants)
 
 

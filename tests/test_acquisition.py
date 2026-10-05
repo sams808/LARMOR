@@ -237,7 +237,8 @@ def _block_3102_like(**over) -> dict:
         "sr_hz": -210.86, "magnet_1h_MHz": 599.77, "b0_T": 14.0866,
         "spectrometer": "Avance III HD 600", "topspin": "3.6.2",
         "probe": "SPRB600511_7297 (MAS)", "pulprog": "zg", "ns": 14, "ds": 0, "rg": 194.07,
-        "d1_s": 300.0, "aq_s": 0.04795, "p1_us": 1.25, "plw1_W": 207.0, "p90_us": 3.75,
+        "d1_s": 300.0, "aq_s": 0.04795, "p1_us": 1.25, "plw1_W": 207.0,
+        "p1_power_W": 207.0, "p1_power_level": "pl1", "p90_us": 3.75,
         "flip_deg": 30.0, "flip_source": "title", "tip_words": "", "rotor": "RS2427418",
         "vt_note": "ambient temperature, no VT gas flow", "decoupling_note": "",
         "sw_Hz": 100000.0, "td": 9590, "date_utc": "2026-05-02T04:09:33Z",
@@ -450,3 +451,57 @@ def test_summary_lines_and_folder_expnos(tmp_path):
     assert A.folder_expnos(month / "04272026_S1_SS_ALP") == [str(e1), str(e2)]
     assert set(A.folder_expnos(month)) == {str(e1), str(e2), str(e3)}
     assert A.folder_expnos(e1) == [str(e1)] and A.folder_expnos(tmp_path / "none") == []
+
+
+# ------------------------------------------------------------------ the p1 power the program plays
+EXAMPLES = Path(__file__).resolve().parents[1] / "examples" / "pCABS2-4"
+
+
+@pytest.mark.skipif(not (EXAMPLES / "3620" / "pulseprogram").is_file(), reason="examples absent")
+def test_the_paragraph_states_the_power_p1_is_played_at_never_plw1_blindly():
+    """mp3qdfsz plays p1 at pl11 (250 W) while PLW1 is an unused 0 W: the
+    paragraph said "a 3.1 µs pulse at 0 W" for the bundled 3QMAS, and the
+    merged 27Al paragraph called both spectra "single pulse acquisitions"
+    after the first pulse program (found by the distribution check)."""
+    zg = A.read_block(EXAMPLES / "3616")
+    mq = A.read_block(EXAMPLES / "3620")
+    assert (zg["p1_power_level"], zg["p1_power_W"]) == ("pl1", zg["plw1_W"])
+    assert mq["plw1_W"] == 0.0
+    assert (mq["p1_power_level"], mq["p1_power_W"]) == ("pl11", 250.0)
+    one = A.paragraph([mq])
+    assert "An MQMAS acquisition (pulse program mp3qdfsz) used a 3.1 µs pulse at 250 W (PLW11)" in one
+    assert "at 0 W" not in one
+    both = A.paragraph([zg, mq])
+    assert "Single pulse" not in both and "single pulse acquisition" not in both
+    assert "pulse programs zg / mp3qdfsz" in both
+    # the two spectra used different powers: the merged sentence states none
+    assert " W," not in both.split("transients")[0].split("used")[-1]
+
+
+def test_p1_power_resolution_rules(tmp_path):
+    """The level on the p1 statement wins, else the last f1 power set before
+    it, else pl1; a zg-family program without its pulseprogram file is pl1;
+    any other program without one, a p1 on another channel or a 0 W level
+    states no power."""
+    def prog(text):
+        d = tmp_path / f"e{abs(hash(text)) % 10**8}"
+        d.mkdir()
+        (d / "acqus").write_text("##TITLE= x\n", encoding="utf-8")
+        if text is not None:
+            (d / "pulseprogram").write_text(text, encoding="utf-8")
+        return d
+
+    plw = [0.0, 50.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 250.0]
+    assert A._p1_power(prog("1 ze\n2 d1\n  (p1 pl11 ph1):f1\n  go=2 ph31\nexit\n"), plw, "x") \
+        == ("pl11", 250.0)
+    assert A._p1_power(prog("1 ze\n2 d1 pl11:f1\n  p1 ph1\n  go=2 ph31\nexit\n"), plw, "x") \
+        == ("pl11", 250.0)
+    assert A._p1_power(prog("1 ze\n2 d1\n  p1 ph1\n  go=2 ph31\nexit\n"), plw, "x") == ("pl1", 50.0)
+    no_file = tmp_path / "nofile"
+    no_file.mkdir()
+    (no_file / "acqus").write_text("##TITLE= x\n", encoding="utf-8")
+    assert A._p1_power(no_file, plw, "zg30") == ("pl1", 50.0)
+    assert A._p1_power(no_file, plw, "hahnecho") == ("", None)
+    assert A._p1_power(prog("1 ze\n2 d1\n  (p1 ph1):f2\n  go=2 ph31\nexit\n"), plw, "x") == ("", None)
+    assert A._p1_power(prog("1 ze\n2 d1\n  (p1 pl3 ph1):f1\n  go=2 ph31\nexit\n"), plw, "x") \
+        == ("pl3", None)
