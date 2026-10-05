@@ -26,3 +26,4 @@ dist/
 examples/bib/
 packaging/.buildenv/
 dist_test/
+build_test/

@@ -53,8 +53,7 @@ DYNAMIC = {
         "multiprocessing.spawn", "multiprocessing.popen_spawn_win32",
         "multiprocessing.reduction", "concurrent.futures.process"],
     "lmfit / uncertainties internals reached through their registries": [
-        "lmfit.models", "lmfit.printfuncs", "lmfit.confidence", "asteval",
-        "uncertainties.umath", "uncertainties.unumpy"],
+        "lmfit.models", "lmfit.printfuncs", "lmfit.confidence", "asteval"],
     "scipy paths the fit and the error tools reach lazily": [
         "scipy.optimize._lsq.trf", "scipy.optimize._lsq.least_squares",
         "scipy.stats._continuous_distns", "scipy.special._ufuncs",

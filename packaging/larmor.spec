@@ -114,6 +114,17 @@ a = Analysis(
     noarchive=False,
 )
 
+# Qt modules LARMOR never loads. PyInstaller's PySide6 hook collects every
+# plugin, and the virtual-keyboard input-context plugin drags in
+# Qt6VirtualKeyboard (GPL-3.0-only / commercial -- not LGPL like the rest of
+# Qt) plus the Qml / Quick stack (~13 MB). Qt6Pdf and Qt6Test are unused
+# too. The distribution check imports every module the app reaches, so a
+# filter that went too far would show up there.
+_DROP = ("VirtualKeyboard", "platforminputcontexts", "Qt6Qml", "Qt6Quick",
+         "Qt6Pdf", "Qt6Test", "QtTest")
+a.binaries = [b for b in a.binaries if not any(k in b[0] for k in _DROP)]
+a.datas = [d for d in a.datas if not any(k in d[0] for k in _DROP)]
+
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
 exe = EXE(

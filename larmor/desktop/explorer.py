@@ -171,9 +171,8 @@ class ExplorerPanel(QWidget):
 
         self._show_procs = True
         self._show_fits = True
-        self._pinned = list(QSettings("LARMOR", "app").value("pinnedFolders", []) or [])
-        if isinstance(self._pinned, str):
-            self._pinned = [self._pinned]
+        from larmor.desktop.prefs import list_setting
+        self._pinned = list_setting("pinnedFolders")
         # optional display names for pins (path -> name), JSON in QSettings so
         # the round-trip is platform-independent
         try:

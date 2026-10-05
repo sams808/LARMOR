@@ -185,12 +185,12 @@ class _EditingMixin:
 
     @staticmethod
     def _remembered_site_defaults(nucleus: str, model: str) -> dict:
-        import json
+        from larmor.desktop.prefs import json_setting
         if not nucleus:
             return {}
-        lib = json.loads(QSettings("LARMOR", "app").value("siteDefaults", "{}")
-                         or "{}")
-        return lib.get(f"{nucleus}/{model}", {})
+        lib = json_setting("siteDefaults", {})       # garbage in the registry -> {}
+        hit = lib.get(f"{nucleus}/{model}", {})
+        return hit if isinstance(hit, dict) else {}
 
     def _remember_site_defaults(self):
         """After a fit, remember each site's shape parameters (not position or
@@ -201,8 +201,8 @@ class _EditingMixin:
         nucleus = (self.recipe or {}).get("nucleus", "")
         if not nucleus or not self.recipe.get("sites"):
             return
-        lib = json.loads(QSettings("LARMOR", "app").value("siteDefaults", "{}")
-                         or "{}")
+        from larmor.desktop.prefs import json_setting
+        lib = json_setting("siteDefaults", {})
         for s in self.recipe["sites"]:
             keep = {}
             for pn, p in s.get("params", {}).items():

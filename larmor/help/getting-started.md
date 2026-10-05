@@ -202,8 +202,8 @@ Each experiment has its own manual with worked steps and the science behind it:
 | a question about a processing step | **Processing reference** |
 | a step-by-step walkthrough on real data | **Help ▸ Tutorials** (seven tutorials) |
 
-All are under **? ▸ User manuals**; the reference documents are direct **?**-menu
-items. Every tool with a **Help** button opens the matching section.
+All are under **Help ▸ User manuals**. Every tool with a **Help** button opens
+the matching section.
 
 **Help windows.** A manual or tutorial opens in its own window that does not
 block the program: the workbench (or the tool the Help button sits in) stays
@@ -231,7 +231,7 @@ answered before continuing) are not listed.
 ## 5 · Menu map
 
 Nine menus, each split into groups; every row shows its explanation as a
-tooltip, and **? ▸ Command palette…** (Ctrl + Shift + P) searches all of them.
+tooltip, and **Help ▸ Command palette…** (Ctrl + Shift + P) searches all of them.
 
 | Menu | Groups |
 |---|---|
@@ -243,7 +243,7 @@ tooltip, and **? ▸ Command palette…** (Ctrl + Shift + P) searches all of the
 | **Tools** | NMR table (with the glass-NMR feasibility of every element), Conversion tools, Pulse program (the sequence as text and as a timing diagram) · Herzfeld–Berger, Read static pattern, Czjzek distribution · Import DFT tensors, **Relaxation ▸** (T1/T2 series, per-site, variable temperature), **QCPMG ▸** (echo train → spectrum, infinite-field δiso, batch), REDOR |
 | **View** | Residual, Components, Component labels, Paddles, Overlays, Clear overlays, Literature shift ranges, Scroll nudges fit values · **Zoom ▸** (full, sites, back to 2D map) · **Axis unit ▸**, **Czjzek width display ▸** · **Panels ▸**, **Theme ▸**, **Text size ▸** |
 | **Plotting** | Plotting studio, Plot current spectrum, New 2D contour plot |
-| **Help (?)** | Command palette · **User manuals ▸**, **Tutorials ▸** · About LARMOR, More… |
+| **Help** | Command palette · **User manuals ▸**, **Tutorials ▸** · About LARMOR, More… |
 
 ---
 

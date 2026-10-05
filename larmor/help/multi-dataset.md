@@ -63,7 +63,7 @@ are unchanged); **stack offset** spreads them out instead. The status bar names 
 overlaid; a file that cannot be read as a 1D spectrum is refused in the
 status bar, never with a dialog.
 
-**File ▸ Save project…** (Ctrl + Shift + P) captures the whole session as one
+**File ▸ Save project…** (Ctrl + Alt + S) captures the whole session as one
 reopenable `.larproj.json` file — every row of the **Workspaces** dock, in
 order: 1D spectra with their processing, fit *and overlays* (overlays by
 reference, with their colour, scale, shift and offset); 2D maps **by

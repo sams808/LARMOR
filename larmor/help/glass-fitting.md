@@ -32,7 +32,7 @@ shifts approach. The spans are typical multi-component-oxide ranges, an
 assignment *guide*, not bounds — e.g. ²⁷Al shifts run significantly lower
 in aluminophosphates (the review's own caveat). Every number's source (and
 the reference-compound traps for ²³Na/¹⁹F) is documented in
-**Help ▸ Literature shift ranges — data & sources**.
+**Help ▸ User manuals ▸ Literature shift ranges — data & sources**.
 
 ## 2 · Peak shape: start free, then justify Gaussian
 

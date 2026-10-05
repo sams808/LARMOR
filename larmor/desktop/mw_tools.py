@@ -185,8 +185,9 @@ class _ToolsMixin:
                                         f"Name for this set ({clib.describe(cset)}):")
         if not ok or not name.strip():
             return
+        from larmor.desktop.prefs import json_setting
         s = QSettings("LARMOR", "app")
-        lib = json.loads(s.value("constraintLibrary", "{}") or "{}")
+        lib = json_setting("constraintLibrary", {})
         lib[name.strip()] = cset
         s.setValue("constraintLibrary", json.dumps(lib))
         self.statusBar().showMessage(f"saved constraint set “{name.strip()}” "

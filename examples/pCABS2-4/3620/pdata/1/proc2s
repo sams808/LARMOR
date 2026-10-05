@@ -4,8 +4,8 @@
 ##NPOINTS= 31	$$ modification sequence number
 ##ORIGIN= Bruker BioSpin GmbH
 ##OWNER= nmr
-$$ 2022-02-08 08:12:38.501 +0100  nmr@jupiter
-$$ /opt/topspin3.6.3/data/ssoudani/nmr/pCABS2-4/3620/pdata/1/proc2s
+$$ 2022-02-08 08:12:38.501 +0100  nmr@spectrometer
+$$ examples/pCABS2-4/3620/pdata/1/proc2s
 $$ process /opt/topspin3.6.3/prog/mod/proc2d
 ##$ABSF1= 0
 ##$ABSF2= 0

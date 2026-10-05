@@ -1,0 +1,29 @@
+Offline bird photographs shipped with LARMOR (Help > More..., the birds pack)
+==========================================================================
+
+Each image is a resized copy of an iNaturalist observation photograph, used
+under the Creative Commons licence its photographer chose; the attribution
+below is also shown on the card at run time. Non-commercial licences
+(CC BY-NC, CC BY-NC-SA) permit this non-commercial distribution; anyone
+redistributing LARMOR commercially must remove those images. The CC BY-NC-ND
+image and the "all rights reserved" image that earlier builds carried were
+removed in 0.16.0.
+
+file                      species                 photographer          licence
+------------------------  ----------------------  --------------------  -----------
+northern_cardinal.jpg     Cardinalis cardinalis   Laura Keene           CC BY-NC
+bald_eagle.jpg            Haliaeetus leucocephalus  Addy                CC BY-NC
+blue_jay.jpg              Cyanocitta cristata     Judy Gallagher        CC BY
+american_robin.jpg        Turdus migratorius      John D Reynolds       CC BY-NC
+atlantic_puffin.jpg       Fratercula arctica      Paul Steeves          CC BY-NC
+great_horned_owl.jpg      Bubo virginianus        Paul G. Johnson       CC BY-NC-SA
+snowy_owl.jpg             Bubo scandiacus         Patrick Randall       CC BY-NC-SA
+toco_toucan.jpg           Ramphastos toco         Paul Steeves          CC BY-NC
+scarlet_macaw.jpg         Ara macao               Matthew Patchett      CC BY-NC
+american_barn_owl.jpg     Tyto furcata            Andria E. Hernandez   CC BY-NC
+greater_flamingo.jpg      Phoenicopterus roseus   cog2022               CC BY-NC
+shoebill.jpg              Balaeniceps rex         Nik Borrow            CC BY-NC
+
+Source: https://www.inaturalist.org (search the species; the observation
+links were not recorded when the pack was assembled). Licence texts:
+https://creativecommons.org/licenses/

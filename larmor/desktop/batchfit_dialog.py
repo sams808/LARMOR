@@ -1671,8 +1671,9 @@ class BatchFitDialog(QDialog):
         if not ok or not name.strip():
             return
         tpl = self._template_dict()
+        from larmor.desktop.prefs import json_setting
         s = QSettings("LARMOR", "app")
-        lib = json.loads(s.value("batchTemplates", "{}") or "{}")
+        lib = json_setting("batchTemplates", {})
         lib[name.strip()] = tpl
         s.setValue("batchTemplates", json.dumps(lib))
         self.status.setText(f"saved batch setup “{name.strip()}”")

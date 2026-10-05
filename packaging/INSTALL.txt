@@ -17,28 +17,61 @@ _internal folder next to it. Right-click LARMOR.exe > "Send to" >
 The first start takes 10-30 seconds while Windows unpacks the libraries;
 later starts are faster.
 
-Opening data: File > Open, or drag a Bruker folder (an EXPNO such as
-.../2026-01/01192026_SR31649_Base0Ca_SS_ALP/24, or its pdata/1/1r), a Varian
-folder, a dmfit .fxmla, or a saved .recipe.json onto the window. The
-instrument folders are never modified.
+Opening data: File > Open, or drag a Bruker folder (an EXPNO folder, or its
+pdata/1/1r), a Varian folder, a dmfit .fxml, or a saved .recipe.json onto
+the window. The instrument folders are never modified. An example data set
+ships with the program: the Bruker folders under
+    <program folder>\_internal\examples\pCABS2-4
+(27Al and 11B MAS spectra of one glass, a 3QMAS 2D data set, the dmfit fits
+made for them and two saved LARMOR fits) - Tutorials 1, 2, 3, 5 and 6 run
+on them.
 
-Manuals and tutorials are inside the app: Help > Manuals, Help > Tutorials.
+Manuals and tutorials are inside the app: Help > User manuals,
+Help > Tutorials.
 
 If the window does not appear: a file LARMOR_crash.log is written in your
-user folder (C:\Users\<you>\). Send it with your report.
+user folder (C:\Users\<you>\). Open an issue at
+https://github.com/sams808/LARMOR/issues with that file attached.
 
-If the window opens but Fit does nothing: open a command prompt in the
-LARMOR folder (Shift + right-click > "Open PowerShell window here") and run
+If the window opens but something does not work: open a command prompt in
+the LARMOR folder (Shift + right-click > "Open PowerShell window here") and
+run
 
     .\LARMOR.exe --selftest
 
 It fits a test spectrum the way the Fit button does and writes
-C:\Users\<you>\LARMOR_selftest.log with every step and any error.
-Send that file with your report (add your own spectrum's path after
---selftest to test on your data).
+C:\Users\<you>\LARMOR_selftest.log with every step and any error (add your
+own spectrum's path after --selftest to test on your data). For the whole
+program:
+
+    .\LARMOR.exe --distcheck
+    .\LARMOR.exe --distcheck --gui
+
+The first imports every module the program can reach, opens every bundled
+resource, runs every engine, every export format, the process pool and the
+command line; the second also opens every window and menu action, off
+screen, without touching your saved settings. Both write
+C:\Users\<you>\LARMOR_distcheck.log and end with a PASS or FAIL line.
+Attach that file to your issue.
 
 Updating: run the new setup (it replaces the old version in place) or delete
 the old LARMOR folder and unzip the new archive. Your saved recipes, projects
 and figures live wherever you saved them, not in the program folder.
+
+Uninstalling (Settings > Apps, or unins000.exe in the program folder)
+removes the program folder only. Your preferences stay in the registry under
+HKEY_CURRENT_USER\Software\LARMOR, and your logs and confirmations under
+%LOCALAPPDATA%\LARMOR (aliases.json, rename_log.jsonl,
+mas_confirmations.jsonl, sr_overrides.json, referencing_log.jsonl,
+session.json); delete them by hand if you want a clean slate.
+
+Licences: LARMOR is MIT (LICENSE, in this folder). The interface uses Qt 6
+through PySide6 and shiboken6 (The Qt Company) under the GNU LGPL v3; the Qt
+DLLs sit unmodified under _internal\PySide6 and may be replaced by another
+build of the same major version. The full third-party list is
+THIRD_PARTY_LICENSES.txt and the licence texts are in LICENSES\, both in
+this folder. LARMOR works offline and sends nothing anywhere; the one
+exception is Help > More..., a just-for-fun card that fetches a picture
+from a public image service when you open it.
 
 Source and documentation: https://github.com/sams808/LARMOR

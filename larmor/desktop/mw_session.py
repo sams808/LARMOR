@@ -702,7 +702,8 @@ class _SessionMixin:
             f = self._session_file()
             if f.exists():
                 d = json.loads(f.read_text(encoding="utf-8"))
-                src, recipe = d.get("source", ""), d.get("recipe", {}) or {}
+                if isinstance(d, dict):
+                    src, recipe = d.get("source", ""), d.get("recipe", {}) or {}
         except (OSError, ValueError):
             pass
         if not src:
@@ -712,12 +713,20 @@ class _SessionMixin:
             saved = s.value("session/recipe", "")
             try:
                 recipe = json.loads(saved) if saved else {}
-            except ValueError:
+            except (TypeError, ValueError):
                 recipe = {}
             if src:
                 s.remove("session/source")
                 s.remove("session/recipe")
-        if not src or not Path(src).exists():
+        # a session file is user-folder state: whatever it holds must not stop
+        # start-up (the 0.16 audit fed it a number for "source" and a string
+        # for "recipe" -- Path(12) raised before the window existed)
+        if not isinstance(src, str) or not isinstance(recipe, dict):
+            return
+        try:
+            if not src or not Path(src).exists():
+                return
+        except (OSError, ValueError):
             return
         try:
             self.load_source(src)

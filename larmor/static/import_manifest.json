@@ -14,9 +14,7 @@
    "asteval",
    "lmfit.confidence",
    "lmfit.models",
-   "lmfit.printfuncs",
-   "uncertainties.umath",
-   "uncertainties.unumpy"
+   "lmfit.printfuncs"
   ],
   "mrsimulator model registry": [
    "mrsimulator.models.czjzek",
@@ -85,6 +83,7 @@
    "larmor.desktop.paths",
    "larmor.desktop.plot",
    "larmor.desktop.plotting_studio",
+   "larmor.desktop.prefs",
    "larmor.desktop.pulseprog_dialog",
    "larmor.desktop.pybaseline_dialog",
    "larmor.desktop.qcpmg_batch_dialog",
@@ -285,6 +284,7 @@
    "larmor.desktop.plot",
    "larmor.desktop.plot_menu",
    "larmor.desktop.plotting_studio",
+   "larmor.desktop.prefs",
    "larmor.desktop.pulseprog_dialog",
    "larmor.desktop.pybaseline_dialog",
    "larmor.desktop.qcpmg_batch_dialog",
@@ -419,6 +419,7 @@
    "larmor.cli",
    "larmor.desktop.batchfit_dialog",
    "larmor.desktop.mw_sidebands",
+   "larmor.desktop.prefs",
    "larmor.desktop.series_table_dialog",
    "larmor.io.bundle",
    "larmor.series_table",
@@ -502,6 +503,7 @@
    "larmor.desktop.batchfit_dialog",
    "larmor.desktop.mw_processing",
    "larmor.distcheck",
+   "larmor.distcheck.gui_common",
    "larmor.io.bundle",
    "larmor.io.scan",
    "larmor.masrate",
@@ -573,7 +575,9 @@
    "larmor.desktop.mw_session",
    "larmor.desktop.mw_tools",
    "larmor.desktop.plotting_studio",
+   "larmor.desktop.prefs",
    "larmor.distcheck",
+   "larmor.distcheck.gui_common",
    "larmor.distcheck.manifest",
    "larmor.figures",
    "larmor.io.bundle",
@@ -1054,6 +1058,14 @@
    "larmor.desktop.mw_tools",
    "larmor.desktop.plot_menu",
    "larmor.desktop.series_plot"
+  ],
+  "larmor.desktop.prefs": [
+   "larmor.desktop.app",
+   "larmor.desktop.batchfit_dialog",
+   "larmor.desktop.explorer",
+   "larmor.desktop.mw_editing",
+   "larmor.desktop.mw_menus",
+   "larmor.desktop.mw_tools"
   ],
   "larmor.desktop.pulseprog_dialog": [
    "larmor.desktop.mw_tools"
@@ -2051,6 +2063,7 @@
    "larmor.dft",
    "larmor.distcheck",
    "larmor.distcheck.core_stages",
+   "larmor.distcheck.gui_common",
    "larmor.distcheck.manifest",
    "larmor.engine",
    "larmor.figures",
@@ -2230,6 +2243,7 @@
   ],
   "subprocess": [
    "larmor.desktop.batch_dialog",
+   "larmor.distcheck.gui_common",
    "larmor.methods",
    "larmor.simpson"
   ],
@@ -2409,6 +2423,7 @@
    "larmor.desktop.plot",
    "larmor.desktop.plot_menu",
    "larmor.desktop.plotting_studio",
+   "larmor.desktop.prefs",
    "larmor.desktop.pulseprog_dialog",
    "larmor.desktop.pybaseline_dialog",
    "larmor.desktop.qcpmg_batch_dialog",
@@ -2639,6 +2654,7 @@
   "larmor.desktop.plot",
   "larmor.desktop.plot_menu",
   "larmor.desktop.plotting_studio",
+  "larmor.desktop.prefs",
   "larmor.desktop.pulseprog_dialog",
   "larmor.desktop.pybaseline_dialog",
   "larmor.desktop.qcpmg_batch_dialog",
@@ -2841,11 +2857,10 @@
   "xfact": [
    "offline/american_barn_owl.jpg",
    "offline/american_robin.jpg",
-   "offline/anna_s_hummingbird.jpg",
    "offline/atlantic_puffin.jpg",
    "offline/bald_eagle.jpg",
    "offline/blue_jay.jpg",
-   "offline/emperor_penguin.jpg",
+   "offline/CREDITS.txt",
    "offline/great_horned_owl.jpg",
    "offline/greater_flamingo.jpg",
    "offline/northern_cardinal.jpg",

@@ -5,7 +5,7 @@
 glass series; ⁸¹Br at 216.007 MHz, pulse program `WCPMG.jk`, 2 MHz sweep,
 TD 58000, SW 2.5 MHz, 512 000 scans; EXPNOs 31–34 are the 1–4 Ca glasses),
 and, for §12, a ³⁵Cl sample measured at two fields. `<NMR>` stands for the
-instrument-data root of the development machine (`…/Desktop/WSU_work/NMR`).
+instrument-data root (these data sets are described here, not shipped).
 These are the developer's instrument files: described here,
 not part of the repository; any WCPMG or QCPMG `fid` can stand in for
 §2–§10. Run the commands from the repository root.*
@@ -322,7 +322,7 @@ do. **Compute δiso** then reads
 ```
 δiso = -68.55 +- 3.82 ppm  (intercept, 1/ν₀²→0)   ·   P_Q = 3.307 +- 0.229 MHz (η-independent)   ·   C_Q = 3.066 +- 0.213 MHz   (η = 0.7 assumed; 2.864-3.307 over η 0-1)
 ```
-<!-- measured 2026-09-23 (wip/QF): both EXPNOs through the stage 1…6 functions as above, sent with the stage-6 button, the dialog's cells as quoted; the headline is fmt_result_lines on those cells -->
+<!-- measured 2026-09-23: both EXPNOs through the stage 1…6 functions as above, sent with the stage-6 button, the dialog's cells as quoted; the headline is fmt_result_lines on those cells -->
 
 together with a warning that the 78 MHz centre of gravity drifts 2.7 ppm
 when its window is doubled — 13 % of the 21 ppm separation between the two
@@ -376,7 +376,7 @@ and **Export report…** writes, for the first sample:
     W_q            =     48.2 ppm (low field) / 25.5 ppm (high field)
     W_csd          =     34.7 ppm (field-independent: shift distribution + CSA)
 ```
-<!-- measured 2026-09-23 (wip/QF): the ten CSVs through the batch grid (read_field_spectrum / measure_cg / fit_samples / report_text), spin 1.5, η 0.7; the two dcg rows are the grid's cells, which the grid fits as printed -->
+<!-- measured 2026-09-23: the ten CSVs through the batch grid (read_field_spectrum / measure_cg / fit_samples / report_text), spin 1.5, η 0.7; the two dcg rows are the grid's cells, which the grid fits as printed -->
 
 followed by the other four samples and a summary table; δiso runs from
 -76.8 ± 2.7 ppm (0 Ca) to +63.7 ± 25.9 ppm (4 Ca) across the series, with

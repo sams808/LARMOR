@@ -782,7 +782,9 @@ class PlottingStudio(QDialog):
     @staticmethod
     def _grid_data_roots() -> list[str]:
         raw = QSettings("LARMOR", "app").value("plottingStudio/dataRoots", "")
-        return [r for r in (raw or "").split(";") if r]
+        if isinstance(raw, (list, tuple)):
+            raw = ";".join(str(r) for r in raw)
+        return [r.strip() for r in str(raw or "").split(";") if r.strip()]
 
     def _grid_set_data_roots(self):
         current = "; ".join(self._grid_data_roots())

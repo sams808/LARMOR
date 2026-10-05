@@ -71,7 +71,7 @@
 		</GrDimension>
 	</GraphParameters>
 	<DataFile>
-		<FileName>C:\Users\sami-admin\THESE\RMN\Data\pCABS2-4\1118\pdata\25\1r</FileName>
+		<FileName>examples\pCABS2-4\1118\pdata\25\1r</FileName>
 		<FileTitle></FileTitle>
 	</DataFile>
 </NMRFit>

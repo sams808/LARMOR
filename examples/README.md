@@ -8,7 +8,10 @@ LARMOR needs.
 - `pCABS2-4/3616` — ²⁷Al MAS, single pulse, 26 kHz. The dmfit fit made for
   it (`pdata/1/1r.fxml`) is included, so the dmfit import path can be tried on
   a real file.
-- `pCABS2-4/1118` — ¹¹B MAS, single pulse, 20 kHz, with its dmfit fit.
+- `pCABS2-4/1118` — ¹¹B MAS, single pulse, 20 kHz, with its dmfit fit. Its
+  `acqus` records `MASR = 30000` while the title, the dmfit file and the saved
+  LARMOR fit all say 20 kHz: the parameter file is wrong, LARMOR's MAS check
+  shows the disagreement when the spectrum opens, and the fit uses 20 kHz.
 - `pCABS2-4/3620` — ²⁷Al 3QMAS (mp3qdfsz), the 2D dataset Tutorial 5 fits and
   Tutorial 3 draws (its `2ri`/`2ir`/`2ii` quadrants and the raw `ser` are
   included so both the processed and the raw route can be tried).

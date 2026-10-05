@@ -2,9 +2,8 @@
 
 *Time: ~25 minutes. Data: the five ¹¹B MAS spectra of a calcium composition
 series — EXPNO 24 of the five 2026-01 sample folders under
-`<NMR>/NMRFAM/DATA`, where `<NMR>` stands for the instrument-data root of the
-development machine (`…/Desktop/WSU_work/NMR`). These are the developer's
-instrument files: described here, not part of the repository. §6 is
+`<NMR>/NMRFAM/DATA`, where `<NMR>` stands for an instrument-data root. These
+data sets are described here but are not part of the repository. §6 is
 self-contained (a synthetic three-spectrum series) and runs anywhere. Run the
 commands from the repository root.*
 
@@ -50,7 +49,7 @@ MAS (booking sidecar): 35714 Hz
 title: 11B with short tip angle
 CONFLICT: MAS rate: acqus says 4200 Hz but the title says 35714 Hz and the booking sidecar agrees -- acqus outvoted, using 35714 Hz
 ```
-<!-- measured v0.13.0 (N9 worktree), 2026-09-23: `larmor info` on the EXPNO (the first line echoes the path as given) -->
+<!-- measured v0.13.0, 2026-09-23: `larmor info` on the EXPNO (the first line echoes the path as given) -->
 
 The acqus file records a 4.2 kHz spinning rate — a leftover of that
 spectrometer's rotor controller, the same 4200 Hz in almost every NMRFAM
@@ -325,7 +324,7 @@ larmor batchfit s0.csv s1.csv s2.csv --model model.recipe.json -o out
 batch fit: 3 spectra, 3 shared parameters · mean RMSD 0.1735
 wrote 3 recipe(s) + batch_table.csv to out
 ```
-<!-- measured v0.13.0 (N5 worktree), 2026-09-23: the four commands of this section, run in a scratch folder; transcripts unchanged from v0.12.1, at_bound column read from out_rel/batch_table.csv -->
+<!-- measured v0.13.0, 2026-09-23: the four commands of this section, run in a scratch folder; transcripts unchanged from v0.12.1, at_bound column read from out_rel/batch_table.csv -->
 
 Adding `--curves` writes the publication bundle next to the recipes and the
 table:

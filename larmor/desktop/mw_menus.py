@@ -595,10 +595,9 @@ class _MenusMixin:
         return a
 
     def _rebuild_recent(self):
+        from larmor.desktop.prefs import list_setting
         self.m_recent.clear()
-        paths = QSettings("LARMOR", "app").value("recent", []) or []
-        if isinstance(paths, str):
-            paths = [paths]
+        paths = list_setting("recent")
         for p in paths[:12]:
             act = self.m_recent.addAction(f"{Path(p).name}   —   {Path(p).parent}")
             act.triggered.connect(lambda _=False, pp=p: self.load_source(pp))
@@ -606,10 +605,9 @@ class _MenusMixin:
             a = self.m_recent.addAction("(none yet)"); a.setEnabled(False)
 
     def _add_recent(self, path: str):
+        from larmor.desktop.prefs import list_setting
         s = QSettings("LARMOR", "app")
-        paths = s.value("recent", []) or []
-        if isinstance(paths, str):
-            paths = [paths]
+        paths = list_setting("recent")
         paths = [p for p in paths if p != path]
         paths.insert(0, path)
         s.setValue("recent", paths[:12])
@@ -617,10 +615,9 @@ class _MenusMixin:
 
     # -------- Apply recipe: re-use a recent fit's model on the open data ------
     def _add_recent_recipe(self, path: str):
+        from larmor.desktop.prefs import list_setting
         s = QSettings("LARMOR", "app")
-        paths = s.value("recentRecipes", []) or []
-        if isinstance(paths, str):
-            paths = [paths]
+        paths = list_setting("recentRecipes")
         paths = [p for p in paths if p != path]
         paths.insert(0, path)
         s.setValue("recentRecipes", paths[:10])
@@ -634,10 +631,8 @@ class _MenusMixin:
         browse = self.m_apply.addAction("Browse for recipe…")
         browse.triggered.connect(self.apply_recipe_browse)
         self.m_apply.addSeparator()
-        paths = QSettings("LARMOR", "app").value("recentRecipes", []) or []
-        if isinstance(paths, str):
-            paths = [paths]
-        paths = [p for p in paths if Path(p).exists()][:10]
+        from larmor.desktop.prefs import list_setting
+        paths = [p for p in list_setting("recentRecipes") if Path(p).exists()][:10]
         if not paths:
             a = self.m_apply.addAction("(no recent recipes)")
             a.setEnabled(False)
@@ -718,8 +713,11 @@ class _MenusMixin:
               <b>15</b>, e0225953 (2020)</li>
           <li><b>Matplotlib</b> — Hunter, <i>Comput.&nbsp;Sci.&nbsp;Eng.</i>
               <b>9</b>, 90 (2007)</li>
-          <li><b>PySide6 / Qt&nbsp;for&nbsp;Python</b> (The Qt Company) and
-              <b>pyqtgraph</b> (L.&nbsp;Campagnola) — the interface</li>
+          <li><b>PySide6 / Qt&nbsp;for&nbsp;Python</b> (The Qt Company,
+              LGPL&nbsp;v3; the Qt libraries ship unmodified as separate DLLs and
+              can be replaced) and <b>pyqtgraph</b> (L.&nbsp;Campagnola, MIT) — the
+              interface. Every third-party licence: THIRD_PARTY_LICENSES.txt next
+              to the program.</li>
         </ul>
 
         <h3 style="margin-bottom:2px;">Inspired by</h3>
@@ -1129,7 +1127,8 @@ class _MenusMixin:
         from PySide6.QtGui import QActionGroup
 
         m = parent.addMenu("Text &size")
-        cur = int(QSettings("LARMOR", "app").value("fontPt", 9) or 9)
+        from larmor.desktop.prefs import font_pt_setting
+        cur = font_pt_setting()                  # garbage in the registry -> 9
         self._textsize_group = QActionGroup(self)
         self._textsize_group.setExclusive(True)
         for label, pt in (("Small", 8), ("Normal", 9), ("Large", 11),
@@ -1204,11 +1203,11 @@ class _MenusMixin:
         """First-run only: guide a brand-new user on the empty canvas. Anyone who
         has opened data before (a non-empty 'recent' list) never sees it — so it
         does not bother returning users."""
-        recent = QSettings("LARMOR", "app").value("recent", []) or []
-        if recent or self.exp_ppm is not None:
+        from larmor.desktop.prefs import list_setting
+        if list_setting("recent") or self.exp_ppm is not None:
             return
         self.view.set_placeholder(
             "Open a spectrum to begin\n\n"
             "File ▸ Open  (Ctrl+O)   ·   or drag a Bruker folder / file onto "
             "the plot\n\n"
-            "New to LARMOR?   ? ▸ User manuals ▸ Getting started")
+            "New to LARMOR?   Help ▸ User manuals ▸ Getting started")

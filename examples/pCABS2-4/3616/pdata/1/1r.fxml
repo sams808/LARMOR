@@ -76,7 +76,7 @@
 		</GrDimension>
 	</GraphParameters>
 	<DataFile>
-		<FileName>C:\Users\sami-admin\THESE\RMN\Data\pCABS2-4\3616\pdata\1\1r</FileName>
+		<FileName>examples\pCABS2-4\3616\pdata\1\1r</FileName>
 		<FileTitle>02/12/21 : conditions OK</FileTitle>
 	</DataFile>
 </NMRFit>

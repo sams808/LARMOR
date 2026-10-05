@@ -340,10 +340,23 @@ def asset_path(name: str) -> str:
 
 
 def _crash_log_path() -> str:
+    # the same file packaging/launcher.py appends Python tracebacks to (the
+    # name INSTALL.txt tells users to send); on NTFS the former lowercase
+    # spelling was that file too, and faulthandler opened it with "w" --
+    # every start wiped the traceback of the previous crash before a user
+    # could send it
     try:
-        return os.path.join(os.path.expanduser("~"), "larmor_crash.log")
+        return os.path.join(os.path.expanduser("~"), "LARMOR_crash.log")
     except Exception:
-        return "larmor_crash.log"
+        return "LARMOR_crash.log"
+
+
+def saved_font_pt(default: int = 9) -> int:
+    """The saved UI font size, or ``default`` for anything unreadable: a
+    corrupt registry value must not stop the application before its window
+    exists (this ran unguarded in main() and in the Text size menu)."""
+    from larmor.desktop.prefs import font_pt_setting
+    return font_pt_setting(default)
 
 
 def _install_faulthandler() -> str:
@@ -359,7 +372,7 @@ def _install_faulthandler() -> str:
         if sys.stderr is not None:
             faulthandler.enable()
             return "stderr"
-        faulthandler.enable(open(_crash_log_path(), "w"))
+        faulthandler.enable(open(_crash_log_path(), "a"))   # append: keep earlier crashes
         return _crash_log_path()
     except Exception:
         return "unavailable"
@@ -379,7 +392,7 @@ def main() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName("LARMOR")
     app.setStyle("Fusion")            # deterministic rendering on any OS theme
-    pt = int(QSettings("LARMOR", "app").value("fontPt", 9) or 9)
+    pt = saved_font_pt()
     for family in ("Segoe UI", "Inter", "Roboto", "Helvetica Neue", "Arial"):
         f = QFont(family, pt)
         if f.exactMatch() or family == "Arial":

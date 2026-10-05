@@ -36,8 +36,14 @@ echo       version %VER%
 echo [2/5] PyInstaller
 "%PY%" -m PyInstaller packaging\larmor.spec --noconfirm --clean --log-level WARN || exit /b 1
 
-echo [3/5] INSTALL.txt
+echo [3/5] INSTALL.txt, LICENSE, THIRD_PARTY_LICENSES.txt, LICENSES\
 copy /y packaging\INSTALL.txt dist\LARMOR\INSTALL.txt >nul || exit /b 1
+rem a public binary must carry its own licence and the LGPL texts of Qt /
+rem PySide6 (LGPL-3.0 section 4): the wizard only DISPLAYS LICENSE, the zip
+rem had nothing
+copy /y LICENSE dist\LARMOR\LICENSE >nul || exit /b 1
+copy /y packaging\THIRD_PARTY_LICENSES.txt dist\LARMOR\THIRD_PARTY_LICENSES.txt >nul || exit /b 1
+xcopy /y /i /q packaging\LICENSES dist\LARMOR\LICENSES\ >nul || exit /b 1
 
 echo [4/5] Inno Setup
 set "ISCC=%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe"

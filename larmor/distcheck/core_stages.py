@@ -59,16 +59,20 @@ def imports(say, ctx):
             try:
                 importlib.import_module(name)
                 n_ok += 1
-            except ModuleNotFoundError as exc:
-                if name in optional or exc.name in optional:
-                    skipped.append(f"{name} ({optional.get(name) or optional.get(exc.name)})")
+            except ImportError as exc:
+                # an accepted absence: the optional module itself, or a module
+                # whose import fails because an optional one is missing
+                # (larmor.app raises its own ImportError naming the extra)
+                culprit = getattr(exc, "name", None)
+                if name in optional or culprit in optional:
+                    skipped.append(f"{name} ({optional.get(name) or optional.get(culprit)})")
                     continue
                 if (sys.platform != "win32" and name in
                         ("multiprocessing.popen_spawn_win32", "msvcrt", "winreg")):
                     skipped.append(f"{name} (Windows only)")
                     continue
                 bad_here.append(f"{name}: {exc}")
-                missing.append(name)
+                (missing if isinstance(exc, ModuleNotFoundError) else broken).append(name)
             except Exception as exc:                      # noqa: BLE001
                 bad_here.append(f"{name}: {type(exc).__name__}: {exc}")
                 broken.append(name)
@@ -221,7 +225,8 @@ def cli(say, ctx):
         return
     expnos = sorted(p for p in (ex / "pCABS2-4").iterdir() if p.is_dir() and p.name.isdigit())
     one = str(expnos[0])
-    for argv in (["info", one], ["acqtable", *map(str, expnos[:2])],
+    csv_out = str(Path(ctx["out"]) / "acquisition.csv")   # acqtable's default is the cwd
+    for argv in (["info", one], ["acqtable", *map(str, expnos[:2]), "-o", csv_out],
                  ["compare", *map(str, expnos[:2])], ["inventory", str(ex / "pCABS2-4")]):
         buf = io.StringIO()
         try:

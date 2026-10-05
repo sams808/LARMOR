@@ -9,7 +9,18 @@ description = "Open successor to dmfit: solid-state NMR lineshape fitting and si
 readme = "README.md"
 requires-python = ">=3.10,<3.13"
 license = { text = "MIT" }
-authors = [{ name = "sams808", email = "sam.souda.ss@gmail.com" }]
+authors = [{ name = "Sam Soudani", email = "sam.souda.ss@gmail.com" }]
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: OS Independent",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Chemistry",
+    "Topic :: Scientific/Engineering :: Physics",
+]
 dependencies = [
     "numpy",
     "scipy",
@@ -20,6 +31,11 @@ dependencies = [
     "nmrglue>=0.11",
     "pybaselines>=1.1",
 ]
+
+[project.urls]
+Homepage = "https://github.com/sams808/LARMOR"
+Source = "https://github.com/sams808/LARMOR"
+Issues = "https://github.com/sams808/LARMOR/issues"
 
 [project.scripts]
 larmor = "larmor.cli:main"

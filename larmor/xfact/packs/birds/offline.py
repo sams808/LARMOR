@@ -42,23 +42,6 @@ OFFLINE_CARDS = [{'catalog_tag': 'iNaturalist · Cardinalis cardinalis',
   'image_file': 'bald_eagle.jpg',
   'image_caption': '(c) Addy, some rights reserved (CC BY-NC), uploaded by Addy · via iNaturalist (offline '
                    'sample)'},
- {'catalog_tag': 'iNaturalist · Aptenodytes forsteri',
-  'class_tag': 'Bird',
-  'name': 'Emperor Penguin',
-  'subtitle': 'Aptenodytes forsteri · Aves',
-  'headline': {'dot': '#8A9E3E', 'text': 'Near Threatened', 'tail': 'IUCN Red List (NT)'},
-  'grid': [['Order', 'Penguins', ''],
-           ['Family', 'Penguins', ''],
-           ['Observations logged', '625', 'iNaturalist'],
-           ['Conservation status', 'Near Threatened', 'IUCN NT']],
-  'foot': 'The emperor penguin (Aptenodytes forsteri) is the tallest and heaviest of all living penguin species '
-          'and is endemic to Antarctica. The male and female are similar in plumage and size, reaching 122\xa0cm '
-          '(48\xa0in) in height and weighing from 22 to 45\xa0kg (49 to 99\xa0lb). The dorsal side and head are '
-          'black and sharply delineated from the white belly, pale-yellow breast and bright-yellow ear patches. '
-          'Like all penguins it is flightless, with a streamlined body, and wings...',
-  'image_file': 'emperor_penguin.jpg',
-  'image_caption': '(c) Martha de Jong-Lantink, some rights reserved (CC BY-NC-ND) · via iNaturalist (offline '
-                   'sample)'},
  {'catalog_tag': 'iNaturalist · Cyanocitta cristata',
   'class_tag': 'Bird',
   'name': 'Blue Jay',
@@ -220,23 +203,6 @@ OFFLINE_CARDS = [{'catalog_tag': 'iNaturalist · Cardinalis cardinalis',
           'is mainly grey while the juveniles are browner. It lives in tropical east Africa...',
   'image_file': 'shoebill.jpg',
   'image_caption': '(c) Nik Borrow, some rights reserved (CC BY-NC), uploaded by Nik Borrow · via iNaturalist '
-                   '(offline sample)'},
- {'catalog_tag': 'iNaturalist · Calypte anna',
-  'class_tag': 'Bird',
-  'name': "Anna's Hummingbird",
-  'subtitle': 'Calypte anna · Aves',
-  'headline': {'dot': '#3E8F63', 'text': 'Least Concern', 'tail': 'IUCN Red List (LC)'},
-  'grid': [['Order', 'Swifts and Hummingbirds', ''],
-           ['Family', 'Hummingbirds', ''],
-           ['Observations logged', '126,055', 'iNaturalist'],
-           ['Conservation status', 'Least Concern', 'IUCN LC']],
-  'foot': "Anna's hummingbird (Calypte anna), a medium-sized hummingbird native to the west coast of North "
-          "America, was named after Anna Masséna, Duchess of Rivoli. In the early 20th century, Anna's "
-          'hummingbirds bred only in northern Baja California and southern California. The transplanting of exotic '
-          'ornamental plants in residential areas throughout the Pacific coast and inland deserts provided '
-          'expanded nectar and nesting sites, allowing the species to expand its breeding range.',
-  'image_file': 'anna_s_hummingbird.jpg',
-  'image_caption': '(c) Nancy Christensen, all rights reserved, uploaded by Nancy Christensen · via iNaturalist '
                    '(offline sample)'}]
 
 

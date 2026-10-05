@@ -4,8 +4,8 @@
 ##NPOINTS= 13	$$ modification sequence number
 ##ORIGIN= Bruker BioSpin GmbH
 ##OWNER= nmr
-$$ 2022-02-04 14:47:40.311 +0100  nmr@jupiter
-$$ /opt/topspin3.6.3/data/ssoudani/nmr/pCABS2-4/1118/acqus
+$$ 2022-02-04 14:47:40.311 +0100  nmr@spectrometer
+$$ examples/pCABS2-4/1118/acqus
 $$ process /opt/topspin3.6.3/prog/mod/go4
 ##$ACQT0= -1.33689833500927
 ##$AMP= (0..31)

@@ -45,10 +45,20 @@ def ensure_app():
 class SettingsGuard:
     """Snapshot ``QSettings("LARMOR", "app")`` on entry and restore every key
     on exit, so a sweep that changes the theme, the recent files or any
-    option leaves the user's registry exactly as it found it."""
+    option leaves the user's registry exactly as it found it.
+
+    The snapshot also goes to DISK first (``backup_path``: a ``reg export``
+    of ``HKCU\\Software\\LARMOR`` on Windows, a JSON dump elsewhere) under
+    ``%LOCALAPPDATA%\\LARMOR\\settings_backup`` (the last 20 kept), because a
+    guard that lives only in memory is lost with its process: a test that
+    hung in a modal dialog and had to be killed took the user's saved
+    recent files, pinned folders and libraries with it (2026-10-05)."""
+
+    backup_path = None
 
     def __enter__(self):
         from PySide6.QtCore import QSettings
+        self.backup_path = backup_settings()
         s = QSettings(*_SETTINGS)
         self._saved = {k: s.value(k) for k in s.allKeys()}
         return self
@@ -61,6 +71,46 @@ class SettingsGuard:
             s.setValue(k, v)
         s.sync()
         return False
+
+
+def backup_settings():
+    """Write a restorable copy of the user's LARMOR settings and return its
+    path (None when nothing could be written). Windows: ``reg export`` of
+    ``HKCU\\Software\\LARMOR`` (``reg import <file>`` puts it back after
+    ``reg delete HKCU\\Software\\LARMOR /f``); elsewhere a JSON of the keys."""
+    import datetime
+    import json
+    import subprocess
+    from pathlib import Path
+
+    base = Path(os.environ.get("LOCALAPPDATA") or Path.home()) / "LARMOR" / "settings_backup"
+    try:
+        base.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return None
+    stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S") + f"_{os.getpid()}"
+    try:
+        if sys.platform == "win32":
+            target = base / f"LARMOR_settings_{stamp}.reg"
+            r = subprocess.run(["reg", "export", r"HKCU\Software\LARMOR", str(target), "/y"],
+                               capture_output=True, text=True, timeout=30)
+            if r.returncode != 0:            # no key yet: nothing to back up
+                target = None
+        else:
+            from PySide6.QtCore import QSettings
+            s = QSettings(*_SETTINGS)
+            target = base / f"LARMOR_settings_{stamp}.json"
+            target.write_text(json.dumps({k: s.value(k) for k in s.allKeys()},
+                                         default=str, indent=1), encoding="utf-8")
+        old = sorted(base.glob("LARMOR_settings_*"), key=lambda p: p.stat().st_mtime)
+        for p in old[:-20]:
+            try:
+                p.unlink()
+            except OSError:
+                pass
+        return target
+    except Exception:                                     # noqa: BLE001
+        return None
 
 
 class ExceptionTrap:
