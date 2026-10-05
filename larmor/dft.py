@@ -206,7 +206,11 @@ class ComputedSite:
 
         q = self.quadrupolar()
         if q and cq_key is not None:
-            params[cq_key]["value"] = q["Cq_MHz"]
+            # quadrupolar() keeps the sign of C_Q (sign(Vzz) x sign(Q): a
+            # property of the crystal); the lineshape depends on |C_Q| only and
+            # every model bounds Cq_MHz at >= 0.01, so a signed seed was
+            # reported as unphysical and clamped to 0.01 MHz by the fit
+            params[cq_key]["value"] = abs(q["Cq_MHz"])
             if eta_q_key is not None:
                 params[eta_q_key]["value"] = q["eta"]
         elif self.efg_tensor is not None and cq_key is None:

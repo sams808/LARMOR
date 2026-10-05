@@ -9,6 +9,11 @@ it is present, synthetic data otherwise. In ``--quick`` mode the Czjzek /
 amorphous kernels are built on a reduced (Cq, eta) grid (``_small_kernels``)
 so the whole set runs in a minute or two; the first stage that needs
 mrsimulator pays its import (~20 s on a cold machine) and says so.
+
+This module holds the shared helpers and the first eight stages; the
+records, specialty and figures groups live in ``engine_records``,
+``engine_specialty`` and ``engine_figures`` (they import the helpers from
+here) and are appended by :func:`stages`.
 """
 from __future__ import annotations
 
@@ -1172,7 +1177,13 @@ def multi_stage(say, ctx):
 
 # ------------------------------------------------------------ the list
 def stages() -> list:
+    # imported here, not at the top: these modules import this one's helpers
+    from larmor.distcheck import engine_figures, engine_records, engine_specialty
+
     return [("engine-readers", readers), ("engine-processing", processing_stage),
             ("engine-models", models_stage), ("engine-physics", physics_stage),
             ("engine-fitting", fitting_stage), ("engine-error-tools", error_tools_stage),
-            ("engine-constraints", constraints_stage), ("engine-multi", multi_stage)]
+            ("engine-constraints", constraints_stage), ("engine-multi", multi_stage),
+            ("engine-records", engine_records.records_stage),
+            ("engine-specialty", engine_specialty.specialty_stage),
+            ("engine-figures", engine_figures.figures_stage)]

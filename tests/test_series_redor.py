@@ -111,21 +111,61 @@ def test_fit_slice_amplitudes_is_nonnegative():
 
 # ---------------------------------------------------------------- REDOR
 def test_redor_universal_curve_landmarks():
-    """The powder curve must reproduce the universal REDOR curve: ΔS/S0
-    rises to its first maximum near lambda = D*N*Tr ~ 0.7 and overshoots 1."""
-    lam = np.linspace(0.001, 1.5, 400)
+    """The powder curve must reproduce the universal REDOR curve of an
+    isolated pair (Mueller et al. 1995): ΔS/S0 = 0.5 near lambda = D*N*Tr =
+    0.77, a first maximum near lambda = 1.67 with the characteristic
+    overshoot (~1.04)."""
+    lam = np.linspace(0.001, 2.5, 600)
     ds = redor.redor_pair_curve(1.0, lam)          # D = 1 Hz -> lambda = ntr
     i_max = int(np.argmax(ds))
-    assert 0.55 < lam[i_max] < 0.85, f"first max at lambda={lam[i_max]:.2f}"
-    assert 1.0 < ds[i_max] < 1.4                   # characteristic overshoot
+    assert 1.55 < lam[i_max] < 1.8, f"first max at lambda={lam[i_max]:.2f}"
+    assert 1.0 < ds[i_max] < 1.1                   # characteristic overshoot
+    half = lam[int(np.argmin(np.abs(ds[:i_max] - 0.5)))]
+    assert 0.72 < half < 0.82, f"dS/S0 = 0.5 at lambda={half:.2f}"
     assert ds[0] < 1e-3                            # starts at zero
+
+
+def test_redor_curve_is_the_exact_isolated_pair_solution():
+    """Physics from outside the module: the powder curve equals the closed
+    form of Mueller et al. (J. Magn. Reson. A 113, 81, 1995), S/S0 =
+    (sqrt2 pi/4) J_1/4(sqrt2 lambda) J_-1/4(sqrt2 lambda); a 13C-15N pair at
+    the glycine C'-N distance (2.48 A), its dephasing made from that closed
+    form and the CODATA / IUPAC constants, comes back at 2.48 A; the M2 is
+    the van Vleck value of one spin-1/2 partner, which Bertmer & Eckert's
+    short-time law (4/(3 pi^2)) M2 (N Tr)^2 turns back into the data. The
+    curve was once twice too fast in lambda (the I-spin line at
+    +-D (3cos^2 - 1) instead of +-(D/2)): every fitted D came out halved,
+    every distance 26 % long, and the round-trip tests could not see it."""
+    from scipy.special import jv
+
+    def mueller(lam):
+        x = np.sqrt(2.0) * np.asarray(lam, float)
+        with np.errstate(invalid="ignore"):
+            s = (np.sqrt(2.0) * np.pi / 4.0) * jv(0.25, x) * jv(-0.25, x)
+        return np.where(x > 0, 1.0 - s, 0.0)
+
+    lam = np.linspace(0.0, 3.0, 301)
+    assert np.abs(redor.redor_pair_curve(1.0, lam) - mueller(lam)).max() < 2e-3
+    hbar, mu0_4pi = 1.054571817e-34, 1.0e-7
+    g13c, g15n = 6.728284e7, -2.712618e7          # rad s^-1 T^-1
+    d_true = mu0_4pi * abs(g13c * g15n) * hbar / (2 * np.pi * (2.48e-10) ** 3)   # ~201 Hz
+    ntr = np.arange(2, 40, 2) / 10000.0           # 10 kHz MAS, lambda up to 0.76
+    ds = mueller(d_true * ntr)
+    pair = redor.analyze(ntr, ds, pair=("13C", "15N"), regime="pair")
+    assert pair.d_hz == pytest.approx(d_true, rel=0.01)
+    assert pair.distance_A == pytest.approx(2.48, abs=0.01)
+    short = redor.analyze(ntr, ds, pair=("13C", "15N"), regime="short")
+    assert short.d_hz == pytest.approx(d_true, rel=0.05)
+    assert pair.m2 == pytest.approx(0.75 * (4.0 / 15.0) * (2 * np.pi * d_true) ** 2, rel=0.02)
+    low = ds < 0.05
+    assert np.allclose(4.0 / (3.0 * np.pi ** 2) * pair.m2 * ntr[low] ** 2, ds[low], rtol=0.03)
 
 
 def test_redor_parabola_is_the_small_lambda_limit():
     """The parabola is the second-order expansion of the powder average, so
     it must converge to it as lambda -> 0, and its error must GROW toward the
     quoted validity limit (dS/S0 ~ 0.2) -- that is why the limit exists."""
-    lam = np.linspace(1e-3, 0.25, 120)
+    lam = np.linspace(1e-3, 0.5, 120)
     exact = redor.redor_pair_curve(1.0, lam)
     para = redor.short_time_curve(1.0, lam)
     rel = np.abs(para - exact) / np.maximum(exact, 1e-12)
@@ -194,3 +234,25 @@ def test_redor_txt_parser(tmp_path):
     assert masr == pytest.approx(35714.0)
     assert n == pytest.approx([1, 2])
     assert ds == pytest.approx([0.1, 0.5])
+
+
+def test_detect_kind_reads_the_pulse_program(tmp_path):
+    """The series kind comes from acqus PULPROG, 1D or pseudo-2D. nmrglue's
+    read_acqus_file returns ONE dict keyed by file name; a two-value
+    unpacking of it once made detect_kind None for every EXPNO, so every
+    kind=None caller (`larmor satrec`, the per-site T1 actions) fitted a
+    saturation recovery whatever the experiment -- a CPMG T2 included."""
+    def expno(name, prog, two_d=False):
+        e = tmp_path / name
+        e.mkdir()
+        txt = f"##TITLE= Parameter file\n##JCAMPDX= 5.0\n##$PULPROG= <{prog}>\n##$TD= 1024\n##END=\n"
+        (e / "acqus").write_text(txt)
+        if two_d:
+            (e / "acqu2s").write_text(txt)
+        return e
+
+    assert series.detect_kind(expno("1", "satrec_zg", two_d=True)) == "satrec"
+    assert series.detect_kind(expno("2", "cpmg1d")) == "cpmg"
+    assert series.detect_kind(expno("3", "t1ir")) == "invrec"
+    assert series.detect_kind(expno("4", "zg")) is None            # unsure: ask, never guess
+    assert series.detect_kind(tmp_path / "no-such-expno") is None

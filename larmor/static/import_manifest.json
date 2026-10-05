@@ -315,6 +315,9 @@
    "larmor.display",
    "larmor.distcheck",
    "larmor.distcheck.core_stages",
+   "larmor.distcheck.engine_figures",
+   "larmor.distcheck.engine_records",
+   "larmor.distcheck.engine_specialty",
    "larmor.distcheck.engines",
    "larmor.distcheck.gui_common",
    "larmor.distcheck.gui_menus",
@@ -415,6 +418,7 @@
   ],
   "contextlib": [
    "larmor.distcheck.core_stages",
+   "larmor.distcheck.engine_records",
    "larmor.distcheck.engines",
    "larmor.distcheck.gui_menus",
    "larmor.distcheck.gui_tools",
@@ -427,6 +431,7 @@
    "larmor.desktop.mw_sidebands",
    "larmor.desktop.prefs",
    "larmor.desktop.series_table_dialog",
+   "larmor.distcheck.engine_records",
    "larmor.distcheck.engines",
    "larmor.io.bundle",
    "larmor.series_table",
@@ -440,6 +445,7 @@
    "larmor.comparability",
    "larmor.desktop.series_plot",
    "larmor.desktop.series_table_dialog",
+   "larmor.distcheck.engine_records",
    "larmor.distcheck.gui_tools",
    "larmor.fittable",
    "larmor.inventory",
@@ -512,6 +518,7 @@
    "larmor.desktop.batchfit_dialog",
    "larmor.desktop.mw_processing",
    "larmor.distcheck",
+   "larmor.distcheck.engine_records",
    "larmor.distcheck.gui_common",
    "larmor.io.bundle",
    "larmor.io.scan",
@@ -549,6 +556,8 @@
    "larmor.distcheck.gui_menus"
   ],
   "hashlib": [
+   "larmor.distcheck.engine_records",
+   "larmor.distcheck.engine_specialty",
    "larmor.engine",
    "larmor.recipe",
    "larmor.seriesmode"
@@ -591,6 +600,9 @@
    "larmor.desktop.plotting_studio",
    "larmor.desktop.prefs",
    "larmor.distcheck",
+   "larmor.distcheck.engine_figures",
+   "larmor.distcheck.engine_records",
+   "larmor.distcheck.engine_specialty",
    "larmor.distcheck.gui_common",
    "larmor.distcheck.gui_tools",
    "larmor.distcheck.gui_workflows",
@@ -668,6 +680,9 @@
    "larmor.dft",
    "larmor.distcheck",
    "larmor.distcheck.core_stages",
+   "larmor.distcheck.engine_figures",
+   "larmor.distcheck.engine_records",
+   "larmor.distcheck.engine_specialty",
    "larmor.distcheck.engines",
    "larmor.distcheck.gui_menus",
    "larmor.distcheck.gui_tools",
@@ -714,6 +729,7 @@
    "larmor.desktop.mw_chrome",
    "larmor.desktop.mw_files",
    "larmor.desktop.mw_fitting",
+   "larmor.distcheck.engine_records",
    "larmor.io.bundle",
    "larmor.loader",
    "larmor.methods"
@@ -723,6 +739,7 @@
    "larmor.desktop.inventory_dialog",
    "larmor.desktop.mw_chrome",
    "larmor.desktop.mw_files",
+   "larmor.distcheck.engine_records",
    "larmor.io.scan"
   ],
   "larmor.app": [
@@ -781,6 +798,7 @@
    "larmor.desktop.comparability_dialog",
    "larmor.desktop.mw_overlays",
    "larmor.desktop.mw_series",
+   "larmor.distcheck.engine_records",
    "larmor.seriesmode"
   ],
   "larmor.components": [
@@ -804,12 +822,17 @@
    "larmor.desktop.herzfeld_berger_dialog",
    "larmor.desktop.table",
    "larmor.desktop.utilities",
+   "larmor.distcheck.engine_specialty",
    "larmor.distcheck.engines"
+  ],
+  "larmor.correlate": [
+   "larmor.distcheck.engine_specialty"
   ],
   "larmor.czjzek_dist": [
    "larmor.batch",
    "larmor.desktop.czjzek_dist_dialog",
    "larmor.desktop.table",
+   "larmor.distcheck.engine_specialty",
    "larmor.distcheck.engines",
    "larmor.models.quadrupolar"
   ],
@@ -1315,10 +1338,12 @@
   "larmor.dft": [
    "larmor.cli",
    "larmor.desktop.magres_dialog",
+   "larmor.distcheck.engine_specialty",
    "larmor.methods",
    "larmor.shiftcal"
   ],
   "larmor.diagnostics": [
+   "larmor.distcheck.engine_specialty",
    "larmor.distcheck.engines",
    "larmor.fithealth"
   ],
@@ -1336,13 +1361,26 @@
   "larmor.distcheck": [
    "larmor.distcheck",
    "larmor.distcheck.__main__",
+   "larmor.distcheck.engines",
    "larmor.distcheck.gui_menus"
   ],
   "larmor.distcheck.core_stages": [
    "larmor.distcheck"
   ],
+  "larmor.distcheck.engine_figures": [
+   "larmor.distcheck.engines"
+  ],
+  "larmor.distcheck.engine_records": [
+   "larmor.distcheck.engines"
+  ],
+  "larmor.distcheck.engine_specialty": [
+   "larmor.distcheck.engines"
+  ],
   "larmor.distcheck.engines": [
-   "larmor.distcheck"
+   "larmor.distcheck",
+   "larmor.distcheck.engine_figures",
+   "larmor.distcheck.engine_records",
+   "larmor.distcheck.engine_specialty"
   ],
   "larmor.distcheck.gui_common": [
    "larmor.distcheck",
@@ -1376,6 +1414,8 @@
    "larmor.desktop.mw_editing",
    "larmor.desktop.mw_fitting",
    "larmor.desktop.workers",
+   "larmor.distcheck.engine_figures",
+   "larmor.distcheck.engine_specialty",
    "larmor.distcheck.engines",
    "larmor.distcheck.gui_menus",
    "larmor.distcheck.gui_tools",
@@ -1396,6 +1436,7 @@
    "larmor.desktop.magres_dialog",
    "larmor.desktop.mw_editing",
    "larmor.dft",
+   "larmor.distcheck.engine_specialty",
    "larmor.distcheck.engines"
   ],
   "larmor.families": [
@@ -1403,6 +1444,7 @@
    "larmor.desktop.batchfit_dialog",
    "larmor.desktop.montecarlo_dialog",
    "larmor.desktop.table",
+   "larmor.distcheck.engine_records",
    "larmor.quantify",
    "larmor.series_grid"
   ],
@@ -1416,6 +1458,7 @@
    "larmor.desktop.qcpmg_batch_dialog",
    "larmor.desktop.qcpmg_fields_dialog",
    "larmor.distcheck.core_stages",
+   "larmor.distcheck.engine_figures",
    "larmor.distcheck.gui_tools"
   ],
   "larmor.fit": [
@@ -1426,6 +1469,7 @@
    "larmor.cli",
    "larmor.desktop.mw_fitting",
    "larmor.desktop.workers",
+   "larmor.distcheck.engine_specialty",
    "larmor.distcheck.engines",
    "larmor.figures",
    "larmor.multifit",
@@ -1445,7 +1489,8 @@
    "larmor.desktop.fittable_dialog",
    "larmor.desktop.mw_session",
    "larmor.desktop.mw_tools",
-   "larmor.desktop.table"
+   "larmor.desktop.table",
+   "larmor.distcheck.engine_records"
   ],
   "larmor.fourier": [
    "larmor.desktop.fid_dialog",
@@ -1454,19 +1499,22 @@
   ],
   "larmor.herzfeld_berger": [
    "larmor.desktop.herzfeld_berger_dialog",
+   "larmor.distcheck.engine_specialty",
    "larmor.distcheck.engines",
    "larmor.distcheck.gui_workflows",
    "larmor.models.csa"
   ],
   "larmor.identifiability": [
    "larmor.desktop.correlation_dialog",
+   "larmor.distcheck.engine_specialty",
    "larmor.distcheck.engines",
    "larmor.fithealth"
   ],
   "larmor.inventory": [
    "larmor.cli",
    "larmor.desktop.inventory_dialog",
-   "larmor.desktop.mw_tools"
+   "larmor.desktop.mw_tools",
+   "larmor.distcheck.engine_records"
   ],
   "larmor.io": [
    "larmor.acquisition",
@@ -1493,6 +1541,8 @@
    "larmor.desktop.qcpmg_dialog",
    "larmor.desktop.subtract_dialog",
    "larmor.desktop.twod_view",
+   "larmor.distcheck.engine_figures",
+   "larmor.distcheck.engine_records",
    "larmor.distcheck.engines",
    "larmor.distcheck.gui_tools",
    "larmor.distcheck.gui_workflows",
@@ -1527,6 +1577,7 @@
    "larmor.desktop.mw_tools",
    "larmor.desktop.qcpmg_dialog",
    "larmor.desktop.subtract_dialog",
+   "larmor.distcheck.engine_figures",
    "larmor.distcheck.engines",
    "larmor.io.bundle",
    "larmor.io.varian",
@@ -1569,6 +1620,7 @@
    "larmor.desktop.explorer",
    "larmor.desktop.mw_chrome",
    "larmor.desktop.plotting_studio",
+   "larmor.distcheck.engine_records",
    "larmor.distcheck.engines",
    "larmor.inventory",
    "larmor.loader",
@@ -1598,6 +1650,7 @@
    "larmor.desktop.batchfit_dialog",
    "larmor.desktop.dialogs",
    "larmor.desktop.mw_files",
+   "larmor.distcheck.engine_records",
    "larmor.distcheck.engines",
    "larmor.figures",
    "larmor.qcpmg_fields",
@@ -1616,10 +1669,12 @@
   ],
   "larmor.measure": [
    "larmor.desktop.integrate_dialog",
+   "larmor.distcheck.engine_specialty",
    "larmor.distcheck.engines"
   ],
   "larmor.methods": [
    "larmor.desktop.mw_fitting",
+   "larmor.distcheck.engine_records",
    "larmor.io.bundle",
    "larmor.provenance"
   ],
@@ -1631,6 +1686,7 @@
    "larmor.desktop.mw_sidebands",
    "larmor.desktop.table",
    "larmor.dft",
+   "larmor.distcheck.engine_records",
    "larmor.distcheck.engines",
    "larmor.distcheck.gui_workflows",
    "larmor.engine",
@@ -1687,6 +1743,7 @@
    "larmor.desktop.mw_tools",
    "larmor.desktop.utilities",
    "larmor.desktop.workers",
+   "larmor.distcheck.engine_specialty",
    "larmor.distcheck.engines",
    "larmor.quantitativity"
   ],
@@ -1706,6 +1763,7 @@
    "larmor.cli",
    "larmor.desktop.mw_fitting",
    "larmor.desktop.table",
+   "larmor.distcheck.engine_records",
    "larmor.distcheck.engines",
    "larmor.fit",
    "larmor.fithealth",
@@ -1734,12 +1792,14 @@
   "larmor.project": [
    "larmor.batch",
    "larmor.desktop.mw_session",
+   "larmor.distcheck.engine_records",
    "larmor.distcheck.gui_tools"
   ],
   "larmor.provenance": [
    "larmor.cli",
    "larmor.desktop.batchfit_dialog",
    "larmor.desktop.mw_files",
+   "larmor.distcheck.engine_records",
    "larmor.fit",
    "larmor.loader",
    "larmor.methods",
@@ -1747,7 +1807,8 @@
   ],
   "larmor.pulseprog": [
    "larmor.desktop.explorer",
-   "larmor.desktop.pulseprog_dialog"
+   "larmor.desktop.pulseprog_dialog",
+   "larmor.distcheck.engine_records"
   ],
   "larmor.pybaseline": [
    "larmor.acquisition",
@@ -1761,12 +1822,14 @@
    "larmor.desktop.qcpmg_batch_dialog",
    "larmor.desktop.qcpmg_dialog",
    "larmor.desktop.qcpmg_fields_dialog",
+   "larmor.distcheck.engine_specialty",
    "larmor.qcpmg_fields",
    "larmor.sidebands"
   ],
   "larmor.qcpmg_fields": [
    "larmor.desktop.qcpmg_batch_dialog",
    "larmor.desktop.qcpmg_fields_dialog",
+   "larmor.distcheck.engine_specialty",
    "larmor.figures",
    "larmor.shiftcal"
   ],
@@ -1778,6 +1841,7 @@
    "larmor.desktop.montecarlo_dialog",
    "larmor.desktop.mw_fitting",
    "larmor.desktop.series_plot",
+   "larmor.distcheck.engine_records",
    "larmor.distcheck.engines",
    "larmor.figures",
    "larmor.fithealth"
@@ -1787,6 +1851,7 @@
    "larmor.desktop.dialogs",
    "larmor.desktop.mw_fitting",
    "larmor.desktop.mw_processing",
+   "larmor.distcheck.engine_records",
    "larmor.fithealth"
   ],
   "larmor.recipe": [
@@ -1813,6 +1878,9 @@
    "larmor.desktop.tool_dialogs",
    "larmor.desktop.workers",
    "larmor.dft",
+   "larmor.distcheck.engine_figures",
+   "larmor.distcheck.engine_records",
+   "larmor.distcheck.engine_specialty",
    "larmor.distcheck.engines",
    "larmor.distcheck.gui_menus",
    "larmor.distcheck.gui_tools",
@@ -1840,11 +1908,13 @@
    "larmor.simpson"
   ],
   "larmor.recipe_diff": [
-   "larmor.desktop.diff_dialog"
+   "larmor.desktop.diff_dialog",
+   "larmor.distcheck.engine_records"
   ],
   "larmor.redor": [
    "larmor.cli",
    "larmor.desktop.tool_dialogs",
+   "larmor.distcheck.engine_specialty",
    "larmor.distcheck.gui_workflows"
   ],
   "larmor.referencing": [
@@ -1856,6 +1926,7 @@
    "larmor.desktop.mw_tools",
    "larmor.desktop.qcpmg_dialog",
    "larmor.desktop.referencing_dialog",
+   "larmor.distcheck.engine_records",
    "larmor.inventory",
    "larmor.io.bundle",
    "larmor.loader",
@@ -1866,14 +1937,17 @@
   "larmor.refranges": [
    "larmor.desktop.mw_editing",
    "larmor.desktop.mw_menus",
+   "larmor.distcheck.engine_specialty",
    "larmor.distcheck.engines"
   ],
   "larmor.sanity": [
+   "larmor.distcheck.engine_specialty",
    "larmor.distcheck.engines",
    "larmor.fithealth"
   ],
   "larmor.satrec": [
    "larmor.desktop.satrec_dialog",
+   "larmor.distcheck.engine_specialty",
    "larmor.io.bruker",
    "larmor.quantitativity",
    "larmor.series"
@@ -1891,16 +1965,19 @@
    "larmor.cli",
    "larmor.desktop.mw_fitting",
    "larmor.desktop.mw_tools",
-   "larmor.desktop.satrec_dialog"
+   "larmor.desktop.satrec_dialog",
+   "larmor.distcheck.engine_specialty"
   ],
   "larmor.series_grid": [
    "larmor.desktop.plotting_studio",
+   "larmor.distcheck.engine_records",
    "larmor.series_table"
   ],
   "larmor.series_table": [
    "larmor.desktop.batchfit_dialog",
    "larmor.desktop.series_plot",
    "larmor.desktop.series_table_dialog",
+   "larmor.distcheck.engine_records",
    "larmor.seriesmode"
   ],
   "larmor.seriesmode": [
@@ -1913,6 +1990,7 @@
    "larmor.cli",
    "larmor.desktop.magres_dialog",
    "larmor.dft",
+   "larmor.distcheck.engine_specialty",
    "larmor.methods"
   ],
   "larmor.sidebands": [
@@ -1924,8 +2002,12 @@
    "larmor.distcheck.engines",
    "larmor.qcpmg_fields"
   ],
+  "larmor.simpson": [
+   "larmor.distcheck.engine_specialty"
+  ],
   "larmor.staticct": [
    "larmor.desktop.staticct_dialog",
+   "larmor.distcheck.engine_specialty",
    "larmor.distcheck.engines",
    "larmor.distcheck.gui_workflows"
   ],
@@ -1939,6 +2021,7 @@
    "larmor.desktop.twod_dialog",
    "larmor.desktop.twod_view",
    "larmor.desktop.workers",
+   "larmor.distcheck.engine_specialty",
    "larmor.distcheck.gui_tools",
    "larmor.distcheck.gui_workflows",
    "larmor.figures",
@@ -1946,10 +2029,12 @@
    "larmor.multifit"
   ],
   "larmor.vocs": [
-   "larmor.desktop.vocs_dialog"
+   "larmor.desktop.vocs_dialog",
+   "larmor.distcheck.engine_specialty"
   ],
   "larmor.vt": [
-   "larmor.desktop.vt_dialog"
+   "larmor.desktop.vt_dialog",
+   "larmor.distcheck.engine_specialty"
   ],
   "larmor.xfact": [
    "larmor.desktop.mw_menus"
@@ -1980,6 +2065,8 @@
    "larmor.desktop.table",
    "larmor.desktop.theme",
    "larmor.diagnostics",
+   "larmor.distcheck.engine_records",
+   "larmor.distcheck.engine_specialty",
    "larmor.fithealth",
    "larmor.fittable",
    "larmor.models.analytic",
@@ -2016,12 +2103,14 @@
    "larmor.desktop.plotting_studio",
    "larmor.desktop.series_plot",
    "larmor.distcheck.core_stages",
+   "larmor.distcheck.engine_figures",
    "larmor.figures"
   ],
   "matplotlib.ticker": [
    "larmor.figures"
   ],
   "mrsimulator": [
+   "larmor.distcheck.engine_records",
    "larmor.distcheck.engines",
    "larmor.engine",
    "larmor.models._singlesite",
@@ -2038,6 +2127,7 @@
    "larmor.twod"
   ],
   "mrsimulator.models": [
+   "larmor.distcheck.engine_specialty",
    "larmor.engine",
    "larmor.models.quadrupolar",
    "larmor.twod"
@@ -2066,6 +2156,7 @@
    "larmor.distcheck.__main__"
   ],
   "nmrglue": [
+   "larmor.distcheck.engine_specialty",
    "larmor.distcheck.engines",
    "larmor.figures",
    "larmor.io.bruker",
@@ -2127,6 +2218,9 @@
    "larmor.diagnostics",
    "larmor.display",
    "larmor.distcheck.core_stages",
+   "larmor.distcheck.engine_figures",
+   "larmor.distcheck.engine_records",
+   "larmor.distcheck.engine_specialty",
    "larmor.distcheck.engines",
    "larmor.distcheck.gui_menus",
    "larmor.distcheck.gui_tools",
@@ -2196,6 +2290,8 @@
    "larmor.desktop.qcpmg_dialog",
    "larmor.distcheck",
    "larmor.distcheck.core_stages",
+   "larmor.distcheck.engine_records",
+   "larmor.distcheck.engine_specialty",
    "larmor.distcheck.engines",
    "larmor.distcheck.gui_common",
    "larmor.distcheck.gui_menus",
@@ -2256,6 +2352,9 @@
    "larmor.dft",
    "larmor.distcheck",
    "larmor.distcheck.core_stages",
+   "larmor.distcheck.engine_figures",
+   "larmor.distcheck.engine_records",
+   "larmor.distcheck.engine_specialty",
    "larmor.distcheck.engines",
    "larmor.distcheck.gui_common",
    "larmor.distcheck.gui_menus",
@@ -2298,6 +2397,7 @@
   ],
   "platform": [
    "larmor.distcheck.core_stages",
+   "larmor.distcheck.engine_records",
    "larmor.methods",
    "larmor.provenance",
    "larmor.selftest"
@@ -2367,6 +2467,8 @@
    "larmor.desktop.mdrender",
    "larmor.desktop.pulseprog_dialog",
    "larmor.dft",
+   "larmor.distcheck.engine_figures",
+   "larmor.distcheck.engine_records",
    "larmor.distcheck.gui_menus",
    "larmor.distcheck.gui_workflows",
    "larmor.families",
@@ -2417,11 +2519,13 @@
    "larmor.vt"
   ],
   "scipy.signal": [
+   "larmor.distcheck.engine_specialty",
    "larmor.processing",
    "larmor.sidebands",
    "larmor.twod"
   ],
   "scipy.special": [
+   "larmor.distcheck.engine_specialty",
    "larmor.models.analytic"
   ],
   "scipy.stats": [
@@ -2438,6 +2542,7 @@
   ],
   "shutil": [
    "larmor.distcheck",
+   "larmor.distcheck.engine_records",
    "larmor.distcheck.gui_common",
    "larmor.distcheck.gui_menus",
    "larmor.simpson"
@@ -2478,6 +2583,9 @@
    "larmor.desktop.pybaseline_dialog",
    "larmor.distcheck",
    "larmor.distcheck.core_stages",
+   "larmor.distcheck.engine_figures",
+   "larmor.distcheck.engine_records",
+   "larmor.distcheck.engine_specialty",
    "larmor.distcheck.engines",
    "larmor.distcheck.gui_common",
    "larmor.distcheck.gui_menus",
@@ -2501,6 +2609,9 @@
    "larmor.families",
    "larmor.models.base",
    "larmor.project"
+  ],
+  "uncertainties": [
+   "larmor.distcheck.engine_records"
   ],
   "unicodedata": [
    "larmor.palette",
@@ -2565,6 +2676,7 @@
    "scipy.special",
    "scipy.stats",
    "shiboken6",
+   "uncertainties",
    "uvicorn"
   ],
   "larmor": [
@@ -2666,6 +2778,9 @@
    "larmor.distcheck",
    "larmor.distcheck.__main__",
    "larmor.distcheck.core_stages",
+   "larmor.distcheck.engine_figures",
+   "larmor.distcheck.engine_records",
+   "larmor.distcheck.engine_specialty",
    "larmor.distcheck.engines",
    "larmor.distcheck.gui_common",
    "larmor.distcheck.gui_menus",
@@ -2899,6 +3014,9 @@
   "larmor.distcheck",
   "larmor.distcheck.__main__",
   "larmor.distcheck.core_stages",
+  "larmor.distcheck.engine_figures",
+  "larmor.distcheck.engine_records",
+  "larmor.distcheck.engine_specialty",
   "larmor.distcheck.engines",
   "larmor.distcheck.gui_common",
   "larmor.distcheck.gui_menus",

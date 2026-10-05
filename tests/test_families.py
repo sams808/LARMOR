@@ -193,3 +193,46 @@ def test_site_integrals_matches_quantify_and_windows_are_compared_with_tolerance
     rec.fit_window_ppm = (30.0, -10.0)
     assert site_integrals(rec)[1] == (30.0, -10.0)
     assert site_integrals(rec, (-5.0, 25.0))[1] == (25.0, -5.0)   # normalised (hi, lo)
+
+
+def test_independent_family_error_is_the_first_order_error_of_the_share():
+    """The independent basis is first-order propagation with the site
+    integrals independent, the normalisation by the total included: every
+    family equals the covariance basis fed a DIAGONAL covariance (the same
+    assumption) and the closed form sqrt(R²σ_F² + F²σ_R²)/T²; a one-line
+    family equals its own site row; a family holding every line is 100 ± 0 %.
+    (σ_F/T, the family integral's error over the total, once printed
+    'B4 32.7 ± 0.6' and 'Σ BO4 32.7 ± 0.4' in the same table, and 100 ± 2.6 %
+    for a family of every line.) The N4 delta method is unchanged."""
+    from uncertainties import ufloat
+
+    rec = _b_recipe([_gl(17.0, 5.0, 80.0, "A", "BO3", stderr=2.0),
+                     _gl(12.0, 6.0, 50.0, "B", "BO3", stderr=2.5),
+                     _gl(0.5, 3.0, 120.0, "C", "BO4", stderr=1.5),
+                     _gl(-12.0, 4.0, 10.0, "D", "", stderr=1.0)])
+    win = (60.0, -40.0)
+    q_ind = quantify(rec, win)
+    diag = {i: ufloat(s.params["amplitude"].value, s.params["amplitude"].stderr)
+            for i, s in enumerate(rec.sites)}
+    q_cov = quantify(rec, win, uvars=diag)
+    assert q_ind["family_basis"] == "independent" and q_cov["family_basis"] == "covariance"
+    ints = np.array([r["integral"] for r in q_ind["rows"]])
+    sig = np.array([r["integral_err"] for r in q_ind["rows"]])
+    T = ints.sum()
+    for fi, fc in zip(q_ind["families"], q_cov["families"]):
+        idx = fi["sites"]
+        rest = [k for k in range(len(ints)) if k not in idx]
+        F, R = ints[idx].sum(), ints[rest].sum()
+        closed = 100.0 * np.sqrt(R ** 2 * (sig[idx] ** 2).sum() + F ** 2 * (sig[rest] ** 2).sum()) / T ** 2
+        assert fi["fraction_err_pct"] == pytest.approx(closed, rel=1e-9), fi["family"]
+        assert fi["fraction_err_pct"] == pytest.approx(fc["fraction_err_pct"], rel=1e-6), fi["family"]
+    bo4 = next(f for f in q_ind["families"] if f["family"] == "BO4")
+    assert bo4["fraction_err_pct"] == pytest.approx(q_ind["rows"][2]["fraction_err_pct"], rel=1e-9)
+    n4_ind = next(r for r in q_ind["ratios"] if r["name"] == "N4")
+    n4_cov = next(r for r in q_cov["ratios"] if r["name"] == "N4")
+    assert n4_ind["err"] == pytest.approx(n4_cov["err"], rel=1e-6)
+    both = quantify(_b_recipe([_gl(17.0, 5.0, 80.0, "A", "BO3", stderr=2.0),
+                               _gl(12.0, 6.0, 50.0, "B", "BO3", stderr=2.5)]), win)
+    fam = both["families"][0]
+    assert fam["fraction_pct"] == pytest.approx(100.0)
+    assert fam["fraction_err_pct"] == pytest.approx(0.0, abs=1e-12)

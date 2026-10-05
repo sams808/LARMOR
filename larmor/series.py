@@ -85,8 +85,11 @@ def detect_kind(expno: str | Path) -> str | None:
     try:
         import nmrglue as ng
 
-        dic, _ = ng.bruker.read_acqus_file(str(expno))
-        pulprog = str(dic.get("PULPROG", "")).lower()
+        # one dict keyed by file name ({"acqus": {...}, "acqu2s": {...}}): a
+        # two-value unpacking of it always raised here, so every caller fell
+        # back to saturation recovery whatever the pulse program said
+        dic = ng.bruker.read_acqus_file(str(expno))
+        pulprog = str((dic.get("acqus") or {}).get("PULPROG", "")).lower()
     except Exception:
         return None
     for frag, kind in _PULPROG_HINTS:
