@@ -113,6 +113,10 @@ def test_line_menu_actions_emit_and_edit(qapp, monkeypatch):
     cell = t.table.cellWidget(1, col)
     assert cell.pin.isChecked() and cell.is_held()
     assert "italic" in cell.edit.styleSheet() and "held" in cell.edit.toolTip()
+    # a stray closing brace made Qt refuse the whole sheet ("Could not parse
+    # stylesheet"): the held value never rendered dimmed (distribution check)
+    css = cell.edit.styleSheet()
+    assert css.count("{") == css.count("}"), css
     assert len(edits) == 1
     menu = t._build_menu(1, None)
     by = {a.text(): a for a in menu.actions() if not a.isSeparator()}

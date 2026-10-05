@@ -72,6 +72,12 @@ class IntegralsDialog(QDialog):
         col = REGION_COLORS[i % len(REGION_COLORS)]
         (x0, x1), _ = self.plot.getPlotItem().getViewBox().viewRange()
         lo, hi = sorted((x0, x1))
+        # pyqtgraph auto-ranges on the first PAINT, so a dialog seeding its
+        # first region in __init__ still sees the default 0…1 ppm view: on a
+        # coarse spectrum (a 2048-point 27Al 1r has ~1 ppm per point) that
+        # region held no data point and the dialog crashed before it opened
+        if int(((self.ppm >= lo) & (self.ppm <= hi)).sum()) < 4:
+            lo, hi = float(self.ppm.min()), float(self.ppm.max())
         span = hi - lo
         c = pg.mkColor(col); c.setAlpha(40)
         r = pg.LinearRegionItem(values=(lo + 0.4 * span, lo + 0.6 * span),

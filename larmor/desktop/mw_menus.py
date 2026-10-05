@@ -1205,7 +1205,10 @@ class _MenusMixin:
         has opened data before (a non-empty 'recent' list) never sees it — so it
         does not bother returning users."""
         from larmor.desktop.prefs import list_setting
-        if list_setting("recent") or self.exp_ppm is not None:
+        # exp_ppm is an EMPTY array until a spectrum loads, never None: the
+        # old `is not None` test was always true, so no first-run user ever
+        # saw the hint (found by the distribution check's menu-help stage)
+        if list_setting("recent") or (self.exp_ppm is not None and len(self.exp_ppm)):
             return
         self.view.set_placeholder(
             "Open a spectrum to begin\n\n"

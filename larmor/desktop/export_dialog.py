@@ -73,6 +73,50 @@ def _ask_path(parent, default_name, ext) -> str:
     return path
 
 
+def _svg_closepath_shim() -> None:
+    """pyqtgraph 0.14.0's SVG exporter parses every token of a path's ``d``
+    as ``x,y``; Qt 6.11's QSvgGenerator closes shapes with a bare ``Z`` (the
+    ViewBox background: ``M0,0 L603.5,0 … L0,0 Z``), so every SVG export of
+    a live plot died with "not enough values to unpack" (found by the
+    distribution check). Upstream pyqtgraph master passes single tokens
+    through; until that release ships, the bare Z becomes the explicit line
+    back to its subpath's start -- the geometry closepath stands for --
+    before pyqtgraph's parser sees it. Installed once, idempotent, and a
+    no-op for an exporter that already copes (there is no Z left to expand
+    that it would not have handled)."""
+    import importlib
+
+    # the module, not the class of the same name the package re-exports
+    mod = importlib.import_module("pyqtgraph.exporters.SVGExporter")
+    orig = mod.correctCoordinates
+    if getattr(orig, "_larmor_closepath", False):
+        return
+
+    def expand_closepath(d: str) -> str:
+        out, start = [], None
+        for tok in d.strip().split(" "):
+            if not tok:
+                continue
+            if tok in ("Z", "z"):
+                if start is not None:
+                    out.append("L" + start)
+                continue
+            if tok[0] in "Mm":
+                start = tok[1:]
+            out.append(tok)
+        return " ".join(out)
+
+    def patched(node, defs, item, options):
+        for el in node.getElementsByTagName("path"):
+            d = el.getAttribute("d")
+            if "Z" in d or "z" in d:
+                el.setAttribute("d", expand_closepath(d))
+        return orig(node, defs, item, options)
+
+    patched._larmor_closepath = True
+    mod.correctCoordinates = patched
+
+
 def export_pyqtgraph(parent, plotitem, default_name="figure") -> str | None:
     """Export a pyqtgraph PlotItem with the shared options dialog."""
     opt = choose(parent, list(_RASTER) + ["SVG"])
@@ -84,6 +128,7 @@ def export_pyqtgraph(parent, plotitem, default_name="figure") -> str | None:
         return None
     if opt["format"] == "SVG":
         from pyqtgraph.exporters import SVGExporter
+        _svg_closepath_shim()
         SVGExporter(plotitem).export(path)
     else:
         from pyqtgraph.exporters import ImageExporter

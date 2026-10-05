@@ -809,12 +809,23 @@ class _ProcessingMixin:
         self.statusBar().showMessage(msg)
 
     def reset_processing(self):
+        """Process ▸ Reset to original: reload the source in place and keep
+        the lines. The processing record comes from the RELOAD (none for a
+        1r, the file's own chain for a reopened recipe), not from the recipe
+        that was on screen -- that one still listed every step the panel had
+        applied while the data was back to raw, so a saved fit replayed a
+        chain the user had just dropped; the panel is synced the same way."""
         if self.source_path:
             keep = json.loads(json.dumps(self.recipe)) if self.recipe else None
             self._ws_mode = "reuse"        # reload in place, same workspace
             self.load_source(self.source_path)
             if keep is not None:
+                fresh = self.recipe or {}
+                keep["processing"] = list(fresh.get("processing") or [])
+                keep["processing_from_raw"] = bool(fresh.get("processing_from_raw"))
                 self.recipe = keep
+                self.proc_panel.sync_from_ops(keep["processing"],
+                                              keep["processing_from_raw"])
                 self.on_structure_changed()
 
     def open_wurst_correct(self):

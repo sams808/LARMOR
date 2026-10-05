@@ -57,10 +57,19 @@ def test_every_opened_spectrum_is_its_own_workspace(win, qapp, tmp_path):
     qapp.processEvents()
     assert win.source_path == str(paths[2])
     assert float(win.exp_ppm[int(np.argmax(win.exp_amp))]) == pytest.approx(10.0, abs=0.5)
-    # Reset to original reloads IN PLACE (an explicit reuse), never a 7th
+    # Reset to original reloads IN PLACE (an explicit reuse), never a 7th --
+    # and the processing record goes with the processing: the recipe used to
+    # keep listing the steps while the data was back to raw, so a saved fit
+    # replayed a chain the user had just dropped (distribution check)
+    win.apply_processing([{"op": "phase", "p0": 15.0, "p1": 0.0}], False)
+    qapp.processEvents()
+    assert [o["op"] for o in win.recipe["processing"]][-1] == "phase"
+    assert win.proc_panel.phase_values() == (15.0, 0.0)
     win.reset_processing()
     qapp.processEvents()
     assert len(win.workspaces) == 6 and win.active_ws == 2
+    assert win.recipe["processing"] == [] and not win.recipe.get("processing_from_raw")
+    assert win.proc_panel.phase_values() == (0.0, 0.0)
 
 
 def test_file_menu_opens_a_fit_on_the_current_spectrum(win, qapp, tmp_path, monkeypatch):

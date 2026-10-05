@@ -101,8 +101,12 @@ def _synthetic():
             "isotropic_chemical_shift_ppm": Param(5.0), "shift_fwhm_ppm": Param(12.0),
             "amplitude": Param(40.0), "gl": Param(0.3, vary=False)}),
     ])
-    _, y, _ = engine.simulate(truth, exp_ppm=x)
-    y = np.asarray(y, float) + np.random.default_rng(1).normal(0.0, 0.4, x.size)
+    # a Czjzek site makes simulate() render on the kernel's own (ascending,
+    # wider) axis, not on x -- resample onto x, or the two lines land at
+    # the wrong ppm (both arrays happen to be 2048 points long, which hid it)
+    x_sim, y_sim, _ = engine.simulate(truth, exp_ppm=x)
+    y = np.interp(x, x_sim, np.asarray(y_sim, float))
+    y = y + np.random.default_rng(1).normal(0.0, 0.4, x.size)
     return x, y
 
 

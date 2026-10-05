@@ -59,3 +59,21 @@ def test_measure_region():
     rows = M.integrate_regions(x, y, [(10, -10), (30, 10)])
     assert rows[0]["percent"] == pytest.approx(66.7, abs=0.5)
     assert rows[1]["percent"] == pytest.approx(33.3, abs=0.5)
+
+
+def test_measure_region_between_two_points_is_zero_not_a_crash():
+    """The Integrals dialog seeds its first region from a view range pyqtgraph
+    has not auto-ranged yet (0.4…0.6 ppm); on a ~1 ppm/point 27Al 1r that
+    region holds no sample and centre_of_mass raised on an empty slice, so
+    the dialog never opened. Every measurement must answer 0 for it."""
+    from larmor import measure as M
+    x = np.linspace(-1000.0, 1000.0, 2048)          # 0.98 ppm per point
+    y = np.exp(-((x - 60.0) / 20.0) ** 2)
+    dx = x[1] - x[0]
+    region = (x[1024] + 0.2 * dx, x[1024] + 0.8 * dx)   # strictly between two samples
+    assert not ((x >= region[0]) & (x <= region[1])).any()   # the premise: an empty slice
+    assert M.centre_of_mass(x, y, region) == 0.0
+    assert M.integrate(x, y, region) == 0.0
+    assert M.fwhm(x, y, region) == 0.0
+    rows = M.integrate_regions(x, y, [region])
+    assert rows[0]["percent"] == 0.0 and rows[0]["centre"] == 0.0

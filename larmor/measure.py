@@ -27,6 +27,8 @@ def centre_of_mass(x: np.ndarray, y: np.ndarray, region=None) -> float:
     """Intensity-weighted centroid (ppm) over a region."""
     m = _region_mask(x, region)
     xs, ys = np.asarray(x)[m], np.asarray(y)[m]
+    if not xs.size:                 # a region between two points: nothing to weigh
+        return 0.0
     w = ys - min(ys.min(), 0.0)
     s = w.sum()
     return float((xs * w).sum() / s) if s else float(xs.mean() if xs.size else 0.0)

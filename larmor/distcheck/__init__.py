@@ -17,9 +17,12 @@ Stages are plain callables ``fn(say, ctx)``: ``say(*parts)`` logs a line,
 bundled example data), "quick": bool, "gui": bool, "frozen": bool}``; a
 stage passes by returning, fails by raising (the traceback goes to the log).
 ``core_stages`` holds the environment / imports / resources / exports / pool
-/ CLI stages, ``engines`` the Qt-free capabilities, ``gui_menus`` and
-``gui_tools`` the desktop sweeps (offscreen; they never touch the user's
-saved settings thanks to ``gui_common.SettingsGuard``).
+/ CLI stages, ``engines`` the Qt-free capabilities, ``gui_tools`` the
+desktop workflows, ``gui_workflows`` the tool dialogs and ``gui_menus`` the
+menu sweep (offscreen). Unless ``--real-settings`` is given, a run never
+touches the user's own stores: the preferences go to a scratch .ini
+(``LARMOR_SETTINGS_FILE``), %LOCALAPPDATA% and each store's override point
+into a sandbox, and ``run`` puts the environment back on the way out.
 """
 from __future__ import annotations
 
@@ -67,8 +70,11 @@ def all_stages(gui: bool) -> list:
     out = list(core_stages.STAGES)
     out += list(engines.stages())
     if gui:
-        from larmor.distcheck import gui_menus, gui_tools
+        # the workflows first, the dialogs next, the menu sweep last: it
+        # triggers every action and leaves the most state behind
+        from larmor.distcheck import gui_menus, gui_tools, gui_workflows
         out += list(gui_tools.stages())
+        out += list(gui_workflows.stages())
         out += list(gui_menus.stages())
     return out
 

@@ -1106,6 +1106,35 @@ def test_figure_exports_remember_their_folder(qapp, tmp_path, monkeypatch):
             s.setValue(paths.FIGURE_DIR_KEY, old)
 
 
+def test_live_plot_exports_svg_under_qt6_closepath(qapp, tmp_path, monkeypatch):
+    """pyqtgraph 0.14.0's SVG exporter parsed every path token as 'x,y';
+    Qt 6.11's QSvgGenerator closes the ViewBox background with a bare 'Z',
+    so every Export figure… ▸ SVG of a live plot died with 'not enough
+    values to unpack' (found by the distribution check). export_pyqtgraph
+    now expands the Z into the explicit closing line first."""
+    import pyqtgraph as pg
+
+    from larmor.desktop import export_dialog
+
+    w = pg.PlotWidget()
+    w.plot([1.0, 2.0, 3.0, 4.0], [1.0, 4.0, 9.0, 16.0])
+    out = tmp_path / "plot.svg"
+    monkeypatch.setattr(export_dialog, "choose",
+                        lambda *a, **k: {"format": "SVG", "dpi": 150,
+                                         "width_cm": 12, "height_cm": 9})
+    monkeypatch.setattr(export_dialog, "_ask_path", lambda *a, **k: str(out))
+    assert export_dialog.export_pyqtgraph(None, w.getPlotItem(), "plot") == str(out)
+    text = out.read_text(encoding="utf-8")
+    assert "<svg" in text and "<path" in text and " Z" not in text
+    # the shim is idempotent and keeps the closing geometry: Z -> a line back
+    # to the subpath start, every other token untouched
+    import sys
+    export_dialog._svg_closepath_shim()
+    mod = sys.modules["pyqtgraph.exporters.SVGExporter"]
+    assert getattr(mod.correctCoordinates, "_larmor_closepath", False)
+    w.close()
+
+
 def test_computing_params_controls_are_all_wired(qapp, monkeypatch):
     """D1: the Computing-parameters dialog had two decorative controls -- a
     'Cq max (MHz)' whose setting nothing read (the 1D ceiling is the

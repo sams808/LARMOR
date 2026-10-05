@@ -297,7 +297,7 @@ class _Cell(QWidget):
         # parameters -- the pin ☑ beside it is the switch
         if not p.get("vary", True) and not p.get("expr"):
             css += (f"QLineEdit {{ color: {theme.active().text_dim}; "
-                    "font-style: italic; }}")
+                    "font-style: italic; }")
             tips.append("held at the model default (dmfit greys it too); "
                         "untick the pin to fit it" if self.default_fixed
                         else "held (pin ☑) — untick the pin to fit it")
