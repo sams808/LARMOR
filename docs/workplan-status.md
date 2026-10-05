@@ -657,6 +657,53 @@ label, keep-this-fit through seeding / copy / sweep / project, member-menu
 removal, the bar's rendering), `tests/test_series_export.py` (+1 series whose
 members differ).
 
+## 2026-10-05 — "check LARMOR and verify it's ready for public distribution" → v0.16.0
+
+Sam's request, with a screenshot of the 0.15.3 exe failing an SVG export
+from the Plotting studio ("No module named 'matplotlib.backends.backend_svg'"):
+check every capability, verify they work and are compatible with each other,
+make sure everything works well. The full account is
+`docs/distribution-readiness.md`; in short:
+
+- **A self-check inside the installed copy**: `LARMOR.exe --distcheck
+  [--gui] [--quick]` (`larmor/distcheck/`, 36 stages: environment, imports
+  from the generated manifest, resources, exports, a real process pool, the
+  CLI, 11 engine stages each checked against an independent reference, and
+  19 GUI stages -- workflows, tool dialogs, every menu action in three
+  window states, themes, text sizes, manuals -- each GUI group in a child
+  process). The test suite runs the same stages.
+- **Found and fixed by it**: the frozen app's missing SVG / PDF / EPS
+  backends; REDOR distances 26 % too long (prefactor 4√2 → 2√2, verified
+  against Mueller's closed form with an independent implementation --
+  every earlier REDOR distance should be recomputed); the Experimental
+  paragraph's pulse power for pulse programs that play p1 at another level
+  (MQMAS "at 0 W"); family errors in the independent basis; a DFT import
+  seeding a negative C_Q; `series.detect_kind` always None; the self-test's
+  synthetic spectrum on the wrong axis; live-plot SVG export under Qt 6.11;
+  Reset to original keeping a dropped processing chain; the Integrals dialog
+  on coarse spectra; the held-value style sheet; the first-run hint; the
+  shipped example recipes' SR.
+- **Distribution**: licences shipped and stated (LICENSE,
+  THIRD_PARTY_LICENSES.txt regenerated per build, LGPL / GPL texts), the
+  GPL-only Qt Virtual Keyboard and the QML stack out of the bundle, two
+  non-redistributable photos removed with credits for the rest, the example
+  data scrubbed of the author's former accounts and paths and bundled, the
+  README / INSTALL.txt / help pages aligned with the program.
+- **Robustness**: start-up survives garbage in every saved preference
+  (`desktop/prefs.py`); the crash log is appended, not truncated; every
+  preference goes through one factory, and the test suite and the check use
+  their own preferences file and LOCALAPPDATA.
+- **An incident of this session**: a robustness test wrote garbage into
+  every saved preference behind an in-memory guard, then hung in a modal
+  dialog; Sam's LARMOR preferences (recent files, pinned folders, line
+  defaults, constraint sets, batch templates, theme) were lost from the
+  registry. The only copy is in the hung process (python.exe started 10:10,
+  left running); reading its memory was declined by the session's safety
+  check. The isolation above exists so it cannot recur.
+- Machine sleep (Kernel-Power 42/107 at 12:20-12:50, 13:47-14:38,
+  14:58-15:22) paused three long runs; their wall times are not stage
+  times.
+
 ## Remaining
 
 1. **E7** — `dist/LARMOR-0.14.0-setup.exe` and the zip are built and tested

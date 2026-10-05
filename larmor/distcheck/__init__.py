@@ -124,6 +124,11 @@ def _run_child(names: list, group: str, ctx: dict, say) -> list:
     except subprocess.TimeoutExpired:
         rc, err_tail = "timeout", ""
     text = log.read_text(encoding="utf-8", errors="replace") if log.exists() else ""
+    fh = out / "faulthandler.txt"
+    if rc not in (0, 1) and fh.exists():
+        dump = fh.read_text(encoding="utf-8", errors="replace").strip()
+        if dump:
+            err_tail = (err_tail + "\n" if err_tail else "") + dump[-4000:]
     for line in text.splitlines():
         if line.startswith("=== ") or line.startswith("(log:"):
             continue
@@ -187,6 +192,21 @@ def run(argv=None) -> int:
         for stream in (sys.stdout, sys.stderr):
             try:
                 stream.flush()
+            except Exception:                            # noqa: BLE001
+                pass
+        # not even os._exit: on Windows it still runs every DLL's detach
+        # routine, and Qt's static destructors crashed there (access
+        # violation) with the dialog group's windows alive. TerminateProcess
+        # skips that teardown; the log and the report are already closed.
+        if sys.platform == "win32":
+            try:
+                import ctypes
+                k32 = ctypes.windll.kernel32
+                # the pseudo-handle is 64-bit: without these declarations
+                # ctypes passed it as a 32-bit int and the call failed
+                k32.GetCurrentProcess.restype = ctypes.c_void_p
+                k32.TerminateProcess.argtypes = [ctypes.c_void_p, ctypes.c_uint]
+                k32.TerminateProcess(k32.GetCurrentProcess(), int(rc))
             except Exception:                            # noqa: BLE001
                 pass
         os._exit(rc)
@@ -255,6 +275,15 @@ def _run(argv) -> int:
     keep = bool(args.out)
     out = Path(args.out) if args.out else Path(tempfile.mkdtemp(prefix="larmor_distcheck_"))
     out.mkdir(parents=True, exist_ok=True)
+    if os.environ.get("LARMOR_DISTCHECK_CHILD"):
+        # a crash in a child leaves its stack here for the parent to relay (a
+        # windowed exe has no stderr)
+        try:
+            import faulthandler
+            faulthandler.enable(open(out / "faulthandler.txt", "w", encoding="utf-8"),
+                                all_threads=True)
+        except Exception:                                # noqa: BLE001
+            pass
     ctx = {"out": out, "examples": _examples_dir(), "quick": bool(args.quick),
            "gui": gui, "frozen": bool(getattr(sys, "frozen", False))}
     import larmor
