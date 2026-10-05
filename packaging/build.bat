@@ -32,6 +32,8 @@ if "%VER%"=="" (
     exit /b 1
 )
 echo       version %VER%
+rem the third-party list names the versions that actually ship
+"%PY%" packaging\third_party_licenses.py || exit /b 1
 
 echo [2/5] PyInstaller
 "%PY%" -m PyInstaller packaging\larmor.spec --noconfirm --clean --log-level WARN || exit /b 1

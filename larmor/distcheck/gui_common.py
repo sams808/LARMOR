@@ -216,6 +216,110 @@ def pump(ms: int = 200) -> None:
     app.processEvents()
 
 
+def running_threads() -> list:
+    """Every Python-owned QThread still running (FitWorker, SimWorker, a
+    dialog's worker...), the main thread excluded."""
+    import gc
+
+    import shiboken6
+    from PySide6.QtCore import QThread
+
+    main = shiboken6.getCppPointer(QThread.currentThread())[0]
+    out = []
+    for obj in gc.get_objects():
+        if isinstance(obj, QThread):
+            try:
+                if (shiboken6.isValid(obj) and shiboken6.getCppPointer(obj)[0] != main
+                        and obj.isRunning()):
+                    out.append(obj)
+            except RuntimeError:                          # deleted meanwhile
+                pass
+    return out
+
+
+def join_threads(timeout: float = 30.0) -> list:
+    """Wait, pumping events, for every running QThread; the class names of
+    those still running after ``timeout`` s each."""
+    left = []
+    for t in running_threads():
+        end = time.perf_counter() + timeout
+        try:
+            while t.isRunning() and time.perf_counter() < end:
+                pump(20)
+            if t.isRunning():
+                left.append(type(t).__name__)
+        except RuntimeError:
+            pass
+    return left
+
+
+def destroy_all_windows():
+    """Wait for every running worker thread, then destroy the leftover
+    windows (below). Returns ``(destroyed, workers_waited_for,
+    workers_still_running)``: nothing is destroyed while a worker runs --
+    Qt aborts the interpreter when a running QThread's owner is deleted
+    (which is how the first version of this clean-up crashed after the
+    error-tools stage)."""
+    waited = [type(t).__name__ for t in running_threads()]
+    still = join_threads(30.0) if waited else []
+    if still:
+        return 0, waited, still
+    return _destroy_windows(), waited, []
+
+
+def _destroy_windows() -> int:
+    """Between GUI stages: perform the deletions the stage queued, then
+    destroy the parentless windows that were never shown; returns how many
+    were destroyed.
+
+    ``deleteLater`` is honoured only when control returns to an event loop,
+    and ``processEvents()`` is not that -- so every window a stage closed
+    stayed alive, and every theme switch of a later stage restyled all of
+    them: the menu sweep took 6 minutes on its own and more than 40 after
+    the other stages in one process. ``sendPostedEvents(DeferredDelete)``
+    performs the pending deletions.
+
+    What is NOT destroyed: a widget with a parent (it goes with its owner),
+    Qt's popups (menus, combo-box drop-downs, tool tips: their owners keep
+    pointers to them -- destroying every top-level widget crashed the
+    interpreter), and a window that has been SHOWN (it owns a native window
+    handle). Deleting the main window a dialog stage had shown made Qt warn
+    "shared QObject was deleted directly" and abort the interpreter; the
+    same deletion outside the check -- a shown main window closed and
+    deleted mid-session, after a fit, themed or not, and LARMOR's own exit
+    through app.main() -- went through cleanly every time, so the cause is
+    in the harness, and the few shown windows are simply left closed."""
+    import gc
+
+    from PySide6.QtCore import QCoreApplication, QEvent, Qt
+    from PySide6.QtWidgets import QApplication, QMenu
+
+    app = QApplication.instance()
+    if app is None:
+        return 0
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    skip_types = {Qt.WindowType.Popup, Qt.WindowType.ToolTip, Qt.WindowType.Desktop,
+                  Qt.WindowType.Drawer, Qt.WindowType.Sheet}
+    n = 0
+    for w in list(QApplication.topLevelWidgets()):
+        try:
+            if w.parent() is not None or isinstance(w, QMenu):
+                continue
+            if w.windowType() in skip_types or w.windowHandle() is not None:
+                continue
+            w.close()
+            w.deleteLater()
+            n += 1
+        except RuntimeError:                              # already gone on the C++ side
+            pass
+    for _ in range(3):
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        app.processEvents()
+    gc.collect()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    return n
+
+
 def close_tool_windows(keep=()) -> int:
     """Close every top-level widget except the ones in ``keep`` (the main
     window); returns how many were closed."""

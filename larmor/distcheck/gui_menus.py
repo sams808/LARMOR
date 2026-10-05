@@ -1116,6 +1116,12 @@ def menu_panels(say, ctx):
 
         docks = [win.explorer_dock, win.datasets_dock, win.ws_dock, win.lines_dock,
                  win.results_dock, win.proc_dock]
+        # a dock's toggle action syncs its check on the dock's Show event:
+        # in a window that was never shown it starts unchecked while the
+        # dock is not hidden, and the first trigger is a no-op. The user's
+        # window is always shown; offscreen, show() displays nothing.
+        win.show()
+        pump(50)
         for d in docks:
             act = d.toggleViewAction()
             hidden0 = d.isHidden()

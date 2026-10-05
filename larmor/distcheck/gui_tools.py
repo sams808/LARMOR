@@ -1397,14 +1397,24 @@ def _project_roundtrip(say, ctx, wins, dismiss):
         raise AssertionError("the series did not come back from its tags")
     if not all(len(ws["snap"]["recipe"]["sites"]) == 1 for ws in win2.workspaces[1:4]):
         raise AssertionError("the series members lost their lines")
-    if not win2.series_bar.isVisibleTo(win2) or len(win2.series_bar.member_buttons()) != 3:
-        raise AssertionError("the series bar did not come back")
+    if len(win2.series_bar.member_buttons()) != 3:
+        raise AssertionError("the series bar did not come back with its three members")
     if ex:
         w2d = win2.workspaces[4]
         if w2d["kind"] != "2d" or w2d["snap"].get("data2d") is None:
             raise AssertionError("the 2D map did not come back by reference")
         if win2.central_stack.currentWidget() is not win2.view2d:
             raise AssertionError("the active (2D) workspace is not the one on screen")
+        # the bar belongs to the 1D page: over the 2D map it stays hidden
+        if win2.series_bar.isVisibleTo(win2):
+            raise AssertionError("the series bar shows over the 2D map")
+    # walking to a member brings the 1D page, and the bar, back on it
+    win2.series_go(0, seed=False)
+    pump(50)
+    _settle(win2, _FIT_TIMEOUT)
+    if not win2.series_bar.isVisibleTo(win2) or win2.series_bar.current() != 0:
+        raise AssertionError("switching to the first series member did not bring the bar back "
+                             f"on it: {_status(win2)!r}")
     say(f"reopened in a fresh window in {time.perf_counter() - t0:.1f} s: {len(win2.workspaces)} "
         f"workspaces {titles}, the {n_sites} lines of the first, {len(ovs)} overlay, the series "
         f"{spec2.names()} with its bar and its fitted member (RMSD {r_back:.4g})"

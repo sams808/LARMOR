@@ -545,6 +545,7 @@
    "larmor.staticct"
   ],
   "gc": [
+   "larmor.distcheck.gui_common",
    "larmor.distcheck.gui_menus"
   ],
   "hashlib": [
@@ -1344,6 +1345,7 @@
    "larmor.distcheck"
   ],
   "larmor.distcheck.gui_common": [
+   "larmor.distcheck",
    "larmor.distcheck.gui_menus",
    "larmor.distcheck.gui_tools",
    "larmor.distcheck.gui_workflows"
@@ -2431,6 +2433,7 @@
   "shiboken6": [
    "larmor.desktop.palette_dialog",
    "larmor.desktop.windowtray",
+   "larmor.distcheck.gui_common",
    "larmor.distcheck.gui_menus"
   ],
   "shutil": [

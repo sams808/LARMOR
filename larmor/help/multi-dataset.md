@@ -490,7 +490,8 @@ manual, §2, describes the rule and the flags.
    with the figure export and into the studio. **Species bar…** opens the
    Plotting studio on a 100 %-stacked bar of every site's integral
    population, one bar per name (or per group), in the current x order.
-   **Export DUST CSV…** writes a composition file DUST imports directly:
+   **Export DUST CSV…** writes a composition file that DUST (a companion
+   program for N4 / NBO speciation in oxide glasses) imports directly:
    `Sample`, the Series table's oxide columns under DUST's canonical names
    (`P2O5_mol`, `Bi2O3 (mol%)` → `P2O5`, `Bi2O3`; non-oxide columns are
    skipped and named), then `N4_measured` and `N4_measured_err` — the

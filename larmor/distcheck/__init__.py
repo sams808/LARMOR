@@ -194,6 +194,26 @@ def _run(argv) -> int:
             if isinstance(exc, KeyboardInterrupt):
                 break
         dt = time.perf_counter() - t0
+        if gui and name.split("-")[0] in ("tool", "dialog", "menu"):
+            # every GUI stage starts from an empty application: windows a
+            # stage left behind would be restyled by every later theme
+            # switch. A worker thread a stage left running is waited for
+            # first (and named); one that never ends fails the stage.
+            try:
+                from larmor.distcheck.gui_common import destroy_all_windows
+                n_win, waited, still = destroy_all_windows()
+                if waited:
+                    note(f"worker thread(s) still running when the stage ended: "
+                         f"{', '.join(waited)}" + ("" if still else " (finished after)"))
+                if still:
+                    ok = False
+                    err = err or (f"worker thread(s) still running 30 s after the stage: "
+                                  f"{', '.join(still)}")
+                    failed.append(name) if name not in failed else None
+                if n_win:
+                    say(f"    {n_win} window(s) left by {name} destroyed")
+            except Exception as exc:                     # noqa: BLE001
+                say(f"    window clean-up after {name} failed: {exc!r}")
         say(f"{'ok  ' if ok else 'FAIL'} {name} ({dt:.1f} s)")
         report["stages"].append({"name": name, "ok": ok, "seconds": round(dt, 2),
                                  "notes": notes, "error": err})

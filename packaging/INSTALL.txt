@@ -44,15 +44,18 @@ C:\Users\<you>\LARMOR_selftest.log with every step and any error (add your
 own spectrum's path after --selftest to test on your data). For the whole
 program:
 
-    .\LARMOR.exe --distcheck
-    .\LARMOR.exe --distcheck --gui
+    .\LARMOR.exe --distcheck --quick
+    .\LARMOR.exe --distcheck --gui --quick
 
-The first imports every module the program can reach, opens every bundled
-resource, runs every engine, every export format, the process pool and the
-command line; the second also opens every window and menu action, off
-screen, without touching your saved settings. Both write
-C:\Users\<you>\LARMOR_distcheck.log and end with a PASS or FAIL line.
-Attach that file to your issue.
+The first (about a minute) imports every module the program can reach,
+opens every bundled resource, runs every engine, every export format, the
+process pool and the command line; the second (about a quarter of an hour)
+also opens every window, tool and menu action, off screen. Neither touches
+your preferences, logs or crash-recovery session: they run on scratch
+copies. Both write C:\Users\<you>\LARMOR_distcheck.log and end with a
+PASS or FAIL line. Attach that file to your issue. (Without --quick the
+check builds full-size lineshape kernels and runs every fit to the end:
+thorough, and much slower.)
 
 Updating: run the new setup (it replaces the old version in place) or delete
 the old LARMOR folder and unzip the new archive. Your saved recipes, projects
