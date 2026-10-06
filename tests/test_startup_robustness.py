@@ -108,8 +108,10 @@ def test_window_builds_and_works_with_garbage_in_every_saved_setting(
         win.explorer._pinned                      # pinnedFolders was read at build time
         from larmor.desktop.workers import _fit_tol
         assert _fit_tol() == 0.1                  # fitStdevPct garbage -> the default
+        import shiboken6
         for w in list(QApplication.topLevelWidgets()):
-            if w is not win and w.isVisible():
+            # an earlier test's widget may already be gone on the C++ side
+            if w is not win and shiboken6.isValid(w) and w.isVisible():
                 w.close()
         qapp.processEvents()
         assert any("Plotting studio" in t for t in dismiss.seen), dismiss.seen

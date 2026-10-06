@@ -455,6 +455,9 @@
    "larmor.series_grid",
    "larmor.series_table"
   ],
+  "ctypes": [
+   "larmor.distcheck"
+  ],
   "dataclasses": [
    "larmor.acquisition",
    "larmor.autofit",
@@ -538,7 +541,8 @@
    "larmor.app"
   ],
   "faulthandler": [
-   "larmor.desktop.app"
+   "larmor.desktop.app",
+   "larmor.distcheck"
   ],
   "fractions": [
    "larmor.desktop.magres_dialog"
@@ -2881,6 +2885,7 @@
    "contextlib",
    "copy",
    "csv",
+   "ctypes",
    "dataclasses",
    "datetime",
    "faulthandler",

@@ -1,8 +1,8 @@
-THIRD-PARTY LICENCES -- LARMOR 0.15.3, Windows build
+THIRD-PARTY LICENCES -- LARMOR 0.16.0, Windows build
 ====================================================
 
-Generated 2026-10-05 from the frozen-build environment (packaging/.buildenv,
-Python 3.11.9) with
+Generated from the frozen-build environment (packaging/.buildenv, Python
+3.11.9) by packaging/third_party_licenses.py, with
 
     pip-licenses --format=plain-vertical --with-license-file --no-license-path
                  --with-urls --order=name
@@ -15,8 +15,8 @@ Scope
 The list covers every package installed in the build environment, which is a
 superset of what the distributed LARMOR folder contains. Build-time only, NOT
 present in the distributed folder: pyinstaller, pyinstaller-hooks-contrib,
-altgraph, pefile, pywin32-ctypes, pytest, pluggy, iniconfig. "larmor" itself is
-MIT (see LICENSE next to this file).
+altgraph, pefile, pywin32-ctypes, pip-licenses, prettytable, wcwidth, pytest,
+pluggy, iniconfig. "larmor" itself is MIT (see LICENSE next to this file).
 
 PyInstaller is GPL-2.0-or-later WITH Bootloader-exception: the bootloader
 linked into LARMOR.exe may be distributed under LARMOR's own licence (MIT).
@@ -29,18 +29,16 @@ licence options their metadata offers. The only licence file their wheels carry
 is the Qt commercial-licence notice reproduced in their blocks below; that
 notice does not apply to this build. The Qt libraries ship unmodified, as
 separate DLLs under _internal\PySide6, and can be replaced by the user with
-another build of the same Qt major version, as the LGPL requires. Sources and
-terms:
+another build of the same Qt major version, as the LGPL requires. The Qt
+modules LARMOR does not use -- among them Qt Virtual Keyboard, which is
+GPL-3.0-only -- are left out of the build. Sources and terms:
 
     Qt source           https://code.qt.io
     PySide6 source      https://code.qt.io/cgit/pyside/pyside-setup.git
     PySide6 licensing   https://doc.qt.io/qtforpython-6/licenses.html
-    LGPL-3.0 text       https://www.gnu.org/licenses/lgpl-3.0.txt
-    GPL-3.0 text        https://www.gnu.org/licenses/gpl-3.0.txt
+    LGPL-3.0 text       LICENSES\LGPL-3.0.txt next to this file
+    GPL-3.0 text        LICENSES\GPL-3.0.txt next to this file
                         (the LGPL-3.0 is a set of permissions on top of it)
-
-The verbatim LGPL-3.0 and GPL-3.0 texts are not reproduced below because the
-wheels do not carry them; they must be shipped alongside this file.
 
 Other bundled data files with their own terms
 ---------------------------------------------
@@ -48,6 +46,8 @@ matplotlib fonts: DejaVu (Bitstream Vera licence) and STIX (SIL OFL), licence
 files shipped under _internal\matplotlib\mpl-data\fonts\ttf.
 pyqtgraph CET colour maps: CC BY 4.0, licence file shipped under
 _internal\pyqtgraph\colors\maps.
+Bird photographs of Help > More... (offline pack): photographer and Creative
+Commons licence of each in _internal\larmor\xfact\packs\birds\assets\offline\CREDITS.txt.
 
 ====================================================================
 
@@ -763,12 +763,39 @@ to indicate the copyright and license terms:
 
 
 larmor
-0.15.3
-MIT
-UNKNOWN
+0.16.0
+MIT License
+https://github.com/sams808/LARMOR
 MIT License
 
-Copyright (c) 2026 sams808
+Copyright (c) 2026 Sam Soudani
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+larmor
+0.16.0
+MIT License
+https://github.com/sams808/LARMOR
+MIT License
+
+Copyright (c) 2026 Sam Soudani
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

@@ -113,6 +113,7 @@ def _run_child(names: list, group: str, ctx: dict, say) -> list:
     out.mkdir(parents=True, exist_ok=True)
     log = out / "distcheck.log"
     env = dict(os.environ, LARMOR_DISTCHECK_CHILD="1", LARMOR_DISTCHECK_LOG=str(log))
+    env.pop("PYTEST_CURRENT_TEST", None)
     say(f"--- {group} stages in a child process: {', '.join(names)}")
     t0 = time.perf_counter()
     try:
@@ -176,7 +177,7 @@ def run(argv=None) -> int:
         for k, v in env_before.items():
             if os.environ.get(k) != v:
                 os.environ[k] = v
-    if os.environ.get("LARMOR_DISTCHECK_CHILD") and not os.environ.get("PYTEST_CURRENT_TEST"):
+    if os.environ.get("LARMOR_DISTCHECK_CHILD"):
         # a child GUI group ends here, its report written: the interpreter's
         # own teardown of the dozens of windows a group leaves behind crashed
         # with an access violation after every stage had passed (LARMOR's

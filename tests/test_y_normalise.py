@@ -402,8 +402,10 @@ def test_mode_is_remembered_in_qsettings(win, monkeypatch):
         def value(self, key, default=None, type=None):
             return FakeSettings.store.get(key, default)
 
-    monkeypatch.setattr(mw_chrome, "QSettings", FakeSettings)
-    monkeypatch.setattr(mw_menus, "QSettings", FakeSettings)
+    # every preference goes through larmor.desktop.prefs.settings(), which
+    # the mixins import as _settings
+    monkeypatch.setattr(mw_chrome, "_settings", FakeSettings)
+    monkeypatch.setattr(mw_menus, "_settings", FakeSettings)
     monkeypatch.delenv("LARMOR_NO_SESSION", raising=False)
     _active(win)
     win._set_y_mode("max")

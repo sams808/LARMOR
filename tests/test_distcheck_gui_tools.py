@@ -43,8 +43,12 @@ def test_tool_stages_pass_in_a_development_install(tmp_path, monkeypatch):
     assert [s["name"] for s in report["stages"]] == NAMES
     assert all(s["ok"] for s in report["stages"]), text[-6000:]
     assert "=== PASS" in text
-    # the exports the frozen 0.15.3 build could not make are on disk
-    studio = tmp_path / "out" / "studio"
+    # the exports the frozen 0.15.3 build could not make are on disk (the
+    # GUI groups run in a child process of their own, under <out>/tool_stages)
+    out = tmp_path / "out"
+    if (out / "tool_stages").is_dir():
+        out = out / "tool_stages"
+    studio = out / "studio"
     assert {p.suffix for p in studio.glob("studio.*")} >= {".png", ".pdf", ".svg", ".eps",
                                                            ".tiff", ".jpg"}
-    assert (tmp_path / "out" / "plot" / "plot.svg").stat().st_size > 200
+    assert (out / "plot" / "plot.svg").stat().st_size > 200
