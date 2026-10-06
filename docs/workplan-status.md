@@ -12,7 +12,7 @@ Workplan"; this file is the ground truth for progress.
 - **Pushed** to `origin/master` on 2026-09-23 on Sam's go-ahead ("once done
   make sure the version on github is up to date, and push if needed"):
   v0.13.0 → v0.14.0, the eleven merged branches of the next-ten batch below.
-- **Tests**: 1774 collected in 140 files at v0.15.3 (1761 in 139 at v0.15.2, 1728 in 135 at v0.15.0, 1324 in 107 at v0.14.0). Last full run: see the
+- **Tests**: 1799 collected at v0.16.0 (1774 in 140 files at v0.15.3, 1761 in 139 at v0.15.2, 1728 in 135 at v0.15.0, 1324 in 107 at v0.14.0). Last full run: see the
   line "Full suite" at the end of this section. Trust a green bar only when
   the terminal banner says "real-data layer: complete (all 19 datasets
   present)" — five datasets were added this session (the CaF₂ / NaF magres
@@ -85,8 +85,16 @@ Workplan"; this file is the ground truth for progress.
   `LARMOR_is1`), installed exe self-test PASS, silent uninstall 3 s with no
   folder and no entry left, the desktop shortcut (deleted by the uninstaller,
   which shares its name) restored to `dist\LARMOR\LARMOR.exe`, crash log
-  empty. **Hand out the 0.15.3 setup**; every earlier file in `dist/` is
-  superseded.
+  empty. **0.16.0** built 2026-10-05 after its full suite
+  (`dist/LARMOR-0.16.0-setup.exe` 108.5 MB, `dist/LARMOR-0.16.0-win64.zip`
+  154.0 MB; the folder now carries LICENSE, THIRD_PARTY_LICENSES.txt and
+  LICENSES\ next to the exe, and the example data under _internal):
+  `LARMOR.exe --distcheck --gui --quick` PASS on the distributed exe
+  (36 stages, 7.5 min), silent install 18 s (2021 files), Apps entry
+  "LARMOR 0.16.0", installed exe `--selftest` PASS and `--distcheck
+  --quick` PASS (17 stages, 14 s), silent uninstall 3 s clean, desktop
+  shortcut restored, crash log unchanged. **Hand out the 0.16.0 setup**;
+  every earlier file in `dist/` is superseded.
 - **Full suite**: at v0.14.0 (0de34c7), **1324 passed / 0 failed** in 20 min 39 s,
   real-data layer complete (all 19 datasets present). v0.14.1 (faab8f9) adds
   `larmor/selftest.py`, the quick overlays and their tests (scoped runs
@@ -111,7 +119,11 @@ Workplan"; this file is the ground truth for progress.
   test passes. **v0.15.2 (8bbc39d, 2026-10-02): 1761 passed / 0 failed** in
   52 min 08 s, run alone, real-data layer complete (all 19 datasets
   present). **v0.15.3 (2026-10-02): 1774 passed / 0 failed** in 26 min 56 s,
-  run alone, real-data layer complete (all 19 datasets present).
+  run alone, real-data layer complete (all 19 datasets present). **v0.16.0 (2026-10-05): 1794 passed / 5 failed** in 1 h 04 min,
+  run alone, real-data layer complete; the five failures (test-side: a
+  stale manifest, paths after the check's child-process isolation, a
+  child-exit guard, a patched name the preferences refactor removed)
+  fixed and re-run green.
 - **0.14.1 (2026-09-23, same day)**: a student's frozen 0.14.0 opened spectra
   but "fitting did not work". The fit path was verified in the exe's own
   package set — console-less Python of `packaging/.buildenv`, then the frozen

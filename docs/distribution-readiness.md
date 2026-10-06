@@ -132,9 +132,28 @@ The same stages run in the development install as tests
 
 ## 3 · Verification record
 
-[pending: full suite; frozen `--distcheck --quick` and `--distcheck --gui
---quick` results; installer sizes, silent install / uninstall, Apps entry,
-desktop shortcut]
+| check | result |
+|---|---|
+| full test suite, run alone, real-data layer complete (19 datasets) | 1799 collected: 1794 passed, 5 failed in 1 h 04 min; the five (a stale manifest, two test paths after the child-process isolation, a child-exit guard, a test patching a name the preferences refactor removed) fixed and re-run green |
+| development install, `python -m larmor.distcheck --gui --quick` | all 36 stages pass |
+| final distributed exe, `LARMOR.exe --distcheck --gui --quick` | **PASS, 36 stages in 7.5 min**; each GUI group's process exits 0 (workflows 42 s, dialogs 47 s, menus 350 s: 200 menu actions in three window states) |
+| `dist/LARMOR-0.16.0-setup.exe` | 108.5 MB (0.15.3: 111 MB, with the examples now added and the unused Qt modules removed) |
+| `dist/LARMOR-0.16.0-win64.zip` | 154.0 MB |
+| silent install | 18 s, 2021 files, Apps entry "LARMOR 0.16.0" (publisher "McCloy group, Washington State University"); `LICENSE`, `THIRD_PARTY_LICENSES.txt`, `INSTALL.txt`, `LICENSES\LGPL-3.0.txt` / `GPL-3.0.txt` and the example data present; `Qt6VirtualKeyboard.dll` absent |
+| installed copy, `--selftest` | PASS (core and desktop fits) in 37 s |
+| installed copy, `--distcheck --quick` | PASS, 17 stages in 14 s |
+| silent uninstall | 3 s, no folder and no Apps entry left |
+| desktop shortcut | rewritten by the build to `dist\LARMOR\LARMOR.exe`; restored after the uninstaller removed its namesake |
+| crash log | unchanged through every check |
+
+Timing note: three runs this afternoon showed stages of 24 to 51 minutes;
+they were the machine sleeping (Kernel-Power 42 / 107 at 12:20–12:50,
+13:47–14:38 and 14:58–15:22), not the stages. The final runs held the
+machine awake.
+
+One follow-up: `--selftest` (unlike `--distcheck`) still writes the
+remembered "+ Add line" model to the user's preferences, as a click would;
+the next release should give it the same sandbox.
 
 ## 4 · Known limitations, measured and left
 
