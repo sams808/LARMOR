@@ -693,9 +693,11 @@ class _MenusMixin:
         <p style="color:#4a4f58; margin-top:0;"><i>An open desktop successor to
         dmfit — solid-state NMR lineshape fitting for disordered solids.</i></p>
 
-        <p>Developed by <b>Sam Soudani</b>, in the <b>McCloy</b> group at
-        Washington State University, with support from the
-        U.S.&nbsp;Department&nbsp;of&nbsp;Energy&nbsp;(DOE).</p>
+        <p>Developed by <b>Sam Soudani</b> in the Nuclear, Optical, Magnetic,
+        and Electronic Materials Laboratory (<b>NOME</b>) of
+        Prof.&nbsp;John&nbsp;<b>McCloy</b>, School of Mechanical and Materials
+        Engineering, <b>Washington State University</b>, with support from the
+        U.S.&nbsp;Department&nbsp;of&nbsp;Energy&nbsp;(<b>DOE</b>).</p>
         <p><a href="https://github.com/sams808/LARMOR">github.com/sams808/LARMOR</a>
         &nbsp;·&nbsp; MIT&nbsp;License</p>
 

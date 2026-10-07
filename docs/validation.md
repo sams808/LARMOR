@@ -714,4 +714,4 @@ chemical-shift anisotropy."*
 
 ---
 
-Sam Soudani, McCloy group, Washington State University.
+Sam Soudani, NOME Laboratory (McCloy group), Washington State University.

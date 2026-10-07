@@ -532,4 +532,4 @@ spinning-sideband detection on load** turns the automatic offer off.
 - R. R. Ernst, G. Bodenhausen, A. Wokaun, *Principles of NMR in One and Two
   Dimensions*, Oxford (1987). *(general reference)*
 
-*LARMOR — Sam Soudani, McCloy group, Washington State University.*
+*LARMOR — Sam Soudani, NOME Laboratory (McCloy group), Washington State University.*

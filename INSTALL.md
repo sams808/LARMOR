@@ -194,4 +194,4 @@ version with `python --version` (aim for 3.11).
 
 ---
 
-*LARMOR — Sam Soudani, McCloy group, Washington State University.*
+*LARMOR — Sam Soudani, NOME Laboratory (McCloy group), Washington State University.*

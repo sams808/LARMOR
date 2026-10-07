@@ -194,4 +194,4 @@ site's C_Q (Edén 2023 §6.2.2/§6.3.2 and refs. therein), so:
   Spectrosc.* **45**, 53 (2004). *(review)*
 - D. Massiot *et al.*, dmfit, *Magn. Reson. Chem.* **40**, 70 (2002).
 
-*LARMOR — Sam Soudani, McCloy group, Washington State University.*
+*LARMOR — Sam Soudani, NOME Laboratory (McCloy group), Washington State University.*

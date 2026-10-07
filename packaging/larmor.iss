@@ -15,7 +15,7 @@
   #define MyAppVersion "0.0.0"
 #endif
 #define MyAppName "LARMOR"
-#define MyAppPublisher "McCloy group, Washington State University"
+#define MyAppPublisher "NOME Laboratory (McCloy group), Washington State University"
 #define MyAppURL "https://github.com/sams808/LARMOR"
 #define MyAppExeName "LARMOR.exe"
 #ifndef SourceDir

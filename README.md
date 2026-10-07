@@ -223,4 +223,9 @@ LARMOR works offline and sends nothing anywhere. The one exception is
 Help ▸ More…, a just-for-fun card that fetches a picture from a public image
 service when you open it.
 
-Sam Soudani — McCloy group, Washington State University.
+## Acknowledgements
+
+LARMOR is developed by Sam Soudani in the Nuclear, Optical, Magnetic, and
+Electronic Materials Laboratory (NOME) of Prof. John McCloy, School of
+Mechanical and Materials Engineering, Washington State University, with
+support from the U.S. Department of Energy (DOE).

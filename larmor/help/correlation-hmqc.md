@@ -96,4 +96,4 @@ architecture may be built ahead of time but it is not wired into the app yet.
 - T. Gullion, J. Schaefer, "Rotational-echo double-resonance NMR" (REDOR),
   *J. Magn. Reson.* **81**, 196 (1989).
 
-*LARMOR — Sam Soudani, McCloy group, Washington State University.*
+*LARMOR — Sam Soudani, NOME Laboratory (McCloy group), Washington State University.*

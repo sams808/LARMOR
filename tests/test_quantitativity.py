@@ -87,9 +87,9 @@ Point       Tau          Expt          Calc       Difference
 
 """
 
-# 2026-07/07062026_SR31648_Peyton-S2_SS_ALP/1901 (INTENSITY fit on a peak point)
+# 2026-07/07062026_SR31648_S2_SS_ALP/1901 (INTENSITY fit on a peak point)
 CT1T2_PEAK = """Dataset :
- /data/soudani_data/07062026_SR31648_Peyton-S2_SS_ALP/1901/pdata/1
+ /data/soudani_data/07062026_SR31648_S2_SS_ALP/1901/pdata/1
 INTENSITY fit :
  I[t]=I[0]+P*exp(-t/T1)
 

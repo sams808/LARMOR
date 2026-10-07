@@ -170,33 +170,48 @@ the next release should give it the same sandbox.
   thirty GUI stages left enough closed windows behind for a later text-size
   switch to crash Qt; a realistic session does not (development notes §8).
 
-## 5 · Decisions that are the author's
+## 5 · The author's decisions (answered 2026-10-07)
 
-1. **Publishing the example data set.** `examples/pCABS2-4` is the author's
-   own 2022 measurement from a former lab. After scrubbing, the files still
-   reveal acquisition dates, a +0100 timezone, a probe identifier, French
-   title lines and sample masses; no institution or third person is named.
-   Confirm the right to publish it, or replace it.
-2. **Bruker pulse programs** in the example (`zg`, `mp3qdfsz`) are Bruker's
-   library files, routinely present in public Bruker data deposits; keep or
-   delete (Tools ▸ Pulse program reads them).
-3. **Non-commercial photo licences** (eleven of the twelve bird photos are
-   CC BY-NC / CC BY-NC-SA) inside an MIT download: fine for this
-   distribution, a problem for anyone redistributing commercially.
-4. **The GitHub URL** in About, `INSTALL.txt`, the installer metadata and
-   `pyproject` points at a private repository, and it is the only
-   "report a problem" channel. Make it public (after moving
-   `docs/workplan-status.md`, an internal session log, out of it and
-   anonymising the test fixtures that quote the author's machine) or point
-   these at a page that exists.
-5. **The personal e-mail** in `pyproject` is written into every build's
-   package metadata.
-6. **Institutional copyright and acknowledgement**: the About dialog states
-   DOE support and the installer publisher is the McCloy group; check WSU's
-   software policy and the award's acknowledgement terms.
-7. **Code signing**: the build is unsigned; SmartScreen warns, and
-   `INSTALL.txt` explains the two clicks.
-8. **The lost preferences**: the author's previous LARMOR preferences exist
-   only in the memory of a hung test process (python.exe started 10:10 on
-   2026-10-05), left running on purpose; recovering them means reading that
-   process's memory, which the session's safety check declined to do.
+1. **Example data set: published.** `examples/pCABS2-4`, the author's own
+   2022 measurement, stays in the repository and in the build.
+2. **Bruker pulse programs** in the example (`zg`, `mp3qdfsz`): not yet
+   answered; kept as they are (Tools ▸ Pulse program reads them).
+3. **Non-commercial photo licences: accepted.** The twelve bird photos stay,
+   eleven of them CC BY-NC / CC BY-NC-SA, each credited in `CREDITS.txt`.
+4. **The repository: public.** GitHub reported it public on 2026-10-07, with
+   72 distinct cloners over the preceding fourteen days, so it was already
+   public during this audit, which called it private in error. Its whole
+   history is public with it. A scan of every commit found no credential or
+   key. The history does carry the internal session log
+   `docs/workplan-status.md` (no third person named), the example files
+   before their scrub (the author's former account and host names), and the
+   two bird photos removed in 0.16.0, which remain in every commit since
+   2026-07-22 and in the source archives of releases v0.4.0 and v0.4.1.
+   Taking those two files out of the history means rewriting it: every
+   commit since then gets a new id and the release tags move. That is left
+   to the author. One test fixture quoted a sample folder carrying a
+   person's first name; it is anonymised.
+   The pushed code is 0.15.x. The 0.16.0 fixes, the REDOR distances among
+   them, reach the public repository only when pushed, and the Releases page
+   the README sends users to has no installer attached yet.
+5. **E-mail: the WSU address.** `pyproject` names sami.soudani@wsu.edu. The
+   commits themselves still carry the personal address they were made with.
+6. **Credit.** The About dialog, the README's Acknowledgements and
+   `INSTALL.txt` read: developed in the Nuclear, Optical, Magnetic, and
+   Electronic Materials Laboratory (NOME) of Prof. John McCloy, School of
+   Mechanical and Materials Engineering, Washington State University, with
+   support from the U.S. Department of Energy (DOE). The manuals' footer and
+   the installer's publisher read "NOME Laboratory (McCloy group),
+   Washington State University". The copyright line stays the author's.
+   WSU's software policy and the award's own acknowledgement wording, which
+   usually names the award number, were not checked.
+7. **Code signing: unsigned.** The exe and the setup carry no Authenticode
+   signature, so on first launch SmartScreen shows "Windows protected your
+   PC" with an unknown publisher; More info ▸ Run anyway passes it, as
+   `INSTALL.txt` and the README explain. Removing the warning takes a
+   code-signing certificate, bought yearly from a certificate authority or
+   an institutional one from WSU, applied to both files at build time. Even
+   signed, SmartScreen can warn until the downloads build a reputation.
+8. **The lost preferences: open.** The author's previous LARMOR preferences
+   exist only in the memory of the hung test process (python.exe started
+   10:10 on 2026-10-05), still left running on purpose.

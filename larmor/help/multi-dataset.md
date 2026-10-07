@@ -704,4 +704,4 @@ change; use §8 when the sites themselves **evolve** along the series.
   Lacaillerie, C. Fretigny, D. Massiot, *J. Magn. Reson.* **192**, 244 (2008).
   *(the Czjzek widths shared in a glass co-fit)*
 
-*LARMOR — Sam Soudani, McCloy group, Washington State University.*
+*LARMOR — Sam Soudani, NOME Laboratory (McCloy group), Washington State University.*

@@ -115,4 +115,4 @@ plus this record, never the processed arrays.
 - J. Keeler, *Understanding NMR Spectroscopy*, 2nd ed., Wiley (2010). *(a very
   readable account of 2D quadrature detection)*
 
-*LARMOR — Sam Soudani, McCloy group, Washington State University.*
+*LARMOR — Sam Soudani, NOME Laboratory (McCloy group), Washington State University.*

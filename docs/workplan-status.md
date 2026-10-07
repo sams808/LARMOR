@@ -716,14 +716,32 @@ make sure everything works well. The full account is
   14:58-15:22) paused three long runs; their wall times are not stage
   times.
 
+## 2026-10-07 — Sam's answers on distribution (still 0.16.0, rebuilt)
+
+- Example data publishable; the non-commercial bird photos stay; the WSU
+  address replaces the personal one in `pyproject`; credit goes to the NOME
+  Laboratory of Prof. John McCloy, Washington State University, and the U.S.
+  DOE (About, README Acknowledgements, `INSTALL.txt`; manual footers and the
+  installer publisher "NOME Laboratory (McCloy group), Washington State
+  University"); the build stays unsigned.
+- The GitHub repository was already public (72 distinct cloners in the
+  fourteen days before 2026-10-07), so its whole history is too. A scan of
+  every commit found no credential; the two photos removed in 0.16.0 remain
+  in the history since 2026-07-22 and in the v0.4.0 / v0.4.1 source
+  archives (purging them = a history rewrite, Sam's call). The one fixture
+  that quoted a person's first name in a sample folder is anonymised.
+- Answers recorded in `docs/distribution-readiness.md` §5; open: the lost
+  preferences, the Bruker pulse programs in the example, the history.
+
 ## Remaining
 
-1. **E7** — `dist/LARMOR-0.14.0-setup.exe` and the zip are built and tested
-   on the build machine; run the setup on a machine with no development
-   setup (a student's laptop: install, open a Bruker folder, fit, save a
-   recipe, uninstall), then publish a GitHub release carrying both
-   (`gh release create v0.14.0 dist/LARMOR-0.14.0-setup.exe
-   dist/LARMOR-0.14.0-win64.zip`).
+1. **E7** — `dist/LARMOR-0.16.0-setup.exe` and the zip are built and tested
+   on the build machine. With Sam's word: push master, then publish a
+   GitHub release carrying both (`gh release create v0.16.0
+   dist/LARMOR-0.16.0-setup.exe dist/LARMOR-0.16.0-win64.zip`), since the
+   README sends users to the Releases page and v0.4.1 there has no files.
+   Still worth a run on a machine with no development setup (a student's
+   laptop: install, open a Bruker folder, fit, save a recipe, uninstall).
 2. The open observations of the next-ten batch above (kernel-window CG bias
    of the Czjzek model, REDOR S(S+1), the frozen-site marker).
 3. Follow-ups noted earlier, none blocking:

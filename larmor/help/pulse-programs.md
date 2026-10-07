@@ -408,4 +408,4 @@ the diagram — never guessed.
   Overhauser experiment with pure absorption phase in four quadrants",
   *J. Magn. Reson.* **48**, 286 (1982). *(States acquisition)*
 
-*LARMOR — Sam Soudani, McCloy group, Washington State University.*
+*LARMOR — Sam Soudani, NOME Laboratory (McCloy group), Washington State University.*
