@@ -21,7 +21,7 @@ from larmor.desktop.prefs import settings as _settings
 
 #: QSettings key of Edit > Spinning sidebands > Offer ... on load. OFF by
 #: default since 0.15: the banner popping up over every loaded spectrum was
-#: the first thing Sam asked to stop; Detect (Ctrl+Shift+D) shows it on
+#: the first thing Sami asked to stop; Detect (Ctrl+Shift+D) shows it on
 #: demand. A new key, not a new default on the old 'ssbAutoOffer' -- that
 #: one defaulted to True and had been written as True on every install that
 #: never touched the toggle, so a default change alone would have changed

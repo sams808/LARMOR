@@ -113,8 +113,8 @@ The same stages run in the development install as tests
 - The crash log was truncated at every start, under two spellings of one
   name, wiping the previous crash before a user could send it; it is appended.
 - The test suite and the check now use their own preferences file and their
-  own `%LOCALAPPDATA%`. *During this audit, a test of mine overwrote the
-  author's saved LARMOR preferences in the registry and then hung before its
+  own `%LOCALAPPDATA%`. *During this audit, one of the new tests overwrote
+  the author's saved LARMOR preferences in the registry and then hung before its
   guard could restore them; the original values were lost (recent files,
   pinned Explorer folders, remembered line defaults, saved constraint sets,
   batch templates, theme). The isolation above exists so this cannot recur.*

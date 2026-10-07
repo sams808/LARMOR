@@ -1,6 +1,6 @@
 """A physical axis never carries an SI prefix (larmor.desktop.axes).
 
-Sam, 2026-09-24: "when opening some data (my WURST-QCPMG for example), the
+Sami, 2026-09-24: "when opening some data (my WURST-QCPMG for example), the
 x axis in the plot area is broken: it says from 6 to -6 ppm where the data
 range from about 6000 to -6000 ppm." pyqtgraph's AxisItem had rescaled the
 ticks and quietly relabelled the unit "kppm". Every plot of every dialog now
@@ -241,7 +241,7 @@ def test_spectrum_view_keeps_thousands_of_ppm_after_a_theme_reapply(qapp):
 # the real dataset
 # --------------------------------------------------------------------------
 def test_81br_static_spectrum_is_ticked_in_thousands_of_ppm(qapp):
-    """MAGLAB_81BR / "30": the WCPMG 81Br spectrum Sam opened, 65536 points
+    """MAGLAB_81BR / "30": the WCPMG 81Br spectrum Sami opened, 65536 points
     over +-5787 ppm. In a batch-fit cell, in the main view, and on a plain
     ppm axis given the data first and the helper second."""
     from larmor.desktop.axes import plain_units

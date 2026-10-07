@@ -225,7 +225,7 @@ service when you open it.
 
 ## Acknowledgements
 
-LARMOR is developed by Sam Soudani in the Nuclear, Optical, Magnetic, and
+LARMOR is developed by Sami Soudani in the Nuclear, Optical, Magnetic, and
 Electronic Materials Laboratory (NOME) of Prof. John McCloy, School of
 Mechanical and Materials Engineering, Washington State University, with
 support from the U.S. Department of Energy (DOE).

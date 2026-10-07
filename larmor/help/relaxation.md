@@ -95,4 +95,4 @@ where a single $T_1$ is a fiction. The fitted formula is shown above the curve.
 - H. Vogel, *Phys. Z.* **22**, 645 (1921); G. S. Fulcher, *J. Am. Ceram. Soc.*
   **8**, 339 (1925). *(VFT law)*
 
-*LARMOR — Sam Soudani, NOME Laboratory (McCloy group), Washington State University.*
+*LARMOR — Sami Soudani, NOME Laboratory (McCloy group), Washington State University.*

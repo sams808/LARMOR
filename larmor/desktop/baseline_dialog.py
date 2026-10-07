@@ -62,7 +62,7 @@ class BaselineDialog(QDialog):
         self.p_bot.setLabel("bottom", "shift", units="ppm")
         # addPlot() returns a PlotItem (getPlotItem is the PlotWidget method):
         # this line crashed the whole "Baseline iterative" dialog since it
-        # was written (found by Sam on 2026-09-24)
+        # was written (found by Sami on 2026-09-24)
         self.p_bot.getAxis("bottom").enableAutoSIPrefix(False)
         self.p_top.getAxis("bottom").enableAutoSIPrefix(False)
         self.p_bot.setXLink(self.p_top)

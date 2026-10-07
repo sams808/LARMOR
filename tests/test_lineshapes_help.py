@@ -21,7 +21,7 @@ def test_lineshapes_manual_covers_every_model():
     for token in ("Czjzek", "d'Espinose", "Central Limit Theorem",
                   "quadrupolar product", "Haeberlen", "mrsimulator",
                   "Le Caër", "Gaussian Isotropic Model", "Gutowsky",
-                  "McConnell", "Sam Soudani"):
+                  "McConnell", "Sami Soudani"):
         assert token in flat, f"missing: {token}"
 
 

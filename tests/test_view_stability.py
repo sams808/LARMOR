@@ -1,6 +1,6 @@
 """The spectrum view never moves because of a model, simulation or fit.
 
-Sam's report (2026-09): "sometimes when importing a spectrum the plot window
+Sami's report (2026-09): "sometimes when importing a spectrum the plot window
 drifts out, same sometimes when fitting" -- the x axis reached 2500, 5000,
 7000 ppm on data spanning 640 ... -580 ppm. Two mechanisms, both pyqtgraph
 auto-range (enabled by zoom_full at load until the user zooms):

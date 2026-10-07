@@ -768,7 +768,7 @@ MIT License
 https://github.com/sams808/LARMOR
 MIT License
 
-Copyright (c) 2026 Sam Soudani
+Copyright (c) 2026 Sami Soudani
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -795,7 +795,7 @@ MIT License
 https://github.com/sams808/LARMOR
 MIT License
 
-Copyright (c) 2026 Sam Soudani
+Copyright (c) 2026 Sami Soudani
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

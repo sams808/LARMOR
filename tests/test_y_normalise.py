@@ -1,7 +1,7 @@
 """View > Y axis: raw intensity / normalise to maximum / to area / to the
 area of a region.
 
-Sam (2026-09): "Make it possible to switch the plotting area to normalized
+Sami (2026-09): "Make it possible to switch the plotting area to normalized
 Y: to the max, or to the area (total, or a user-selected X region)."
 
 ONE display factor, computed from the active spectrum (larmor.display

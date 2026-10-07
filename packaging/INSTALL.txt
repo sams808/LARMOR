@@ -77,7 +77,7 @@ this folder. LARMOR works offline and sends nothing anywhere; the one
 exception is Help > More..., a just-for-fun card that fetches a picture
 from a public image service when you open it.
 
-Credits: LARMOR is developed by Sam Soudani in the Nuclear, Optical,
+Credits: LARMOR is developed by Sami Soudani in the Nuclear, Optical,
 Magnetic, and Electronic Materials Laboratory (NOME) of Prof. John McCloy,
 Washington State University, with support from the U.S. Department of
 Energy (DOE).

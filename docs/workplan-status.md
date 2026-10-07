@@ -2,14 +2,14 @@
 
 Where the 50-item improvement workplan stands, what the sessions after it
 changed, and what a continuing session picks up. The workplan itself (items,
-evidence, Sam's keep/defer/drop decisions) lives in the artifact "LARMOR
+evidence, Sami's keep/defer/drop decisions) lives in the artifact "LARMOR
 Workplan"; this file is the ground truth for progress.
 
 ## State of the repository
 
 - **Version**: 0.15.0 (`larmor/__init__.py` + `pyproject.toml`, bumped in step;
   committed 2026-09-30 as f627a89, **not pushed** — no push word this session).
-- **Pushed** to `origin/master` on 2026-09-23 on Sam's go-ahead ("once done
+- **Pushed** to `origin/master` on 2026-09-23 on Sami's go-ahead ("once done
   make sure the version on github is up to date, and push if needed"):
   v0.13.0 → v0.14.0, the eleven merged branches of the next-ten batch below.
 - **Tests**: 1799 collected at v0.16.0 (1774 in 140 files at v0.15.3, 1761 in 139 at v0.15.2, 1728 in 135 at v0.15.0, 1324 in 107 at v0.14.0). Last full run: see the
@@ -65,7 +65,7 @@ Workplan"; this file is the ground truth for progress.
   (core czjzek 557 evaluations with the scaled solver), silent install 39 s
   (1994 files), Apps entry "LARMOR 0.15.1", installed exe self-test PASS,
   silent uninstall clean, crash log empty. `packaging/build.bat` now ends
-  with step [6/6], `packaging/desktop_shortcut.ps1`: Sam's standing request
+  with step [6/6], `packaging/desktop_shortcut.ps1`: Sami's standing request
   ("always replace the shortcut to the larmor.exe on the desktop") after a
   shortcut to PyInstaller's intermediate `build\larmor\LARMOR.exe` died with
   "Failed to load Python DLL …\build\larmor\_internal\python311.dll" — the
@@ -146,11 +146,11 @@ Workplan"; this file is the ground truth for progress.
   recorded in `packaging/README.md`: a build cannot replace `dist\LARMOR`
   while a copy runs — PyInstaller ends with the OLD exe in place; check the
   timestamp, or build with `--distpath dist_test` and wrap it with
-  `/DSourceDir=..\dist_test\LARMOR`. Also in 0.14.1, on Sam's request: quick
+  `/DSourceDir=..\dist_test\LARMOR`. Also in 0.14.1, on Sami's request: quick
   overlays in the main window (Shift + drop, File ▸ Overlay a spectrum…
   Ctrl+Shift+A, Explorer right-click, View ▸ Overlays Ctrl+Shift+V / Clear
   overlays, "match height" in the Datasets dock).
-- **0.14.2 (2026-09-24)**: Sam's fourteen field-use items after the first
+- **0.14.2 (2026-09-24)**: Sami's fourteen field-use items after the first
   student session, built on three worktree branches and merged (WB 4afa9a2,
   WC 446fcad, WA 2c92c46; release commit cc8b1ca). Fixed: the Baseline
   iterative dialog crashed on open (`PlotItem.getPlotItem`) and its Apply
@@ -187,7 +187,7 @@ Workplan"; this file is the ground truth for progress.
   acqus would hang the app — guard it); the `LinesTable` embedded in
   `panels.SiteCard` / the sequential-fit dialog is not wired for multi-select
   Remove.
-- **0.14.3 (2026-09-24, later the same day)**: Sam's second field-use batch,
+- **0.14.3 (2026-09-24, later the same day)**: Sami's second field-use batch,
   four branches (WD 490f31b…38bbf93, WE 0a13a3a…59d1d0b, WF 150e103…41ac5f5,
   WG on master 76d1c6b/e93b364; release commit 37ece2d). **Help and
   viewers**: manuals and tutorials open as non-modal tool windows
@@ -293,7 +293,7 @@ All 41 kept items are implemented. Phase 5, finished on 2026-09-22:
 | F2 | TopSpin drag-to-phase (Ctrl+P) | 0acf234 |
 | G5 | `app.py` split: 387-line facade over eleven mixins + `workers.py` | b2de803 … 130b5e1 |
 
-Beyond the workplan, from Sam's requests and from what the work uncovered
+Beyond the workplan, from Sami's requests and from what the work uncovered
 (2026-09-22):
 
 - Component names on the plot (View ▸ Component labels, or hover), Delete /
@@ -320,7 +320,7 @@ Beyond the workplan, from Sam's requests and from what the work uncovered
 
 ## The next-ten batch (2026-09-23)
 
-After the workplan closed, Sam asked for a judged shortlist of ten further
+After the workplan closed, Sami asked for a judged shortlist of ten further
 items useful to the group, plus a thorough re-check of the QCPMG multi-field
 extrapolation. Each item was designed by two independent drafts and a judge
 (the designs live in the session scratchpad, `designs/Rank_*.md` and
@@ -367,7 +367,7 @@ test or a tutorial block):
   78 MHz for C_Q 5.5 and the convergence flag fires; the whole-manifold route
   with all sidebands recovers within 1.5 ppm / 0.1 MHz (QF).
 
-Open observations from the batch (not fixed; for Sam):
+Open observations from the batch (not fixed; for Sami):
 
 - LARMOR's kernel-based `czjzek` model gives a whole-manifold centre of
   gravity biased −21 ppm at 78 MHz for σ = 1.0 MHz (−4 ppm at 108 MHz, under
@@ -376,7 +376,7 @@ Open observations from the batch (not fixed; for Sam):
   large-C_Q rows. Direct mrsimulator sites are exact; the QCPMG tests use
   those. Worth a separate look at `engine.build_kernel`'s window.
 - `redor.analyze` uses the spin-½ second moment for ¹⁹F{²⁷Al}; whether the
-  S(S+1) factor should enter is Sam's call.
+  S(S+1) factor should enter is Sami's call.
 - A site frozen outside the fit window derives ‡ at min 0 while the fit's own
   at-bound list omits it (development-notes §8); one line in `fit()` setting
   the frozen site's `Param.vary = False` would align them.
@@ -450,10 +450,10 @@ Open observations from the batch (not fixed; for Sam):
   A test that needs only the active theme calls `theme.apply(None, name)`.
 - **A green pytest bar is not enough**: read the real-data banner.
 
-## 2026-09-30 session — Sam's third field-use batch → v0.15.0
+## 2026-09-30 session — Sami's third field-use batch → v0.15.0
 
 Eleven items from field use, all delivered; the two "broken" ones were real
-defects with the same signature Sam described.
+defects with the same signature Sami described.
 
 **Root causes found (each with a regression test):**
 
@@ -542,7 +542,7 @@ repo root and is not part of the package.
 
 ## 2026-09-30, later — "check all the error calculation when there is only one line" → v0.15.1
 
-Sam could not calculate errors on a single-line Czjzek fit of ²³Na. Reproduced
+Sami could not calculate errors on a single-line Czjzek fit of ²³Na. Reproduced
 on a real ²³Na MAS spectrum (a CEMHTI NaAlSiO glass, zg, 132 MHz) with one
 Czjzek site seeded the way the app seeds it: every tool *returned*, and four
 things were wrong.
@@ -671,7 +671,7 @@ members differ).
 
 ## 2026-10-05 — "check LARMOR and verify it's ready for public distribution" → v0.16.0
 
-Sam's request, with a screenshot of the 0.15.3 exe failing an SVG export
+Sami's request, with a screenshot of the 0.15.3 exe failing an SVG export
 from the Plotting studio ("No module named 'matplotlib.backends.backend_svg'"):
 check every capability, verify they work and are compatible with each other,
 make sure everything works well. The full account is
@@ -707,7 +707,7 @@ make sure everything works well. The full account is
   their own preferences file and LOCALAPPDATA.
 - **An incident of this session**: a robustness test wrote garbage into
   every saved preference behind an in-memory guard, then hung in a modal
-  dialog; Sam's LARMOR preferences (recent files, pinned folders, line
+  dialog; Sami's LARMOR preferences (recent files, pinned folders, line
   defaults, constraint sets, batch templates, theme) were lost from the
   registry. The only copy is in the hung process (python.exe started 10:10,
   left running); reading its memory was declined by the session's safety
@@ -716,7 +716,7 @@ make sure everything works well. The full account is
   14:58-15:22) paused three long runs; their wall times are not stage
   times.
 
-## 2026-10-07 — Sam's answers on distribution (still 0.16.0, rebuilt)
+## 2026-10-07 — Sami's answers on distribution (still 0.16.0, rebuilt)
 
 - Example data publishable; the non-commercial bird photos stay; the WSU
   address replaces the personal one in `pyproject`; credit goes to the NOME
@@ -728,7 +728,7 @@ make sure everything works well. The full account is
   fourteen days before 2026-10-07), so its whole history is too. A scan of
   every commit found no credential; the two photos removed in 0.16.0 remain
   in the history since 2026-07-22 and in the v0.4.0 / v0.4.1 source
-  archives (purging them = a history rewrite, Sam's call). The one fixture
+  archives (purging them = a history rewrite, Sami's call). The one fixture
   that quoted a person's first name in a sample folder is anonymised.
 - Answers recorded in `docs/distribution-readiness.md` §5; open: the lost
   preferences, the Bruker pulse programs in the example, the history.
@@ -736,7 +736,7 @@ make sure everything works well. The full account is
 ## Remaining
 
 1. **E7** — `dist/LARMOR-0.16.0-setup.exe` and the zip are built and tested
-   on the build machine. With Sam's word: push master, then publish a
+   on the build machine. With Sami's word: push master, then publish a
    GitHub release carrying both (`gh release create v0.16.0
    dist/LARMOR-0.16.0-setup.exe dist/LARMOR-0.16.0-win64.zip`), since the
    README sends users to the Releases page and v0.4.1 there has no files.
@@ -755,13 +755,13 @@ make sure everything works well. The full account is
      QThread port of the synchronous reprocess loop, the Rician correction of
      magnitude-mode QCPMG centres of gravity, batch grids marking spectra
      whose MAS rate is unconfirmed.
-4. Deferred by Sam (revisit only if asked): A9 C4 C6 E2 E3 F1 F4.
+4. Deferred by Sami (revisit only if asked): A9 C4 C6 E2 E3 F1 F4.
    Dropped: A2, C5.
 
 ## Conventions that keep this project safe
 
 - Scope test runs to what changed; **full suite + real-data banner before any
-  push**, never push without Sam's word.
+  push**, never push without Sami's word.
 - Version bumps touch `larmor/__init__.py` **and** `pyproject.toml`.
 - Commits are `vX.Y.Z: summary` or `<item>: summary` with a post-mortem body
   (what was wrong, how found, measured effect) — `git log` is the project's

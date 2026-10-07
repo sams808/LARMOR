@@ -788,4 +788,4 @@ minutes per site). Fitted values are unchanged by any of this.
 - **ssNake** (function-fit inspiration) — van Meerten, Franssen & Kentgens,
   *J. Magn. Reson.* **301**, 56 (2019).
 
-*LARMOR — Sam Soudani, NOME Laboratory (McCloy group), Washington State University.*
+*LARMOR — Sami Soudani, NOME Laboratory (McCloy group), Washington State University.*

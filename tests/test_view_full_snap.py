@@ -1,6 +1,6 @@
 """The Full view and the snap-back.
 
-Sam (2026-09): "When clicking View all on the plot window, make sure it
+Sami (2026-09): "When clicking View all on the plot window, make sure it
 resets to the good size to view the full spectrum. Also if the user goes too
 far and exceeds the window limits, go back to the full view."
 

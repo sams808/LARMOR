@@ -2,7 +2,7 @@
 
 pyqtgraph's AxisItem rescales its tick values to the displayed range and
 moves the factor into the unit label: a static 81Br spectrum spanning
-+-5787 ppm is drawn as ticks 6 ... -6 under "chemical shift (kppm)" (Sam,
++-5787 ppm is drawn as ticks 6 ... -6 under "chemical shift (kppm)" (Sami,
 2026-09-24, on a WURST-QCPMG dataset). "kppm" is not a unit, and neither is
 "mMHz" (a sub-MHz Czjzek C_Q axis) or "m1/K" (1000/T above 1000 K). Without
 a unit string the same machinery still scales any axis whose whole range

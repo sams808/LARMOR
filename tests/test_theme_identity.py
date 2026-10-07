@@ -1,6 +1,6 @@
 """The themes are what they say, and can be told apart.
 
-Sam: "make sure the themes are actually what they say: the ones in 'More
+Sami: "make sure the themes are actually what they say: the ones in 'More
 themes' are not discernible enough and don't match their names". So, beyond
 the contrast floor of tests/test_theme.py, every theme is (a) pinned to the
 canonical palette of the scheme it is named after (Solarized, Nord) or to the

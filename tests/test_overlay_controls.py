@@ -1,6 +1,6 @@
 """Per-overlay display controls in the Datasets dock.
 
-Sam (2026-09): "When adding a spectrum to compare in Datasets, we must be
+Sami (2026-09): "When adding a spectrum to compare in Datasets, we must be
 able to modify colour, scaling and shifting of the added spectrum easily."
 
 Every overlay row has, besides the colour swatch, a scale factor (x), an x

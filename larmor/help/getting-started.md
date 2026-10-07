@@ -273,4 +273,4 @@ tooltip, and **Help ▸ Command palette…** (Ctrl + Shift + P) searches all of 
 - M. H. Levitt, *Spin Dynamics: Basics of Nuclear Magnetic Resonance*, 2nd ed.,
   Wiley (2008). *(general reference)*
 
-*LARMOR — Sam Soudani, NOME Laboratory (McCloy group), Washington State University.*
+*LARMOR — Sami Soudani, NOME Laboratory (McCloy group), Washington State University.*

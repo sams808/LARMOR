@@ -693,7 +693,7 @@ class _MenusMixin:
         <p style="color:#4a4f58; margin-top:0;"><i>An open desktop successor to
         dmfit — solid-state NMR lineshape fitting for disordered solids.</i></p>
 
-        <p>Developed by <b>Sam Soudani</b> in the Nuclear, Optical, Magnetic,
+        <p>Developed by <b>Sami Soudani</b> in the Nuclear, Optical, Magnetic,
         and Electronic Materials Laboratory (<b>NOME</b>) of
         Prof.&nbsp;John&nbsp;<b>McCloy</b>, School of Mechanical and Materials
         Engineering, <b>Washington State University</b>, with support from the

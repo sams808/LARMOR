@@ -34,7 +34,7 @@ def test_manual_ships_and_is_substantial(stem, _title):
     assert "## References" in text or "references" in text.lower(), \
         f"{stem}.md has no references section"
     assert text.rstrip().endswith(
-        "*LARMOR — Sam Soudani, NOME Laboratory (McCloy group), "
+        "*LARMOR — Sami Soudani, NOME Laboratory (McCloy group), "
         "Washington State University.*"), \
         f"{stem}.md missing the standard footer"
 

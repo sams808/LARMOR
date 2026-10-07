@@ -9,7 +9,7 @@ description = "Open successor to dmfit: solid-state NMR lineshape fitting and si
 readme = "README.md"
 requires-python = ">=3.10,<3.13"
 license = { text = "MIT" }
-authors = [{ name = "Sam Soudani", email = "sami.soudani@wsu.edu" }]
+authors = [{ name = "Sami Soudani", email = "sami.soudani@wsu.edu" }]
 classifiers = [
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",

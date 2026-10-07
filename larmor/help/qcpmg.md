@@ -516,4 +516,4 @@ convenient, high-S/N but lineshape-sparse alternative.
   solid-state NMR", *NMR Basic Principles and Progress* **29** (1993). *(the CT
   second-order shift and width formulas)*
 
-*LARMOR — Sam Soudani, NOME Laboratory (McCloy group), Washington State University.*
+*LARMOR — Sami Soudani, NOME Laboratory (McCloy group), Washington State University.*

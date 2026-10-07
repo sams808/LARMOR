@@ -302,7 +302,7 @@ def test_added_line_on_a_member_survives_moving_away_and_back(win, qapp, tmp_pat
 
 
 def test_moving_never_changes_a_member_that_has_lines(win, qapp, tmp_path):
-    """Sam's case: sample 1 fitted, sample 2 worked on, back to sample 1 --
+    """Sami's case: sample 1 fitted, sample 2 worked on, back to sample 1 --
     its fit must still be there (the first version re-seeded it from the
     neighbour on every move and ruined it)."""
     from larmor.seriesmode import rmsd_of

@@ -1,6 +1,6 @@
 """The error tools on a fit with ONE line, and what they must say.
 
-Sam could not "calculate error on a simple fit of a czjzek for 23Na". Run
+Sami could not "calculate error on a simple fit of a czjzek for 23Na". Run
 on a real single-line 23Na Czjzek fit, every tool returned -- but the χ²
 profile dialog sat frozen for the ~15 s its process pool took to start (the
 whole scan was 2 s of work), the profile's best value disagreed with the

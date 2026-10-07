@@ -532,7 +532,7 @@ class SpectrumView(pg.PlotWidget):
         # plain_units, not enableAutoSIPrefix(False): pyqtgraph recomputes the
         # prefix INSIDE that call and never again once off, so re-applying
         # it from apply_theme() while a +-6000 ppm spectrum was shown froze a
-        # "k" prefix -- ticks 6 ... -6 under a "(kppm)" label (Sam, 2026-09-24)
+        # "k" prefix -- ticks 6 ... -6 under a "(kppm)" label (Sami, 2026-09-24)
         # BOTH axes: the intensity axis carries no unit, and pyqtgraph then
         # annotates it "(x0.001)" and rescales the ticks -- under View > Y
         # axis > normalise to area it read 0 ... 60 "n" for 0 ... 6e-8

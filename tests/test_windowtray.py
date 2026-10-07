@@ -1,6 +1,6 @@
 """The "open windows" bar of the left sidebar (larmor/desktop/windowtray.py).
 
-Sam's field-use feedback: a minimised popup window used to shrink to a
+Sami's field-use feedback: a minimised popup window used to shrink to a
 floating title bar at the bottom-left of the screen, and there was no way to
 see which tool windows were already open in a session. The bar is an
 application-level event filter feeding a strip at the very bottom of the

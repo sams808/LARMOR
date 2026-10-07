@@ -2,7 +2,7 @@
 open page, a text-size bar whose factor applies to every help window and
 persists.
 
-Sam: "Why can't we use LARMOR when the help page is open?" and "add buttons
+Sami: "Why can't we use LARMOR when the help page is open?" and "add buttons
 to increase and decrease text size". The manuals render through
 ``mdrender.render_help_html(md, scale)``; ``toHtml`` writes the body font as
 an absolute pt size that beats any stylesheet rule, so the zoom rewrites that

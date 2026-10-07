@@ -1,6 +1,6 @@
 """An opened spectrum stays open, and a saved fit can be put on the open data.
 
-Sam: "Why I cannot open more than 4-5 spectra, I double clicked them but
+Sami: "Why I cannot open more than 4-5 spectra, I double clicked them but
 they are not staying open in the workspace". The Workspaces dock reused the
 active 1D workspace whenever it carried no fit, so browsing a sample folder
 replaced the previous spectrum each time and only fitted ones accumulated.

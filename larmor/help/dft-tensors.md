@@ -218,4 +218,4 @@ keeps the single-σ_ref form, `--no-group` writes one site per atom,
 - D. J. Srivastava *et al.*, mrsimulator, *J. Chem. Phys.* **160**, 234110
   (2024). *(the EFG → C_Q conversion and the CSA lineshape)*
 
-*LARMOR — Sam Soudani, NOME Laboratory (McCloy group), Washington State University.*
+*LARMOR — Sami Soudani, NOME Laboratory (McCloy group), Washington State University.*

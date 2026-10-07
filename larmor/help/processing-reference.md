@@ -290,4 +290,4 @@ recipe without a hash (written before this record existed) stays silent.
 - R. R. Ernst, G. Bodenhausen, A. Wokaun, *Principles of NMR in One and Two
   Dimensions*, Oxford (1987).
 
-*LARMOR — Sam Soudani, NOME Laboratory (McCloy group), Washington State University.*
+*LARMOR — Sami Soudani, NOME Laboratory (McCloy group), Washington State University.*
