@@ -145,6 +145,7 @@ The same stages run in the development install as tests
 | silent uninstall | 3 s, no folder and no Apps entry left |
 | desktop shortcut | rewritten by the build to `dist\LARMOR\LARMOR.exe`; restored after the uninstaller removed its namesake |
 | crash log | unchanged through every check |
+| rebuild of 2026-10-07 (credits, WSU e-mail) | setup 108.5 MB, zip 154.0 MB; exe `--distcheck --gui --quick` **PASS, 36 stages** (22 min, with another job sharing the CPU; each GUI group's process exits 0); silent install 26 s, 2021 files, Apps entry publisher "NOME Laboratory (McCloy group), Washington State University", `INSTALL.txt` carries the credits; installed `--selftest` PASS (core and desktop fits), `--distcheck --quick` PASS (17 stages); uninstall 4 s, nothing left; desktop shortcut restored; crash log and registry untouched |
 
 Timing note: three runs this afternoon showed stages of 24 to 51 minutes;
 they were the machine sleeping (Kernel-Power 42 / 107 at 12:20–12:50,
