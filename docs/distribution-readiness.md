@@ -193,9 +193,9 @@ the next release should give it the same sandbox.
    commit since then gets a new id and the release tags move. That is left
    to the author. One test fixture quoted a sample folder carrying a
    person's first name; it is anonymised.
-   The pushed code is 0.15.x. The 0.16.0 fixes, the REDOR distances among
-   them, reach the public repository only when pushed, and the Releases page
-   the README sends users to has no installer attached yet.
+   Pushed on 2026-10-07 with the author's word and released as v0.16.0,
+   with the setup and the zip attached (their SHA-256 in §3); the REDOR
+   correction and the other 0.16.0 fixes are public with it.
 5. **E-mail: the WSU address.** `pyproject` names sami.soudani@wsu.edu. The
    commits themselves still carry the personal address they were made with.
 6. **Credit.** The About dialog, the README's Acknowledgements and

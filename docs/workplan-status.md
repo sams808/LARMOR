@@ -7,11 +7,13 @@ Workplan"; this file is the ground truth for progress.
 
 ## State of the repository
 
-- **Version**: 0.15.0 (`larmor/__init__.py` + `pyproject.toml`, bumped in step;
-  committed 2026-09-30 as f627a89, **not pushed** — no push word this session).
-- **Pushed** to `origin/master` on 2026-09-23 on Sami's go-ahead ("once done
-  make sure the version on github is up to date, and push if needed"):
-  v0.13.0 → v0.14.0, the eleven merged branches of the next-ten batch below.
+- **Version**: 0.16.0 (`larmor/__init__.py` + `pyproject.toml`, bumped in step).
+- **Pushed** to `origin/master` on 2026-10-07 on Sami's word ("push to
+  github"): d025e82..62e6be8, the 0.15.3 series-mode rework through the
+  0.16.0 distribution audit, the credits and the name. Tagged **v0.16.0** and
+  released on GitHub with `LARMOR-0.16.0-setup.exe` and
+  `LARMOR-0.16.0-win64.zip` attached, the first release carrying files;
+  GitHub's SHA-256 digests match the local builds. The repository is public.
 - **Tests**: 1799 collected at v0.16.0 (1774 in 140 files at v0.15.3, 1761 in 139 at v0.15.2, 1728 in 135 at v0.15.0, 1324 in 107 at v0.14.0). Last full run: see the
   line "Full suite" at the end of this section. Trust a green bar only when
   the terminal banner says "real-data layer: complete (all 19 datasets
@@ -123,7 +125,9 @@ Workplan"; this file is the ground truth for progress.
   run alone, real-data layer complete; the five failures (test-side: a
   stale manifest, paths after the check's child-process isolation, a
   child-exit guard, a patched name the preferences refactor removed)
-  fixed and re-run green.
+  fixed and re-run green. **v0.16.0 final (2026-10-07, before the push):
+  1799 passed / 0 failed** in 52 min 49 s, run alone, real-data layer
+  complete.
 - **0.14.1 (2026-09-23, same day)**: a student's frozen 0.14.0 opened spectra
   but "fitting did not work". The fit path was verified in the exe's own
   package set — console-less Python of `packaging/.buildenv`, then the frozen
@@ -732,16 +736,21 @@ make sure everything works well. The full account is
   that quoted a person's first name in a sample folder is anonymised.
 - Answers recorded in `docs/distribution-readiness.md` §5; open: the lost
   preferences, the Bruker pulse programs in the example, the history.
+- The author's name is **Sami**, not Sam: every tracked mention changed
+  (LICENSE, pyproject, About, README, manuals, install notes, tests,
+  comments, this log); `THIRD_PARTY_LICENSES.txt` regenerated (its Sam
+  Bushell and Sam Leffler are other people).
+- Final build after the full suite: the exe's `--distcheck --gui --quick`
+  PASS on 36 stages in 10.7 min; install, self-test, quick check and
+  uninstall clean; desktop shortcut restored. Pushed, tagged v0.16.0 and
+  released with both files on Sami's word.
 
 ## Remaining
 
-1. **E7** — `dist/LARMOR-0.16.0-setup.exe` and the zip are built and tested
-   on the build machine. With Sami's word: push master, then publish a
-   GitHub release carrying both (`gh release create v0.16.0
-   dist/LARMOR-0.16.0-setup.exe dist/LARMOR-0.16.0-win64.zip`), since the
-   README sends users to the Releases page and v0.4.1 there has no files.
-   Still worth a run on a machine with no development setup (a student's
-   laptop: install, open a Bruker folder, fit, save a recipe, uninstall).
+1. **E7** — released 2026-10-07: v0.16.0 on GitHub with the setup and the
+   zip. Still worth a run on a machine with no development setup (a
+   student's laptop: install, open a Bruker folder, fit, save a recipe,
+   uninstall).
 2. The open observations of the next-ten batch above (kernel-window CG bias
    of the Czjzek model, REDOR S(S+1), the frozen-site marker).
 3. Follow-ups noted earlier, none blocking:
