@@ -146,6 +146,7 @@ The same stages run in the development install as tests
 | desktop shortcut | rewritten by the build to `dist\LARMOR\LARMOR.exe`; restored after the uninstaller removed its namesake |
 | crash log | unchanged through every check |
 | rebuild of 2026-10-07 (credits, WSU e-mail) | setup 108.5 MB, zip 154.0 MB; exe `--distcheck --gui --quick` **PASS, 36 stages** (22 min, with another job sharing the CPU; each GUI group's process exits 0); silent install 26 s, 2021 files, Apps entry publisher "NOME Laboratory (McCloy group), Washington State University", `INSTALL.txt` carries the credits; installed `--selftest` PASS (core and desktop fits), `--distcheck --quick` PASS (17 stages); uninstall 4 s, nothing left; desktop shortcut restored; crash log and registry untouched |
+| final build of 2026-10-07 (the author's name, Sami Soudani) | full suite run alone before the push: 1799 passed in 52 min 49 s, real-data layer complete; setup 108.5 MB (SHA-256 53af7c4ce67bcd751022a7d873226ecd1ac47d78ed28d73603481c0ebcf6355c), zip 154.0 MB (SHA-256 6fa39bafd069fa3b27f661051fce49e32a2a11d9f9bb3dccbbeae494d481a197); exe `--distcheck --gui --quick` **PASS, 36 stages in 10.7 min**, each GUI group's process exits 0; silent install 23 s, 2021 files, the same publisher, `LICENSE` and `INSTALL.txt` name Sami Soudani; installed `--selftest` PASS in 53 s, `--distcheck --quick` PASS (17 stages, 19 s); uninstall 3 s, nothing left; desktop shortcut restored; crash log and registry untouched |
 
 Timing note: three runs this afternoon showed stages of 24 to 51 minutes;
 they were the machine sleeping (Kernel-Power 42 / 107 at 12:20–12:50,
@@ -201,7 +202,8 @@ the next release should give it the same sandbox.
    `INSTALL.txt` read: developed in the Nuclear, Optical, Magnetic, and
    Electronic Materials Laboratory (NOME) of Prof. John McCloy, School of
    Mechanical and Materials Engineering, Washington State University, with
-   support from the U.S. Department of Energy (DOE). The manuals' footer and
+   support from the U.S. Department of Energy (DOE), and name the author
+   Sami Soudani (corrected from "Sam" the same day). The manuals' footer and
    the installer's publisher read "NOME Laboratory (McCloy group),
    Washington State University". The copyright line stays the author's.
    WSU's software policy and the award's own acknowledgement wording, which
